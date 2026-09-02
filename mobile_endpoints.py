@@ -2369,10 +2369,11 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 /* rule bars */
 #ckp .c-grp{font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--mute);margin:12px 0 6px;display:flex;justify-content:space-between}
 #ckp .c-grp:first-child{margin-top:0}
-#ckp .c-rule{display:grid;grid-template-columns:34px 1fr auto;gap:4px 10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer}
+#ckp .c-rule{display:grid;grid-template-columns:44px 1fr auto;gap:4px 10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer}
 #ckp .c-rule:last-child{border-bottom:0}
 #ckp .c-rule:active{background:rgba(255,255,255,.03)}
-#ckp .c-rule .c-id{font-family:var(--mono);font-size:10px;color:var(--dim);grid-row:1/span 3;overflow-wrap:anywhere}
+#ckp .c-rule .c-id{font-family:var(--mono);font-size:10px;color:var(--dim);grid-row:1/span 3;overflow-wrap:anywhere;line-height:1.15}
+#ckp .c-rule .c-id.lk{font-size:8px;letter-spacing:0}
 #ckp .c-rule .c-k{font-size:13px;font-weight:700}
 #ckp .c-rule .c-st{font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.8px;text-align:right;white-space:nowrap}
 #ckp .c-rule .c-st.pass{color:var(--up)}#ckp .c-rule .c-st.watch{color:var(--amber)}#ckp .c-rule .c-st.fail{color:var(--down)}#ckp .c-rule .c-st.na{color:var(--dim)}

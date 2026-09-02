@@ -1,72 +1,44 @@
 <!doctype html>
+<!-- ══ mobile/check.html — the app Check tab (cc#1593, APP_CHECK_PAGE_V2, session_log 36637) ══
+     DESIGN AUTHORITY = design_refs/scorr_mobile_check_R4.html (R4 on R3 on R2 on R1; cc_task_logs
+     4481, 4488, 4495, 4512). Three modes on one page: Trade Check | Run Scan | Invest Check, deep
+     links #tc #scan #ic, one view visible. Every number is served: /api/mobile/check/tc (the
+     four-bucket scorer, best of four, /100), /api/mobile/check/scan (a fresh universe scan),
+     /api/mobile/check/invest (invest_check_v2). Band cuts, registry weight sums and weights are
+     read from the payload, never typed here. No localStorage (card scope 7).
+
+     STYLE SCOPE: styles live in /static/mobile_app.css (mobile_endpoints.py MOBILE_CSS, section
+     "CHECK v2") on the cc#897 precedent; every inner class is page-local (c-*) because the shared
+     sheets declare bare short selectors. Bottom nav markup is the app's own and is not touched. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Trade Check · Scorr</title>
+<title>Check</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
-<style>
-/* ══ APP_QA_R5 P8 · /m/check MIGRATION ═══════════════════════════════════════════════
-   Refs: scorr_sprint2_goldnight_R1 @ cd75e2c (scale) + scorr_appshell_R1 @ a20ae0d (shell).
-   The .screen scope issue is present here too (checked, same as P7): mobile_app.css declares the
-   palette on `.screen,.bnav`, so body tokens are shadowed for page content without this bridge.
-   No legacy palette hex on this page — cc#897 folded its CSS into the shared sheet. */
-body[data-theme]{
-  --t-field:var(--field); --t-panel:var(--panel); --t-hi:var(--hi); --t-edge:var(--edge);
-  --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
-  --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
-}
-.screen,.bnav{
-  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
-  --line:var(--t-edge); --line2:var(--t-edge);
-  --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
-  --grn:var(--t-win); --red:var(--t-loss);
-  --blu:var(--t-accent); --cyan:var(--t-brand);
-}
-/* raised scale, goldnight ref — 9.5px floor, page-scoped */
-.bnav .bn{font-size:var(--type-11)}
-.bnav .bn .i{font-size:var(--type-16)}
-.bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
-.tool{font-size:var(--type-12)}
-.tool span{font-size:var(--type-19);text-shadow:0 0 10px var(--brandglow)}
-</style>
 <script src="/scorr_card_common.js"></script>
-<script src="/scorr_card_strip.js"></script>
-<script src="/scorr_chart_card.js"></script>
-<script src="/scorr_analysis_card.js"></script>
-<script src="/results_card.js"></script>
-<script src="/scorr_cockpit_card.js"></script>
 </head>
 <body data-theme="goldnight">
-<!-- APP_QA_R5 P8: goldnight forced before first paint; stored key read and KEPT. -->
+<!-- APP_QA_R5 P8 convention kept: goldnight before first paint; a stored dark is honoured, a stored
+     goldday is kept and not used (cc#1119). -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
-     applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
-     White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
-document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');})();</script>
-<div class="screen">
-  <div class="head" style="display:flex;align-items:center;gap:12px">
-    <a href="/m/home" aria-label="Scorr home" style="min-width:44px;min-height:44px;display:flex;
-       align-items:center;text-decoration:none;color:var(--txt);font-weight:800;font-size:17px;
-       letter-spacing:-.4px">SC<span style="color:var(--grn)">O</span>RR</a>
-    <div style="flex:1;min-width:0">
-    <h1>Trade Check</h1>
-    <div class="s" id="sub">score the trade before you take it</div></div>
-  </div>
+document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');}catch(e){}})();</script>
+<div id="ckp">
+  <div class="c-top"><div class="c-brand">CHE<b>CK</b></div><div class="c-live" id="c-live"></div></div>
+  <div class="c-modes" id="c-modes" role="tablist"></div>
 
-  <div class="inrow">
-    <div class="sfld"><span style="color:var(--dim)">&#9906;</span>
-      <input id="q" type="search" placeholder="Search a symbol" autocomplete="off"></div>
-    <div class="tog">
-      <button class="tg on" id="tgL" type="button" onclick="setSide('LONG')">LONG</button>
-      <button class="tg" id="tgS" type="button" onclick="setSide('SHORT')">SHORT</button>
+  <div class="c-view" id="v-tc">
+    <div class="c-search">
+      <div class="c-sbox"><span class="c-ic">◈</span><input id="c-q" type="search" placeholder="Search a stock to check" autocomplete="off" autocapitalize="characters" aria-label="Search a stock"></div>
+      <div class="c-drop" id="c-drop" hidden></div>
     </div>
+    <div id="tc-main"></div>
   </div>
 
-  <div id="stale"></div>
-  <div class="body" id="body"><div class="loading">Loading verdicts…</div></div>
+  <div class="c-view" id="v-scan"><div id="scan-main"></div></div>
+  <div class="c-view" id="v-ic"><div id="ic-main"></div></div>
 </div>
 
 <nav class="bnav">
@@ -78,113 +50,209 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
 </nav>
 
 <script>
-var STATE = { side: 'LONG', open: 0 };
+(function(){
+'use strict';
+var URLS = { tc:'/api/mobile/check/tc?symbol=', scan:'/api/mobile/check/scan?universe=',
+             invest:'/api/mobile/check/invest?symbol=', search:'/api/gvm/search?q=' };
+/* Modes are added to this list as each view lands (cc#1593 pushes P4 → P6 → P8); a mode not in
+   the list has no view yet, so its button is not drawn and its deep link falls back to #tc. */
+var MODES = [ {key:'tc', label:'Trade Check'} ];
+var S = { mode:'tc', sym:'', tc:null, tcErr:null, bucket:null, busy:false };
 
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function n1(v){ return (v == null || isNaN(Number(v))) ? '--' : Number(v).toFixed(1); }
-function px(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v); return x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN');
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function num(v, d){ if (v == null || isNaN(Number(v))) return '—'; return Number(v).toLocaleString('en-IN', {minimumFractionDigits:d, maximumFractionDigits:d}); }
+function n1(v){ return num(v, 1); }
+function wfmt(w){ if (w == null) return '?'; var x = Number(w); return (Math.round(x * 100) / 100).toString(); }
+function pct(v, d){ if (v == null || isNaN(Number(v))) return '—'; var x = Number(v); return (x > 0 ? '+' : (x < 0 ? '−' : '')) + Math.abs(x).toFixed(d == null ? 2 : d) + '%'; }
+function inr(v){ if (v == null || isNaN(Number(v))) return '—'; var x = Number(v); return '₹' + x.toLocaleString('en-IN', {minimumFractionDigits: x < 100 ? 2 : 1, maximumFractionDigits: x < 100 ? 2 : 1}); }
+function hhmm(ts){ /* "2026-09-02 16:41:12 IST" or "2026-09-02 15:30:00" -> "02-Sep 16:41" */
+  if (!ts) return null; var m = String(ts).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); if (!m) return String(ts);
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return m[3] + '-' + MON[Number(m[2]) - 1] + ' ' + m[4] + ':' + m[5]; }
+function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
+function apiGet(url){
+  return fetchWithTimeout(url).then(function(r){ return r.json(); }).then(function(d){
+    if (d && d.error) throw new Error(d.error); return d; });
 }
-function vColor(v){
-  v = (v || '').toUpperCase();
-  if (v.indexOf('STRONG') > -1) return 'var(--grn)';
-  if (v.indexOf('VALID') > -1) return 'var(--blu)';
-  return 'var(--amber)';
+function emptyBox(title, body, retry){
+  return '<div class="slab c-empty"><b>' + esc(title) + '</b>' + esc(body || '')
+    + (retry ? '<div><button type="button" class="c-btn" data-act="' + esc(retry) + '">Retry</button></div>' : '') + '</div>';
 }
-function railHtml(r){
-  if (!r) return '';
-  var s = (r.state || 'CLOSED').toLowerCase();
-  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
+
+/* ── mode switch + deep links ────────────────────────────────────────────────────────── */
+function modeOf(hash){ var h = String(hash || '').replace('#', ''); return MODES.some(function(m){ return m.key === h; }) ? h : 'tc'; }
+function drawModes(){
+  $('c-modes').innerHTML = MODES.map(function(m){
+    return '<button type="button" role="tab" data-mode="' + m.key + '"' + (S.mode === m.key ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>' + esc(m.label) + '</button>';
+  }).join('');
+  ['tc','scan','ic'].forEach(function(k){ var v = $('v-' + k); if (v) v.classList.toggle('on', S.mode === k); });
 }
-function strip(sym){
-  /* full web C·A·R·D popups, compact size — shared component, rule cc#789 */
-  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
-  return '';
+function setMode(k, push){
+  S.mode = modeOf(k); drawModes();
+  if (push !== false){ try { history.replaceState(null, '', location.pathname + (S.sym ? '?sym=' + encodeURIComponent(S.sym) : '') + '#' + S.mode); } catch(e){} }
+  if (S.mode === 'tc' && S.sym && !S.tc && !S.busy) loadTC();
 }
-function gaps(x){
-  if (!x.not_passed) return [];
-  return String(x.not_passed).split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+
+/* ── search: the app's one autocomplete (/api/gvm/search), same as /m/gvm and /m/alerts ─── */
+var searchT = null;
+function search(q){
+  var box = $('c-drop');
+  if (!q){ box.hidden = true; box.innerHTML = ''; return; }
+  apiGet(URLS.search + encodeURIComponent(q) + '&limit=8').then(function(d){
+    var res = (d && d.results) || [];
+    box.innerHTML = res.length ? res.map(function(x){
+      return '<div class="c-drow" data-sym="' + esc(x.symbol) + '"><b>' + esc(x.symbol) + '</b><i>' + (x.gvm_score != null ? 'GVM ' + n1(x.gvm_score) : '') + '</i><span>' + esc(x.company_name || x.name || '') + (x.segment ? ' · ' + esc(x.segment) : '') + '</span></div>';
+    }).join('') : '<div class="c-drow"><span>No match. Press enter to check the typed symbol.</span></div>';
+    box.hidden = false;
+  }).catch(function(){ box.hidden = true; });
 }
-function card(x, i, open){
-  var gp = gaps(x);
-  var short_ = (x.side || '').toUpperCase() === 'SHORT';
-  /* cc#1090 P5: the verdict card takes the shell, dense. It is tappable — toggle() opens the gap
-     list — and the endpoint serves up to 50 rows with 20 as the default, so it is past the 8-row
-     line the modifier exists for. --vc is untouched: the verdict rail is the score language. */
-  var h = '<div class="v slab dense" style="--vc:' + vColor(x.verdict) + '" onclick="toggle(event,' + i + ')">'
-    + '<div class="v1"><span class="vsym">' + esc(x.symbol) + '</span>'
-    + '<span class="vside' + (short_ ? ' sh' : '') + '">' + esc(x.side || '') + '</span>'
-    + strip(x.symbol)
-    + '<span class="vpx">CMP ' + px(x.cmp)
-    + (x.computed_at ? ' \u00b7 ' + esc(x.computed_at) : '') + '</span></div>'
-    + '<div class="v2"><span class="word">' + esc((x.verdict || '--').toUpperCase()) + '</span>'
-    + '<span class="score">' + n1(x.score) + '</span></div>'
-    + '<div class="counts">'
-    + (gp.length ? '<span class="ct f">' + gp.length + ' GAP' + (gp.length > 1 ? 'S' : '') + '</span>'
-                 : '<span class="ct p">NO GAPS</span>')
-    + (x.pivot_zone ? '<span class="ct">' + esc(x.pivot_zone) + '</span>' : '')
-    + '</div></div>';
-  if (open){
-    h += gp.map(function(r){
-      return '<div class="g"><span class="gv">Not passed: <b>' + esc(r) + '</b></span></div>';
-    }).join('');
-    h += gp.length
-      ? '<div class="pass1">gaps first — everything else passed</div>'
-      : '<div class="pass1">every rule passed — nothing to read</div>';
-  }
-  return h;
+function chooseSym(sym){
+  sym = String(sym || '').trim().toUpperCase();
+  if (!sym) return;
+  $('c-drop').hidden = true; $('c-q').value = sym; $('c-q').blur();
+  S.sym = sym; S.tc = null; S.tcErr = null; S.bucket = null;
+  try { history.replaceState(null, '', location.pathname + '?sym=' + encodeURIComponent(sym) + '#' + S.mode); } catch(e){}
+  if (S.mode === 'tc') loadTC();
 }
-function render(d){
-  var rs = d.results || [];
-  document.getElementById('sub').innerHTML =
-    d.count + ' verdicts \u00b7 ' + (d.query ? 'both sides' : esc(STATE.side)) + ' ' + railHtml(d.rail);
-  var f = d.freshness || {};
-  document.getElementById('stale').innerHTML = f.stale
-    ? '<div style="margin:11px 12px 0;padding:10px 12px;border-radius:11px;'
-      + 'background:rgba(245,185,74,.10);border:1px solid rgba(245,185,74,.4);'
-      + 'color:var(--amber);font-size:11.5px;font-weight:700;line-height:1.5">'
-      + '&#9888; ' + esc(f.note || 'Verdicts are stale.') + '</div>'
-    : '';
-  document.getElementById('body').innerHTML = rs.length
-    ? '<div class="sect">THE VERDICT \u00b7 GAPS FIRST</div>'
-      + rs.map(function(x, i){ return card(x, i, i === STATE.open); }).join('')
-    : '<div class="empty"><b>Nothing found</b>No cached verdict for "' + esc(d.query || '') + '".</div>';
-  window.__rows = rs;
+
+/* ── TRADE CHECK ─────────────────────────────────────────────────────────────────────── */
+function loadTC(){
+  S.busy = true;
+  $('tc-main').innerHTML = '<div class="slab c-empty"><b>' + esc(S.sym) + '</b>Scoring all four buckets…</div>';
+  apiGet(URLS.tc + encodeURIComponent(S.sym)).then(function(d){
+    S.tc = d; S.tcErr = null; S.busy = false;
+    if (!S.bucket || !cardOf(S.bucket)) S.bucket = d.best_label;
+    renderTC();
+  }).catch(function(e){
+    S.busy = false; S.tcErr = e.message || 'failed';
+    $('tc-main').innerHTML = emptyBox('Could not score ' + S.sym, S.tcErr, 'tc');
+    $('c-live').textContent = '';
+  });
 }
-function toggle(ev, i){
-  if (ev && ev.target && ev.target.closest && ev.target.closest('.scorr-card-strip')) return;
-  STATE.open = (STATE.open === i ? -1 : i); render(window.__d);
+function cardOf(label){ var cs = (S.tc && S.tc.cards) || []; for (var i = 0; i < cs.length; i++) if (cs[i].label === label) return cs[i]; return null; }
+function bandCls(b){ return (b === 'STRONG' || b === 'VALID') ? 'pass' : (b === 'WATCH' ? 'watch' : (b === 'FAIL' ? 'fail' : 'na')); }
+function bandWord(c){ if (!c || !c.weighted || !c.band) return 'Unweighted'; return {STRONG:'Strong', VALID:'Valid', WATCH:'Watch', FAIL:'Fail'}[c.band] || c.band; }
+function bucketWords(label){ return {'BUY-REV':'Buy-reversal', 'BUY-MOM':'Buy-momentum', 'SELL-MOM':'Sell-momentum', 'SELL-REV':'Sell-reversal'}[label] || label; }
+/* rule state from the engine's own credit / max: full, half (any partial), none, or n/a when the
+   rule carries no max (SELL-MOM alt-ignition when not applicable). */
+function ruleState(r){
+  var mx = Number(r.max) || 0, cr = Number(r.credit) || 0;
+  if (mx <= 0) return {cls:'na', word:'N/A', ratio:0};
+  var ratio = clamp(cr / mx, 0, 1);
+  return ratio >= 1 ? {cls:'pass', word:'FULL', ratio:1} : (ratio > 0 ? {cls:'watch', word:'HALF', ratio:ratio} : {cls:'fail', word:'NONE', ratio:0});
 }
-function setSide(s){
-  STATE.side = s; STATE.open = 0;
-  document.getElementById('tgL').className = 'tg' + (s === 'LONG' ? ' on' : '');
-  document.getElementById('tgS').className = 'tg' + (s === 'SHORT' ? ' on sh' : '');
-  load(document.getElementById('q').value.trim());
+/* plain names per rule id — CANDIDATE list (posted for Fable review with P4; engine label is the
+   fallback for any id not here, so nothing invents a rule). */
+var NAMES = {
+  R1:'Market mood', R2:'Sector month', R3:'Peers today', R4:'Moving averages', R5:'Volume backing', R7:'RSI frame',
+  R8:'Month return', R9:'5-min tape + VWAP', R10:'Two-day turn', R11:'Location + room', R12:'Futures lean',
+  R16:'Fib position (3M)', R17:'Valuation (V)', R18:'Momentum (M)', R19:'Strength vs market (63d)', R20:'GVM trend (180d)',
+  R21:'50-day distance', R22:'52-week position', R23:'GVM floor', R24:'Delivery pick-up',
+  LOCK_ENTRYDAY_FALL:'Entry-day fall', LOCK_WEEK_FALLING_BAND:'Week falling, not spent', LOCK_VOLUME:'Volume backing',
+  LOCK_MOM_2D:'Two-day slide', LOCK_ALT_IGNITION:'Steep slide (alt)', LOCK_52W_INDEX:'52-week position',
+  LOCK_MA_NOT_DEEP:'Not over-stretched', LOCK_GVM:'GVM cap', LOCK_MOOD:'Market mood', LOCK_FALL_FRESHNESS:'Fall still fresh',
+  LOCK_TRIO_52W:'52-week low zone', LOCK_TRIO_RSI:'Weekly RSI weak', LOCK_TRIO_MOM2D:'Two-day slide', LOCK_WEEK_FALLING:'Week falling',
+  LOCK_5M_WEAK:'Day weak', LOCK_MA_SHALLOW:'Early break', LOCK_QUALITY_FADE:'Quality fade', LOCK_SECTOR_WEAK:'Sector weak'
+};
+function plainName(r){ return NAMES[r.rule] || r.label || r.rule; }
+function actualText(v){
+  if (v == null) return '—';
+  if (typeof v !== 'object') return String(v);
+  var parts = [];
+  Object.keys(v).forEach(function(k){ var x = v[k]; if (x == null) return;
+    parts.push(k + ' ' + (typeof x === 'boolean' ? (x ? '✓' : '✗') : (typeof x === 'number' ? num(x, Math.abs(x) >= 100 ? 0 : 2) : String(x)))); });
+  return parts.length ? parts.join(' · ') : '—';
 }
-function load(q){
-  document.getElementById('body').innerHTML = '<div class="loading">Loading verdicts…</div>';
-  fetchWithTimeout('/api/mobile/check?limit=12&side=' + STATE.side
-      + (q ? '&symbol=' + encodeURIComponent(q) : ''))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.error) throw new Error(d.error);
-      window.__d = d; STATE.open = 0; render(d);
-    })
-    .catch(function(e){
-      document.getElementById('body').innerHTML =
-        '<div class="empty"><b>Could not load</b>' + esc(e.message)
-        + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-      document.getElementById('sub').textContent = 'failed to load';
-    });
+/* the ONE plain-words line per rule. Until the per-rule templates pass Fable review (cc#1593 P5)
+   this is the engine's own condition and reading, unedited: what the rule needs, what the stock
+   shows. */
+function whyLine(r, st){
+  return 'Needs: ' + esc(r.required || '—') + '. Now: <b>' + esc(actualText(r.value)) + '</b>. ' + esc(st.word === 'N/A' ? 'Not applicable.' : (st.word === 'FULL' ? 'Full.' : (st.word === 'HALF' ? 'Half.' : 'None.')));
 }
-var t = null;
-document.getElementById('q').addEventListener('input', function(e){
-  clearTimeout(t); var v = e.target.value.trim();
-  t = setTimeout(function(){ load(v); }, 300);
+/* the hero read: band + distance to the next cut + the heaviest rules holding and failing, from
+   the active card's own rows. Words are plain (36283 plain_words_v2). */
+function readText(d, c){
+  var cuts = d.cuts || {}, s = Number(c.score100);
+  var out = '';
+  if (!c.weighted || c.score100 == null){ out = '<b>No calibrated score.</b> This bucket has no live registry weights, so its number is unweighted. '; }
+  else if (c.band === 'STRONG') out = '<b>Strong.</b> Clears every band. ';
+  else if (c.band === 'VALID') out = '<b>Valid — ' + n1(cuts.strong - s) + ' short of Strong.</b> ';
+  else if (c.band === 'WATCH') out = '<b>Watch — ' + n1(cuts.valid - s) + ' short of Valid.</b> ';
+  else out = '<b>Fail — ' + n1(cuts.watch - s) + ' short of Watch.</b> ';
+  var rules = c.rules || [], hold = [], miss = [];
+  rules.forEach(function(r){ var st = ruleState(r); if (st.cls === 'pass') hold.push(plainName(r)); else if (st.cls === 'fail') miss.push(plainName(r)); });
+  if (hold.length) out += esc(hold.slice(0, 2).join(' and ')) + (hold.length > 2 ? ' hold up, with ' + (hold.length - 2) + ' more' : ' hold up') + '. ';
+  if (miss.length) out += esc(miss.slice(0, 2).join(' and ')) + (miss.length > 2 ? ' do not, with ' + (miss.length - 2) + ' more' : (miss.length > 1 ? ' do not' : ' does not')) + '. ';
+  out += esc(bucketWords(c.label)) + (c.label === d.best_label ? ' is the closest fit of the four.' : ' is not the best fit today; ' + esc(bucketWords(d.best_label)) + ' is.');
+  return out;
+}
+function alertChips(alerts){
+  var a = (alerts || []).filter(function(x){ return x && x.label && x.color && x.color !== 'grey'; });
+  if (!a.length) return '';
+  return '<div class="c-alerts">' + a.map(function(x){ var cls = x.color === 'red' ? 'dn' : (x.color === 'green' ? 'up' : 'am'); return '<span class="c-tag ' + cls + '">' + esc(x.label) + '</span>'; }).join('') + '</div>';
+}
+function renderTC(){
+  var d = S.tc; if (!d) return;
+  var c = cardOf(S.bucket) || cardOf(d.best_label) || (d.cards || [])[0];
+  if (!c){ $('tc-main').innerHTML = emptyBox('No cards scored', 'The engine returned no bucket for ' + S.sym + '.', 'tc'); return; }
+  var cuts = d.cuts || {}, ws = c.weight_sum;
+  var score = c.score100, cls = c.weighted ? bandCls(c.band) : 'na';
+  var cmpTs = hhmm((d.cmp_line && d.cmp_line.ts) || d.computed_at);
+  var tiles = (d.cards || []).slice().sort(function(a, b){ return (Number(b.score100) || 0) - (Number(a.score100) || 0); });
+  var h = '<section class="pressed c-hero">'
+    + '<div class="c-hd"><div><div class="c-sym">' + esc(d.symbol) + '</div><div class="c-nm">' + esc(d.company || '') + (d.segment ? ' · ' + esc(d.segment) : '') + (d.gvm != null ? ' · GVM ' + num(d.gvm, 2) : '') + '</div></div>'
+    + '<div class="c-px"><div class="c-pv">' + inr(d.cmp) + '</div><div class="c-ps">CMP · ' + esc(cmpTs || '—') + ' · spot</div></div></div>'
+    + '<div class="c-vrow"><div><div class="c-eye">' + (c.label === d.best_label ? 'BEST OF 4 · ' : 'BUCKET · ') + esc(c.label) + '</div><div class="c-vword ' + cls + '">' + esc(bandWord(c)) + '</div></div>'
+    + '<div class="c-vscore"><div class="c-n">' + (score == null ? '—' : n1(score)) + '<small> / 100</small></div><div class="c-l">TC SCORE</div></div></div>'
+    + '<div class="c-meter"><i style="width:' + clamp(Number(score) || 0, 0, 100) + '%"></i>'
+      + ['watch','valid','strong'].map(function(k){ return cuts[k] == null ? '' : '<span class="c-cut" style="left:' + clamp(Number(cuts[k]), 0, 100) + '%"></span>'; }).join('') + '</div>'
+    + '<div class="c-mlabels"><span>FAIL</span><span>WATCH ' + n1(cuts.watch) + '</span><span>VALID ' + n1(cuts.valid) + '</span><span>STRONG ' + n1(cuts.strong) + '</span></div>'
+    + '<div class="c-buckets">' + tiles.map(function(t){
+        var tc = t.weighted ? (bandCls(t.band) === 'pass' ? 'up' : (bandCls(t.band) === 'watch' ? 'am' : 'dn')) : 'mu';
+        return '<div class="c-bk' + (t.label === c.label ? ' on' : '') + '" data-bucket="' + esc(t.label) + '" role="button"><div class="c-bk-k">' + esc(t.label) + '</div><div class="c-bk-v ' + tc + '">' + (t.score100 == null ? '—' : n1(t.score100)) + '</div><div class="c-bk-s">' + esc(t.weighted ? (t.band || '—') : 'UNWEIGHTED') + '</div></div>';
+      }).join('') + '</div>'
+    + '<div class="c-read">' + readText(d, c) + '</div>'
+    + alertChips(d.alerts)
+    + '<div class="c-foot"><span>score = weighted credits ÷ ' + (ws == null ? '?' : n1(ws)) + ' (registry) × 100 · full 1 · half ½</span><span>' + esc(d.price_basis || 'spot price, not futures') + '</span></div>'
+    + '</section>';
+  h += '<div class="c-sect">' + esc(c.label) + ' · ' + (c.n_rules || (c.rules || []).length) + ' rules <span class="c-r">heaviest first · weighted ' + n1(c.weighted_earned) + ' / ' + (ws == null ? '?' : n1(ws)) + '</span></div>';
+  h += '<section class="slab" id="tc-rules"><div class="c-grp"><span>RULE · CREDIT · WEIGHT</span><span>bar = credit earned</span></div>'
+    + (c.rules || []).map(function(r, i){
+        var st = ruleState(r);
+        return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id">' + esc(r.rule) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + st.word + ' · w' + wfmt(r.weight) + '</span>'
+          + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div><div class="c-why">' + whyLine(r, st) + '</div></div>';
+      }).join('') + '</section>';
+  if (c.unmapped_rules && c.unmapped_rules.length) h += '<div class="c-note">Rules with no registry row (scored at weight 1): ' + esc(c.unmapped_rules.join(', ')) + '.</div>';
+  h += '<div class="c-cover">Personal trade context · not a V8 signal · scored ' + esc(hhmm(d.computed_at) || '—') + ' IST</div>';
+  $('tc-main').innerHTML = h;
+  $('c-live').textContent = 'Scored ' + (hhmm(d.computed_at) || '') + ' IST';
+}
+function renderTCLanding(){
+  $('tc-main').innerHTML = '<div class="slab c-empty"><b>Search a stock to check</b>All four buckets are scored — BUY-MOM, BUY-REV, SELL-MOM, SELL-REV — and the best one leads.</div>';
+  $('c-live').textContent = '';
+}
+
+/* ── events ──────────────────────────────────────────────────────────────────────────── */
+$('c-modes').addEventListener('click', function(e){ var b = e.target.closest('button[data-mode]'); if (b) setMode(b.getAttribute('data-mode')); });
+$('c-q').addEventListener('input', function(e){ clearTimeout(searchT); var v = e.target.value.trim(); searchT = setTimeout(function(){ search(v); }, 250); });
+$('c-q').addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); chooseSym(e.target.value); } });
+$('c-drop').addEventListener('click', function(e){ var r = e.target.closest('[data-sym]'); if (r) chooseSym(r.getAttribute('data-sym')); });
+document.addEventListener('click', function(e){ if (!e.target.closest('.c-search')) $('c-drop').hidden = true; });
+$('tc-main').addEventListener('click', function(e){
+  var bk = e.target.closest('[data-bucket]'); if (bk){ S.bucket = bk.getAttribute('data-bucket'); renderTC(); return; }
+  var rt = e.target.closest('[data-act="tc"]'); if (rt){ loadTC(); }
 });
-load('');
+window.addEventListener('hashchange', function(){ setMode(location.hash, false); });
+
+/* ── boot ────────────────────────────────────────────────────────────────────────────── */
+(function boot(){
+  var q = null; try { q = new URLSearchParams(location.search).get('sym'); } catch(e){}
+  S.mode = modeOf(location.hash); drawModes();
+  if (q){ $('c-q').value = String(q).toUpperCase(); S.sym = String(q).trim().toUpperCase(); }
+  if (S.sym) loadTC(); else renderTCLanding();
+})();
+})();
 </script>
 </body>
 </html>
