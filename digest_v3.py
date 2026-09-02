@@ -495,6 +495,46 @@ def _what_moved_all(cur, limit_per_cat: int = 20) -> Dict[str, Any]:
     return {"items": items, "category_counts": counts, "tier": "LIVE"}
 
 
+def _news_feed(cur, days: int = 7, limit: int = 120) -> Dict[str, Any]:
+    """cc#1608 (founder 02-Sep 15:31): ONE merged What Moved feed for the WEB digest — every
+    polished_news category of the last `days` days in one chronological list (Global rows join the
+    same feed with category=Global, so 06 Global Events stops being its own section), each row
+    carrying what the app's story sheet shows: headline, summary, full_summary, source,
+    published, polished_at, sentiment (raw, normalised on the client like everywhere else), impact,
+    symbols, category. category_counts and stance_counts feed the chip labels from the DATA, never
+    a typed list. newest_polished_at drives the section pill: LIVE only when it is fresh.
+
+    A NEW key beside what_moved / what_moved_all / global_events — those keep their readers (the
+    app decks) untouched; the web page switches to this one."""
+    cur.execute("""SELECT id, headline_clean, COALESCE(summary, full_summary), published_time,
+                          sentiment, impact, full_summary, mentioned_symbols, category, source,
+                          polished_at
+                   FROM polished_news
+                   WHERE polished_at >= NOW() - (%s || ' days')::interval
+                   ORDER BY published_time DESC NULLS LAST, polished_at DESC
+                   LIMIT %s""", (str(int(days)), int(limit)))
+    items, counts = [], {}
+    for r in cur.fetchall():
+        syms = r[7]
+        if isinstance(syms, str):
+            syms = [x.strip() for x in syms.split(",") if x.strip()]
+        cat = r[8] or "Uncategorised"
+        counts[cat] = counts.get(cat, 0) + 1
+        items.append({"id": r[0], "headline": r[1], "summary": r[2],
+                      "published": r[3].isoformat() if r[3] else None,
+                      "sentiment": r[4], "impact": r[5], "full_summary": r[6],
+                      "symbols": list(syms) if syms else [], "category": cat,
+                      "source": r[9],
+                      "polished_at": r[10].isoformat() if r[10] else None})
+    cur.execute("SELECT MAX(polished_at) FROM polished_news")
+    row = cur.fetchone()
+    newest = row[0] if row else None
+    return {"items": items, "count": len(items), "days": days,
+            "category_counts": counts,
+            "newest_polished_at": newest.isoformat() if newest else None,
+            "note": None if items else f"No polished stories in the last {days} days."}
+
+
 def _news(cur, category: str, limit: int = 20) -> List[Dict[str, Any]]:
     # cc#853: sentiment added so the R3 news rows can carry their .sdot colour and .nsent label.
     # It is READ from polished_news, never inferred here — the column is populated but its
@@ -1120,6 +1160,9 @@ def build_digest(cur) -> Dict[str, Any]:
             # own docstring for why this is a new key and not a change to what_moved above.
             "what_moved_all": _what_moved_all(cur),
             "global_events": {"items": _news(cur, "Global"), "tier": "LIVE"},
+            # cc#1608: the merged, filterable feed the WEB What Moved section reads (Global folded
+            # in). what_moved / what_moved_all / global_events above stay for the app decks.
+            "news_feed": _news_feed(cur),
             "yesterday_results": _yesterday_results(cur, prev_trading),
             # cc#1190: ADDED beside yesterday_results, not in place of it. The web digest reads
             # yesterday_results and is untouched by this card; the mobile deck reads this one.
