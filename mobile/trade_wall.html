@@ -68,8 +68,13 @@
 </head>
 <body>
 <!--
-  cc#991/cc#1295 — WALL OF TRADES. Every position across the live engines, read-only display over
-  /api/tradewall; this page computes no money of its own.
+  cc#991/cc#1295 — WALL OF TRADES. Read-only display over /api/tradewall; this page computes no
+  money of its own.
+
+  cc#1587 (session_log 36394, founder 02-Sep): the wall shows APPROVED TRADES ONLY. Engine
+  buckets are gated server-side by app_config.wot_buckets_enabled (default ["approved_alerts"]).
+  The hierarchy below (status -> instrument -> engine bucket) is kept intact and comes back
+  automatically if that flag is widened; in approved mode the chips are empty and hidden.
 
   cc#1295 (founder direct 24-Aug, session_log 30420 WALL_OF_TRADES_GROUPS_V2): STATUS (Open|Closed,
   default Open) -> INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is one POSITION
@@ -125,8 +130,15 @@
    INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is now one POSITION (entry+
    exit together when closed), not a flat entry/exit event — see trade_wall_endpoints.py for why. */
 var BUCKETS = { FUTURES: ['V8', 'TC Scanner', 'Index Intel'], EQUITY: ['QB Basket', 'Investment Scanner'] };
+/* cc#1587 (session_log 36394): the wall now shows APPROVED TRADES ONLY. The server-side flag
+   app_config.wot_buckets_enabled (default ["approved_alerts"]) decides which buckets reach the
+   feed; this page reads `buckets_enabled` off the same /api/tradewall response and picks a
+   render mode from it. mode 'approved' = a flat list of approved trades, no chips. If the flag
+   is ever widened to an engine bucket the page falls back to the cc#1295 hierarchy ('engines')
+   with nothing else to change. */
 var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: null,
-              status: 'open', instrument: 'FUTURES', bucket: 'V8', asOf: null };
+              status: 'open', instrument: 'FUTURES', bucket: 'V8', asOf: null,
+              mode: 'approved', approvedAsOf: null };
 var PAGE  = { cursor: null, more: true, busy: false, obs: null };
 var LIMIT = 40;
 
@@ -151,6 +163,63 @@ function px(v){
 function qty(v){
   if (v === null || v === undefined || isNaN(Number(v))) return null;
   return Math.round(Number(v)).toLocaleString('en-IN');
+}
+/* cc#1587: an approved price is the exact figure the founder approved at — always 2 dp,
+   never rounded to a whole rupee the way px() does for readability on engine cards. */
+function pxApproved(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  return Number(v).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+/* cc#1587: one approved trade = one card. Symbol, BUY/SELL, approved price, approved time
+   (IST), origin (engine that raised it, or manual), notes. No status badge, no P&L — an
+   approved trade is a decision, not a position with an exit. */
+function approvedCard(e){
+  var side = e.side === 'SHORT' ? 'SELL' : (e.side === 'LONG' ? 'BUY' : (e.side || '--'));
+  var sideCls = side === 'SELL' ? 'tw-short' : 'tw-long';
+  var h = '<div class="tw-card slab dense">'
+    + '<div class="tw-top">'
+      + '<span class="tw-ev tw-in">APPROVED</span>'
+      + '<span class="tw-sym">' + esc(e.symbol) + '</span>'
+      + '<span class="tw-when">' + esc((e.entry && e.entry.when_full) || '--') + '</span>'
+    + '</div>'
+    + '<div class="tw-meta">'
+      + '<span class="tw-chip ' + sideCls + '">' + esc(side) + '</span>'
+      + '<span class="tw-chip">' + esc(e.origin || 'manual') + '</span>'
+    + '</div>'
+    + '<div class="tw-px"><span>approved price <b>' + pxApproved(e.entry_price) + '</b></span></div>';
+  if (e.note) h += '<div class="tw-note">' + esc(e.note) + '</div>';
+  return h + '</div>';
+}
+
+function approvedFeedHtml(list){
+  var h = '', day = null;
+  list.forEach(function(e){
+    if (e.day !== day){ day = e.day; h += '<div class="tw-day">' + esc(day || 'undated') + '</div>'; }
+    h += approvedCard(e);
+  });
+  return h;
+}
+
+function renderApproved(){
+  var n = STATE.total == null ? '--' : STATE.total;
+  document.getElementById('sub').textContent =
+    n + ' approved trade' + (STATE.total === 1 ? '' : 's')
+    + (STATE.approvedAsOf ? ' · as of ' + STATE.approvedAsOf + ' IST' : '');
+  document.getElementById('chipsStatus').innerHTML = '';
+  document.getElementById('chipsInstrument').innerHTML = '';
+  document.getElementById('chipsBucket').innerHTML = '';
+  var ib = document.querySelector('.tw-ibtn');
+  if (ib) ib.style.display = 'none';
+  var body = document.getElementById('body');
+  if (!STATE.events.length){
+    body.innerHTML = '<div class="empty"><b>No approved trades yet.</b>'
+      + 'Approve a trade on the Alerts page and it shows here.</div>' + sentinelHtml();
+  } else {
+    body.innerHTML = approvedFeedHtml(STATE.events) + sentinelHtml();
+  }
+  updateCover();
+  armSentinel();
 }
 
 function evClass(e){
@@ -243,6 +312,7 @@ function sentinelHtml(){
 }
 
 function render(){
+  if (STATE.mode === 'approved') return renderApproved();
   document.getElementById('sub').textContent =
     (STATE.total == null ? '--' : STATE.total) + ' positions since 10 Aug 2026, '
     + STATE.status + ', ' + STATE.bucket;
@@ -269,6 +339,10 @@ function render(){
 function updateCover(){
   var el = document.getElementById('cover');
   if (!el) return;
+  if (STATE.mode === 'approved'){
+    el.textContent = 'showing ' + STATE.events.length + ' of ' + (STATE.total == null ? '--' : STATE.total);
+    return;
+  }
   var view = bucketView();
   var of = ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
   el.textContent = 'showing ' + view.length + ' of ' + (of == null ? '--' : of);
@@ -294,8 +368,11 @@ function armSentinel(){
 }
 
 function url(cursor){
-  var u = '/api/tradewall?limit=' + LIMIT + '&instrument=' + encodeURIComponent(STATE.instrument)
-        + '&status=' + encodeURIComponent(STATE.status);
+  /* cc#1587: approved mode is one flat list — no instrument/status split on the server call */
+  var inst = STATE.mode === 'approved' ? 'ALL' : STATE.instrument;
+  var st   = STATE.mode === 'approved' ? 'ALL' : STATE.status;
+  var u = '/api/tradewall?limit=' + LIMIT + '&instrument=' + encodeURIComponent(inst)
+        + '&status=' + encodeURIComponent(st);
   if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
   return u;
 }
@@ -316,7 +393,8 @@ function loadMore(){
       var seen = {};
       STATE.events.forEach(function(e){ seen[e.id] = 1; });
       var fresh = (d.events || []).filter(function(e){ return !seen[e.id]; });
-      appendCards(fresh.filter(function(e){ return e.engine === STATE.bucket; }));
+      appendCards(STATE.mode === 'approved' ? fresh
+                  : fresh.filter(function(e){ return e.engine === STATE.bucket; }));
       STATE.events = STATE.events.concat(fresh);
       PAGE.busy = false;
       var s2 = document.getElementById('sentinel');
@@ -338,12 +416,13 @@ function appendCards(fresh){
   var sent = document.getElementById('sentinel');
   /* the day heading only repeats when the day actually changes across the join, so an appended
      page cannot print a second heading for the day already on screen */
-  var view = bucketView();
+  var approved = STATE.mode === 'approved';
+  var view = approved ? STATE.events : bucketView();
   var lastDay = view.length ? view[view.length - 1].day : null;
   var h = '', day = lastDay;
   fresh.forEach(function(e){
     if (e.day !== day){ day = e.day; h += '<div class="tw-day">' + esc(day || 'undated') + '</div>'; }
-    h += card(e);
+    h += approved ? approvedCard(e) : card(e);
   });
   var frag = document.createElement('div');
   frag.innerHTML = h;
@@ -376,6 +455,17 @@ function boot(keepCounts){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (d.error) throw new Error(d.error);
+      /* cc#1587: mode follows the server flag. Approved-only is the default; anything wider
+         (an engine bucket switched on in app_config) drops back to the cc#1295 hierarchy and
+         refetches once with the instrument/status filters the hierarchy expects. */
+      var en = d.buckets_enabled;
+      var approvedOnly = Array.isArray(en) && en.length === 1 && en[0] === 'approved_alerts';
+      if (!approvedOnly && STATE.mode === 'approved'){
+        STATE.mode = 'engines';
+        STATE.events = []; PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
+        return boot(false);
+      }
+      STATE.approvedAsOf = d.approved_as_of || null;
       STATE.events = d.events || [];
       /* counts are head-of-feed values over the WHOLE wall, so a filter switch keeps the ones
          it already has rather than blanking the chips. by_engine is refreshed every call since
@@ -390,7 +480,9 @@ function boot(keepCounts){
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
       render();
-      twLoadApproved();   /* cc#1526: paint APPROVED before the founder touches anything */
+      /* cc#1526: paint APPROVED badges on engine cards — not needed in approved mode, where
+         every card already IS an approved trade */
+      if (STATE.mode !== 'approved') twLoadApproved();
     })
     .catch(function(e){
       document.getElementById('body').innerHTML =
