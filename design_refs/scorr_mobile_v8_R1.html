@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>V8</title>
+<!--
+  DESIGN REF scorr_mobile_v8_R1 — app /m/v8 page, founder section order 02-Sep-2026.
+  Order: MOOD -> OPEN POSITIONS -> SECTOR TABLE -> DAY PERFORMANCE -> CLOSED -> FUNNEL (basket switch)
+  Tokens: GOLD NIGHT (scorr_theme_r5.css .slab/.pressed declarations, THEME_TOKENS_R51_V1). Every colour is var(--token, #fallback).
+  Shells: .pressed sinks (hero, funnel). .slab.dense rises (position rows). Never slab in slab.
+  Data in this file is the LIVE 02-Sep-2026 12:20 IST payload with the 7 duplicate 31-Aug closes REMOVED (cc#1589) - closed 127 / 45-32 / net 3.27L, not the inflated 134 / 50-34 / 3.58L the page showed that day (paper_status / market_mood / v8_paper_trades) so CC can bind field for field.
+  Sample stage counts in the FUNNEL are marked data-sample="1" and must be replaced by /api/v8/stock_passcount/<basket> on build.
+-->
+<style>
+:root{
+  --field:#0A0A0C; --panel:#17171B; --well:#131316; --sunk:#0C0C0F;
+  --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
+  --gold:#D4AF37; --gold-lo:#7A6320; --gold-hi:#F0D070;
+  --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45;
+  --up-d:rgba(47,212,139,.14); --down-d:rgba(255,92,108,.14); --gold-d:rgba(212,175,55,.12);
+  --display:'Archivo Black','Space Grotesk',system-ui,sans-serif;
+  --body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--field);color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45}
+body{background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);padding-bottom:84px}
+.wrap{max-width:430px;margin:0 auto;padding:0 12px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .dn{color:var(--down)} .mu{color:var(--mute)} .gd{color:var(--gold)}
+.top{display:flex;align-items:center;justify-content:space-between;padding:14px 12px 10px}
+.brand{font-family:var(--display);font-size:20px;letter-spacing:1px;color:var(--chalk)}
+.brand b{color:var(--gold)}
+.live{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--mute)}
+.live .dot{width:7px;height:7px;border-radius:50%;background:var(--up);box-shadow:0 0 8px var(--up)}
+.live .pill{border:1px solid var(--line);padding:3px 8px;color:var(--up);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.sect{display:flex;align-items:center;gap:10px;margin:22px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center}
+.sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
+.sect .n{font-family:var(--mono);color:var(--mute);letter-spacing:0;transform:none;font-size:11px}
+.sect .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
+.pressed{background:var(--sunk);border:1px solid #000;border-radius:12px;padding:14px 16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
+.well-up{background:var(--well);border-radius:7px;box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000}
+.slab{background:var(--panel);border:1.5px solid var(--line);border-radius:13px;padding:13px 15px;box-shadow:0 5px 0 0 var(--gold-lo),0 5px 0 1.5px var(--line);transition:transform .07s ease,box-shadow .07s ease}
+.slab:active{transform:translateY(5px);box-shadow:0 0 0 0 var(--gold-lo),0 0 0 1.5px var(--line)}
+.slab.dense{border-radius:11px;padding:10px 12px;box-shadow:0 3px 0 0 var(--gold-lo),0 3px 0 1.5px var(--line)}
+.slab.dense:active{transform:translateY(3px);box-shadow:0 0 0 0 var(--gold-lo),0 0 0 1.5px var(--line)}
+.well{background:var(--sunk);border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 0 0 #000}
+.seg{display:flex;gap:4px;padding:4px;background:var(--well);border:1px solid var(--line);border-radius:9px}
+.seg button{flex:1;border:0;background:transparent;color:var(--mute);font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;padding:8px 6px;border-radius:6px;cursor:pointer}
+.seg button.on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--gold-lo)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:700;padding:5px 9px;border:1px solid var(--line);background:var(--well);color:var(--mute);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.chip.ok{color:var(--up);border-color:rgba(47,212,139,.35);background:var(--up-d)}
+.chip.bad{color:var(--down);border-color:rgba(255,92,108,.35);background:var(--down-d)}
+.chip.gd{color:var(--gold);border-color:rgba(212,175,55,.4);background:var(--gold-d)}
+.tag{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.tag.long{background:var(--up-d);color:var(--up)} .tag.short{background:var(--down-d);color:var(--down)}
+.tag.bk{background:var(--gold-d);color:var(--gold)}
+.tag.res{background:var(--well);color:var(--mute);border:1px solid var(--line)}
+.tag.res.t{color:var(--up)} .tag.res.s{color:var(--down)} .tag.res.g{color:var(--amber)}
+.hero .eyebrow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:2px;color:var(--mute);text-transform:uppercase}
+.hero .word{font-family:var(--display);font-size:56px;line-height:.95;letter-spacing:-1px;margin:8px 0 6px;transform:skewX(-6deg);transform-origin:left center}
+.hero .word.bear{color:var(--down);text-shadow:0 0 28px rgba(255,92,108,.35)}
+.hero .word.bull{color:var(--up);text-shadow:0 0 28px rgba(47,212,139,.35)}
+.hero .sub{color:var(--mute);font-size:13px;margin-bottom:12px}
+.hero .sub b{color:var(--chalk);font-family:var(--mono)}
+.checks{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px}
+.ck{padding:8px 6px 7px;text-align:center;border:1px solid var(--line);background:var(--well)}
+.ck .k{font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute)}
+.ck .v{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px}
+.ck.bad{border-color:rgba(255,92,108,.35)} .ck.bad .v{color:var(--down)}
+.ck.ok{border-color:rgba(47,212,139,.35)} .ck.ok .v{color:var(--up)}
+.slots{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.slot .l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute);margin-bottom:5px}
+.slot .l b{color:var(--chalk);font-size:13px;letter-spacing:0}
+.bar{height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.bar i{display:block;height:100%}
+.bar.buy i{background:linear-gradient(90deg,var(--up),#7BE6B5)} .bar.sell i{background:linear-gradient(90deg,var(--down),#FF8FA0)}
+.hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.k{padding:10px 10px 9px}
+.k .l{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--mute)}
+.k .v{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px;letter-spacing:-.3px}
+.k .s{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:1px}
+.filters{display:flex;gap:6px;margin:8px 0 10px;overflow-x:auto;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.filters .chip{flex:none}
+.pos{display:flex;flex-direction:column;gap:8px}
+.row{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center}
+.row .sym{display:flex;align-items:center;gap:7px;font-weight:800;font-size:15px;letter-spacing:.2px}
+.row .sym .tag{margin-left:2px}
+.row .pnl{font-family:var(--mono);font-size:16px;font-weight:800;text-align:right;letter-spacing:-.2px}
+.row .meta{grid-column:1 / span 2;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 12px;font-family:var(--mono);font-size:11px;color:var(--mute)}
+.row .meta .age{margin-left:auto}
+.row .meta b{color:var(--chalk);font-weight:600}
+.row .meta .age{color:var(--dim)}
+.trk{grid-column:1 / span 2;position:relative;height:6px;margin-top:2px;background:var(--well);border:1px solid var(--line)}
+.trk .fill{position:absolute;top:0;bottom:0;left:0}
+.trk.long .fill{background:var(--up)} .trk.short .fill{background:var(--down)}
+.trk .cmp{position:absolute;top:-4px;width:2px;height:12px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
+.trk .z{position:absolute;top:-4px;width:1px;height:12px;background:var(--dim)}
+.more{display:flex;justify-content:center;margin-top:10px}
+.more .chip{padding:8px 14px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute);text-align:right;padding:8px 6px 8px;border-bottom:1px solid var(--line);font-weight:700}
+thead th:first-child{text-align:left}
+tbody td{padding:9px 6px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);font-size:12.5px}
+tbody td:first-child{text-align:left;font-family:var(--body);font-weight:600;color:var(--chalk);font-size:12.5px;line-height:1.25}
+tbody tr:last-child td{border-bottom:0}
+td.h{position:relative}
+td.h span{display:inline-block;min-width:54px;padding:2px 6px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+td.h.u span{background:var(--up-d);color:var(--up)} td.h.d span{background:var(--down-d);color:var(--down)}
+td.pass{color:var(--gold);font-weight:800}
+.tbl-note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
+.dp-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.dp-head .big{font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:-.3px}
+.dp-head .lbl{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.2px}
+svg.bars{display:block;width:100%;height:auto}
+.dp-foot{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px}
+.wl{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.closed .row .pnl{font-size:15px}
+.closed .row .meta{font-size:10.5px}
+.fn .seg{margin-bottom:14px}
+.stage{display:grid;grid-template-columns:110px 1fr 46px;gap:10px;align-items:center;margin:9px 0}
+.stage .n{font-family:var(--mono);font-size:10.5px;letter-spacing:1px;color:var(--mute);text-transform:uppercase}
+.stage .b{height:18px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.stage .b i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--gold-lo),var(--gold))}
+.stage .b i.fin{background:linear-gradient(90deg,var(--gold),var(--gold-hi));box-shadow:0 0 10px rgba(212,175,55,.35)}
+.stage .c{font-family:var(--mono);font-size:14px;font-weight:800;text-align:right}
+.stage.dim .c,.stage.dim .n{color:var(--dim)}
+.fn .why{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.fn .why .t{font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute);margin-bottom:6px}
+.fn .why .r{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;padding:4px 0}
+.fn .why .r b{color:var(--chalk)} .fn .why .r span{color:var(--mute)}
+.fn .foot{display:flex;justify-content:space-between;margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;background:#0A101E;border-top:1px solid var(--line);padding:8px 0 max(10px,env(safe-area-inset-bottom))}
+.bn{display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--body);font-size:11px;letter-spacing:1px;font-weight:700;color:#35E0FF;text-decoration:none;position:relative}
+.bn .i{font-size:16px;opacity:.85}
+.bn.on{color:var(--gold);text-shadow:0 0 10px rgba(212,175,55,.35)} .bn.on .i{opacity:1}
+.bn.on::before{content:"";position:absolute;top:-9px;left:25%;right:25%;height:3px;background:var(--gold);clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}
+@media (prefers-reduced-motion:reduce){*{transition:none !important}}
+</style>
+</head>
+<body>
+<div class="top wrap"><div class="brand">V<b>8</b></div><div class="live"><span class="dot"></span>Market open · 12:20 IST <span class="pill">Feed live</span></div></div>
+<div class="wrap">
+<div class="sect">Market mood <span class="r">2026-09-02</span></div>
+<section class="pressed hero" aria-label="Market mood gate">
+  <div class="eyebrow"><span>Market gate</span><span>4 of 4 checks failed</span></div>
+  <div class="word bear">Bearish</div>
+  <div class="sub">Engine is in sell mode. Buy side is nearly shut: <b>2 of 8</b> buy slots, <b>13 of 14</b> sell slots in use.</div>
+  <div class="checks">
+    <div class="ck bad"><div class="k">ADR</div><div class="v">0.13</div></div>
+    <div class="ck bad"><div class="k">DAY</div><div class="v">−1.02%</div></div>
+    <div class="ck bad"><div class="k">WEEK</div><div class="v">−1.64%</div></div>
+    <div class="ck bad"><div class="k">MONTH</div><div class="v">−3.89%</div></div>
+  </div>
+  <div class="slots">
+    <div class="slot"><div class="l"><span>BUY SLOTS</span><b>2 / 8</b></div><div class="bar buy"><i style="width:25%"></i></div></div>
+    <div class="slot"><div class="l"><span>SELL SLOTS</span><b>13 / 14</b></div><div class="bar sell"><i style="width:93%"></i></div></div>
+  </div>
+  <div class="foot"><span>ADR Wed 11:45 · Nifty D/W/M vs prev close</span><span>PCR 1.46 · VIX 11.9</span></div>
+</section>
+<div class="sect">Open positions <span class="n">15</span><span class="r">net of ₹500/trade</span></div>
+<div class="kpi">
+  <div class="k well-up"><div class="l">UNREALISED</div><div class="v mono up">₹35,118</div><div class="s">gross ₹42,618</div></div>
+  <div class="k well-up"><div class="l">LONG</div><div class="v mono dn">−₹31,328</div><div class="s">2 positions</div></div>
+  <div class="k well-up"><div class="l">SHORT</div><div class="v mono up">₹66,446</div><div class="s">13 positions</div></div>
+</div>
+<div class="filters"><span class="chip gd">All 15</span><span class="chip">Long 2</span><span class="chip">Short 13</span><span class="chip">Buy Rev 2</span><span class="chip">Sell Rev 5</span><span class="chip">Sell Mom 8</span></div>
+<div class="pos">
+  <div class="slab dense row"><div class="sym">AMBUJACEM <span class="tag short">SHORT</span><span class="tag bk">SELL REV</span></div><div class="pnl up">₹15,280</div><div class="meta"><span>413.0 → <b>399.85</b></span><span>tgt 395.15 · sl 426.45</span><span class="age">28 Aug · 5d</span></div><div class="trk short"><i class="fill" style="width:73%"></i><i class="z" style="left:43%"></i><i class="cmp" style="left:73%"></i></div></div>
+  <div class="slab dense row"><div class="sym">M&amp;M <span class="tag short">SHORT</span><span class="tag bk">SELL MOM</span></div><div class="pnl up">₹10,020</div><div class="meta"><span>3,207.4 → <b>3,154.8</b></span><span>tgt 3,096 · sl 3,288</span><span class="age">today · 2h 50m</span></div><div class="trk short"><i class="fill" style="width:69%"></i><i class="z" style="left:42%"></i><i class="cmp" style="left:69%"></i></div></div>
+  <div class="slab dense row"><div class="sym">SUZLON <span class="tag short">SHORT</span><span class="tag bk">SELL MOM</span></div><div class="pnl up">₹9,025</div><div class="meta"><span>46.48 → <b>45.73</b></span><span>tgt 45.18 · sl 47.98</span><span class="age">25 Aug · 8d</span></div><div class="trk short"><i class="fill" style="width:80%"></i><i class="z" style="left:54%"></i><i class="cmp" style="left:80%"></i></div></div>
+  <div class="slab dense row"><div class="sym">SHREECEM <span class="tag short">SHORT</span><span class="tag bk">SELL REV</span></div><div class="pnl up">₹9,000</div><div class="meta"><span>23,900 → <b>23,520</b></span><span>tgt 23,003 · sl 24,527</span><span class="age">31 Aug · 2d</span></div><div class="trk short"><i class="fill" style="width:66%"></i><i class="z" style="left:41%"></i><i class="cmp" style="left:66%"></i></div></div>
+  <div class="slab dense row"><div class="sym">HINDPETRO <span class="tag short">SHORT</span><span class="tag bk">SELL REV</span></div><div class="pnl up">₹8,005</div><div class="meta"><span>360.6 → <b>356.4</b></span><span>tgt 352.0 · sl 366.9</span><span class="age">31 Aug · 2d</span></div><div class="trk short"><i class="fill" style="width:70%"></i><i class="z" style="left:42%"></i><i class="cmp" style="left:70%"></i></div></div>
+  <div class="slab dense row"><div class="sym">KFINTECH <span class="tag short">SHORT</span><span class="tag bk">SELL MOM</span></div><div class="pnl up">₹6,745</div><div class="meta"><span>932.9 → <b>920.3</b></span><span>tgt 903.75 · sl 959.65</span><span class="age">today · 2h 15m</span></div><div class="trk short"><i class="fill" style="width:70%"></i><i class="z" style="left:48%"></i><i class="cmp" style="left:70%"></i></div></div>
+  <div class="slab dense row"><div class="sym">HDFCBANK <span class="tag short">SHORT</span><span class="tag bk">SELL REV</span></div><div class="pnl up">₹4,115</div><div class="meta"><span>710.3 → <b>703.2</b></span><span>tgt 682.03 · sl 726.07</span><span class="age">1 Sep · 1d</span></div><div class="trk short"><i class="fill" style="width:52%"></i><i class="z" style="left:36%"></i><i class="cmp" style="left:52%"></i></div></div>
+  <div class="slab dense row"><div class="sym">BEL <span class="tag long">LONG</span><span class="tag bk">BUY REV</span></div><div class="pnl dn">−₹9,478</div><div class="meta"><span>411.3 → <b>405.0</b></span><span>tgt 422.71 · sl 398.09</span><span class="age">14 Aug · 19d</span></div><div class="trk long"><i class="fill" style="width:28%"></i><i class="z" style="left:54%"></i><i class="cmp" style="left:28%"></i></div></div>
+  <div class="slab dense row"><div class="sym">BHARATFORG <span class="tag long">LONG</span><span class="tag bk">BUY REV</span></div><div class="pnl dn">−₹22,850</div><div class="meta"><span>2,059.0 → <b>2,014.3</b></span><span>tgt 2,107 · sl 1,984</span><span class="age">31 Aug · 2d</span></div><div class="trk long"><i class="fill" style="width:24%"></i><i class="z" style="left:61%"></i><i class="cmp" style="left:24%"></i></div></div>
+</div>
+<div class="more"><span class="chip">Show all 15 ▾</span></div>
+<div class="sect">Sectors <span class="n">22 groups</span><span class="r">vs Nifty −1.0 / −1.6 / −3.2</span></div>
+<div class="seg" style="margin-bottom:10px"><button class="on">All futures</button><button>Nifty 50</button></div>
+<table><thead><tr><th>Sector</th><th>1D</th><th>1W</th><th>1M</th><th>Pass</th></tr></thead><tbody>
+<tr><td>Telecom</td><td class="h u"><span>+0.57%</span></td><td class="h d"><span>−2.37%</span></td><td class="h u"><span>+0.79%</span></td><td class="pass">3</td></tr>
+<tr><td>Power &amp; Renewables</td><td class="h u"><span>+0.08%</span></td><td class="h d"><span>−2.83%</span></td><td class="h d"><span>−6.57%</span></td><td class="pass">3</td></tr>
+<tr><td>Metals &amp; Mining</td><td class="h d"><span>−0.91%</span></td><td class="h d"><span>−4.86%</span></td><td class="h d"><span>−0.67%</span></td><td class="pass">3</td></tr>
+<tr><td>Capital Goods</td><td class="h d"><span>−1.54%</span></td><td class="h d"><span>−2.64%</span></td><td class="h d"><span>−2.66%</span></td><td class="pass">3</td></tr>
+<tr><td>Digital &amp; New-Age</td><td class="h d"><span>−1.56%</span></td><td class="h d"><span>−2.73%</span></td><td class="h u"><span>+4.57%</span></td><td class="pass">3</td></tr>
+<tr><td>Energy (Oil &amp; Gas)</td><td class="h d"><span>−0.29%</span></td><td class="h d"><span>−0.16%</span></td><td class="h d"><span>−1.12%</span></td><td class="pass">2</td></tr>
+<tr><td>PSU Banks</td><td class="h d"><span>−0.42%</span></td><td class="h d"><span>−2.21%</span></td><td class="h u"><span>+0.62%</span></td><td class="pass">2</td></tr>
+<tr><td>Autos</td><td class="h d"><span>−2.31%</span></td><td class="h d"><span>−3.10%</span></td><td class="h d"><span>−4.90%</span></td><td class="pass">1</td></tr>
+</tbody></table>
+<div class="more"><span class="chip">All 22 sectors ▾</span></div>
+<div class="tbl-note">Pass = how many of 6 checks the sector clears (1D / 1W / 1M and 52W index, live; GVM and momentum EOD as of last close). Sorted by Pass, then 1D.</div>
+<div class="sect">Day performance <span class="n">last 10 days</span><span class="r">net P&amp;L / day</span></div>
+<section class="pressed" aria-label="Daily net P&L bars">
+  <div class="dp-head"><div><div class="lbl">TODAY · NET</div><div class="big up">₹62,304</div></div><div style="text-align:right"><div class="lbl">10-SESSION NET</div><div class="big mono dn">−₹24,600</div></div></div>
+  <svg class="bars" viewBox="0 0 360 150" aria-hidden="true">
+  <line x1="0" y1="75" x2="360" y2="75" stroke="#2A2A31" stroke-width="1"/>
+  <rect x="6.8" y="75.0" width="22.3" height="8.7" fill="#FF5C6C" opacity="0.55"/>
+  <rect x="42.8" y="56.8" width="22.3" height="18.2" fill="#2FD48B" opacity="0.60"/>
+  <rect x="78.8" y="67.7" width="22.3" height="7.3" fill="#2FD48B" opacity="0.65"/>
+  <rect x="114.8" y="75.0" width="22.3" height="1.0" fill="#FF5C6C" opacity="0.70"/>
+  <rect x="150.8" y="75.0" width="22.3" height="57.2" fill="#FF5C6C" opacity="0.75"/>
+  <rect x="186.8" y="34.8" width="22.3" height="40.2" fill="#2FD48B" opacity="0.80"/>
+  <rect x="222.8" y="75.0" width="22.3" height="60.0" fill="#FF5C6C" opacity="0.85"/>
+  <rect x="258.8" y="62.0" width="22.3" height="13.0" fill="#2FD48B" opacity="0.90"/>
+  <rect x="294.8" y="75.0" width="22.3" height="23.8" fill="#FF5C6C" opacity="0.95"/>
+  <rect x="330.8" y="24.0" width="22.3" height="51.0" fill="#D4AF37"/>
+  <text x="342.0" y="9" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#D4AF37" text-anchor="middle">live</text>
+  </svg>
+  <div class="dp-foot"><span>20 Aug</span><span>26 Aug</span><span>31 Aug</span><span>today 12:20</span></div>
+</section>
+<div class="more"><span class="chip gd">Open Day Log →</span></div>
+<div class="sect">Closed <span class="n">127</span><span class="r">since 18 Jul · all baskets</span></div>
+<div class="wl">
+  <div class="k well-up"><div class="l">REALISED</div><div class="v mono up">₹3.27L</div><div class="s">gross 3.90L · brk 63.5k</div></div>
+  <div class="k well-up"><div class="l">WIN / LOSS</div><div class="v mono">45 / 32</div><div class="s">accuracy 58.4%</div></div>
+  <div class="k well-up"><div class="l">AVG W / L</div><div class="v mono"><span class="up">+3.1%</span><span class="mu" style="font-size:12px"> / </span><span class="dn">−3.0%</span></div><div class="s">return per trade</div></div>
+</div>
+<div class="pos closed">
+  <div class="slab dense row"><div class="sym">MUTHOOTFIN <span class="tag short">SHORT</span><span class="tag res g">GAP TGT</span></div><div class="pnl up">₹31,483</div><div class="meta"><span>2,992.4 → <b>2,876.1</b> · +4.04%</span><span class="age">1 Sep → today 09:20 · 23h</span></div></div>
+  <div class="slab dense row"><div class="sym">M&amp;M <span class="tag short">SHORT</span><span class="tag res t">TARGET</span></div><div class="pnl up">₹19,320</div><div class="meta"><span>3,303.0 → <b>3,203.9</b> · +3.09%</span><span class="age">1 Sep → today 09:20 · 21h</span></div></div>
+  <div class="slab dense row"><div class="sym">ASIANPAINT <span class="tag short">SHORT</span><span class="tag res g">GAP TGT</span></div><div class="pnl up">₹18,550</div><div class="meta"><span>2,623.0 → <b>2,546.8</b> · +2.99%</span><span class="age">19 Aug → today · 14d</span></div></div>
+  <div class="slab dense row"><div class="sym">ICICIPRULI <span class="tag short">SHORT</span><span class="tag res g">GAP TGT</span></div><div class="pnl up">₹17,491</div><div class="meta"><span>511.5 → <b>492.05</b> · +3.95%</span><span class="age">28 Aug → today · 5d</span></div></div>
+  <div class="slab dense row"><div class="sym">ANGELONE <span class="tag short">SHORT</span><span class="tag res g">GAP TGT</span></div><div class="pnl up">₹16,875</div><div class="meta"><span>285.75 → <b>278.8</b> · +2.49%</span><span class="age">31 Aug → today · 2d</span></div></div>
+  <div class="slab dense row"><div class="sym">SONACOMS <span class="tag long">LONG</span><span class="tag res s">SL</span></div><div class="pnl dn">−₹41,415</div><div class="meta"><span>820.7 → <b>787.3</b> · −4.07%</span><span class="age">31 Aug → today 09:25 · 1d 21h</span></div></div>
+</div>
+<div class="more"><span class="chip">All 127 closed ▾</span></div>
+<div class="sect">Funnel <span class="r">why these, not others</span></div>
+<section class="pressed fn" aria-label="Signal funnel by basket">
+  <div class="seg"><button>Buy Rev</button><button>Buy Mom</button><button>Sell Rev</button><button class="on">Sell Mom</button></div>
+  <div class="stage"><div class="n">Universe</div><div class="b"><i style="width:100%"></i></div><div class="c">208</div></div>
+  <div class="stage"><div class="n">Sector ok</div><div class="b"><i style="width:62%"></i></div><div class="c" data-sample="1">129</div></div>
+  <div class="stage"><div class="n">7 of 9 pass</div><div class="b"><i style="width:22%"></i></div><div class="c" data-sample="1">46</div></div>
+  <div class="stage"><div class="n">All 9 pass</div><div class="b"><i style="width:6%"></i></div><div class="c" data-sample="1">12</div></div>
+  <div class="stage"><div class="n">Qualified</div><div class="b"><i class="fin" style="width:3%"></i></div><div class="c gd">1</div></div>
+  <div class="stage dim"><div class="n">Entered</div><div class="b"><i class="fin" style="width:3%"></i></div><div class="c">1</div></div>
+  <div class="why"><div class="t">QUALIFIED BUT NOT ENTERED · TODAY</div><div class="r"><b>NHPC</b><span>already exited today · cool-off</span></div><div class="r"><b>KFINTECH</b><span>already in position</span></div></div>
+  <div class="foot"><span>sell slots 13 / 14 · 1 free</span><span>last signal 10:05 IST</span></div>
+</section>
+<div style="height:18px"></div>
+<div class="tbl-note" style="text-align:center">Numbers are the paper book. Capital ₹50,00,000 · ₹500 brokerage per closed trade.</div>
+</div>
+<nav class="bnav"><a class="bn" href="#"><span class="i">◧</span>Home</a><a class="bn on" href="#"><span class="i">△</span>V8</a><a class="bn" href="#"><span class="i">◈</span>GVM</a><a class="bn" href="#"><span class="i">◉</span>Check</a><a class="bn" href="#"><span class="i">⚠</span>Alerts</a></nav>
+</body>
+</html>
