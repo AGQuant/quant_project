@@ -1451,6 +1451,8 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    deliberate second focal point under the gauge rather than a stray line drifting left. */
 .pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);
   color:var(--txt,#E9EEFB);text-align:center}
+/* cc#1568: one-line reason under the PCR line (CAUTIOUS cover reading / week unavailable). */
+.preason{font-size:var(--type-11);color:var(--mut);text-align:center;margin-top:calc(2px * var(--rh,1))}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
   letter-spacing:var(--track-em14);text-transform:uppercase;color:var(--txt,#E9EEFB);margin-bottom:var(--space-3)}
 .v10r{display:flex;align-items:center;gap:var(--space-8);min-height:32px}
@@ -4205,56 +4207,25 @@ function adrBar(hero){
     + '</div></div>';
 }
 
-/* ══ cc#927: PCR -> MOOD LABEL ═════════════════════════════════════════════════════════════
-   PCR_MOOD_MAPPING_V1, founder-locked in session_log 18024, and CONTRARIAN by decision: a LOW
-   put/call ratio means the crowd is not buying protection, which reads as Fear; a HIGH one reads
-   as Greed.
-
-   WHICH BANDS — the card carried TWO tables and they disagree. `rescope_08aug` lists
-   <=0.7/0.7-0.9/0.9-1.1/1.1-1.3/>=1.3 with a "Neutral" middle; `bands_final` lists
-   <0.5/0.5-0.8/0.8-1.0/1.0-1.4/>1.4 with a "Caution" middle and says in its own words that it
-   SUPERSEDES the rescope text. I read session_log 18024 to settle it rather than pick: the entry
-   is titled "bands_FINAL_founder_08aug" and matches the second table. That is what is implemented.
-
-   The bands are deliberately wide at the extremes. 18024 states 46 days of history with min 0.50,
-   median 0.90, max 1.28 — which the DB confirms exactly (46 rows, 0.499 / 0.898 / 1.283) — so
-   over that whole history the labels fall 1 Extreme Fear, 12 Fear, 23 Caution, 10 Greed, 0
-   Extreme Greed. Extremes SHOULD be rare; that is the design, not a bug.
-
-   ONE DERIVATION: this reads hero.pcr, the same value the card-1 PCR chip shows. No second fetch
-   and no second computation. Null PCR renders NOTHING — never a guessed label.
-
-   cc#1379 · PCR_MOOD_MAPPING_V2 (session_log 33334), WORDING ONLY, founder-locked 28-Aug: index 1
-   'Fear' -> 'Cautious', index 2 'Caution' -> 'Neutral'. The three numeric boundaries and the other
-   three labels ('Extreme Fear' / 'Greed' / 'Extreme Greed') are byte-identical to 18024 — pcrBand()
-   below is untouched by this change, on purpose. Repo-wide audit before this edit (grep for
-   PCR_BANDS / the mood-word strings / pcr+mood/band/fear/greed/caution across every .html/.js/.py
-   in the tree): this array is the ONLY implementation. v8_dashboard.html's PCR code is trend
-   charts and a plain up/down red-green colouring, not a 5-tier mood label; scorr_health.html has
-   an unrelated "Caution" sector-call tag (Strong/Neutral/Weak/Caution) with no connection to PCR.
-   No second implementation exists to go out of sync with this rename. */
-var PCR_BANDS = [
-  [-Infinity, 0.5, 'Extreme Fear', 'var(--red,#FF5C6C)'],
-  [0.5,       0.8, 'Cautious',     'var(--red,#FF5C6C)'],
-  [0.8,       1.0, 'Neutral',      'var(--amber,#F5B94A)'],
-  [1.0,       1.4, 'Greed',        'var(--grn,#2FD48B)'],
-  [1.4,  Infinity, 'Extreme Greed','var(--grn,#2FD48B)']
-];
-function pcrBand(v){
-  if (v == null || isNaN(Number(v))) return -1;
-  var x = Number(v);
-  /* Written as literal cut-offs rather than a loop over the table, because a loop got the top
-     edge wrong: 18024 says "1.0-1.4 Greed; >1.4 Extreme Greed", so 1.4 itself is GREED, and a
-     half-open [1.0,1.4) test dropped exactly 1.4 through to no label at all. These four lines
-     mirror 18024 one for one — "<0.5", "0.5-0.8", "0.8-1.0", "1.0-1.4", then ">1.4". cc#1379: the
-     thresholds these compare against are unchanged by the V2 wording relabel — only the strings
-     PCR_BANDS carries at these same four indices changed. */
-  if (x < 0.5)  return 0;      // Extreme Fear
-  if (x < 0.8)  return 1;      // Cautious (cc#1379: was Fear)
-  if (x < 1.0)  return 2;      // Neutral (cc#1379: was Caution)
-  if (x <= 1.4) return 3;      // Greed   — 1.4 inclusive
-  return 4;                    // Extreme Greed — strictly above 1.4
-}
+/* ══ cc#1568: PCR MOOD IS READ FROM THE SERVER COMPOSER, NEVER COMPUTED HERE ═══════════════
+   PCR_MOOD_BANDS_V2 (session_log 36200, founder-locked 02-Sep-2026). The mood word now needs a
+   CROSS-INPUT — the Nifty week return — because a PCR above 1.50 on a falling week is put COVER
+   (CAUTIOUS), not EXTREME GREED. Only the server has that number (nifty_dwm.live_nifty_dwm, the
+   Market Gate source), so the whole mapping moved to pcr_mood.py and this file reads its output:
+     hero.pcr_mood = {label, band, dial_cuts, dial_segments:[{lo,hi,colour,band}], label_colour,
+                      reason, note}
+   The cc#927 band table and its lookup function that lived here are REMOVED, not kept beside the
+   composer — two mappings would drift the moment one changed. Lower bands are unchanged on the
+   server (18024 / 33334); the upper cut is now 1.50 with tick 150 on the dial.
+   Colours arrive as TOKEN NAMES and map to this file's own var(--token,#fallback) pattern below —
+   the only place a colour is named for this card. Null PCR or a missing composer object renders
+   NOTHING — never a guessed label. */
+var PCR_TOKEN = {
+  red:   'var(--red,#FF5C6C)',
+  amber: 'var(--amber,#F5B94A)',
+  grn:   'var(--grn,#2FD48B)'
+};
+function pcrTok(name){ return PCR_TOKEN[name] || 'var(--mut)'; }
 /* ══ cc#1379 · PCR SPEEDOMETER GAUGE ═══════════════════════════════════════════════════════════
    Replaces the old 5-pill linear .pmeter bar with a semicircular car-speedometer dial, per the
    founder's inline-preview-reviewed ask (session_log 33334).
@@ -4272,14 +4243,14 @@ function pcrBand(v){
    pcrMood()'s own .pcite line below keeps printing the real, unscaled, unclamped PCR exactly as it
    did before this task (data-honesty requirement, not a style choice, per the card).
 
-   BAND BOUNDARIES ARE DERIVED FROM PCR_BANDS (x100, the two Infinity ends mapped to the dial's own
-   0/200), not a second hardcoded list — one source of truth for both the mood word above the dial
+   BAND BOUNDARIES (cc#1568) COME FROM THE COMPOSER's dial_segments (pcr_mood.py, already x100 on
+   the 0-200 dial), not a hardcoded list — one source of truth for both the mood word above the dial
    and the dial's own colour segments. PCR_GAUGE_OPACITY alternates full/dimmed across the 5 bands
    so the two red tiers (Extreme Fear, Cautious) and two green tiers (Greed, Extreme Greed) — which
    share one hue each — stay visually distinguishable as separate segments rather than reading as
    one wide band.
 
-   COLOUR: every colour used (the four PCR_BANDS var(...) tokens, var(--txt)/var(--panel) for the
+   COLOUR: every colour used (the PCR_TOKEN var(...) tokens the composer's names map to, var(--txt)/var(--panel) for the
    needle and its two-layer pivot ring, var(--dim) for the tick labels, plus var(--line2)/var(--mut)
    for the null-PCR muted state I added below) is already used elsewhere in this file in the exact
    same var(--token,#fallback) pattern — zero new bare/standalone hex primitives.
@@ -4302,7 +4273,7 @@ var PCR_GAUGE_OPACITY = [1, 0.55, 1, 0.55, 1];
    derivation, only the ref's own math read back out of its hand-placed numbers. Tick anchor is
    'start' at 0 and 'end' at 200 (matching the ref) so the widened 13px bold labels don't run past
    the viewBox edge at the two horizontal extremes — 'middle' for the rest, same as before. */
-function pcrGaugeSvg(pcrRaw){
+function pcrGaugeSvg(pcrRaw, mood){
   var cx = 170, cy = 180, R = 138, SW = 20;
   function pt(val, r){
     r = r || R;
@@ -4310,17 +4281,18 @@ function pcrGaugeSvg(pcrRaw){
     var th = Math.PI * (1 - clamped / 200);
     return { x: cx + r * Math.cos(th), y: cy - r * Math.sin(th) };
   }
-  var hasPcr = pcrRaw != null && !isNaN(Number(pcrRaw));
+  var segs = (mood && mood.dial_segments) || [];
+  var hasPcr = pcrRaw != null && !isNaN(Number(pcrRaw)) && segs.length > 0;
   var bands = '', needle = '', ticks = '';
 
   if (hasPcr){
-    PCR_BANDS.forEach(function(b, j){
-      var lo = (b[0] === -Infinity) ? 0   : b[0] * 100;
-      var hi = (b[1] ===  Infinity) ? 200 : b[1] * 100;
-      var p0 = pt(lo), p1 = pt(hi);
+    /* cc#1568: segments come from the composer (dial_cuts 0/50/80/100/150/200). The 150-200
+       segment's colour follows the label — amber for CAUTIOUS, green for EXTREME GREED. */
+    segs.forEach(function(b, j){
+      var p0 = pt(b.lo), p1 = pt(b.hi);
       bands += '<path d="M' + p0.x.toFixed(1) + ',' + p0.y.toFixed(1)
         + ' A' + R + ',' + R + ' 0 0 1 ' + p1.x.toFixed(1) + ',' + p1.y.toFixed(1) + '"'
-        + ' stroke="' + b[3] + '" stroke-opacity="' + PCR_GAUGE_OPACITY[j] + '"'
+        + ' stroke="' + pcrTok(b.colour) + '" stroke-opacity="' + (PCR_GAUGE_OPACITY[j] == null ? 1 : PCR_GAUGE_OPACITY[j]) + '"'
         + ' stroke-width="' + SW + '" fill="none"/>';
     });
     var gv = Number(pcrRaw) * 100;                    // VISUAL scale only, clamped in pt()
@@ -4329,7 +4301,7 @@ function pcrGaugeSvg(pcrRaw){
       + '" stroke="var(--txt,#E9EEFB)" stroke-width="5" stroke-linecap="round"/>'
       + '<circle cx="' + cx + '" cy="' + cy + '" r="10" fill="var(--txt,#E9EEFB)"/>'
       + '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="var(--panel,#121A33)"/>';
-    ticks = [0, 50, 80, 100, 140, 200].map(function(v){
+    ticks = ((mood && mood.dial_cuts) || [0, 50, 80, 100, 150, 200]).map(function(v){   // cc#1568: 140 -> 150
       var p = pt(v, R + 27);
       var anchor = v === 0 ? 'start' : (v === 200 ? 'end' : 'middle');
       // cc#1388: 100 highlighted in --txt per the founder's ask, everything else stays --mut
@@ -4357,11 +4329,10 @@ function pcrGaugeSvg(pcrRaw){
     + bands + needle + ticks + '</svg></div>';
 }
 function pcrMood(hero){
-  var i = pcrBand(hero.pcr);
-  if (i < 0) return '';                      // no PCR = no label, never a guess
-  var b = PCR_BANDS[i];
-  return '<div class="pmood"><div class="pw" style="color:' + b[3] + '">' + esc(b[2]) + '</div>'
-    + pcrGaugeSvg(hero.pcr)
+  var m = hero.pcr_mood;
+  if (!m || !m.label || hero.pcr == null) return '';   // no PCR / no composer = no label, never a guess
+  return '<div class="pmood"><div class="pw" style="color:' + pcrTok(m.label_colour) + '">' + esc(m.label) + '</div>'
+    + pcrGaugeSvg(hero.pcr, m)
     /* cc#1140 · AS-OF HONESTY. The label states what it is showing: during the session
        "PCR 0.94 · 10:30 LIVE", outside it "PCR 0.68 · 08-19 EOD". The number and its basis come
        from the SAME payload object, so the card cannot render a live-looking figure without
@@ -4375,7 +4346,13 @@ function pcrMood(hero){
         ? (hero.pcr_asof ? ' · ' + esc(hero.pcr_asof) : '')
           + (hero.pcr_stale ? ' · <span style="color:var(--amber,#FF9F45)">STALE</span>' : ' · LIVE')
         : (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) + ' EOD' : ''))
-    + '</div></div>';
+    + '</div>'
+    /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
+       ("High put cover while Nifty is down 1.4% on the week"); a missing week input says so
+       ("week return unavailable"). Both strings are the composer's — nothing is worded here. */
+    + (m.reason ? '<div class="preason">' + esc(m.reason) + '</div>' : '')
+    + (m.note ? '<div class="preason">' + esc(m.note) + '</div>' : '')
+    + '</div>';
 }
 /* cc#1139 · the INDEX ROW that fills the cc#1134 surplus zone — NIFTY and BANKNIFTY, level and
    day change, the two numbers a trader checks first.
