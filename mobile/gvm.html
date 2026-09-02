@@ -149,6 +149,39 @@ function pnCol(title, cls, rows){
   else for(var i=0;i<rows.length && i<3;i++) h += '<div class="g-pr">'+esc(plainLabel(rows[i]))+'<span class="'+cls+'">'+esc(bmVal(rows[i]))+'</span></div>';
   return h+'</div>';
 }
+/* ── cc#1619 · hero STRONG / WEAK as swipeable flag cards (founder 02-Sep 19:57), ported from the
+   web HIGHLIGHT REEL (scorr_gvm_fightcard.html 248-255: W / L pills, positives first then
+   negatives, label + #rank). Same order and labels as the payload arrays (builder-sorted by
+   rating); the W / L letter becomes a green / red flag on GOLD NIGHT tokens. One snap row, cards
+   ~150px so about 2.3 show, dots pager; max 5 per side, a "+N more" card per side opens a sheet
+   (P3); tap scrolls to the parameter row (P4). Sizes inline: gvm.html stays at 0 on the ratchet. */
+var FLAG_MAX = 5;
+function flagCard(b, strong, i){
+  var cls = strong ? 'up' : 'dn', tone = strong ? {bg:'var(--up-d)', bd:'var(--up)', fg:'var(--up)'} : {bg:'var(--down-d)', bd:'var(--down)', fg:'var(--down)'};
+  var ctx = [];
+  if(num(b.peer_median)) ctx.push('peers '+bmPeerTxt(b));
+  if(num(b.rank) && num(b.peer_n)) ctx.push('#'+b.rank+' of '+b.peer_n);
+  return '<button type="button" class="g-cc" data-flag="'+esc(b.key)+'" style="flex:0 0 150px;scroll-snap-align:start;display:flex;flex-direction:column;justify-content:space-between;gap:6px;min-height:92px;padding:9px 10px 8px;text-align:left;border-radius:9px;border:1px solid '+tone.bd+';background:'+tone.bg+';color:var(--chalk);cursor:pointer;min-width:0">'
+    + '<span style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:'+tone.fg+'"><svg viewBox="0 0 12 14" width="10" height="12" aria-hidden="true"><path d="M1 0h1v14H1zM2 1h9l-2.5 3L11 7H2z" fill="currentColor"/></svg>'+(strong ? 'STRONG' : 'WEAK')+' '+(i+1)+'</span>'
+    + '<span style="font-family:var(--body);font-size:11px;line-height:1.25;color:var(--chalk);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'+esc(plainLabel(b))+'</span>'
+    + '<span><span style="display:block;font-family:var(--mono);font-size:18px;font-weight:800;letter-spacing:-.3px;line-height:1;color:'+tone.fg+'">'+esc(bmVal(b))+'</span>'
+    + '<span style="display:block;margin-top:3px;font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(ctx.join(' · ') || 'no peer read')+'</span></span></button>';
+}
+function flagMore(n, strong){
+  var fg = strong ? 'var(--up)' : 'var(--down)';
+  return '<button type="button" class="g-cc" data-flag-more="'+(strong ? 'pos' : 'neg')+'" style="flex:0 0 96px;scroll-snap-align:start;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:92px;border-radius:9px;border:1px dashed '+fg+';background:transparent;color:'+fg+';font-family:var(--mono);font-weight:800;font-size:14px;cursor:pointer"><span>+'+n+' more</span><span style="font-size:9px;letter-spacing:1.2px">'+(strong ? 'STRONG' : 'WEAK')+'</span></button>';
+}
+function flagRow(d){
+  var pos = (d.positives||[]), neg = (d.negatives||[]), cards = [];
+  pos.slice(0, FLAG_MAX).forEach(function(b, i){ cards.push(flagCard(b, true, i)); });
+  if(pos.length > FLAG_MAX) cards.push(flagMore(pos.length - FLAG_MAX, true));
+  neg.slice(0, FLAG_MAX).forEach(function(b, i){ cards.push(flagCard(b, false, i)); });
+  if(neg.length > FLAG_MAX) cards.push(flagMore(neg.length - FLAG_MAX, false));
+  var head = '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px"><span><span style="color:var(--up)">STRONG '+pos.length+'</span><span style="color:var(--dim)"> · </span><span style="color:var(--down)">WEAK '+neg.length+'</span></span><span style="color:var(--dim);letter-spacing:.5px">swipe · tap a flag</span></div>';
+  if(!cards.length) return head+'<div class="g-empty" style="padding:10px">Nothing flagged for this company yet.</div>';
+  return head+'<div class="g-car" data-car="flags" style="gap:8px;margin-top:8px;padding-bottom:2px">'+cards.join('')+'</div>'
+    + '<div class="g-dots" data-dots="flags" style="gap:5px;padding:6px 0 0">'+cards.map(function(_, k){ return '<span class="g-dot'+(k===0?' g-on':'')+'" style="width:5px;height:5px"></span>'; }).join('')+'</div>';
+}
 function renderHero(d){
   var sc = d.scores || {}, ex = d.extras || {}, pc = ex.percentile, sg = ex.segment_ctx, r52 = ex.range52;
   var chips = '';
@@ -178,7 +211,7 @@ function renderHero(d){
     '</div>'+
     '<div class="g-strip"></div>'+
     '<div class="g-trend well" id="g-trend" role="button" data-trend="1" aria-label="Open the score trend chart"><div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for score chart ⤢</span></div><div class="g-empty" style="padding:10px">Loading the score history…</div></div>'+
-    '<div class="g-pn">'+pnCol('STRONG','up',d.positives)+pnCol('WEAK','dn',d.negatives)+'</div>'+
+    flagRow(d)+   /* cc#1619: was two static pnCol columns */
     '<div class="g-hfoot"><span>score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</span><span>Pick a capsule below ↓</span></div>'+
     '</section>';
 }
@@ -822,7 +855,8 @@ function ratioSheetClose(){ var w = document.getElementById('g-rsheet'); if(w) w
 /* dots follow the swipe: scroll does not bubble, so one capturing listener serves every carousel */
 document.addEventListener('scroll', function(e){
   var car = e.target; if(!car || !car.getAttribute || !car.getAttribute('data-car')) return;
-  var w = car.clientWidth || 1, k = Math.round(car.scrollLeft / w);
+  var first = car.firstElementChild, cw = first ? (first.getBoundingClientRect().width + 8) : (car.clientWidth || 1);
+  var k = car.getAttribute('data-car') === 'flags' ? Math.round(car.scrollLeft / cw) : Math.round(car.scrollLeft / (car.clientWidth || 1));
   var dots = document.querySelector('[data-dots="'+car.getAttribute('data-car')+'"]'); if(!dots) return;
   Array.prototype.forEach.call(dots.children, function(d, i){ d.classList.toggle('g-on', i === k); });
 }, true);
