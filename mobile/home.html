@@ -3154,9 +3154,12 @@ function renderHeroPositions(){
      "Futures or options" line under it. The two section blocks and the divider are not rendered at
      all (divider hidden by absence, not by a style toggle). VIEW LOGS is outside this body and keeps
      its pinned place. Mixed (one leg open, one empty) never comes here -- it uses the P2 block. */
+  /* cc#1569 P4 · the symbol word is the toggle's own LABEL (POS_SYMS: NIFTY50 -> "NIFTY"), not the
+     internal key — the card must read "No open NIFTY position", the same word the pill shows. */
+  var symLabel = (POS_SYMS.filter(function(s){ return s.key === POS.sym; })[0] || {}).label || POS.sym;
   if (body && futEmpty && optEmpty){
     body.innerHTML = posFeedAlertHtml(rec.feed_alert)
-      + '<div class="posempty"><span class="msg">No open ' + esc(POS.sym) + ' position</span>'
+      + '<div class="posempty"><span class="msg">No open ' + esc(symLabel) + ' position</span>'
       + '<span class="sub">Futures or options</span></div>';
   } else if (body) body.innerHTML =
       posFeedAlertHtml(rec.feed_alert)
