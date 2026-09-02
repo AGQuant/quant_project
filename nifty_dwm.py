@@ -17,6 +17,7 @@ formula unchanged.
 from datetime import datetime, time, timedelta, timezone
 
 from price_sources import continuous_cash   # cc#1200: exclusion, never an allow-list
+from prev_close import prev_session_close   # cc#1565: ONE previous-session close for Day %
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -68,19 +69,13 @@ def live_nifty_dwm(cur, symbol: str = "NIFTY50"):
         latest = float(row[0]) if row and row[0] is not None else None
 
         if latest is not None:
-            today_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
-            # The previous session's last continuous bar. Same exclusion as above, and the same
-            # reason: the anchor must move to the healed series too, or day % would compare a
-            # healed latest against an unhealed anchor — two different series.
-            cur.execute("""
-                SELECT close FROM intraday_prices
-                WHERE symbol=%s AND timeframe='5m'
-                  AND COALESCE(source,'') <> ALL(%s)
-                  AND ts < %s AND ts::time BETWEEN '09:15' AND '15:30'
-                ORDER BY ts DESC LIMIT 1
-            """, (symbol, continuous_cash(), today_open))
-            pr = cur.fetchone()
-            prev_close = float(pr[0]) if pr and pr[0] is not None else None
+            # cc#1565: the Day anchor is the previous session's OFFICIAL close, from the one
+            # module every "Day change" now reads (prev_close.py: raw_eod > 15:30 auction bar >
+            # last spot bar). It used to be the previous session's last CONTINUOUS bar (15:10),
+            # which sat 82 pts under the closing-auction print on 01-Sep — so this gate and
+            # live_metrics disagreed on the same label. The cc#1200 continuous_cash exclusion
+            # stays on the LATEST tick above; only the anchor moves. Week/Month unchanged.
+            prev_close, _basis, _asof = prev_session_close(cur, symbol, before=now.date())
 
             cur.execute("""
                 SELECT close FROM raw_prices
