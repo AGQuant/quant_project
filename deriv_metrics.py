@@ -1448,17 +1448,95 @@ def _batch_quotes(tickers, token) -> Dict[str, float]:
     return out
 
 
+_INDEX_OPT_SPOT = {"NIFTY": "NIFTY50", "NIFTY50": "NIFTY50", "NIFTY 50": "NIFTY50", "BANKNIFTY": "BANKNIFTY"}
+_INDEX_OPT_ROOT = {"NIFTY": "NIFTY", "NIFTY50": "NIFTY", "NIFTY 50": "NIFTY", "BANKNIFTY": "BANKNIFTY"}
+
+
+def _price_rows(strikes, spot, T, rv20, px_of):
+    """cc#1576: the ONE Black-Scholes fair / tag / ratio row builder, shared by the Fyers path
+    (stocks) and the option_chain path (indices) below. px_of(strike, 'CE'|'PE') -> ltp or None."""
+    atm = min(strikes, key=lambda s: abs(s - spot))
+    rows = []
+    for s in strikes:
+        row = {"strike": s, "atm": (s == atm)}
+        for ot, key in (("CE", "ce"), ("PE", "pe")):
+            px = px_of(s, ot)
+            iv = _bs_iv(px, spot, s, T, ot) if px else None
+            fair = _bs_price(spot, s, T, rv20, ot) if rv20 else None
+            if px and fair and fair > 0:
+                prem = round((px / fair - 1) * 100, 1)
+                tag = "EXPENSIVE" if prem > 25 else ("CHEAP" if prem < 0 else "REASONABLE")
+                ratio = round(px / fair, 2)
+            else:
+                prem = tag = ratio = None
+            row[key] = {"ltp": round(px, 2) if px else None,
+                        "iv": round(iv * 100, 1) if iv else None,
+                        "fair": round(fair, 2) if fair else None,
+                        "prem_pct": prem, "tag": tag, "ratio": ratio}
+        rows.append(row)
+    return rows
+
+
 @deriv_router.get("/api/deriv/strike-chain/{symbol}")
 def strike_chain(symbol: str):
     """cc#666 part_3: on-demand ATM±10 CE/PE chain with Black-Scholes fair value. Live ltp per contract
     is fetched from Fyers (app-side), IV inverted from ltp via _bs_iv, fair computed via _bs_price with
     sigma=RV20 (R_FREE=0.07). Premium-vs-fair tag: EXPENSIVE >+25% · REASONABLE 0..+25% · CHEAP <0%.
     Strikes come from the Fyers symbol master (never guessed); ATM = strike nearest spot. No new
-    tables/columns — reuses the shipped BS machinery + the stock_options_backfill resolver."""
+    tables/columns — reuses the shipped BS machinery + the stock_options_backfill resolver.
+
+    cc#1576 (36294 amend_3): INDEX underlyings (NIFTY / NIFTY50 / BANKNIFTY) take the option_chain
+    path — the spot is cmp_prices NIFTY50 / BANKNIFTY (the option root has no cmp row, which is
+    why /strike-chain/NIFTY answered 404 before), the strikes and ltp are the latest option_chain
+    tick of the nearest expiry (the same tick max pain reads), RV20 from raw_prices of the same
+    spot symbol. SAME _price_rows builder, same fair, same tags — one pricer, no second formula.
+    The payload says source='option_chain' and carries chain_tick so a surface can state it."""
     sym = (symbol or "").strip().upper()
     if not sym:
         raise HTTPException(400, "symbol required")
     try:
+        root = _INDEX_OPT_ROOT.get(sym)
+        if root:
+            spot_sym = _INDEX_OPT_SPOT[sym]
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (spot_sym,))
+                r = cur.fetchone()
+                spot = float(r[0]) if r and r[0] else None
+                if not spot:
+                    cur.execute("SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1", (spot_sym,))
+                    r = cur.fetchone()
+                    spot = float(r[0]) if r and r[0] else None
+                if not spot:
+                    raise HTTPException(404, f"no spot price for {spot_sym}")
+                rv20 = _rv20_annualized(cur, spot_sym)
+                cur.execute("""
+                    WITH exp AS (SELECT MIN(expiry) AS e FROM option_chain
+                                 WHERE underlying = %(u)s AND expiry >= CURRENT_DATE),
+                         mts AS (SELECT MAX(ts) AS t FROM option_chain
+                                 WHERE underlying = %(u)s AND expiry = (SELECT e FROM exp))
+                    SELECT strike, option_type, ltp, (SELECT e FROM exp), (SELECT t FROM mts)
+                    FROM option_chain
+                    WHERE underlying = %(u)s AND expiry = (SELECT e FROM exp) AND ts = (SELECT t FROM mts)
+                """, {"u": root})
+                chain_rows = cur.fetchall()
+            if not chain_rows:
+                return {"symbol": sym, "spot": round(spot, 2), "strikes": [], "source": "option_chain",
+                        "error": "no option_chain rows for this index"}
+            exp, tick = chain_rows[0][3], chain_rows[0][4]
+            px = {}
+            for st, ot, ltp, _e, _t in chain_rows:
+                if ltp is not None and float(ltp) > 0:
+                    px[(float(st), (ot or "").upper())] = float(ltp)
+            all_strikes = sorted({float(r[0]) for r in chain_rows})
+            strikes = sorted(sorted(all_strikes, key=lambda s: abs(s - spot))[:21])
+            today = date.today()
+            days = max((exp - today).days, 0) if exp else 0
+            T = days / 365.0
+            rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: px.get((s, ot)))
+            return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp) if exp else None,
+                    "days_to_expiry": days, "rv20": round(rv20 * 100, 1) if rv20 else None,
+                    "quoted": len(px), "strikes": rows, "source": "option_chain",
+                    "chain_tick": str(tick) if tick else None}
         import stock_options_backfill as sob
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
@@ -1485,27 +1563,10 @@ def strike_chain(symbol: str):
         T = days / 365.0
         tickers = [sob.strike_ticker(sym, code, s, ot) for s in strikes for ot in ("CE", "PE")]
         ltp = _batch_quotes(tickers, token)
-        atm = min(strikes, key=lambda s: abs(s - spot))
-        rows = []
-        for s in strikes:
-            row = {"strike": s, "atm": (s == atm)}
-            for ot, key in (("CE", "ce"), ("PE", "pe")):
-                px = ltp.get(sob.strike_ticker(sym, code, s, ot))
-                iv = _bs_iv(px, spot, s, T, ot) if px else None
-                fair = _bs_price(spot, s, T, rv20, ot) if rv20 else None
-                if px and fair and fair > 0:
-                    prem = round((px / fair - 1) * 100, 1)
-                    tag = "EXPENSIVE" if prem > 25 else ("CHEAP" if prem < 0 else "REASONABLE")
-                    ratio = round(px / fair, 2)
-                else:
-                    prem = tag = ratio = None
-                row[key] = {"ltp": round(px, 2) if px else None,
-                            "iv": round(iv * 100, 1) if iv else None,
-                            "fair": round(fair, 2) if fair else None,
-                            "prem_pct": prem, "tag": tag, "ratio": ratio}
-            rows.append(row)
+        rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: ltp.get(sob.strike_ticker(sym, code, s, ot)))
         return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp), "days_to_expiry": days,
-                "rv20": round(rv20 * 100, 1) if rv20 else None, "quoted": len(ltp), "strikes": rows}
+                "rv20": round(rv20 * 100, 1) if rv20 else None, "quoted": len(ltp), "strikes": rows,
+                "source": "fyers"}
     except HTTPException:
         raise
     except Exception as e:

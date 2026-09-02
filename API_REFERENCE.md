@@ -238,6 +238,7 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/pcr/intraday` | intraday PCR |
+| GET | `/api/pcr/mood?underlying=NIFTY\|BANKNIFTY` | `pcr_mood.py` (cc#1568, session_log 36200): label, band, dial_segments, label_colour, reason, note, basis, as_of. **cc#1576 (36294)** adds `interpret`: `state` (STRENGTH \| CAUTION \| COMPLACENCY \| WEAK_SUPPORT \| NEUTRAL, the three-input rule: PCR vs yesterday, Nifty day %, VIX vs prev close), `band` (read band), `headline`, `read[]`/`read_text`, `change_line`, `hour_line`, `range_line`, `caveats[]`, `evidence {n, up, down, avg_next_pct, scored}` + `evidence_line` for the current state (pcr_daily × raw_prices × INDIAVIX, last 120 sessions, scored=false below 20), `evidence_by_state`, `evidence_by_band`, `inputs`, `option_price` (ATM CE/PE ltp vs Black-Scholes fair via `/api/deriv/strike-chain`, cached 5 min). Descriptive only. |
 | POST | `/api/pcr/intraday/compute` | compute intraday PCR |
 | POST | `/api/pcr/backfill` | backfill PCR |
 
@@ -349,6 +350,11 @@ loudly on anything not in its documented `KNOWN_EXCEPTIONS` (the four above), an
 | GET | `/api/scanners/intraday` | live intraday strength. Query: `min_day1d`, `min_vol_ratio`, `limit` |
 | GET | `/api/scanners/positional` | V8 qualified swing setups. Query: `basket`, `min_gvm`, `limit` |
 | GET | `/api/scanners/investment` | GVM≥7 quality. Query: `min_gvm`, `verdict`, `limit` |
+
+### Derivatives — `deriv_metrics.py` (index path added by cc#1576)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/deriv/strike-chain/{symbol}` | cc#666: ATM±10 CE/PE chain with Black-Scholes fair (σ=RV20, r=7%), tags EXPENSIVE >+25% / REASONABLE / CHEAP. Stocks: Fyers symbol master + live quotes. **cc#1576:** NIFTY / NIFTY50 / BANKNIFTY take the `option_chain` path (latest tick of the nearest expiry, spot from cmp_prices NIFTY50 / BANKNIFTY, RV20 from the same symbol) through the same row builder; payload adds `source` and `chain_tick`. |
 
 ### OI Structure — `oi_structure.py` (cc#1575, OI_STRUCTURE_INTERPRET_V1 · session_log 36283)
 | Method | Path | Description |
