@@ -1654,6 +1654,10 @@ var _full = false;                // cc#779: fullscreen state
     document.addEventListener("keydown", _esc);
     _tf = "3M";
     _gvmMode = "gvm"; _gvmCache = null; _gvmCacheKey = null;   // cc#1501: every open starts on full GVM
+    // cc#1591 (R3, CHART_CARD_GVM_PILLAR_TOGGLE_V1 34463): a caller may open WITH the score overlay
+    // on — the app GVM page's "tap for price chart" lands on price + GVM line, toggle G/V/M from
+    // there. Explicit opt-in only; every other caller keeps the reader's remembered setting.
+    if (opts.gvm === true) { _ov.gvm = true; }
     _tab = "chart"; _peers = null; _peerOpen = null;
     // cc#987: a new symbol is a new comparison — the sort and the drawer cache do not carry over.
     _peerSortCol = null; _peerSortDir = -1; _peerCards = {};   // cc#845: every open starts on Chart
