@@ -47,6 +47,9 @@
   .al-why{font-size:10.5px;color:var(--mut,#8A8A93)}
   .al-dis{margin-left:6px;color:var(--mut,#8A8A93)}
   .al-ovr{color:var(--amber,#FF9F45);text-decoration:underline dotted}
+  .al-badge{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 8px;border-radius:5px;border:1px solid var(--line,#2A2A31)}
+  .al-badge.ok{color:var(--grn,#2FD48B);border-color:var(--grn,#2FD48B)}
+  .al-badge.no{color:var(--mut,#8A8A93)}
   .al-pend .al-dis{margin-left:0}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .al-eng{font:600 10px ui-monospace,monospace;color:var(--mut);border:1px solid var(--line2);
@@ -220,6 +223,13 @@ function rowHtml(a){
   var dis = '<button type="button" class="btn al-dis" id="dm-' + a.id + '" onclick="dismiss(' + a.id + ')">Dismiss</button>';
   if (st === 'triggered') {
     act = '<div class="twa"><button type="button" class="btn pri" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve</button>' + dis + '</div>';
+  } else if (st === 'approved') {
+    /* scope 4: the decision, no button — WoT reads approved rows, so "sent to WoT" is implicit */
+    act = '<div class="twa"><span class="al-badge ok">Approved' + (a.approved_price != null ? ' @ ' + fmtPx(a.approved_price) : '')
+        + (a.approved_at ? ' · ' + istStamp(a.approved_at) : '') + '</span>'
+        + (a.notes && /override before trigger/.test(a.notes) ? '<span class="al-why">founder override before trigger</span>' : '') + '</div>';
+  } else if (st === 'dismissed') {
+    act = '<div class="twa"><span class="al-badge no">Dismissed</span></div>';
   } else if (st === 'pending') {
     var cond = a.trigger_condition === 'ABOVE' ? '≥' : '≤';
     var liveTxt = a.cmp == null ? 'no live price right now'
