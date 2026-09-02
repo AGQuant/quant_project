@@ -23,8 +23,8 @@
 .ia-pressed{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:12px 12px 10px}
 .ia-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
 .ia-stats>div{padding:6px 4px;text-align:center}
-.ia-stats .k{font-family:var(--mono);font-size:9px;letter-spacing:1.4px;color:var(--mute)}
-.ia-stats .v{font-family:var(--mono);font-size:17px;font-weight:800;margin-top:2px;color:var(--chalk,var(--txt))}
+.ia-stats .ia-k{font-family:var(--mono);font-size:9px;letter-spacing:1.4px;color:var(--mute)}
+.ia-stats .ia-v{font-family:var(--mono);font-size:17px;font-weight:800;margin-top:2px;color:var(--chalk,var(--txt))}
 .ia-hon{font-family:var(--mono);font-size:10px;color:var(--dim);text-align:center;line-height:1.5}
 .ia-filters{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:12px 0}
 .ia-filters::-webkit-scrollbar{display:none}
@@ -58,9 +58,9 @@
 /* P4: plan tiles, the stop -> target track, footer */
 .ia-plan{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
 .ia-plan>div{padding:7px 8px;background:var(--well);border:1px solid var(--line);border-radius:7px;min-width:0}
-.ia-plan .k{font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)}
-.ia-plan .v{font-family:var(--mono);font-size:13.5px;font-weight:800;margin-top:1px;color:var(--chalk,var(--txt))}
-.ia-plan .v.mu{color:var(--mute)}
+.ia-plan .ia-k{font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)}
+.ia-plan .ia-v{font-family:var(--mono);font-size:13.5px;font-weight:800;margin-top:1px;color:var(--chalk,var(--txt))}
+.ia-plan .ia-v.mu{color:var(--mute)}
 .ia-trk{position:relative;height:7px;margin:12px 0 0;background:var(--well);border:1px solid var(--line)}
 .ia-trk .fill{position:absolute;top:0;bottom:0;left:0;display:block}
 .ia-trk.long .fill{background:var(--up)}.ia-trk.short .fill{background:var(--down)}
@@ -70,6 +70,16 @@
 .ia-ft{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;padding-top:24px;font-family:var(--mono);font-size:10px;color:var(--dim)}
 .ia-ft.tight{padding-top:10px}
 .ia-ft b{color:var(--mute);font-weight:600}
+/* P5: waiting cards — distance-to-trigger track + the two actions (cc#1586 endpoints) */
+.ia-dist{position:relative;height:7px;margin:12px 0 0;background:var(--well);border:1px solid var(--line)}
+.ia-dist .fill{position:absolute;top:0;bottom:0;left:0;display:block;background:var(--amber)}
+.ia-dist .lab{position:absolute;top:10px;font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap}
+.ia-acts{display:flex;gap:8px;margin-top:28px}
+.ia-acts button{flex:1;min-height:44px;text-align:center;font-family:var(--mono);font-size:11px;font-weight:800;letter-spacing:.8px;padding:10px 6px;border-radius:9px;border:1px solid var(--line);cursor:pointer}
+.ia-acts .pri{background:var(--gold);color:var(--well);border-color:var(--gold)}
+.ia-acts .sec{background:var(--well);color:var(--mute)}
+.ia-acts button[disabled]{opacity:.55;cursor:default}
+.ia-cerr{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--down);line-height:1.5}
 /* cc#1507 — create-alert flow. All classes namespaced al- (this app has collided four times on
    short class names — the intel.html nc- lesson). The sheet is home.html's .pfveil/.pfsheet
    shape (veil z-80, bottom sheet z-81, grab handle), re-declared here because those classes are
@@ -162,10 +172,10 @@ function renderTop(){
     ? esc((c.all || 0) + ' ideas · ' + (c.live || 0) + ' live · ' + (c.waiting || 0) + ' waiting') + '<br>' + esc('as of ' + (d.as_of_ist || '—') + (d.price_basis === 'CLOSE' ? ' · last close' : ''))
     : (IA.err ? 'could not load' : 'loading…');
   $('ia-stats').innerHTML = '<div class="ia-stats">'
-    + '<div><div class="k">LIVE</div><div class="v">' + (s.live != null ? s.live : '—') + '</div></div>'
-    + '<div><div class="k">WINNING</div><div class="v ' + (s.winning ? 'up' : '') + '">' + (s.winning != null ? s.winning : '—') + '</div></div>'
-    + '<div><div class="k">AVG SINCE</div><div class="v ' + pctCls(s.avg_since_pct) + '">' + pctS(s.avg_since_pct, 1) + '</div></div>'
-    + '<div><div class="k">BEST</div><div class="v ' + pctCls(s.best_pct) + '">' + pctS(s.best_pct, 1) + '</div></div>'
+    + '<div><div class="ia-k">LIVE</div><div class="ia-v">' + (s.live != null ? s.live : '—') + '</div></div>'
+    + '<div><div class="ia-k">WINNING</div><div class="ia-v ' + (s.winning ? 'up' : '') + '">' + (s.winning != null ? s.winning : '—') + '</div></div>'
+    + '<div><div class="ia-k">AVG SINCE</div><div class="ia-v ' + pctCls(s.avg_since_pct) + '">' + pctS(s.avg_since_pct, 1) + '</div></div>'
+    + '<div><div class="ia-k">BEST</div><div class="ia-v ' + pctCls(s.best_pct) + '">' + pctS(s.best_pct, 1) + '</div></div>'
     + '</div><div class="ia-hon">' + esc((d && d.honesty) || 'Every idea here was handpicked and approved by hand. Prices and P&L are live since approval.') + '</div>';
   $('ia-foot').textContent = 'Ideas are the approved book. Prices live. Nothing lands here before it is approved by hand.';
 }
@@ -229,22 +239,36 @@ function foot(c, tight){
   else if (c.style === 'Price level') p.push('handpicked · founder');
   return '<div class="ia-ft' + (tight ? ' tight' : '') + '">' + p.map(function(x){ return '<span>' + x + '</span>'; }).join('') + '</div>';
 }
+/* P5: a waiting card is a manual price alert that has not been approved yet. Distance track:
+   trigger on the left, now on the right, the fill grows as price closes in (100/(1+|distance|)
+   so 12% away reads as a sliver and 1% away as half). Approve now on a PENDING alert is the
+   cc#1586 founder override (confirm, then override=true); on a TRIGGERED alert it is the plain
+   approve. Dismiss = /api/alerts/dismiss. Both re-read the book on success. */
+function waitBody(c){
+  var dist = c.distance_pct == null ? null : Math.abs(c.distance_pct);
+  var fill = dist == null ? 0 : Math.max(3, Math.min(100, 100 / (1 + dist)));
+  var h = '<div class="ia-dist"><i class="fill" style="width:' + fill.toFixed(1) + '%"></i>'
+    + '<span class="lab" style="left:0">trigger ' + fmtPx(c.trigger_price) + '</span><span class="lab" style="right:0">now ' + fmtPx(c.cmp) + '</span></div>';
+  h += '<div class="ia-acts"><button type="button" class="sec" data-act="dismiss" data-id="' + c.id + '">Dismiss</button>'
+    + '<button type="button" class="pri" data-act="approve" data-id="' + c.id + '">' + (c.triggered ? 'Approve' : 'Approve now') + '</button></div>';
+  return '<div class="ia-body">' + h + '</div>';
+}
 function cardBody(c){
-  if (c.status === 'waiting') return '<div class="ia-body"></div>';   /* P5 */
+  if (c.status === 'waiting') return waitBody(c);
   var h = '', done = c.status === 'closed';
   if (c.target != null && c.stop != null){
-    h += '<div class="ia-plan"><div><div class="k">TARGET</div><div class="v up">' + fmtPx(c.target) + '</div></div>'
-      + '<div><div class="k">STOP</div><div class="v dn">' + fmtPx(c.stop) + '</div></div>'
+    h += '<div class="ia-plan"><div><div class="ia-k">TARGET</div><div class="ia-v up">' + fmtPx(c.target) + '</div></div>'
+      + '<div><div class="ia-k">STOP</div><div class="ia-v dn">' + fmtPx(c.stop) + '</div></div>'
       + (done
-          ? '<div><div class="k">FINAL</div><div class="v ' + pctCls(c.closed && c.closed.final_pct) + '">' + pctS(c.closed && c.closed.final_pct) + '</div></div>'
-          : '<div><div class="k">TO TARGET</div><div class="v">' + (c.to_target_pct == null ? '—' : Number(c.to_target_pct).toFixed(1) + '%') + '</div></div>')
+          ? '<div><div class="ia-k">FINAL</div><div class="ia-v ' + pctCls(c.closed && c.closed.final_pct) + '">' + pctS(c.closed && c.closed.final_pct) + '</div></div>'
+          : '<div><div class="ia-k">TO TARGET</div><div class="ia-v">' + (c.to_target_pct == null ? '—' : Number(c.to_target_pct).toFixed(1) + '%') + '</div></div>')
       + '</div>';
     if (c.track) h += track(c);
     h += foot(c, !c.track);
   } else if (c.trigger_price != null){
-    h += '<div class="ia-plan"><div><div class="k">TRIGGER</div><div class="v">' + (c.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(c.trigger_price) + '</div></div>'
-      + '<div><div class="k">FROM TRIGGER</div><div class="v ' + pctCls(c.from_trigger_pct) + '">' + pctS(c.from_trigger_pct, 1) + '</div></div>'
-      + '<div><div class="k">NOTE</div><div class="v mu" style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(c.notes || '') + '">' + esc(noteShort(c.notes)) + '</div></div></div>';
+    h += '<div class="ia-plan"><div><div class="ia-k">TRIGGER</div><div class="ia-v">' + (c.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(c.trigger_price) + '</div></div>'
+      + '<div><div class="ia-k">FROM TRIGGER</div><div class="ia-v ' + pctCls(c.from_trigger_pct) + '">' + pctS(c.from_trigger_pct, 1) + '</div></div>'
+      + '<div><div class="ia-k">NOTE</div><div class="ia-v mu" style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(c.notes || '') + '">' + esc(noteShort(c.notes)) + '</div></div></div>';
     h += foot(c, true);
   } else {
     h += foot(c, true);
@@ -280,6 +304,42 @@ function load(){
     IA.data = d; IA.err = null; render();
   }).catch(function(e){ IA.err = e.message || 'load failed'; if (!IA.data) render(); else $('ia-r').textContent = 'refresh failed · showing ' + (IA.data.as_of_ist || 'earlier'); });
 }
+function ideaById(id){ return ((IA.data && IA.data.ideas) || []).filter(function(c){ return String(c.id) === String(id); })[0]; }
+function cardErr(id, msg){
+  var el = $('ia-' + id); if (!el) return;
+  var box = el.querySelector('.ia-cerr');
+  if (!box){ box = document.createElement('div'); box.className = 'ia-cerr'; el.querySelector('.ia-body').appendChild(box); }
+  box.textContent = msg;
+}
+function act(kind, id){
+  var c = ideaById(id); if (!c || IA.busy[id]) return;
+  var override = kind === 'approve' && !c.triggered;
+  var ask = kind === 'dismiss'
+    ? 'Dismiss the ' + c.symbol + ' alert? It leaves this list for good.'
+    : (override
+        ? 'Approve ' + c.symbol + ' before its trigger? Price now ' + fmtPx(c.cmp) + ', trigger ' + (c.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(c.trigger_price) + '. The record will note the override.'
+        : 'Approve ' + c.symbol + ' at the live price now?');
+  if (!window.confirm(ask)) return;
+  IA.busy[id] = true;
+  var el = $('ia-' + id);
+  if (el) Array.prototype.forEach.call(el.querySelectorAll('.ia-acts button'), function(b){ b.disabled = true; if (b.getAttribute('data-act') === kind) b.textContent = kind === 'dismiss' ? 'Dismissing…' : 'Approving…'; });
+  var body = kind === 'dismiss' ? { id: c.id } : (override ? { id: c.id, override: true } : { id: c.id });
+  fetchWithTimeout('/api/alerts/' + (kind === 'dismiss' ? 'dismiss' : 'approve'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(x){
+      if (!x.ok) throw new Error((x.d && (x.d.detail || x.d.error)) || (kind + ' failed'));
+      IA.busy[id] = false; load();
+    })
+    .catch(function(e){
+      IA.busy[id] = false;
+      if (el) Array.prototype.forEach.call(el.querySelectorAll('.ia-acts button'), function(b){ b.disabled = false; b.textContent = b.getAttribute('data-act') === 'dismiss' ? 'Dismiss' : (c.triggered ? 'Approve' : 'Approve now'); });
+      cardErr(id, 'Could not ' + kind + ' — ' + (e.message || 'request failed'));
+    });
+}
+$('ia-list').addEventListener('click', function(e){
+  var b = e.target.closest('[data-act]'); if (!b) return;
+  act(b.getAttribute('data-act'), b.getAttribute('data-id'));
+});
 $('ia-filters').addEventListener('click', function(e){
   var b = e.target.closest('[data-f]'); if (!b) return;
   IA.filter = b.getAttribute('data-f'); renderFilters(); renderList();
