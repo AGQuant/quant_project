@@ -295,6 +295,42 @@ function gridBox(b){
     + '<span><span style="display:block;font-family:var(--mono);font-size:13px;font-weight:800;letter-spacing:-.2px;white-space:nowrap;color:'+t.fg+'">'+esc(bmSelf(b))+'</span>'
     + '<span style="display:block;font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(med ? 'peers '+med : 'no peer read')+'</span></span></button>';
 }
+/* P4 · tap a box -> the parameter sheet: COMPANY value (in its tone) · PEER MEDIAN · rank of N ·
+   rating chip, then the peer ladder from benchmark[].peers sorted best-first (direction from
+   beats_peer against the median when the builder did not state higher_is_better), the company
+   row marked gold. The app rows had no sheet before this card; the box is the first tap-through. */
+function paramSheetClose(){ var w = document.getElementById('g-psheet'); if(w) w.remove(); }
+function paramSheetOpen(key){
+  var d = STATE.co, b = d ? bmRow(d, key) : null; if(!b) return;
+  paramSheetClose();
+  var t = gridTone(b), lbl = GRID_LBL[b.key] || plainLabel(b);
+  var hib = (b.higher_is_better === true || b.higher_is_better === false) ? b.higher_is_better
+          : (b.beats_peer != null && num(b.company) && num(b.peer_median) && b.company !== b.peer_median) ? ((b.company > b.peer_median) === (b.beats_peer === true))
+          : !/^(pe|fwd_pe|hist_pe|sector_pe|pb)$/.test(b.key||'');
+  var peers = (b.peers||[]).filter(function(x){ return x && num(x.value); }).slice().sort(function(x, y){ return hib ? y.value - x.value : x.value - y.value; });
+  var me = STATE.sym, seen = peers.some(function(x){ return x.symbol === me; });
+  var fmt = function(v){ return bmSelf({company:v, unit:b.unit, key:b.key}); };
+  var kv = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px">'
+    + '<div style="padding:8px;background:var(--well);border:1px solid '+t.bd+';border-radius:8px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">COMPANY</div><div style="font-family:var(--mono);font-size:16px;font-weight:800;color:'+t.fg+'">'+esc(bmSelf(b))+'</div></div>'
+    + '<div style="padding:8px;background:var(--well);border:1px solid var(--line);border-radius:8px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">PEER MEDIAN</div><div style="font-family:var(--mono);font-size:16px;font-weight:800;color:var(--chalk)">'+esc(bmPeerTxt(b) || '—')+'</div></div>'
+    + '<div style="padding:8px;background:var(--well);border:1px solid var(--line);border-radius:8px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">RANK</div><div style="font-family:var(--mono);font-size:16px;font-weight:800;color:var(--chalk)">'+(num(b.rank) ? b.rank+'<span style="font-size:10px;color:var(--mute)"> of '+(b.peer_n||peers.length)+'</span>' : '—')+'</div></div></div>';
+  var read = b.beats_peer === true ? 'Better than the peer median.' : b.beats_peer === false ? 'Behind the peer median.' : 'No peer read on this one.';
+  read += hib ? ' Higher is better here.' : ' Lower is better here.';
+  var lad = peers.length ? '<div style="margin-top:14px;font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)">PEER LADDER · BEST FIRST</div>'
+    + '<div style="margin-top:4px">'+peers.map(function(x, i){ var isMe = x.symbol === me; return '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-radius:6px;font-family:var(--mono);font-size:11.5px;'+(isMe ? 'background:var(--gold-d, var(--well));color:var(--gold);font-weight:800;border:1px solid var(--gold)' : 'color:var(--chalk);border-bottom:1px solid var(--line)')+'"><span><span style="display:inline-block;width:22px;color:'+(isMe ? 'var(--gold)' : 'var(--dim)')+'">'+(i+1)+'</span>'+esc(x.symbol)+'</span><span>'+esc(fmt(x.value))+'</span></div>'; }).join('')+'</div>'
+    + (seen ? '' : '<div class="g-note">This company is not in the ladder list the report carried.</div>')
+    : '<div class="g-empty">No peer ladder for this check.</div>';
+  var el = document.createElement('div'); el.id = 'g-psheet';
+  el.innerHTML = '<div data-ps-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80"></div>'
+    + '<div style="position:fixed;left:0;right:0;bottom:0;max-height:84vh;display:flex;flex-direction:column;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0">'
+    + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 4px;flex-shrink:0"></div>'
+    + '<div style="overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px))">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--gold)">'+({G:'GROWTH',V:'VALUE',M:'MOMENTUM'}[b.pillar]||'')+' · '+esc(STATE.sym||'')+'</div><div style="font-family:var(--body);font-weight:800;font-size:16px;color:var(--chalk);margin-top:2px">'+esc(lbl)+'</div></div>'+rtChip(b.rating)+'</div>'
+    + kv + '<div class="g-note">'+esc(read)+'</div>' + lad
+    + '<button type="button" data-ps-close="1" style="width:100%;min-height:44px;margin-top:16px;border-radius:12px;border:0;background:var(--gold);color:var(--well);font-family:var(--mono);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer">DONE</button></div></div>';
+  document.body.appendChild(el);
+  el.addEventListener('click', function(e){ if(e.target.closest('[data-ps-close]')) paramSheetClose(); });
+}
 var GRID_LEGEND = '<div class="g-legend" style="flex-wrap:wrap;gap:8px 14px"><span><i style="background:var(--up)"></i>better than peers</span><span><i style="background:var(--down)"></i>behind peers</span><span><i style="background:var(--line)"></i>no peer read</span><span>lower wins on PE and price / book · chip = rating</span></div>';
 function gridHtml(d){
   var groups = gridRows(d), n = 0, h = '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">';
@@ -1137,6 +1173,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
   var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); refreshPillars(); return; }   /* cc#1618 */
+  var gb = e.target.closest('[data-gbox]'); if(gb){ paramSheetOpen(gb.getAttribute('data-gbox')); return; }   /* cc#1618 P4 */
   if(e.target.closest('[data-ratio-filter]')){ ratioSheetOpen(); return; }   /* cc#1617 P4 */
   var ft = e.target.closest('[data-fin-table]'); if(ft){ var fk = ft.getAttribute('data-fin-table'); finTableOpen[fk] = !finTableOpen[fk]; refreshFin(); return; }   /* cc#1617 P5 */
   var fb = e.target.closest('[data-fin]'); if(fb){ finView = fb.getAttribute('data-fin'); var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling; if(fs){ var tmp2 = document.createElement('div'); tmp2.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp2.children[1], fs); } return; }
