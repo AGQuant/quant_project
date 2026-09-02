@@ -203,9 +203,30 @@ def screen_v2(side: str = "BUY", limit: int = 25, run_date: Optional[str] = None
                            FROM tc_screener_v2 WHERE run_date = %s AND universe = %s AND side = %s AND is_best""",
                         (rd, UNIVERSE, side))
             unw, tot = cur.fetchone()
+            # cc#1594 (RECO cc_task_logs 4510): the registry weight sum per bucket, read at request
+            # time from tc_rule_weights — never a literal (TC_SCORE_100_V1, session_log 29138).
+            cur.execute("SELECT bucket, SUM(weight) FROM tc_rule_weights WHERE active GROUP BY bucket")
+            weight_sums = {b: float(w) for b, w in cur.fetchall()}
+        # cc#1594: name the two scales so no reader divides raw_score by raw_max and calls it the
+        # score. raw_score / raw_max are the UNWEIGHTED card credit and its raw max (sum of each
+        # rule's own max, derived per card in tc_v4_dual — it varies by symbol when a rule is not
+        # emitted). score10 is the registry-WEIGHTED canon, 10 * sum(w * pass) / sum(w); score100
+        # is score10 x 10 and nothing else (29138). BHARATFORG BUY-REV 01-Sep: raw 11.5/20,
+        # score10 6.43 -> score100 64.3. 11.5/20 = 57.5 and 11.5/21 = 54.8 are both wrong reads.
+        for r in rows:
+            s10 = r.get("score10")
+            r["score100"] = round(float(s10) * 10.0, 1) if s10 is not None else None
+            r["weight_sum"] = weight_sums.get(r.get("bucket"))
+            for k in ("raw_score", "raw_max"):
+                if r.get(k) is not None:
+                    r[k] = float(r[k])
         return {"status": "ok", "run_date": str(rd), "side": side, "count": len(rows),
                 # Carried on the payload so a surface can label the list rather than infer it.
                 "uncalibrated_rows": int(unw or 0), "total_rows": int(tot or 0),
-                "engine": "tc_v4_dual four-bucket (cc#1172)", "rows": rows}
+                "engine": "tc_v4_dual four-bucket (cc#1172)",
+                "scale": {"score100": "score10 x 10 — registry-weighted (tc_rule_weights, read at compute time)",
+                          "raw_score": "unweighted card credit", "raw_max": "sum of each emitted rule's own max (varies by symbol)",
+                          "weight_sum": "SUM(weight) FROM tc_rule_weights WHERE active, per bucket, read now"},
+                "weight_sums": weight_sums, "rows": rows}
     except Exception as e:
         raise HTTPException(500, f"screen_v2 failed: {e}")
