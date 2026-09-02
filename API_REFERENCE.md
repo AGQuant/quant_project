@@ -347,6 +347,21 @@ loudly on anything not in its documented `KNOWN_EXCEPTIONS` (the four above), an
 | GET | `/api/scanners/positional` | V8 qualified swing setups. Query: `basket`, `min_gvm`, `limit` |
 | GET | `/api/scanners/investment` | GVM≥7 quality. Query: `min_gvm`, `verdict`, `limit` |
 
+### Wall of Trades — `trade_wall_endpoints.py` (cc#991 / cc#1295 / cc#1587)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/tradewall` | Keyset-paged feed read by BOTH `/trades` (web) and `/m/trades` (app). Query: `limit` (default 40, max 100), `cursor`, `instrument` (FUTURES\|EQUITY\|ALL), `status` (open\|closed\|ALL). Alias: `/api/mobile/tradewall` |
+
+**cc#1587 (session_log 36394, WOT_APPROVED_ONLY_V1):** the wall shows **approved trades only** by default.
+Which source buckets reach the feed is a server-side flag, `app_config.wot_buckets_enabled`
+(JSON list or comma string; default `["approved_alerts"]`). Known bucket names: `approved_alerts`,
+`v8`, `index_intel`, `tc_scanner`, `qb_basket`, `investment_scanner`. Widening the flag restores the
+engine hierarchy on both pages with no deploy; unknown names are ignored and logged. The engine union
+SQL is gated, not deleted. Response fields added by cc#1587: `buckets_enabled` (list in force),
+`buckets_known`, `buckets_source` (`default` \| `app_config`), `approved_as_of` (latest
+`trade_alerts.approved_at`, IST, head-of-feed only), and per event `origin` (`manual` or the
+`source_engine` that raised the alert; `null` for non-alert rows).
+
 ---
 
 > Router descriptions are inferred from route names/signatures, not full handler review — verify against source or the live `GET /openapi.json` (machine-readable, always current) before relying on request/response shapes.

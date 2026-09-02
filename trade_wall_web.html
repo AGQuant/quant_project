@@ -95,11 +95,10 @@
     <h1>Wall of Trades</h1>
     <button class="ibtn" onclick="openOther()" title="Other engines not in the 5 primary buckets">i</button>
   </div>
-  <div class="sub" id="subline">
-    Every position across the live engines, <b>since 10 Aug 2026</b>. This page computes nothing
-    of its own — it renders <b>/api/tradewall</b>, the same endpoint the app reads, so the two
-    surfaces cannot disagree about a trade.
-  </div>
+  <!-- cc#1587: subline is set by JS per mode — approved-only (default) or the engine hierarchy
+       when app_config.wot_buckets_enabled is widened. The engines text lives in SUB_ENGINES. -->
+  <div class="sub" id="subline">Approved trades only. This page computes nothing of its own —
+    it renders <b>/api/tradewall</b>, the same endpoint the app reads.</div>
 
   <!-- level 1: status -->
   <div class="tabs lvl1" id="tabsStatus"></div>
@@ -296,7 +295,25 @@ function approvedRowsHtml(list){
   });
   return h;
 }
+var SUB_ENGINES = 'Every position across the live engines, <b>since 10 Aug 2026</b>. This page computes nothing '
+  + 'of its own — it renders <b>/api/tradewall</b>, the same endpoint the app reads, so the two '
+  + 'surfaces cannot disagree about a trade.';
+function setSubline(){
+  var el = document.getElementById('subline');
+  var ib = document.querySelector('.ibtn');
+  if (STATE.mode === 'approved'){
+    el.innerHTML = '<b>Approved trades only</b>'
+      + (STATE.approvedAsOf ? ' · as of ' + esc(STATE.approvedAsOf) + ' IST' : '')
+      + '. This page computes nothing of its own — it renders <b>/api/tradewall</b>, '
+      + 'the same endpoint the app reads.';
+    if (ib) ib.style.display = 'none';
+  } else {
+    el.innerHTML = SUB_ENGINES;
+    if (ib) ib.style.display = '';
+  }
+}
 function renderApproved(){
+  setSubline();
   document.getElementById('tabsStatus').innerHTML = '';
   document.getElementById('tabsInstrument').innerHTML = '';
   document.getElementById('tabsBucket').innerHTML = '';
@@ -313,6 +330,7 @@ function renderApproved(){
 
 function render(){
   if (STATE.mode === 'approved') return renderApproved();
+  setSubline();
   document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
   document.getElementById('tabsInstrument').innerHTML = instrumentTabsHtml();
   document.getElementById('tabsBucket').innerHTML = bucketTabsHtml();
