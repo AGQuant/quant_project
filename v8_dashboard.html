@@ -8198,7 +8198,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // endpoint already sends down (both d.buy and d.sell arrive as full rows, not pre-aggregated-only).
   function closedStats(rows){
     var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
-    var wins=closed.filter(function(r){return r.exit_reason==='TARGET';});
+    var wins=closed.filter(function(r){return String(r.exit_reason||'').indexOf('TARGET')===0;});  // cc#1599: 'TARGET (cash-daily)' is a win
     var net=Math.round(closed.reduce(function(s,r){return s+(r.pnl_pct||0);},0)*100)/100;
     var wr=closed.length?Math.round(wins.length/closed.length*1000)/10:null;
     return {closed:closed.length,wins:wins.length,wr_pct:wr,net_pts_pct:net};
@@ -8266,7 +8266,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
         +'<td>'+n2(r.entry_price)+'</td>'
         +'<td>'+n2(r.exit_price)+'</td>'
-        +'<td><span class="pill '+(r.exit_reason==='TARGET'?'target':'sl')+'">'+esc(r.exit_reason)+'</span></td>'
+        +'<td><span class="pill '+(String(r.exit_reason||'').indexOf('TARGET')===0?'target':'sl')+'">'+esc(r.exit_reason)+'</span></td>'
         +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
         +'<td>'+dShort(r.exit_ts)+'</td></tr>';
     }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC13 positions for this date</td></tr>';
