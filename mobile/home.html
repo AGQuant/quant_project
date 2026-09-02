@@ -2266,7 +2266,36 @@ function renderBreadth(){
   if (!BREADTH.rows.length){ el.innerHTML = '<div class="empty"><b>No breadth data</b></div>'; return; }
   breadthSortView();
   var body = BREADTH.view.map(function(i){ return breadthRow(BREADTH.rows[i]); }).join('');
-  el.innerHTML = breadthHead() + body;
+  /* cc#1592 (ADV_DECL_SECTOR_CAPS_V1, 36539; ref scorr_adv_decl_sectorcaps_R1): the sector capsule
+     strip sits between the overlay header and the symbol table. The table markup below it is the
+     same string it always was — breadthHead() + the same rows — nothing in it moved. */
+  el.innerHTML = breadthSectors() + breadthHead() + body;
+}
+/* five bands, per the ref: up2 >= +1.0 · up1 +0.15..1.0 · am -0.15..+0.15 · dn1 -1.0..-0.15 · dn2 <= -1.0 */
+function adBand(p){
+  if (p == null || isNaN(Number(p))) return 'am';
+  var x = Number(p);
+  return x >= 1 ? 'up2' : (x >= 0.15 ? 'up1' : (x > -0.15 ? 'am' : (x > -1 ? 'dn1' : 'dn2')));
+}
+function adAsOf(ts){
+  var m = String(ts || '').match(/(\d{2}):(\d{2})/);
+  return m ? m[1] + ':' + m[2] + ' IST' : '—';
+}
+function breadthSectors(){
+  var secs = BREADTH.sectors || [];
+  if (!secs.length) return '';
+  var up = 0, flat = 0, dn = 0;
+  var chips = secs.map(function(x){
+    var b = adBand(x.day_pct);
+    if (b === 'up1' || b === 'up2') up++; else if (b === 'am') flat++; else dn++;
+    return '<a class="ad-sc ' + b + '" href="/sector?segment=' + encodeURIComponent(x.segment) + '" data-scorr-skip="1">'
+      + '<span class="ad-n" title="' + esc(x.segment) + '">' + esc(String(x.segment).toUpperCase()) + '</span>'
+      + '<span class="ad-v">' + pct(x.day_pct) + '</span></a>';
+  }).join('');
+  return '<div class="ad-wrap"><div class="ad-hd"><span>Sectors · Day %</span><span class="ad-r">mcap-weighted · biggest movers first</span></div>'
+    + '<div class="ad-row">' + chips + '</div>'
+    + '<div class="ad-foot"><div class="ad-dots"><i class="u"></i><span>' + up + ' up</span><i class="a"></i><span>' + flat + ' flat</span><i class="d"></i><span>' + dn + ' down</span></div>'
+    + '<span>as of ' + adAsOf(BREADTH.as_of) + '</span></div></div>';
 }
 function openBreadth(){
   var ov = document.getElementById('brov');
@@ -2279,6 +2308,8 @@ function openBreadth(){
   fetchWithTimeout('/api/mobile/breadth').then(function(r){ return r.json(); }).then(function(d){
     if (d && d.error) throw new Error(d.error);
     BREADTH.rows = d.rows || [];
+    BREADTH.sectors = d.sectors || [];   // cc#1592: same payload, same snapshot as the rows
+    BREADTH.as_of = d.as_of || null;
     BREADTH.loaded = true;
   }).catch(function(){
     BREADTH.rows = []; BREADTH.loaded = false;

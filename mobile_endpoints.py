@@ -2447,6 +2447,28 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 .c-sheet .c-swhy{font-size:13px;line-height:1.5}.c-sheet .c-swhy b{color:var(--gold,#D4AF37)}
 .c-sheet .c-sfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 10px;margin-top:12px;font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--dim,#5E5E66)}
 .c-sheet .c-x{position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:1px solid var(--line,#2A2A31);background:var(--well,#131316);color:var(--mute,#8A8A93);display:flex;align-items:center;justify-content:center;cursor:pointer}
+
+/* ── ADV/DECL sector capsule strip (cc#1592, ADV_DECL_SECTOR_CAPS_V1 36539; ref scorr_adv_decl_sectorcaps_R1) ─
+   Lives here, not in mobile/home.html's own <style> (ratcheted at 41), on the same precedent as the
+   GVM v2 / CHECK v2 blocks. Scoped under #brov; classes are ad-* so nothing bare is touched. Band
+   colours are semantic up/down/amber, never gold (36539 tokens rule). */
+#brov .ad-wrap{padding:var(--space-12,12px) 0 var(--space-14,14px);border-bottom:1px solid var(--line)}
+#brov .ad-hd{display:flex;justify-content:space-between;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10,10px);letter-spacing:1.6px;color:var(--mut);margin-bottom:9px;text-transform:uppercase}
+#brov .ad-hd .ad-r{color:var(--dim);letter-spacing:.3px;text-transform:none}
+#brov .ad-row{display:flex;gap:var(--space-8,8px);overflow-x:auto;scrollbar-width:none;padding-bottom:2px;scroll-snap-type:x proximity}
+#brov .ad-row::-webkit-scrollbar{display:none}
+#brov .ad-sc{flex:none;scroll-snap-align:start;display:flex;flex-direction:column;gap:3px;min-width:108px;padding:9px 12px;border-radius:10px;text-decoration:none;border:1px solid transparent;color:inherit}
+#brov .ad-sc .ad-n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95,9.5px);font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:108px}
+#brov .ad-sc .ad-v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15,15px);font-weight:800;letter-spacing:-.2px}
+#brov .ad-sc.up2{background:rgba(47,212,139,.16);border-color:rgba(47,212,139,.4)} #brov .ad-sc.up2 .ad-n{color:#9be8c6} #brov .ad-sc.up2 .ad-v{color:var(--grn)}
+#brov .ad-sc.up1{background:rgba(47,212,139,.08);border-color:rgba(47,212,139,.22)} #brov .ad-sc.up1 .ad-n{color:#8fc9a9} #brov .ad-sc.up1 .ad-v{color:#5fdba0}
+#brov .ad-sc.am{background:rgba(255,159,69,.14);border-color:rgba(255,159,69,.3)} #brov .ad-sc.am .ad-n{color:#e0b98c} #brov .ad-sc.am .ad-v{color:var(--amber)}
+#brov .ad-sc.dn1{background:rgba(255,92,108,.08);border-color:rgba(255,92,108,.22)} #brov .ad-sc.dn1 .ad-n{color:#d99aa1} #brov .ad-sc.dn1 .ad-v{color:#ff8994}
+#brov .ad-sc.dn2{background:rgba(255,92,108,.16);border-color:rgba(255,92,108,.4)} #brov .ad-sc.dn2 .ad-n{color:#ffb0b8} #brov .ad-sc.dn2 .ad-v{color:var(--red)}
+#brov .ad-foot{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9,9px);color:var(--dim);margin-top:8px}
+#brov .ad-dots{display:flex;gap:5px;align-items:center}
+#brov .ad-dots i{width:7px;height:7px;border-radius:50%;display:inline-block}
+#brov .ad-dots .u{background:var(--grn)} #brov .ad-dots .a{background:var(--amber)} #brov .ad-dots .d{background:var(--red)}
 """
 
 
