@@ -276,52 +276,129 @@ def _ladders(cur) -> Dict[str, Any]:
             "No pivot ladder available — v8_paper_pivots has no recent row for these indexes.")}
 
 
-# ── 03 INTERNALS: ADR breadth + PCR ───────────────────────────────────────────────────────────
+# ── 03 INTERNALS: ADR breadth + PCR ───────────────────────────────────────────
+# cc#1607 (founder screenshot 02-Sep 15:26): this section wore a LIVE pill while its PCR cards
+# read pcr_daily (yesterday) and the Market Gate header, off pcr_intraday, printed a different
+# number on the same page. ONE source now: pcr_mood.latest_pcr — the helper the header uses —
+# which returns today's newest pcr_intraday pcr_total in session, else the pcr_daily close. Every
+# card states its own as-of, and the section pill follows the data (ENGINE_LIVENESS_RULE 13829):
+# LIVE only when the newest row is under 10 minutes old and the market is open.
+_LIVE_MAX_AGE_MIN = 10
+
+
 def _internals(cur) -> Dict[str, Any]:
-    cur.execute("""SELECT price_date, advances, declines, unchanged, adr FROM adr_daily
-                   ORDER BY price_date DESC LIMIT 1""")
-    a = cur.fetchone()
-    cur.execute("""SELECT price_date, underlying, pcr, quality, quality_note FROM pcr_daily
-                   WHERE price_date=(SELECT MAX(price_date) FROM pcr_daily) ORDER BY underlying""")
-    pcr_rows = [{"date": str(r[0]), "underlying": r[1], "pcr": _f(r[2]),
-                 "quality": r[3], "note": r[4]} for r in cur.fetchall()]
-    # cc#1568: the mood word on the tile comes from the ONE composer (pcr_mood.py, session_log
-    # 36200) — same label the app hero and the web card print. Never banded here.
-    for r in pcr_rows:
+    from pcr_mood import latest_pcr          # cc#1607: the Market Gate header's own PCR read
+    now = _ist_now()
+    today = now.date()
+    in_session = market_state(now)["state"] in ("OPEN", "CAS")
+
+    def _age_min(ts) -> Optional[float]:
+        if ts is None:
+            return None
         try:
-            r["mood"] = compose_live(cur, r["pcr"])
+            t = ts if isinstance(ts, datetime) else datetime.strptime(str(ts)[:16], "%Y-%m-%d %H:%M")
+            t = t.replace(tzinfo=None)
+            return (now.replace(tzinfo=None) - t).total_seconds() / 60.0
         except Exception:
-            r["mood"] = None
+            return None
+
+    def _dmy(d) -> str:
+        try:
+            return datetime.strptime(str(d)[:10], "%Y-%m-%d").strftime("%d-%b")
+        except Exception:
+            return str(d)
+
+    # ── A/D: adr_intraday in session (its own ts), adr_daily otherwise (its own date) ──
+    adr = None
+    adr_live = False
+    if in_session:
+        cur.execute("""SELECT ts, advances, declines, unchanged, adr FROM adr_intraday
+                       WHERE advances IS NOT NULL AND declines IS NOT NULL
+                       ORDER BY ts DESC LIMIT 1""")
+        r = cur.fetchone()
+        if r and r[0] is not None and str(r[0])[:10] == str(today):
+            age = _age_min(r[0])
+            adr_live = age is not None and age <= _LIVE_MAX_AGE_MIN
+            adr = {"date": r[0].strftime("%H:%M") + " IST" + (" · live" if adr_live else " · last tick"),
+                   "as_of": r[0].strftime("%Y-%m-%d %H:%M"), "basis": "intraday",
+                   "advances": r[1], "declines": r[2], "unchanged": r[3], "adr": _f(r[4])}
+    if adr is None:
+        cur.execute("""SELECT price_date, advances, declines, unchanged, adr FROM adr_daily
+                       ORDER BY price_date DESC LIMIT 1""")
+        a = cur.fetchone()
+        if a:
+            adr = {"date": ("close · " if str(a[0]) == str(today) else "prev close · ") + _dmy(a[0]),
+                   "as_of": str(a[0]), "basis": "daily",
+                   "advances": a[1], "declines": a[2], "unchanged": a[3], "adr": _f(a[4])}
+
+    # ── PCR cards: the header's helper, per underlying ──
+    pcr_rows = []
+    pcr_live = False
+    for u in ("NIFTY", "BANKNIFTY"):
+        val, basis, as_of = latest_pcr(cur, u)
+        if val is None:
+            continue
+        row = {"underlying": u, "pcr": val, "basis": basis, "as_of": as_of}
+        if basis == "LIVE":
+            age = _age_min(as_of)
+            fresh = in_session and age is not None and age <= _LIVE_MAX_AGE_MIN
+            pcr_live = pcr_live or fresh
+            row["date"] = str(as_of)[11:16] + " IST" + (" · live" if fresh else " · last tick")
+        else:
+            row["date"] = ("close · " if str(as_of) == str(today) else "prev close · ") + _dmy(as_of)
+        row["note"] = "as of " + row["date"]
+        # cc#1568: the mood word on the tile comes from the ONE composer (pcr_mood.py, session_log
+        # 36200) — same label the app hero and the web card print. Never banded here.
+        try:
+            row["mood"] = compose_live(cur, val)
+        except Exception:
+            row["mood"] = None
+        pcr_rows.append(row)
+    # pcr_daily quality flags ride along for the daily-basis rows only (they describe that row).
+    if pcr_rows and pcr_rows[0]["basis"] != "LIVE":
+        cur.execute("""SELECT underlying, quality, quality_note FROM pcr_daily
+                       WHERE price_date=(SELECT MAX(price_date) FROM pcr_daily)""")
+        q = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        for row in pcr_rows:
+            if row["underlying"] in q:
+                row["quality"], row["quality_note"] = q[row["underlying"]]
+
     cur.execute("""SELECT price_date, underlying, pcr FROM pcr_daily
                    WHERE price_date >= (SELECT MAX(price_date) FROM pcr_daily) - 10
                    ORDER BY price_date DESC, underlying""")
     trend = [{"date": str(r[0]), "underlying": r[1], "pcr": _f(r[2])} for r in cur.fetchall()]
-
-    adr = {"date": str(a[0]), "advances": a[1], "declines": a[2],
-           "unchanged": a[3], "adr": _f(a[4])} if a else None
 
     # 965 stale_flag_rule: >2 trading days old gets flagged, never shown bare.
     def _stale(dstr):
         if not dstr:
             return False
         try:
-            d = datetime.strptime(dstr, "%Y-%m-%d").date()
-            return (_ist_now().date() - d).days > 4      # >2 trading days, weekend-tolerant
+            d = datetime.strptime(str(dstr)[:10], "%Y-%m-%d").date()
+            return (today - d).days > 4      # >2 trading days, weekend-tolerant
         except Exception:
             return False
 
+    # ── READ line: the same values and the same composer label as the cards ──
     bits = []
     if adr and adr["adr"] is not None:
         bits.append(f"breadth {adr['adr']:.2f} ({adr['advances']}A/{adr['declines']}D)")
     for r in pcr_rows:
         if r["pcr"] is not None:
-            who = "put writers" if r["pcr"] > 1 else "call writers"
             m = r.get("mood") or {}
             lbl = f" · {m['label']}" if m.get("label") else ""
-            bits.append(f"{r['underlying']} PCR {r['pcr']:.2f}{lbl} — {who} in control")
-    return {"adr": adr, "adr_stale": _stale(adr["date"]) if adr else False,
-            "pcr": pcr_rows, "pcr_stale": _stale(pcr_rows[0]["date"]) if pcr_rows else False,
-            "pcr_trend": trend, "tier": "LIVE",
+            bits.append(f"{r['underlying']} PCR {r['pcr']:.2f}{lbl}")
+    # tier follows the data: LIVE only on a fresh in-session row; otherwise the freshest basis word
+    if pcr_live or adr_live:
+        tier = "LIVE"
+    elif in_session:
+        tier = "FROZEN"
+    else:
+        tier = "EOD"
+    return {"adr": adr, "adr_stale": _stale(adr["as_of"]) if adr else False,
+            "pcr": pcr_rows, "pcr_stale": _stale(pcr_rows[0]["as_of"]) if pcr_rows else False,
+            "pcr_trend": trend, "tier": tier,
+            "tier_rule": f"LIVE only when the newest row is under {_LIVE_MAX_AGE_MIN} min old in session (cc#1607)",
+            "source": "pcr_mood.latest_pcr (the Market Gate header's read); adr_intraday in session, adr_daily otherwise",
             "read": ("; ".join(bits) if bits else "No breadth or options data available.")}
 
 
