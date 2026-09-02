@@ -1132,6 +1132,29 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   #panel13 .hs-nm{font-size:9.75px}#panel13 .hs-ch{font-size:12px}#panel13 .hs-px{font-size:8.6px}
 }
 .hs-head-wk{margin-top:20px;padding-top:16px;border-top:1px solid var(--line,#1E2A44)}
+/* cc#1580: Tiles | Table switch (top-right of the GLOBAL HEAT header) and the table view. Colours are
+   theme tokens only; the Day%/Week% cell tints reuse HS_BAND inline, same as the tiles. */
+#panel13 .hs-ctl{margin-left:auto;display:flex;gap:6px;align-self:center}
+#panel13 .hs-seg{display:inline-flex;border:1px solid var(--line,rgba(148,166,210,.2));border-radius:6px;overflow:hidden}
+#panel13 .hs-segb{background:transparent;border:0;color:var(--dim,#5E6B8F);font:inherit;font-size:10.5px;font-weight:700;
+  letter-spacing:.04em;padding:4px 9px;min-height:26px;cursor:pointer;font-family:inherit}
+#panel13 .hs-segb.on{background:var(--panel,#111A33);color:var(--txt,#E9EEFB)}
+#panel13 .hs-tbl-wrap{overflow-x:auto}
+#panel13 .hs-tbl{width:100%;border-collapse:collapse;font-size:12px}
+#panel13 .hs-tbl th{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim,#5E6B8F);
+  text-align:left;padding:5px 8px;border-bottom:1px solid var(--line,rgba(148,166,210,.14))}
+#panel13 .hs-tbl th.num,#panel13 .hs-tbl td.num{text-align:right;font-family:var(--mono,ui-monospace,monospace);white-space:nowrap}
+#panel13 .hs-tbl td{padding:6px 8px;border-bottom:1px solid var(--line,rgba(148,166,210,.08));color:var(--txt,#E9EEFB)}
+#panel13 .hs-tbl tr.hs-cat td{padding:9px 8px 3px;font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--dim,#5E6B8F);border-bottom:none}
+#panel13 .hs-row{cursor:pointer}
+#panel13 .hs-row:hover td{background:var(--panel,#111A33)}
+#panel13 .hs-row td.emph{font-weight:800}
+#panel13 .hs-row td.asof{font-size:10.5px;color:var(--dim,#5E6B8F);white-space:nowrap}
+#panel13 .hs-row .hs-sym{font-size:10px;color:var(--dim,#5E6B8F);margin-left:6px}
+@media (max-width:700px){
+  #panel13 .hs-tbl{font-size:11px}#panel13 .hs-tbl td{padding:6px 5px}#panel13 .hs-row .hs-sym{display:none}
+}
 .hs-foot{margin-top:9px;font-size:10px;color:var(--dim,#5E6B8F);line-height:1.5}
 .hs-err{font-size:11.5px;color:var(--dim,#5E6B8F)}
 .hs-draw{margin:0 0 14px;padding:12px 14px;background:var(--panel,#121A33);
@@ -4959,8 +4982,35 @@ const HS_BAND={
   'none':       {bg:'rgba(148,166,210,.07)',fg:'#5E6B8F'}
 };
 let HS_DATA=null;
+// cc#1580: view switch state. In-memory only — it lasts the session and resets on reload by design
+// (spec: no localStorage). HS_VIEW is 'tiles' | 'table'; HS_EMPH is the table's emphasis level.
+let HS_VIEW='tiles', HS_EMPH='day';
 
 function hsPct(v){ return v==null?'--':(v>=0?'+':'')+Number(v).toFixed(2)+'%'; }
+
+// cc#1580: the Tiles | Table control sits top-right of the GLOBAL HEAT header. A switch re-renders
+// from HS_DATA — the last payload — so toggling never refetches.
+function hsSeg(attr,cur,opts){
+  return '<span class="hs-seg" role="group">'+opts.map(o=>
+    `<button type="button" class="hs-segb${cur===o.v?' on':''}" ${attr}="${o.v}">${o.l}</button>`).join('')+'</span>';
+}
+function hsControls(){
+  let h='<span class="hs-ctl">';
+  if(HS_VIEW==='table')h+=hsSeg('data-hs-emph',HS_EMPH,[{v:'day',l:'Day'},{v:'week',l:'Week'}]);
+  h+=hsSeg('data-hs-view',HS_VIEW,[{v:'tiles',l:'Tiles'},{v:'table',l:'Table'}]);
+  return h+'</span>';
+}
+function hsRerender(){
+  const el=document.getElementById('panel13'); if(!el||!HS_DATA)return;
+  el.innerHTML=renderHeatStrip(HS_DATA);
+  bindHeatStrip();
+}
+function hsTableBlock(d){
+  // P2 shell — P3 fills the body.
+  return '<div class="hs-tbl-wrap"><table class="hs-tbl"><thead><tr>'
+    +'<th>Symbol</th><th class="num">Price</th><th class="num">Day %</th><th class="num">Week %</th><th>As of</th>'
+    +'</tr></thead><tbody></tbody></table></div>';
+}
 
 function hsTile(t,level){
   const chg = level==='week'? t.week_chg_pct : t.day_chg_pct;
@@ -5004,8 +5054,17 @@ function renderHeatStrip(d){
   const live=(d.tiles||[]), eod=(d.eod_tiles||[]);
   if(!live.length&&!eod.length)return'';
   let h='<div class="hs-wrap">';
+  if(HS_VIEW==='table'){
+    // cc#1580 TABLE view: one table, same payload, same drawer, same disclosure footer.
+    h+='<div class="hs-head"><span class="hs-title">Global heat</span>'
+      +'<span class="hs-sub">DAY · latest vs prev close · WEEK · rolling 5 sessions</span>'+hsControls()+'</div>';
+    h+=hsTableBlock(d);
+    h+='<div class="hs-foot">India VIX inverted — up = risk-off, on both levels. Tap a row for returns and 52-week range.</div>';
+    h+='</div><div id="hs-drawer"></div>';
+    return h;
+  }
   h+='<div class="hs-head"><span class="hs-title">Global heat</span>'
-    +'<span class="hs-sub">DAY · latest vs prev close</span></div>';
+    +'<span class="hs-sub">DAY · latest vs prev close</span>'+hsControls()+'</div>';
   h+='<div class="hs-lvl">'+hsGroups(live,'day',d)+'</div>';
   if(eod.length){
     // Founder-locked: a SEPARATE, visually distinct block. Not dimmed into the day row, not dropped.
@@ -5025,8 +5084,15 @@ function renderHeatStrip(d){
 }
 
 function bindHeatStrip(){
-  document.querySelectorAll('.hs-tile').forEach(b=>{
+  // cc#1580: tiles and table rows share ONE handler through data-sym — no second click path.
+  document.querySelectorAll('.hs-tile,.hs-row').forEach(b=>{
     b.onclick=()=>hsOpenDrawer(b.getAttribute('data-sym'));
+  });
+  document.querySelectorAll('[data-hs-view]').forEach(b=>{
+    b.onclick=()=>{ HS_VIEW=b.getAttribute('data-hs-view'); hsRerender(); };
+  });
+  document.querySelectorAll('[data-hs-emph]').forEach(b=>{
+    b.onclick=()=>{ HS_EMPH=b.getAttribute('data-hs-emph'); hsRerender(); };
   });
 }
 
