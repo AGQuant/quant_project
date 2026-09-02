@@ -8,7 +8,7 @@ Endpoints:
   GET /api/gvm/search            — autocomplete search by symbol or company name
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, date
 from decimal import Decimal
@@ -17,6 +17,7 @@ import statistics
 import psycopg
 import os
 import logging
+import re
 
 from gvm_company_report import build_company_report, search_companies, build_financials_block, build_ops_block
 from gvm_page_extras import build_page_extras
@@ -776,6 +777,89 @@ def _log_search(sym: str):
             conn.commit()
     except Exception as e:
         log.warning(f"cc689 search-history log failed for {sym}: {e}")
+
+
+# ── cc#1622: per-DEVICE recent searches for the app GVM landing (founder 02-Sep 20:46: "just give
+# last 10 searches, only symbols"). gvm_search_history above is GLOBAL (symbol is its primary key)
+# and the web quick-access reads it, so it stays as it is; this small table keys the same fact by
+# device. The device key is a random id the page keeps in browser storage - the app exposes no
+# per-user identity to the page. Symbols only; the page never asks for names or scores here.
+_RECENT_KEEP = 50      # rows kept per device
+_RECENT_SHOW = 10      # chips shown
+
+
+def _ensure_recent(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS gvm_search_recent (
+        device_key TEXT NOT NULL, symbol TEXT NOT NULL,
+        searched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (device_key, symbol))""")
+
+
+def _dev_ok(dev: str) -> bool:
+    return bool(dev) and 8 <= len(dev) <= 64 and re.fullmatch(r"[A-Za-z0-9_-]+", dev) is not None
+
+
+@router.get("/api/gvm/recent")
+def gvm_recent(dev: str = "", limit: int = _RECENT_SHOW):
+    """The last N symbols this device opened, newest first. Symbols only."""
+    if not _dev_ok(dev):
+        return {"recent": [], "error": "dev key required"}
+    lim = max(1, min(int(limit or _RECENT_SHOW), _RECENT_KEEP))
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_recent(cur)
+            cur.execute("""SELECT symbol FROM gvm_search_recent WHERE device_key = %s
+                           ORDER BY searched_at DESC LIMIT %s""", (dev, lim))
+            rows = [r[0] for r in cur.fetchall()]
+            conn.commit()
+        return {"recent": rows, "shown": lim, "kept": _RECENT_KEEP}
+    except Exception as e:
+        log.error(f"cc1622 recent failed: {e}")
+        return {"recent": [], "error": str(e)[:120]}
+
+
+@router.post("/api/gvm/recent")
+async def gvm_recent_add(req: Request):
+    """One row per (device, symbol); a repeat open bumps searched_at. Then trim to _RECENT_KEEP."""
+    body = await req.json()
+    dev = str(body.get("dev") or "").strip()
+    sym = str(body.get("symbol") or "").strip().upper()
+    if not _dev_ok(dev) or not sym or len(sym) > 32:
+        return {"ok": False, "error": "dev key and symbol required"}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_recent(cur)
+            cur.execute("""INSERT INTO gvm_search_recent (device_key, symbol, searched_at)
+                           VALUES (%s, %s, NOW())
+                           ON CONFLICT (device_key, symbol) DO UPDATE SET searched_at = NOW()""", (dev, sym))
+            cur.execute("""DELETE FROM gvm_search_recent WHERE device_key = %s AND symbol IN (
+                             SELECT symbol FROM gvm_search_recent WHERE device_key = %s
+                             ORDER BY searched_at DESC OFFSET %s)""", (dev, dev, _RECENT_KEEP))
+            trimmed = cur.rowcount
+            conn.commit()
+        return {"ok": True, "symbol": sym, "trimmed": trimmed}
+    except Exception as e:
+        log.error(f"cc1622 recent add failed: {e}")
+        return {"ok": False, "error": str(e)[:120]}
+
+
+@router.post("/api/gvm/recent/remove")
+async def gvm_recent_remove(req: Request):
+    body = await req.json()
+    dev = str(body.get("dev") or "").strip()
+    sym = str(body.get("symbol") or "").strip().upper()
+    if not _dev_ok(dev) or not sym:
+        return {"ok": False, "error": "dev key and symbol required"}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_recent(cur)
+            cur.execute("DELETE FROM gvm_search_recent WHERE device_key = %s AND symbol = %s", (dev, sym))
+            n = cur.rowcount
+            conn.commit()
+        return {"ok": True, "removed": n}
+    except Exception as e:
+        log.error(f"cc1622 recent remove failed: {e}")
+        return {"ok": False, "error": str(e)[:120]}
 
 
 @router.get("/api/gvm/recent-searches")
