@@ -85,7 +85,7 @@ function emptyBox(title, body, retry){
 }
 
 /* ── mode switch + deep links ────────────────────────────────────────────────────────── */
-function modeOf(hash){ var h = String(hash || '').replace('#', ''); return MODES.some(function(m){ return m.key === h; }) ? h : 'tc'; }
+function modeOf(hash){ var h = String(hash || '').replace('#', '').split('?')[0]; return MODES.some(function(m){ return m.key === h; }) ? h : 'tc'; }   /* cc#1616: '#tc?sym=X' tolerated */
 function drawModes(){
   $('c-modes').innerHTML = MODES.map(function(m){
     return '<button type="button" role="tab" data-mode="' + m.key + '"' + (S.mode === m.key ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>' + esc(m.label) + '</button>';
@@ -532,6 +532,8 @@ window.addEventListener('hashchange', function(){ setMode(location.hash, false);
 /* ── boot ────────────────────────────────────────────────────────────────────────────── */
 (function boot(){
   var q = null; try { q = new URLSearchParams(location.search).get('sym'); } catch(e){}
+  /* cc#1616: the founder's deep-link form is /m/check#tc?sym=SYM — the symbol rides in the hash */
+  if (!q){ try { var hq = String(location.hash || '').split('?')[1]; if (hq) q = new URLSearchParams(hq).get('sym'); } catch(e){} }
   S.mode = modeOf(location.hash); drawModes();
   if (S.mode === 'scan') renderScan();
   if (q){ $('c-q').value = String(q).toUpperCase(); S.sym = String(q).trim().toUpperCase(); }
