@@ -45,9 +45,14 @@
   // fullscreen refit. Renaming the key would have touched six predicates for a cosmetic change,
   // and any one missed rename would fail silently in a different direction each time. Label-only
   // is zero logic churn. TF_LABEL is the ONE place a key becomes a word.
-  var TF = { "5m": null, "1W": 7, "1M": 30, "3M": 90, "1Y": 365, "ALL": 1825 };
-  var TF_ORDER = ["5m", "1W", "1M", "3M", "1Y", "ALL"];
+  // cc#1566 (founder 02-Sep): 3Y is BACK, between 1Y and ALL, in stock AND index mode. 1095 days.
+  // It is the one bounded TF with a depth gate: /api/candles?tf=3Y refuses a symbol with under
+  // ~2.5 years of sessions (kind=unavailable) rather than serving a shorter series labelled 3Y,
+  // and the pill greys out with that reason — it is never hidden and never falls back to ALL.
+  var TF = { "5m": null, "1W": 7, "1M": 30, "3M": 90, "1Y": 365, "3Y": 1095, "ALL": 1825 };
+  var TF_ORDER = ["5m", "1W", "1M", "3M", "1Y", "3Y", "ALL"];
   var TF_LABEL = { "5m": "1D" };   // internal key -> shown label; everything else shows its key
+  var TF_3Y_REASON = "Under 3 years of listed history";   // fallback text; the server reason wins
   // cc#806 FOUNDER RULE: pivots render ONLY on 5m and 1M/3M/6M. Rolling levels lose meaning at 1Y+,
   // so those pills grey out exactly like VWAP does on EOD frames. This replaces the old ALL-only
   // suppression. One predicate, used by the toggle chip, the price lines and the chip strip — so the
@@ -508,12 +513,14 @@ var _full = false;                // cc#779: fullscreen state
       b.textContent = TF_LABEL[k] || k; b.setAttribute("data-tf", k);   // cc#990: label, not key
       var is5 = (k === "5m");
       var futOk = _futCache[_sym] !== false;   // undefined (not probed) or true => allow; false => grey
-      var disabled = is5 && !futOk;
+      var y3 = (k === "3Y") ? _3yCache[_sym] : null;   // cc#1566: null = not probed yet => allow
+      var disabled = (is5 && !futOk) || !!(y3 && y3.ok === false);
       var on = (k === _tf);
       b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
         ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) +
         (disabled ? ";opacity:.4;cursor:not-allowed" : "");
-      if (disabled) b.title = "1D (5-min intraday) is available for F&O (futures) stocks";
+      if (disabled) b.title = is5 ? "1D (5-min intraday) is available for F&O (futures) stocks"
+                                  : ((y3 && y3.reason) || TF_3Y_REASON);   // cc#1566: the reason IS the tooltip
       if (!disabled) b.onclick = function () { _load(k); };
       host.appendChild(b);
     });
@@ -1100,6 +1107,31 @@ var _full = false;                // cc#779: fullscreen state
     return fetchWithTimeout(url, { credentials: "same-origin" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
   }
 
+  /* cc#1566: 3Y depth probe — one tiny GET per symbol per page load (cached like _futCache), answered
+     WITHOUT bars, so the pill is already grey with its reason before the user reaches for it. A probe
+     failure is NOT cached as unavailable: the pill stays enabled and the load path re-asks. */
+  var _3yCache = {};
+  function _probe3Y(sym) {
+    if (_3yCache[sym]) return Promise.resolve(_3yCache[sym]);
+    return _getJSON("/api/candles/" + encodeURIComponent(sym) + "?tf=3Y&probe=1")
+      .then(function (d) {
+        if (!d || !d.kind) return null;
+        _3yCache[sym] = { ok: d.kind === "ok", reason: d.reason || null, sessions: d.sessions_available };
+        return _3yCache[sym];
+      })
+      .catch(function () { return null; });
+  }
+  /* Re-style just the 3Y pill after a probe lands; _paintChrome rebuilt the row already, so only
+     the one button changes hands. */
+  function _apply3Y(sym) {
+    var y3 = _3yCache[sym]; if (!y3 || _sym !== sym) return;
+    var host = document.getElementById("scorrChartTfs"); if (!host) return;
+    var b = host.querySelector('[data-tf="3Y"]'); if (!b) return;
+    if (y3.ok) return;
+    b.style.opacity = ".4"; b.style.cursor = "not-allowed"; b.onclick = null;
+    b.title = y3.reason || TF_3Y_REASON;
+  }
+
   function _probeFutures(sym) {
     if (_futCache[sym] != null) return Promise.resolve(_futCache[sym]);
     return _getJSON("/api/intraday/" + encodeURIComponent(sym) + "?sessions=1")
@@ -1154,10 +1186,19 @@ var _full = false;                // cc#779: fullscreen state
     var stale = function () { return _sym !== wantSym || _tf !== wantTf; };
     var url = isIntraday
       ? "/api/intraday/" + encodeURIComponent(_sym) + "?sessions=5"
-      : "/api/candles/" + encodeURIComponent(_sym) + "?days=" + TF[tf];
+      : "/api/candles/" + encodeURIComponent(_sym) + "?days=" + TF[tf] + (tf === "3Y" ? "&tf=3Y" : "");   // cc#1566: 3Y carries the depth gate
     _getJSON(url).then(function (rows) {
       if (stale()) return;                       // a response for a symbol/timeframe we left
       var data;
+      /* cc#1566: the server refused 3Y for this symbol (too little history). Grey the pill with the
+         reason, say so in the caption, and STOP — no shorter series under a 3Y label, no silent hop
+         to ALL. The user picks the next frame. */
+      if (rows && !Array.isArray(rows) && rows.kind === "unavailable") {
+        _3yCache[wantSym] = { ok: false, reason: rows.reason || TF_3Y_REASON, sessions: rows.sessions_available };
+        _apply3Y(wantSym);
+        msg.textContent = "3Y unavailable for " + wantSym + " — " + (rows.reason || TF_3Y_REASON) + ".";
+        _setHL([]); return;
+      }
       if (isIntraday) {
         data = (rows || []).map(function (r) {
           return { time: Math.floor(new Date(String(r.ts).replace(" ", "T") + "+05:30").getTime() / 1000), open: +r.open, high: +r.high, low: +r.low, close: +r.close, volume: +r.volume, _day: String(r.ts).slice(0, 10) };   // cc#755: volume + session date for VWAP
@@ -1617,6 +1658,7 @@ var _full = false;                // cc#779: fullscreen state
       if (!ok) { document.getElementById("scorrChartMsg").textContent = "Chart library failed to load."; _paintChrome(); return; }
       _probeFutures(_sym).then(function () { _load(_tf); });
       _paintChrome();
+      _probe3Y(_sym).then(function () { _apply3Y(_sym); });   // cc#1566: greys the 3Y pill if history is short
     });
   }
 
