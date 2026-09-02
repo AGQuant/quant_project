@@ -2387,6 +2387,17 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #ckp .c-runbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;background:var(--gold);color:#141005;font-family:var(--mono);font-weight:800;font-size:13px;letter-spacing:1px;border:0;border-radius:11px;box-shadow:0 4px 0 var(--c-gold-lo);margin-top:10px;cursor:pointer}
 #ckp .c-runbtn:disabled{opacity:.6;cursor:default}
 #ckp .c-prog{font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:10px;text-align:center}
+/* cc#1593 amendment: the RUN button collapses into a round fill while the scan runs */
+#ckp .c-ringwrap{display:flex;flex-direction:column;align-items:center;transition:opacity .35s ease}
+#ckp .c-ringwrap.out{opacity:0}
+#ckp .c-ring{width:72px;height:72px;display:block}
+#ckp .c-ring .trk{fill:none;stroke:var(--line);stroke-width:6}
+#ckp .c-ring .arc{fill:none;stroke:var(--gold);stroke-width:6;stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%;transition:stroke-dashoffset .25s linear}
+#ckp .c-ringwrap.err .arc{stroke:var(--red)}
+#ckp .c-ring .num{font-family:var(--mono);font-weight:700;fill:var(--chalk)}
+#ckp .c-ringwrap.err .num{fill:var(--red)}
+#ckp .c-ringsub{font-family:var(--mono);color:var(--mute);text-align:center}
+#ckp .c-ringwrap.err .c-ringsub{color:var(--red)}
 #ckp .c-scanhd{display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;color:var(--mute);margin:10px 0 6px}
 #ckp .c-tbl{width:100%;border-collapse:collapse}
 #ckp .c-tbl th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.3px;color:var(--mute);text-align:right;padding:6px 4px;border-bottom:1px solid var(--line);font-weight:700}
