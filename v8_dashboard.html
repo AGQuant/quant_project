@@ -5371,8 +5371,20 @@ const C = {
   get bg(){     return _tok('--bg');     },
 };
 /* semantic: green=up, red=down. let, not const, because the theme toggle reassigns them - they are
-   read as bare identifiers in 36 places and rebinding here beats editing all 36. */
-let UP = C.grn, DN = C.red;
+   read as bare identifiers in 36 places and rebinding here beats editing all 36.
+   cc#1564: these were bound HERE, at script parse — and at parse the tokens do not exist yet. This
+   file has no closing head tag, so auth_gate falls back to injecting mobile.css + scorr_theme_r5.css
+   at the closing BODY tag (main.py _find_outside_comments fallback), i.e. AFTER every inline script
+   has run, and the page declares no --grn/--red of its own. (Those two tags are spelled out in
+   words here on purpose: auth_gate injects at the first literal closing-body tag it finds, and a
+   copy inside this comment would pull the whole shared head into this script block.)
+   getComputedStyle therefore returned '' for both, and every HTML string that baked
+   UP/DN in — the VIX sparkline's stroke and dot fill, the .vix-big colour, cx() — carried an empty
+   colour until a theme toggle rebound them. That is the founder's "one black dot, no line": the
+   path had all 100 points and stroke="". Reproduced in headless Chromium with the real injection
+   order. Bound lazily by bindUpDn() at every render() instead: the tokens are present by then. */
+let UP = '', DN = '';
+function bindUpDn(){ UP = C.grn; DN = C.red; }
 
 /* ---- Black-Scholes (r=0.065, T=dte/365, hVol direct) ---- */
 const ncdf = x => {
@@ -5903,10 +5915,14 @@ function rVix(){
   const vc = band.col();
   /* cc#1274 scope 3: the dot at the line's right end is sparkline({liveLast:true}) — the latest
      reading's marker, real data, not decorative. The PCR card's header already legends its own
-     dot ("● = live"); this card never did, so the founder met an unlabeled black dot. Same
-     legend grammar as rPCR, and the dot itself is untouched. */
+     dot ("● = live"); this card never did, so the founder met an unlabeled black dot.
+     cc#1564: the dot was BLACK and the line was missing for the reason stated at UP/DN above —
+     an empty colour, not a one-point series. The caption now says what the chart is: data[] is
+     the last 100 five-minute closes from /api/v10/vix, and the dot is the live bar. The count is
+     printed from the array, never assumed, so a short feed reads "14 bars" and not "100 bars". */
+  const bars = has ? data.length : 0;
   return `<div class="card">
-    <div class="card-hd"><div><div class="t">${esc(label||'India VIX')}</div><div class="s">● = latest reading</div></div></div>
+    <div class="card-hd"><div><div class="t">${esc(label||'India VIX')}</div><div class="s">${has?`${bars} bars · 5-min · ● = live`:'5-min'}</div></div></div>
     <div style="margin-bottom:6px">
       <span class="vix-big" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
       <span class="vix-band ${band.cls}">${band.label}</span>
@@ -7154,6 +7170,7 @@ function render(){
   // than broken, and nothing on it ever appeared. Now a failure writes a visible, honest
   // panel instead, and the console keeps the real stack.
   const host=document.getElementById('idx-app'); if(!host) return;
+  bindUpDn();   // cc#1564: tokens are read here, at render, never at parse (see the UP/DN note)
   let html;
   try{
     html = rTopBar() + rMood() +
@@ -7241,7 +7258,7 @@ loadLive=async function(){
    rebinds UP/DN, re-runs render() against the cached D, and rebuilds the chart if one is mounted.
    Guarded end to end - a repaint failure must never leave the pane blank or block the toggle. */
 window.iiRepaintCharts=function(){
-  UP = C.grn; DN = C.red;
+  bindUpDn();   // cc#1564: render() also rebinds; kept here so the chart rebuild below sees the new theme too
   try{ if(document.getElementById('idx-app')) render(); }catch(e){ console.warn('[idx theme] render', e); }
   try{ if(_v10chart && document.getElementById('v10ChartBox')) loadV10Chart(); }catch(e){ console.warn('[idx theme] chart', e); }
 };
