@@ -418,5 +418,40 @@ def tc_scanner_holds(date_: Optional[str] = None):
         return {"open": len(rows_side) - len(closed), "closed": len(closed),
                 "wins": len(wins), "wr_pct": wr, "net_pts_pct": net_pts}
 
+    # cc#1599 scope 4/5: the Closed Book is keyed on the EXIT date, not the entry date. A hold
+    # entered on 16-Jul and closed on 02-Sep belongs to 02-Sep's Closed Book (and to 16-Jul's
+    # Open Book history). The keys above stay exactly as they were (scan_date = entry day), so
+    # the Open Book and every older reader are untouched; the tab reads the two new keys.
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT h.symbol, h.side, h.score, h.evaluated, h.entry_price, h.entry_ts,
+                   h.target, h.sl, h.exit_price, h.exit_ts, h.exit_reason, h.scan_date
+            FROM tc_scanner_holds h
+            WHERE h.exit_reason <> 'OPEN' AND h.exit_ts::date = %s
+            ORDER BY h.exit_ts DESC
+        """, (d,))
+        ccols = [c[0] for c in cur.description]
+        crows = [dict(zip(ccols, r)) for r in cur.fetchall()]
+    by_exit = {"BUY": [], "SELL": []}
+    for r in crows:
+        entry = float(r["entry_price"]) if r["entry_price"] is not None else None
+        px = float(r["exit_price"]) if r["exit_price"] is not None else None
+        pnl_pct = None
+        if entry and px:
+            pnl_pct = round((px - entry) / entry * 100 * (1 if r["side"] == "BUY" else -1), 2)
+        by_exit.setdefault(r["side"], []).append({
+            "symbol": r["symbol"], "side": r["side"], "score": r["score"], "evaluated": r["evaluated"],
+            "entry_price": entry, "entry_ts": str(r["entry_ts"]) if r["entry_ts"] else None,
+            "scan_date": str(r["scan_date"]) if r["scan_date"] else None,
+            "target": float(r["target"]) if r["target"] is not None else None,
+            "sl": float(r["sl"]) if r["sl"] is not None else None,
+            "exit_price": px, "exit_ts": str(r["exit_ts"]) if r["exit_ts"] else None,
+            "exit_reason": r["exit_reason"], "pnl_pct": pnl_pct,
+        })
+
     return {"date": d, "buy": out.get("BUY", []), "sell": out.get("SELL", []),
-            "buy_stats": _stats(out.get("BUY", [])), "sell_stats": _stats(out.get("SELL", []))}
+            "buy_stats": _stats(out.get("BUY", [])), "sell_stats": _stats(out.get("SELL", [])),
+            # cc#1599: closed on this EXIT date, whatever day they were entered.
+            "closed_by_exit": {"buy": by_exit.get("BUY", []), "sell": by_exit.get("SELL", [])},
+            "closed_by_exit_stats": {"buy": _stats(by_exit.get("BUY", [])), "sell": _stats(by_exit.get("SELL", []))},
+            "closed_basis": "exit_ts::date = date (cc#1599); open book keyed on scan_date (entry)"}
