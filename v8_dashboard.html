@@ -4993,7 +4993,7 @@ function hsPct(v){ return v==null?'--':(v>=0?'+':'')+Number(v).toFixed(2)+'%'; }
 // from HS_DATA — the last payload — so toggling never refetches.
 function hsSeg(attr,cur,opts){
   return '<span class="hs-seg" role="group">'+opts.map(o=>
-    `<button type="button" class="hs-segb${cur===o.v?' on':''}" ${attr}="${o.v}">${o.l}</button>`).join('')+'</span>';
+    `<button type="button" class="hs-segb${cur===o.v?' on':''}" aria-pressed="${cur===o.v}" ${attr}="${o.v}">${o.l}</button>`).join('')+'</span>';
 }
 function hsControls(){
   let h='<span class="hs-ctl">';
@@ -5044,7 +5044,8 @@ function hsTableBlock(d){
     body+=`<tr class="hs-cat"><td colspan="5">${escHtml(label[cat]||cat)}</td></tr>`;
     g.forEach(t=>{
       const px=t.price==null?'--':Number(t.price).toLocaleString('en-IN',{maximumFractionDigits:2});
-      body+=`<tr class="hs-row" data-sym="${escAttr(t.symbol)}" title="${escAttr(t.name||t.symbol)}${t.inverted?' · inverted (up = risk-off)':''}">`
+      // cc#1580 P5: a row is a tap target like a tile — keyboard-reachable, Enter opens the drawer.
+      body+=`<tr class="hs-row" tabindex="0" role="button" data-sym="${escAttr(t.symbol)}" title="${escAttr(t.name||t.symbol)}${t.inverted?' · inverted (up = risk-off)':''}">`
         +`<td>${escHtml(t.name||t.symbol)}<span class="hs-sym">${escHtml(t.symbol)}</span></td>`
         +`<td class="num">${px}</td>`
         +hsCell(t.day_chg_pct,t.day_band,emphDay)
@@ -5133,6 +5134,7 @@ function bindHeatStrip(){
   // cc#1580: tiles and table rows share ONE handler through data-sym — no second click path.
   document.querySelectorAll('.hs-tile,.hs-row').forEach(b=>{
     b.onclick=()=>hsOpenDrawer(b.getAttribute('data-sym'));
+    b.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); hsOpenDrawer(b.getAttribute('data-sym')); } };
   });
   document.querySelectorAll('[data-hs-view]').forEach(b=>{
     b.onclick=()=>{ HS_VIEW=b.getAttribute('data-hs-view'); hsRerender(); };
