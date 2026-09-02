@@ -1014,6 +1014,16 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    stacked directly under the verdict. */
 #heroTrack > .c:first-child > .hchips,
 #heroTrack > .c:first-child > .ixrow{margin-top:0}
+/* cc#1567 P2 · THE INDEX + BREADTH GROUP TAKES THE REMAINING HEIGHT. .ixgrp wraps idxFooter()
+   and adrBar() (the last two blocks of Card 1) and is the column's only flex:1 child. When the
+   height sync makes Card 1 taller than its content, the slack now lands INSIDE this group and
+   space-around shares it above, between and below the two index rows and the A/D bar — no empty
+   band under the card at 1080x2340 or 1080x1920. When Card 1 is itself the tallest card, the
+   group collapses to its content (min-height:0) and the deck's shared height is unchanged. The
+   .ixrow keeps its own top border + padding as the visual separator; its margin-top stays 0. */
+#heroTrack > .c:first-child > .ixgrp{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-around;row-gap:var(--space-9)}
+#heroTrack > .c:first-child > .ixgrp > .ixrow,
+#heroTrack > .c:first-child > .ixgrp > .adrwrap{margin-top:0;margin-bottom:0}
 /* The chip grid's own breathing room. .hchips lives in mobile_app.css and is shared by other
    surfaces, so the gap is raised HERE, scoped to this card, and the shared file is not touched —
    SHARED_CSS_RULE_V1, and the cc#1108 lesson about a look shipped through a shared selector. */
@@ -4854,6 +4864,12 @@ function renderHome(d, pv){
        reversing cc#1372. idxFooter is now the LAST block in the cc#1134 column, carrying the
        inline pivot tag it gained this same round. Still top-anchored, same fixed row-gap, no
        stretch, no auto margins. */
+    /* cc#1567 P2: idxFooter + adrBar are grouped in .ixgrp — the ONE flex:1 child of Card 1's
+       column. The card's height is set by syncHeroCardHeights() (the tallest of the four cards)
+       and Card 1 is usually the stretched face, so the surplus used to collect as an empty band
+       under adrBar. .ixgrp takes that surplus and spreads it around the two index rows and the
+       A/D bar (space-around). Header, verdict, chips: still top-anchored, untouched. */
+    + '<div class="ixgrp">'
     + idxFooter(d)
     /* cc#1387: adrBar(d.hero) LANDS HERE — Card2->Card3 (cc#1385) then Card3->Card1 (this task),
        the founder's own history note. Card 1 has no .c2body/space-between mechanism (cc#1134/1359's
@@ -4861,6 +4877,7 @@ function renderHome(d, pv){
        after idxFooter, same fixed row-gap as everything else in this column — no new distribution
        logic needed. adrBar()'s own function body is untouched, only this call site moved. */
     + adrBar(d.hero || {})
+    + '</div>'   /* /.ixgrp (cc#1567) */
     /* cc#1181: the cc#1160 edge button that straddled this card's bottom is REMOVED (founder
        28349). Index Intel is now one entry only, the bevel button under the INDEX BOOK strip.
        The footer index cells here are untouched — cc#1159's chart buttons stay as shipped. */
