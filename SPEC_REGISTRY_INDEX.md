@@ -1,7 +1,7 @@
 # Scorr — Spec Registry Index
 
 Generated 02-Sep-2026 from the live `session_log` table by `tools/gen_spec_index.py`
-(677 doctrine entries across `architecture`, `canonical_spec`, `day_log`, `daylog`, `debug_learnings`, `decision`, `doctrine`, `framework`, `locked_spec`, `memory_rules`, `mobile_framework`, `propagation_map`, `protocol_one`, `ruling`, `spec`, `spec_locked`, `spec_registry`, `standing_rule`, `trading_learnings`, `week_log`).
+(678 doctrine entries across `architecture`, `canonical_spec`, `day_log`, `daylog`, `debug_learnings`, `decision`, `doctrine`, `framework`, `locked_spec`, `memory_rules`, `mobile_framework`, `propagation_map`, `protocol_one`, `ruling`, `spec`, `spec_locked`, `spec_registry`, `standing_rule`, `trading_learnings`, `week_log`).
 
 **How to use this.** This is an INDEX, not the specs themselves. The full text of every
 entry lives in the Railway DB and is the authority. To read one:
@@ -459,10 +459,11 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 529 | TC v3.5 DIVISLAB Scale Decision — 25pt Accepted |
 
 
-### `doctrine` — 10
+### `doctrine` — 11
 
 | id | Title |
 |---|---|
+| 36200 | PCR_MOOD_BANDS_V2 - founder-locked 02-Sep-2026: PCR 1.00-1.50 = GREED; above 1.50 = CAUTIOUS if Nifty week return <= -1.0%, else EXTREME GREED. Lower bands unchanged. |
 | 36144 | MODEL_EFFORT_CACHE_RULE_V1 — Fable 5.1 + Sonnet 5 by task fit, effort MEDIUM default, ultracode only for a named heavy card, preserve prompt-cache benefit. Founder-locked 02-Sep-2026. Amends PRODUCTION_MODE_V3 (29164) and MODEL_ARCHITECTURE_PHASE3_V1 (24-Aug daylog 30149). |
 | 32076 | V10_OPT_LEG_IS_REPLICATION_NOT_HEDGE_founder_27aug |
 | 29448 | TC_SCANNER_GATED_CONFIG_V1.1 — founder amendment 23-Aug: OBSERVATION MODE, no eligibility cuts (supersedes V1 thresholds/gates as filters) |
