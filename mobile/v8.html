@@ -793,28 +793,77 @@ function closedRow(t){
     '<div class="pmeta"><span>'+px(t.entry_price)+' → <b>'+px(t.exit_price)+'</b> · '+pct(t.return_pct,2)+'</span>'+
     '<span class="age">'+esc(closedAge(t))+'</span></div></div>';
 }
+/* ── cc#1613 · CLOSED with two filters (founder 02-Sep 19:39: "keep long short realised P&L
+   switch separately with duration toggle"). ALL | LONG | SHORT and ALL | 1W | 1M, in-memory,
+   the same semantics as the web Trade Log tab (v8_dashboard renderTradeLog, cc#370): the window
+   is exit date >= IST today minus 7 / 30 days; All / All prints the canon summary (book_canon via
+   /api/mobile/v8book), ANY filter recomputes from the visible subset of the SAME rows - realised
+   = sum(pnl) - Rs 500 x trades (netPnl), wins = result TARGET, losses = result SL (the app's
+   canon rule, cc#950), avg win / loss % from return_pct. bk.closed carries every closed trade
+   of the era (no LIMIT in the builder), so the subset sums are complete. */
+var CL_SIDE = 'all', CL_DUR = 'all', CL_BRK = 500;
+function clCut(dur){
+  if(dur === 'all') return null;
+  var d = istNow(); d.setDate(d.getDate() - (dur === '1w' ? 7 : 30));
+  return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+}
+function clRows(rows, side, dur){
+  var cut = clCut(dur);
+  return rows.filter(function(t){
+    if(side !== 'all' && String(t.side||'').toUpperCase() !== side.toUpperCase()) return false;
+    if(cut && String(t.exit_date || t.exit_ts || '').slice(0, 10) < cut) return false;
+    return true;
+  });
+}
+function clStats(t){
+  var n = t.length, gross = 0, wins = [], losses = [];
+  t.forEach(function(x){ var v = num(x.realised) ? x.realised : 0; gross += v; var r = String(x.result||'').toUpperCase(); if(r === 'TARGET') wins.push(x); else if(r === 'SL') losses.push(x); });
+  var mean = function(a){ var v = a.map(function(x){ return x.return_pct; }).filter(num); return v.length ? v.reduce(function(p, q){ return p+q; }, 0)/v.length : null; };
+  var decided = wins.length + losses.length;
+  return { n:n, gross:gross, brokerage:n*CL_BRK, net:gross - n*CL_BRK, wins:wins.length, losses:losses.length, decided:decided,
+           acc: decided ? wins.length/decided*100 : null, avgWin: mean(wins), avgLoss: mean(losses) };
+}
+function clSeg(kind, cur, opts, counts){
+  return '<div class="filters" style="margin:0 0 8px">'+opts.map(function(o){
+    var on = cur === o[0];
+    return '<span class="chip'+(on ? ' on' : '')+'" data-cl-'+kind+'="'+o[0]+'" role="button" style="'+(on ? 'color:var(--gold);border-color:var(--gold);background:var(--g-gold-d, var(--well))' : '')+'">'+o[1]+(num(counts[o[0]]) ? ' <b style="font-weight:800">'+counts[o[0]]+'</b>' : '')+'</span>';
+  }).join('')+'</div>';
+}
 function renderClosed(){
   var bk = STATE.book, el = document.getElementById('sec-closed'), nEl = document.getElementById('cl-n'),
       rEl = document.getElementById('cl-r'), kpi = document.getElementById('cl-kpi'), more = document.getElementById('cl-more');
   if(!bk || !bk.closed){ nEl.textContent = ''; rEl.textContent = ''; kpi.innerHTML = ''; more.innerHTML = '';
     el.innerHTML = '<div class="slab dense" id="cl-empty"></div>'; emptyBox('cl-empty', 'Closed trades are not available right now.'); return; }
-  var rows = bk.closed, n = num(bk.trades) ? bk.trades : rows.length;
+  var all = bk.closed, rows = clRows(all, CL_SIDE, CL_DUR), isAll = (CL_SIDE === 'all' && CL_DUR === 'all');
+  var sideCounts = { all: clRows(all, 'all', CL_DUR).length, long: clRows(all, 'long', CL_DUR).length, short: clRows(all, 'short', CL_DUR).length };
+  var durCounts = { all: clRows(all, CL_SIDE, 'all').length, '1w': clRows(all, CL_SIDE, '1w').length, '1m': clRows(all, CL_SIDE, '1m').length };
+  var st = clStats(rows);
+  var n = isAll && num(bk.trades) ? bk.trades : rows.length;
   nEl.textContent = n;
-  var first = rows.length ? rows[rows.length-1] : null;
-  rEl.textContent = ((bk.era_block && bk.era_block.era_label) ? bk.era_block.era_label.toLowerCase() : (first && first.exit_ts ? 'since '+dmy(first.exit_ts) : '')) + ' · all baskets';
-  kpi.innerHTML =
-    kpiWell('REALISED', inr(bk.realised), sgn(bk.realised), 'gross '+inrShort(bk.gross)+' · brk '+inrShort(bk.brokerage)) +
-    kpiWell('WIN / LOSS', (num(bk.wins)?bk.wins:'—')+' / '+(num(bk.losses)?bk.losses:'—'), '',
-            num(bk.win_rate) && num(bk.decided) && bk.decided>0 ? 'accuracy '+bk.win_rate.toFixed(1)+'%' : 'no decided trade yet') +
-    kpiWell('REC L / S', '<span class="up">'+recTxt(bk.rec_long)+'</span><span class="mu" style="font-size:12px"> / </span><span class="dn">'+recTxt(bk.rec_short)+'</span>', '', 'wins / decided');
+  var first = all.length ? all[all.length-1] : null;
+  var since = (bk.era_block && bk.era_block.era_label) ? bk.era_block.era_label : (first && first.exit_ts ? 'since '+dmy(first.exit_ts) : 'era');
+  rEl.textContent = since.toLowerCase() + ' · all baskets';
+  var win = since + ' · ' + (CL_SIDE === 'all' ? 'ALL' : CL_SIDE.toUpperCase()) + ' · ' + (CL_DUR === 'all' ? 'ALL' : CL_DUR.toUpperCase());
+  var realised = isAll && num(bk.realised) ? bk.realised : st.net, gross = isAll && num(bk.gross) ? bk.gross : st.gross, brk = isAll && num(bk.brokerage) ? bk.brokerage : st.brokerage;
+  var wins = isAll && num(bk.wins) ? bk.wins : st.wins, losses = isAll && num(bk.losses) ? bk.losses : st.losses;
+  var acc = isAll && num(bk.win_rate) && num(bk.decided) && bk.decided > 0 ? bk.win_rate : st.acc;
+  var segs = clSeg('side', CL_SIDE, [['all','ALL'],['long','LONG'],['short','SHORT']], sideCounts)
+           + clSeg('dur', CL_DUR, [['all','ALL'],['1w','1W'],['1m','1M']], durCounts);
+  kpi.innerHTML = segs.replace(/class="filters"/g, 'class="filters" data-cl-seg="1"') + '<div class="kpi">'
+    + kpiWell('REALISED', inr(realised), sgn(realised), 'gross '+inrShort(gross)+' · brk '+inrShort(brk)+'<br>'+esc(win))
+    + kpiWell('WIN / LOSS', (num(wins)?wins:'—')+' / '+(num(losses)?losses:'—'), '', (num(acc) ? 'accuracy '+acc.toFixed(1)+'%' : 'no decided trade yet')+'<br>'+esc(win))
+    + kpiWell('AVG WIN / LOSS', '<span class="up">'+(num(st.avgWin) ? pct(st.avgWin, 1) : '—')+'</span><span class="mu" style="font-size:12px"> / </span><span class="dn">'+(num(st.avgLoss) ? pct(st.avgLoss, 1) : '—')+'</span>', '', 'return per decided trade<br>'+esc(win))
+    + '</div>';
   if(!rows.length){
     more.innerHTML = '';
-    el.innerHTML = '<div class="slab dense empty">No closed trades in this era yet. The first exit lands here.</div>' + asofLine(bk.as_of);
+    var what = (CL_SIDE === 'all' ? '' : (CL_SIDE === 'long' ? 'long ' : 'short ')) + 'trades';
+    var when = CL_DUR === '1w' ? ' in the last week' : CL_DUR === '1m' ? ' in the last month' : ' in this era';
+    el.innerHTML = '<div class="slab dense empty">No '+what+' closed'+when+'.'+(all.length ? ' Widen a filter to see the rest.' : ' The first exit lands here.')+'</div>' + asofSession(bk.as_of);
     return;
   }
   var show = clAll ? rows : rows.slice(0, CL_LIMIT), h = '';
   for(var i=0;i<show.length;i++) h += closedRow(show[i]);
-  el.innerHTML = h + asofLine(bk.as_of, 'book');
+  el.innerHTML = h + asofSession(bk.as_of, 'book');
   more.innerHTML = rows.length > CL_LIMIT
     ? '<span class="chip" data-cl-toggle="1">'+(clAll ? 'Fewer closed ▴' : 'All '+rows.length+' closed ▾')+'</span>' : '';
 }
@@ -939,6 +988,8 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var sv = e.target.closest('[data-sec-view]'); if(sv){ secView = sv.getAttribute('data-sec-view'); secAll = false; renderSectors(); return; }
   var st = e.target.closest('[data-sec-toggle]'); if(st){ secAll = !secAll; renderSectors(); return; }
   var ct = e.target.closest('[data-cl-toggle]'); if(ct){ clAll = !clAll; renderClosed(); return; }
+  var cs = e.target.closest('[data-cl-side]'); if(cs){ CL_SIDE = cs.getAttribute('data-cl-side'); clAll = false; renderClosed(); return; }   /* cc#1613 */
+  var cd = e.target.closest('[data-cl-dur]'); if(cd){ CL_DUR = cd.getAttribute('data-cl-dur'); clAll = false; renderClosed(); return; }
   var fb = e.target.closest('[data-fn-basket]'); if(fb){ fnBasket = fb.getAttribute('data-fn-basket'); renderFunnel(); return; }
   var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); }
 });
