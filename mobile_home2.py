@@ -70,6 +70,7 @@ from global_heatstrip import _band as _hs_band, INVERTED as _HS_INVERTED
 # "what this page was served as" against "what the server answering THIS live, no-store call is
 # actually running" and self-heal if a layer this app does not control served a stale document.
 from pwa_endpoints import BUILD_ID
+from pcr_mood import compose_live   # cc#1568: ONE PCR mood composer (session_log 36200)
 
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
@@ -928,6 +929,12 @@ def mobile_home2(request: Request):
             pcr_latest = float(_p[0]) if _p and _p[0] is not None else None
             pcr_date = _p[1].isoformat() if _p and _p[1] is not None else None
             pcr_basis = "EOD"
+        # cc#1568: the mood word + dial segments now come from the ONE server-side composer
+        # (pcr_mood.py, session_log 36200) — the client draws what it is told, never re-bands.
+        try:
+            pcr_mood_obj = compose_live(cur, pcr_latest)
+        except Exception:
+            pcr_mood_obj = None
         # ── cc#1083 · India VIX: LIVE level + previous-session close + the change ──────────────
         # WHY THIS MOVED OFF global_indices. That table's India VIX row is a DAILY close and it
         # lags: read 17-Aug 12:11 IST, its newest quote_date was 14-Aug at 11.305, so the hero
@@ -1301,6 +1308,7 @@ def mobile_home2(request: Request):
             "pcr_asof": pcr_asof,
             "pcr_basis": pcr_basis,
             "pcr_stale": pcr_stale,
+            "pcr_mood": pcr_mood_obj,   # cc#1568: {label, band, dial_segments, label_colour, reason, note}
             "vix": vix_latest,
             # cc#1083: completes VIX_COLOR_RULE_V1's confirming-fear half. Both sides are exposed,
             # not just the delta, so the chip (and anyone reading the payload) can see what the
