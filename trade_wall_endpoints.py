@@ -343,7 +343,11 @@ WOT_BUCKETS = {
     "investment_scanner": ("invscan",),
 }
 WOT_BUCKETS_KEY = "wot_buckets_enabled"
-WOT_BUCKETS_DEFAULT = ["approved_alerts"]
+# cc#1609 WOT_APPROVAL_SURFACE_V1 (session_log 36394 correction_02sep_1612): the wall is the
+# APPROVAL SURFACE — the engine signals with an Approve per row — and Alerts is the approved
+# book. approved_alerts is therefore NOT a bucket any more (an approval is a STATE on an engine
+# row, joined from trade_alerts below), and the default is the engine set. Reverses cc#1587.
+WOT_BUCKETS_DEFAULT = ["v8", "index_intel", "tc_scanner"]
 
 
 def wot_buckets_enabled(cur):
@@ -395,7 +399,10 @@ def _wall_sql(names):
     srcs = sorted({s for n in names for s in WOT_BUCKETS.get(n, ())})
     if not srcs:
         return _WALL_SQL + " AND false\n"
-    return _WALL_SQL + " AND w.src IN (" + ", ".join("'" + s + "'" for s in srcs) + ")\n"
+    # cc#1609 + V10_DISPLAY_OPTIONS_ONLY_V1 (36703): an Index Intel row on the wall is the OPTION
+    # leg only. Futures legs stay in v10_trades (record) and never reach a display.
+    return (_WALL_SQL + " AND w.src IN (" + ", ".join("'" + s + "'" for s in srcs) + ")\n"
+            + " AND NOT (w.src = 'v10' AND w.instrument = 'FUTURES')\n")
 
 
 # The guard that makes PERCENT_SIGNS_IN_SQL enforceable instead of merely written down. This
@@ -558,8 +565,55 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                         "WHERE status = 'approved' AND approved_at IS NOT NULL")
             _m = cur.fetchone()
             approved_as_of = _m[0].strftime("%d %b %Y %H:%M") if (_m and _m[0]) else None
+            # cc#1609 scope 6: the header line — pending = open engine rows with no approve /
+            # dismiss decision yet; approved today; newest signal ts. All over the WHOLE wall.
+            cur.execute("SELECT COUNT(*) n FROM (" + wall_sql + ") w WHERE w.status = 'open' AND w.src <> 'alert' "
+                        "AND NOT EXISTS (SELECT 1 FROM trade_alerts a WHERE a.kind = 'entry' "
+                        "AND a.source_engine = w.engine "
+                        "AND a.source_ref = w.symbol || '@' || to_char(w.entry_ts, 'YYYY-MM-DD HH24:MI:SS') "
+                        "AND a.status IN ('approved', 'dismissed'))")
+            _p = cur.fetchone()
+            cur.execute("SELECT COUNT(*) n FROM trade_alerts WHERE status = 'approved' AND source_engine IS NOT NULL "
+                        "AND (approved_at AT TIME ZONE 'Asia/Kolkata')::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+            _a = cur.fetchone()
+            cur.execute("SELECT MAX(w.entry_ts) FROM (" + wall_sql + ") w WHERE w.status = 'open' AND w.src <> 'alert'")
+            _n = cur.fetchone()
+            approval_counts = {"pending": int(_p[0] or 0), "approved_today": int(_a[0] or 0),
+                               "newest_signal_ts": _n[0].strftime("%Y-%m-%d %H:%M:%S") if (_n and _n[0]) else None}
+        else:
+            approval_counts = None
 
-    events = [_shape(r) for r in rows]
+        events = [_shape(r) for r in rows]
+        # cc#1609 scope 2: STATE per engine row from trade_alerts — pending-approval | approved |
+        # dismissed — joined on the same key every approve surface writes: (source_engine = the
+        # engine label as served, source_ref = symbol@entry.ts, kind = entry). An 'alert' row is
+        # the approval record itself. Done after the fetch so the union SQL is untouched.
+        keys = [(e["engine"], e["symbol"] + "@" + (e["entry"]["ts"] or "")) for e in events if e["src"] != "alert"]
+        amap = {}
+        if keys:
+            cur.execute("""SELECT source_engine, source_ref, status, id, approved_price,
+                                  approved_at AT TIME ZONE 'Asia/Kolkata' AS approved_ist, approved_via, notes
+                           FROM trade_alerts
+                           WHERE kind = 'entry' AND source_engine IS NOT NULL
+                             AND source_ref = ANY(%s) AND status IN ('approved', 'dismissed')""",
+                        ([k[1] for k in keys],))
+            for a in _rows(cur):
+                amap[(a["source_engine"], a["source_ref"])] = a
+        for e in events:
+            if e["src"] == "alert":
+                e["state"] = "approved"
+                e["approval"] = None
+                continue
+            a = amap.get((e["engine"], e["symbol"] + "@" + (e["entry"]["ts"] or "")))
+            if a:
+                e["state"] = a["status"]
+                e["approval"] = {"id": a["id"],
+                                 "approved_price": float(a["approved_price"]) if a["approved_price"] is not None else None,
+                                 "approved_at": a["approved_ist"].strftime("%Y-%m-%d %H:%M:%S") if a["approved_ist"] else None,
+                                 "approved_via": a["approved_via"], "notes": a["notes"]}
+            else:
+                e["state"] = "pending-approval"
+                e["approval"] = None
     last = rows[-1] if rows else None
     return {
         "events": events,
@@ -587,6 +641,10 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         "buckets_known": list(WOT_BUCKETS),
         "buckets_source": "default" if buckets_missing else "app_config",
         "approved_as_of": approved_as_of,
+        # cc#1609: the approval surface — header counts + how state was joined, so no surface guesses.
+        "approval_counts": approval_counts,
+        "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed",
+        "v10_display": "OPT legs only (V10_DISPLAY_OPTIONS_ONLY_V1 36703)",
     }
 
 
