@@ -40,6 +40,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from price_sources import not_fut   # cc#1053 INDEX_SYMBOL_CONVENTION_V1
+from pcr_mood import compose_live   # cc#1568: ONE PCR mood composer (session_log 36200)
 from typing import Dict, Any, List, Optional
 
 import psycopg2
@@ -284,6 +285,13 @@ def _internals(cur) -> Dict[str, Any]:
                    WHERE price_date=(SELECT MAX(price_date) FROM pcr_daily) ORDER BY underlying""")
     pcr_rows = [{"date": str(r[0]), "underlying": r[1], "pcr": _f(r[2]),
                  "quality": r[3], "note": r[4]} for r in cur.fetchall()]
+    # cc#1568: the mood word on the tile comes from the ONE composer (pcr_mood.py, session_log
+    # 36200) — same label the app hero and the web card print. Never banded here.
+    for r in pcr_rows:
+        try:
+            r["mood"] = compose_live(cur, r["pcr"])
+        except Exception:
+            r["mood"] = None
     cur.execute("""SELECT price_date, underlying, pcr FROM pcr_daily
                    WHERE price_date >= (SELECT MAX(price_date) FROM pcr_daily) - 10
                    ORDER BY price_date DESC, underlying""")
@@ -308,7 +316,9 @@ def _internals(cur) -> Dict[str, Any]:
     for r in pcr_rows:
         if r["pcr"] is not None:
             who = "put writers" if r["pcr"] > 1 else "call writers"
-            bits.append(f"{r['underlying']} PCR {r['pcr']:.2f} — {who} in control")
+            m = r.get("mood") or {}
+            lbl = f" · {m['label']}" if m.get("label") else ""
+            bits.append(f"{r['underlying']} PCR {r['pcr']:.2f}{lbl} — {who} in control")
     return {"adr": adr, "adr_stale": _stale(adr["date"]) if adr else False,
             "pcr": pcr_rows, "pcr_stale": _stale(pcr_rows[0]["date"]) if pcr_rows else False,
             "pcr_trend": trend, "tier": "LIVE",

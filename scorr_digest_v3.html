@@ -210,6 +210,7 @@ section{margin-top:26px}
   border:1px solid;font-weight:600}
 .p-bull{color:var(--gr);border-color:rgba(52,211,153,.45);background:var(--grDim)}
 .p-cau{color:var(--am);border-color:rgba(251,191,36,.4);background:var(--amDim)}
+.p-bear{color:var(--rd);border-color:var(--rd);background:transparent}   /* cc#1568 PCR mood red */
 .p-neu{color:var(--tx2);border-color:var(--line2)}
 .p-pend{color:var(--tx3);border-color:var(--line2);border-style:dashed}
 .rfoot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid var(--line);
@@ -587,10 +588,16 @@ function secInternals(s){
   var pcrs=(s.pcr||[]);
   if(pcrs.length){
     pcrs.forEach(function(p){
+      /* cc#1568: the mood word is the server composer's (pcr_mood.py, session_log 36200) — the
+         same label the app hero and the web card print. No banding here; no label = no chip. */
+      var m=p.mood||null, mlab=(m&&m.label&&p.pcr!=null)?m.label:'';
+      var mcls=m&&m.label_colour==='red'?'p-bear':m&&m.label_colour==='amber'?'p-cau':'p-bull';
+      var mwhy=(mlab&&(m.reason||m.note))?'<div class="mn">'+esc(m.reason||m.note)+'</div>':'';
       h += '<div class="card mini"><div class="mk">'+esc(p.underlying)+' PCR'+
-           (s.pcr_stale?' <span class="pill p-cau">STALE</span>':'')+'</div>'+
+           (s.pcr_stale?' <span class="pill p-cau">STALE</span>':'')+
+           (mlab?' <span class="pill '+mcls+'">'+esc(mlab)+'</span>':'')+'</div>'+
            '<div class="mv">'+num(p.pcr,2)+'</div>'+
-           '<div class="mn">'+esc(p.note||('as of '+(p.date||'—')))+'</div>';
+           '<div class="mn">'+esc(p.note||('as of '+(p.date||'—')))+'</div>'+mwhy;
       var hist=(p.history||[]);
       if(hist.length){
         var mx=Math.max.apply(null,hist.map(function(x){return Number(x.pcr)||0;}))||1;
