@@ -210,7 +210,7 @@ function openChart(){
 function bmRow(d, key){ var b = (d.benchmark||[]); for(var i=0;i<b.length;i++) if(b[i].key===key) return b[i]; return null; }
 function finRow(tbl, label){ if(!tbl || !tbl.rows) return null; for(var i=0;i<tbl.rows.length;i++) if(tbl.rows[i].label===label) return tbl.rows[i]; return null; }
 function lastVal(row){ if(!row || !row.values) return null; for(var i=row.values.length-1;i>=0;i--) if(num(row.values[i])) return row.values[i]; return null; }
-function sectHead(id, title, right){ return '<div class="sect" id="'+id+'">'+title+' <span class="g-r">'+esc(right||'')+'</span></div>'; }
+function sectHead(id, title, right, extra){ return '<div class="sect" id="'+id+'">'+title+' <span class="g-r">'+esc(right||'')+'</span>'+(extra||'')+'</div>'; }
 function sumLine(parts){ return '<section class="slab"><div class="g-sum">'+parts.map(function(x){ return '<span>'+x+'</span>'; }).join('')+'</div></section>'; }
 /* rating chip: hi >= 7.5 / lo <= 3.75 / mid between (36513 growth card); NULL → em dash chip */
 function rtChip(r){ if(!num(r)) return '<span class="g-rt na">—</span>'; var c = r >= 7.5 ? 'hi' : r <= 3.75 ? 'lo' : 'mid'; return '<span class="g-rt '+c+'">'+(Number.isInteger(r)?r:r.toFixed(1).replace(/\.0$/,''))+'</span>'; }
@@ -250,6 +250,52 @@ function bmRowHtml(b, opts){
          '<div class="g-bval"><b class="'+cls+'">'+esc(bmSelf(b))+'</b>'+rtChip(b.rating)+'</div>'+(opts && opts.track===false ? '' : peerTrack(b))+'</div>';
 }
 var LEGEND = '<div class="g-legend"><span><i style="background:var(--gold)"></i>this company</span><span><i style="background:var(--mute)"></i>peer median</span><span><i style="background:rgba(138,138,147,.25)"></i>peer range</span></div>';
+/* ── cc#1618 · second breakup view: Rows | Grid on the three pillar cards (founder 02-Sep 19:53).
+   Default Rows. Grid = ONE 4-across grid of 24 boxes shown once on the Growth card (pillar groups
+   G / V / M in the page's own row order; the payload carries 12 G, 6 V and 8 M rows for BHARATFORG,
+   so Growth lends its two extra checks to fill 24), Value and Momentum collapse to eyebrow + score
+   while Grid is on. In-memory, one choice for all three cards. Box colour lands in P3, the tap
+   sheet in P4. */
+var gvView = 'rows';
+function gvToggle(){
+  return '<span data-gv-seg="1" style="margin-left:auto;display:inline-flex;gap:2px;padding:2px;background:var(--well);border:1px solid var(--line);border-radius:7px;transform:skewX(6deg);letter-spacing:0;text-transform:none">'
+    + ['rows','grid'].map(function(k){ return '<button type="button" data-gv="'+k+'" style="border:0;border-radius:5px;min-height:24px;padding:2px 9px;font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:1px;cursor:pointer;'+(gvView===k ? 'background:var(--gold);color:var(--well)' : 'background:transparent;color:var(--mute)')+'">'+k.toUpperCase()+'</button>'; }).join('')+'</span>';
+}
+var GRID_ORDER = {
+  G: ['sales_5y','profit_5y','profit_3y','qoq_sales','qoq_profit','opm','opm_exp','roce','div_yield','int_cov'],
+  V: ['pe','fwd_pe','pb','annual_upside','hist_pe','sector_pe'],
+  M: ['ret_1y','ret_3y','ret_52w_idx','ret_1m','dma_50','dma_200','rsi_month','vol_trend']
+};
+var GRID_LBL = { pe:'PE now', fwd_pe:'PE next year', pb:'Price / Book', annual_upside:'Upside to fair value', hist_pe:'PE vs own 5Y avg', sector_pe:'PE vs sector', opm_exp:'Margin change', dma_50:'vs 50-day avg', dma_200:'vs 200-day avg', rsi_month:'Monthly RSI', vol_trend:'Volume trend', ret_52w_idx:'52W vs Nifty', ret_1y:'1-year return', ret_3y:'3-year return', ret_1m:'1-month return' };
+function gridRows(d){
+  var out = [];
+  ['G','V','M'].forEach(function(p){
+    var picked = GRID_ORDER[p].map(function(k){ return bmRow(d, k); }).filter(Boolean);
+    var extra = (d.benchmark||[]).filter(function(b){ return b.pillar === p && !/^inst_/.test(b.key||'') && GRID_ORDER[p].indexOf(b.key) < 0; });
+    picked = picked.concat(extra).slice(0, 8 + (p === 'G' ? 2 : 0));
+    out.push({pillar:p, rows:picked});
+  });
+  return out;
+}
+function gridBox(b){
+  return '<button type="button" data-gbox="'+esc(b.key)+'" style="display:flex;flex-direction:column;justify-content:space-between;gap:4px;min-height:64px;padding:7px 7px 6px;text-align:left;border-radius:8px;border:1px solid var(--line);background:var(--well);color:var(--chalk);cursor:pointer;min-width:0">'
+    + '<span style="font-family:var(--body);font-size:9.5px;line-height:1.2;color:var(--mute);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'+esc(GRID_LBL[b.key] || plainLabel(b))+'</span>'
+    + '<span style="font-family:var(--mono);font-size:13px;font-weight:800;letter-spacing:-.2px;white-space:nowrap">'+esc(bmSelf(b))+'</span></button>';
+}
+function gridHtml(d){
+  var groups = gridRows(d), n = 0, h = '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">';
+  var NAME = {G:'GROWTH', V:'VALUE', M:'MOMENTUM'};
+  groups.forEach(function(g){
+    if(!g.rows.length) return;
+    h += '<div style="grid-column:1/-1;font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--gold);padding-top:4px">'+NAME[g.pillar]+' · '+fx(d.scores && d.scores[g.pillar.toLowerCase()], 1)+'</div>';
+    g.rows.forEach(function(b){ h += gridBox(b); n++; });
+  });
+  h += '</div>';
+  return {html:h, n:n};
+}
+function gvCollapsed(id, title, right){
+  return sectHead(id, title, right, gvToggle())+'<section class="slab"><div class="g-sum"><span>Shown in the grid on the Growth card.</span></div></section>';
+}
 function secGrowth(d){
   /* ref order first (8 rows), then any other G row except the holding rows (those live on Holders) */
   var ORDER = ['sales_5y','profit_5y','profit_3y','qoq_sales','qoq_profit','opm','opm_exp','roce'];
@@ -257,7 +303,11 @@ function secGrowth(d){
   var g = ORDER.map(function(k){ return all.filter(function(b){ return b.key===k; })[0]; }).filter(Boolean)
             .concat(all.filter(function(b){ return ORDER.indexOf(b.key) < 0; }));
   var cov = (d.pillar_coverage||{}).track_score, scored = cov && num(cov.scored) ? cov.scored+' of '+cov.total+' scored' : g.filter(function(b){ return num(b.rating); }).length+' of '+g.length+' scored';
-  var head = sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+scored);
+  var head = sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+scored, gvToggle());
+  if(gvView === 'grid'){   /* cc#1618: one grid for all three pillars */
+    var gr = gridHtml(d);
+    return head+'<section class="slab">'+(gr.n ? gr.html : '<div class="g-empty">No peer checks in this report.</div>')+'<div class="g-asof">'+gr.n+' checks · score as of '+esc(d.score_date||'—')+'</div></section>';
+  }
   if(!g.length) return head+'<section class="slab"><div class="g-empty">No growth checks in this report. The nightly run scores growth only where five years of accounts exist.</div></section>';
   var rows = g.map(function(b){ return bmRowHtml(b, {signed:/^(qoq_|opm_exp)/.test(b.key||''), label:(b.key==='opm_exp'?'Margin change':null)}); }).join('');
   return head+'<section class="slab">'+rows+LEGEND+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
@@ -301,7 +351,8 @@ function peWords(hp, pe, sp){
 }
 function secValue(d){
   var pe = bmRow(d,'pe'), fp = bmRow(d,'fwd_pe'), pb = bmRow(d,'pb'), up = bmRow(d,'annual_upside'), hp = bmRow(d,'hist_pe'), sp = bmRow(d,'sector_pe');
-  var head = sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict&&sp.verdict.label?' · '+String(sp.verdict.label).toLowerCase()+' on PE':''));
+  if(gvView === 'grid') return gvCollapsed('value','Value','V '+fx(d.scores&&d.scores.v,1));   /* cc#1618 */
+  var head = sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict&&sp.verdict.label?' · '+String(sp.verdict.label).toLowerCase()+' on PE':''), gvToggle());
   if(!pe && !fp && !pb && !up) return head+'<section class="slab"><div class="g-empty">No valuation checks in this report.</div></section>';
   var rows = '';
   if(pe){ var sub = []; if(pe.extra_marker && num(pe.extra_marker.value)) sub.push('own 5-year average '+Math.round(pe.extra_marker.value)+'×'); if(sp && num(sp.sector_pe)) sub.push('sector '+Math.round(sp.sector_pe)+'×'); else if(num(pe.peer_median)) sub.push('peers '+Math.round(pe.peer_median)+'×');
@@ -337,7 +388,8 @@ function secMomentum(d){
   var d50 = bmRow(d,'dma_50'), d200 = bmRow(d,'dma_200'), rsi = bmRow(d,'rsi_month'), vt = bmRow(d,'vol_trend');
   var yr = y1 && num(y1.company) ? (y1.company > 15 ? 'strong year' : y1.company < -10 ? 'weak year' : 'flat year') : '';
   var mo = m1 && num(m1.company) ? (m1.company < -3 ? 'soft month' : m1.company > 3 ? 'firm month' : 'quiet month') : '';
-  var head = sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1)+(yr||mo ? ' · '+[yr,mo].filter(Boolean).join(', ') : ''));
+  if(gvView === 'grid') return gvCollapsed('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1));   /* cc#1618 */
+  var head = sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1)+(yr||mo ? ' · '+[yr,mo].filter(Boolean).join(', ') : ''), gvToggle());
   if(!y1 && !y3 && !ix && !m1 && !d50 && !d200 && !rsi && !vt) return head+'<section class="slab"><div class="g-empty">No momentum checks in this report.</div></section>';
   var tiles = '<div class="g-tiles">'+tile('1 YEAR', y1)+tile('3 YEARS', y3)+tile('VS NIFTY 52W', ix, {rankOf:true})+tile('1 MONTH', m1)+'</div>';
   var rows = '';
@@ -673,6 +725,15 @@ function finSeeTable(f, key){
   }
   return '<button type="button" data-fin-table="'+key+'" aria-expanded="'+(open?'true':'false')+'" style="display:block;width:100%;min-height:36px;margin-top:4px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--gold);font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:1px;text-align:center;cursor:pointer">'+(open ? 'hide table ▴' : 'see table ▾')+'</button>'
     + (open ? '<div style="padding-bottom:6px">'+inner+'</div>' : '');
+}
+function replaceSection(id, html){
+  var hd = document.getElementById(id); var sec = hd && hd.nextElementSibling; if(!hd || !sec) return;
+  var tmp = document.createElement('div'); tmp.innerHTML = html;
+  hd.parentNode.replaceChild(tmp.children[1], sec); hd.parentNode.replaceChild(tmp.children[0], hd);
+}
+function refreshPillars(){
+  var d = STATE.co; if(!d) return;
+  replaceSection('growth', secGrowth(d)); replaceSection('value', secValue(d)); replaceSection('momentum', secMomentum(d));
 }
 function refreshFin(){
   var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling;
@@ -1061,6 +1122,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var t = e.target.closest('[data-trend]'); if(t){ openScoreTrend(); return; }   /* cc#1615: the score chart, not the chart card */
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
+  var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); refreshPillars(); return; }   /* cc#1618 */
   if(e.target.closest('[data-ratio-filter]')){ ratioSheetOpen(); return; }   /* cc#1617 P4 */
   var ft = e.target.closest('[data-fin-table]'); if(ft){ var fk = ft.getAttribute('data-fin-table'); finTableOpen[fk] = !finTableOpen[fk]; refreshFin(); return; }   /* cc#1617 P5 */
   var fb = e.target.closest('[data-fin]'); if(fb){ finView = fb.getAttribute('data-fin'); var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling; if(fs){ var tmp2 = document.createElement('div'); tmp2.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp2.children[1], fs); } return; }
