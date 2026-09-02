@@ -154,6 +154,7 @@
   <div class="sect">Open positions <span class="n" id="open-n"></span><span class="r" id="open-r"></span></div>
   <div class="kpi" id="open-kpi"></div>
   <div class="filters" id="open-filters"></div>
+  <div class="filters" id="open-markers" style="margin-top:-4px"></div>
   <div class="plist" id="sec-open"><div class="slab dense empty">Loading the open book…</div></div>
   <div class="vmore" id="open-more"></div>
   <div class="sect">Sectors <span class="n" id="sec-n"></span><span class="r" id="sec-r"></span></div>
@@ -194,9 +195,17 @@ var URLS = {
   daylog: '/api/v8/daylog',
   funnel: '/api/mobile/v8funnel',
   pass:   '/api/v8/stock_passcount/',
-  paper:  '/api/paper/status'
+  paper:  '/api/paper/status',
+  /* cc#1610: the SAME two marker reads the web Open Positions table makes (cc#1558 / cc#1602) —
+     no new query, no change to the book payload. */
+  stars:  '/api/v8/pivot_star',
+  tcs:    '/api/trade-check/position-stars-v2'
 };
 var STATE = { mood:null, book:null, sectors:null, n50:null, daylog:null, funnel:null, paper:null, pass:{}, fetchedAt:null };
+/* cc#1610: marker maps keyed by symbol (the four lists /api/v8/pivot_star serves, plus the TC
+   score rows) and the marker quick-filter set — in memory for the visit only. */
+var MK = { stars:{}, act:{}, dma:{}, tcs:{}, legend:null, tcRows:[] };
+var openMarkers = {};
 function getJ(url){
   return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); });
 }
@@ -327,6 +336,74 @@ function heldLabel(p){
   var dh = num(p.days_held) ? p.days_held : Math.round((now - ent)/86400000);
   return ent.getDate()+' '+MON[ent.getMonth()]+' · '+dh+'d';
 }
+/* cc#1610 · MARKER FLAGS (cc#1558 parity). The row's fired object is filtered ONCE through the
+   shared ScorrMarkerFlagFilter against the row's own side, then fed to ScorrMarkerFlagColor for
+   the glyph and to ScorrMarkerDetail (body-level sheet, cc#1582) on tap — nothing is decided here. */
+function mkFired(p){
+  var sym = p.symbol, side = String(p.side || '').toUpperCase();
+  var f0 = { stars: MK.stars[sym] || null, act: MK.act[sym] || null, dma: MK.dma[sym] || null, tcs: MK.tcs[sym] || null };
+  return window.ScorrMarkerFlagFilter ? window.ScorrMarkerFlagFilter(f0, side) : f0;
+}
+function mkKeys(p){
+  var f = mkFired(p), ks = {};
+  if(f.tcs) ks.tcs = 1;
+  if(f.stars) ks[f.stars.star_color === 'BLUE' ? 's1' : 'r1'] = 1;
+  if(f.act) ks.act = 1;
+  if(f.dma) ks.dma = 1;
+  return ks;
+}
+function mkTc(p){
+  var sym = p.symbol, side = String(p.side || '').toUpperCase();
+  var r = null; (MK.tcRows || []).some(function(t){ if(t && t.symbol === sym && String(t.side || '').toUpperCase() === side){ r = t; return true; } return false; });
+  if(!r) return null;
+  var pct = r.best_any_score100 != null ? r.best_any_score100 : (r.best_any_score10 != null ? Math.round(Number(r.best_any_score10) * 100) / 10 : (r.score_pct != null ? r.score_pct : null));
+  return pct == null ? null : { score_pct: pct, verdict_class: (r.best_any_verdict10 || '') + (r.best_any_bucket ? ' | ' + r.best_any_bucket : '') };
+}
+function mkFlag(p){
+  var f = mkFired(p), col = window.ScorrMarkerFlagColor ? window.ScorrMarkerFlagColor(f) : null;
+  if(!col) return '';
+  return '<button type="button" data-mk-sym="'+esc(p.symbol)+'" data-mk-side="'+esc(String(p.side||'').toUpperCase())+'" aria-label="Markers for '+esc(p.symbol)+', tap for detail"'
+    + ' style="color:'+col+';background:none;border:none;padding:0 4px;font-size:15px;line-height:1;cursor:pointer;vertical-align:middle;min-height:24px">\u2691</button>';
+}
+function mkOpen(sym, side){
+  var p = { symbol: sym, side: side }, f = mkFired(p);
+  if(window.ScorrMarkerDetail) window.ScorrMarkerDetail.open(sym, f, mkTc(p), MK.legend);
+}
+function mkLegendOpen(){
+  if(!window.ScorrMarkerDetail) return;
+  window.ScorrMarkerDetail.open('Marker legend', {}, null, MK.legend);
+  var b = document.getElementById('scorr-mkdetail-b');
+  if(b && window.ScorrMarkerLegend) b.innerHTML = window.ScorrMarkerLegend(MK.legend);
+}
+function applyMarkers(rows){
+  var keys = Object.keys(openMarkers).filter(function(k){ return openMarkers[k]; });
+  if(!keys.length) return rows;
+  return rows.filter(function(p){ var ks = mkKeys(p); return keys.some(function(k){ return ks[k]; }); });
+}
+/* the second chip row: one chip per marker family, live count over the rows the side/basket chips
+   leave (the cc#1602 rule: OR among markers, AND with side/basket). Tooltip = the engine legend
+   line matched by family word — never retyped. */
+function renderMarkerChips(rows){
+  var el = document.getElementById('open-markers'); if(!el) return;
+  var c = { tcs:0, s1:0, r1:0, act:0, dma:0, dmaUp:0, dmaDn:0 };
+  rows.forEach(function(p){ var f = mkFired(p);
+    if(f.tcs) c.tcs++; if(f.stars){ if(f.stars.star_color === 'BLUE') c.s1++; else c.r1++; }
+    if(f.act) c.act++; if(f.dma){ c.dma++; if(f.dma.star_color === 'GREEN') c.dmaUp++; else c.dmaDn++; } });
+  var L = Array.isArray(MK.legend) ? MK.legend : [];
+  var leg = function(){ var ws = Array.prototype.slice.call(arguments); var hit = ''; L.some(function(t){ if(ws.some(function(w){ return String(t).toLowerCase().indexOf(w) >= 0; })){ hit = t; return true; } return false; }); return hit; };
+  var dmaCol = (c.dmaDn > c.dmaUp) ? '#f87171' : '#0a9e63';
+  var chip = function(key, icon, col, title, n, tip){
+    var on = !!openMarkers[key];
+    return '<span class="chip'+(on ? ' gd' : '')+'" data-open-marker="'+key+'" title="'+esc(tip || title)+'" aria-pressed="'+on+'">'
+      + '<span style="color:'+col+'">'+icon+'</span> '+esc(title)+' '+n+'</span>';
+  };
+  el.innerHTML = chip('tcs', '\u2605', '#F5B94A', 'TC strong', c.tcs, leg('amber', 'strong'))
+    + chip('s1', '\u2605', '#4d7cfe', 'S1 rev', c.s1, leg('blue'))
+    + chip('r1', '\u2605', '#f87171', 'R1 mirror', c.r1, leg('red star'))
+    + chip('act', '\u26a1', 'var(--txt)', 'Vol/OI', c.act, leg('\u26a1', 'volume'))
+    + chip('dma', '\u25a0', dmaCol, '5DMA', c.dma, (leg('square', 'dma') || '5DMA cross') + ' \u00b7 up ' + c.dmaUp + ' \u00b7 down ' + c.dmaDn)
+    + '<span class="chip" data-mk-legend="1" title="What the flags mean" aria-label="Marker legend">?</span>';
+}
 function bkTag(p){ var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'); return l ? '<span class="tag bk">'+esc(l.toUpperCase())+'</span>' : ''; }
 function posRow(p){
   var side = (p.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
@@ -336,7 +413,7 @@ function posRow(p){
     : '<div class="trk '+sl+'"><i class="tfill" style="width:'+Math.round(fc*100)+'%"></i>'+(fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')+'<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i></div>';
   var cmpTxt = num(p.cmp) ? px(p.cmp) : '—';
   return '<div class="slab dense prow" data-side="'+sl+'" data-basket="'+esc(p.basket||'')+'">'+
-    '<div class="psym">'+esc(p.symbol)+' <span class="tag '+sl+'">'+esc(side||'—')+'</span>'+bkTag(p)+'</div>'+
+    '<div class="psym">'+esc(p.symbol)+' '+mkFlag(p)+'<span class="tag '+sl+'">'+esc(side||'—')+'</span>'+bkTag(p)+'</div>'+
     '<div class="pnl '+sgn(p.unrealised)+'">'+inr(p.unrealised)+'</div>'+
     '<div class="pmeta"><span>'+px(p.entry_price)+' → <b>'+cmpTxt+'</b>'+(p.cmp_is_live===false?' <span class="mu">(last close)</span>':'')+'</span>'+
     '<span>tgt '+px(p.target)+' · sl '+px(p.stop_loss)+'</span><span class="age">'+heldLabel(p)+'</span></div>'+trk+'</div>';
@@ -345,12 +422,14 @@ function renderOpen(){
   var bk = STATE.book, el = document.getElementById('sec-open'), more = document.getElementById('open-more');
   var n = document.getElementById('open-n'), r = document.getElementById('open-r');
   more.innerHTML = '';
-  if(!bk || !bk.positions){ n.textContent=''; r.textContent=''; renderKpi(null, []); renderFilters([]); el.innerHTML='<div class="slab dense" id="open-empty"></div>'; emptyBox('open-empty', 'Open book is not available right now.'); return; }
+  if(!bk || !bk.positions){ n.textContent=''; r.textContent=''; renderKpi(null, []); renderFilters([]); renderMarkerChips([]); el.innerHTML='<div class="slab dense" id="open-empty"></div>'; emptyBox('open-empty', 'Open book is not available right now.'); return; }
   var all = bk.positions.slice().sort(function(a,b){ return (num(b.unrealised)?b.unrealised:-Infinity) - (num(a.unrealised)?a.unrealised:-Infinity); });
   n.textContent = String(all.length);
   r.textContent = num(bk.brokerage_per_trade) ? 'net of ₹'+bk.brokerage_per_trade+'/trade' : '';
   renderKpi(bk, all); renderFilters(all);
   var rows = applyFilter(all);
+  renderMarkerChips(rows);          // cc#1610: counts over the side/basket-filtered rows
+  rows = applyMarkers(rows);        // OR among markers, AND with the chips above
   if(!all.length){
     el.innerHTML = '<div class="slab dense empty">No open positions right now. The engine enters only when a stock clears all 9 checks and a slot is free.</div>'+asofLine(bk.as_of);
     return;
@@ -606,10 +685,20 @@ function load(){
     getJ(URLS.n50).catch(function(){ return null; }),
     getJ(URLS.daylog).catch(function(){ return null; }),
     getJ(URLS.funnel).catch(function(){ return null; }),
-    getJ(URLS.paper).catch(function(){ return null; })
+    getJ(URLS.paper).catch(function(){ return null; }),
+    getJ(URLS.stars).catch(function(){ return null; }),
+    getJ(URLS.tcs).catch(function(){ return null; })
   ]).then(function(res){
     STATE.mood = res[0]; STATE.book = res[1]; STATE.sectors = res[2]; STATE.n50 = res[3]; STATE.daylog = res[4];
     STATE.funnel = res[5]; STATE.paper = res[6]; STATE.pass = {};
+    /* cc#1610: the marker maps, the same four lists + legend the web loads (loadPivotStars). A
+       failed marker fetch leaves the maps empty — rows render without flags, never blank. */
+    var mk = res[7] || {}, tcq = res[8] || {};
+    MK = { stars:{}, act:{}, dma:{}, tcs:{}, legend: mk.legend || null, tcRows: (tcq.rows || []) };
+    (mk.stars || []).forEach(function(x){ MK.stars[x.symbol] = x; });
+    (mk.activity || []).forEach(function(x){ MK.act[x.symbol] = x; });
+    (mk.dma_cross || []).forEach(function(x){ MK.dma[x.symbol] = x; });
+    (mk.tc_strong || []).forEach(function(x){ MK.tcs[x.symbol] = x; });
     var d = istNow();
     STATE.fetchedAt = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+hhmm(d);
     renderAll();
@@ -619,6 +708,9 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var t = e.target.closest('[data-retry]'); if(t){ load(); return; }
   var o = e.target.closest('[data-open-toggle]'); if(o){ openAll = !openAll; renderOpen(); return; }
   var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); return; }
+  var mk = e.target.closest('[data-mk-sym]'); if(mk){ e.stopPropagation(); mkOpen(mk.getAttribute('data-mk-sym'), mk.getAttribute('data-mk-side')); return; }
+  var mc = e.target.closest('[data-open-marker]'); if(mc){ var k = mc.getAttribute('data-open-marker'); openMarkers[k] = !openMarkers[k]; openAll = false; renderOpen(); return; }
+  var ml = e.target.closest('[data-mk-legend]'); if(ml){ mkLegendOpen(); return; }
   var sv = e.target.closest('[data-sec-view]'); if(sv){ secView = sv.getAttribute('data-sec-view'); secAll = false; renderSectors(); return; }
   var st = e.target.closest('[data-sec-toggle]'); if(st){ secAll = !secAll; renderSectors(); return; }
   var ct = e.target.closest('[data-cl-toggle]'); if(ct){ clAll = !clAll; renderClosed(); return; }
