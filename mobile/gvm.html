@@ -151,6 +151,12 @@
 #gvp .g-cap2{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px}
 #gvp .g-note{margin-top:10px;font-size:12.5px;color:var(--mute);line-height:1.5}
 #gvp .g-lbl{margin-top:14px;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)}
+/* tiles (ref .tiles/.tile) */
+#gvp .g-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#gvp .g-tile{padding:10px 12px}
+#gvp .g-tile .g-tl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)}
+#gvp .g-tile .g-tv{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px}
+#gvp .g-tile .g-ts{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:1px}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -453,7 +459,42 @@ function secValue(d){
 }
 function secValue_old(d){ var pe=bmRow(d,'pe'), sp=bmRow(d,'sector_pe'); return sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict?' · '+String(sp.verdict.label||'').toLowerCase()+' on PE':''))+
   sumLine(['PE <b>'+(pe?fx(pe.company,1)+'×':'—')+'</b>','sector <b>'+(pe&&num(pe.peer_median)?fx(pe.peer_median,0)+'×':'—')+'</b>']); }
-function secMomentum(d){ var y=bmRow(d,'ret_1y'), m=bmRow(d,'ret_1m'); return sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1))+sumLine(['1 year <b class="'+(y&&num(y.company)?(y.company>=0?'up':'dn'):'')+'">'+(y?bmVal(y):'—')+'</b>','1 month <b class="'+(m&&num(m.company)?(m.company>=0?'up':'dn'):'')+'">'+(m?bmVal(m):'—')+'</b>']); }
+/* Momentum card (36513 cards.momentum): 4 tiles ret_1y / ret_3y / ret_52w_idx / ret_1m, then
+   rows dma_50, dma_200, rsi_month, vol_trend. Values and peers straight off benchmark[]. */
+function tile(label, b, opts){
+  opts = opts || {};
+  if(!b) return '<div class="g-tile well-up"><div class="g-tl">'+label+'</div><div class="g-tv mu">—</div><div class="g-ts">not scored</div></div>';
+  var v = b.company, cls = num(v) ? (v > 0 ? 'up' : v < 0 ? 'dn' : '') : 'mu';
+  var sub = [];
+  if(num(b.peer_median)) sub.push('peers '+(b.peer_median<0?'−':'+')+Math.abs(b.peer_median).toFixed(Math.abs(b.peer_median)>=20?0:1)+'%');
+  if(num(b.rank) && num(b.peer_n)) sub.push(opts.rankOf ? 'rank '+b.rank+' of '+b.peer_n : 'rank '+b.rank);
+  return '<div class="g-tile well-up"><div class="g-tl">'+label+'</div><div class="g-tv '+cls+'">'+(num(v)?(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(sub.join(' · ')||'no peer read')+'</div></div>';
+}
+function momWords(b, key){
+  if(!b || !num(b.company)) return null;
+  var v = b.company;
+  if(key==='dma_50') return v >= 0 ? 'above the short trend' : 'below the short trend';
+  if(key==='dma_200') return v >= 0 ? 'above the long trend' : 'below the long trend';
+  if(key==='rsi_month') return (num(b.peer_median)?'peers '+Math.round(b.peer_median)+' · ':'')+(v >= 80 ? 'overheated' : v >= 70 ? 'running hot' : v <= 30 ? 'oversold' : 'not overheated');
+  if(key==='vol_trend') return 'vs own 21-day average';
+  return null;
+}
+function secMomentum(d){
+  var y1 = bmRow(d,'ret_1y'), y3 = bmRow(d,'ret_3y'), ix = bmRow(d,'ret_52w_idx'), m1 = bmRow(d,'ret_1m');
+  var d50 = bmRow(d,'dma_50'), d200 = bmRow(d,'dma_200'), rsi = bmRow(d,'rsi_month'), vt = bmRow(d,'vol_trend');
+  var yr = y1 && num(y1.company) ? (y1.company > 15 ? 'strong year' : y1.company < -10 ? 'weak year' : 'flat year') : '';
+  var mo = m1 && num(m1.company) ? (m1.company < -3 ? 'soft month' : m1.company > 3 ? 'firm month' : 'quiet month') : '';
+  var head = sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1)+(yr||mo ? ' · '+[yr,mo].filter(Boolean).join(', ') : ''));
+  if(!y1 && !y3 && !ix && !m1 && !d50 && !d200 && !rsi && !vt) return head+'<section class="slab"><div class="g-empty">No momentum checks in this report.</div></section>';
+  var tiles = '<div class="g-tiles">'+tile('1 YEAR', y1)+tile('3 YEARS', y3)+tile('VS NIFTY 52W', ix, {rankOf:true})+tile('1 MONTH', m1)+'</div>';
+  var rows = '';
+  [['dma_50','Price vs 50-day average'],['dma_200','Price vs 200-day average'],['rsi_month','Monthly RSI'],['vol_trend','Volume trend']].forEach(function(k){
+    var b = bmRow(d,k[0]); if(!b) return;
+    rows += bmRowHtml(b, {label:k[1], sub:momWords(b,k[0]), track:false, signed:/^dma_/.test(k[0])});
+  });
+  return head+'<section class="slab">'+tiles+(rows?'<div style="margin-top:12px">'+rows+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
+}
+function secMomentum_old(d){ var y=bmRow(d,'ret_1y'), m=bmRow(d,'ret_1m'); return sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1))+sumLine(['1 year <b class="'+(y&&num(y.company)?(y.company>=0?'up':'dn'):'')+'">'+(y?bmVal(y):'—')+'</b>','1 month <b class="'+(m&&num(m.company)?(m.company>=0?'up':'dn'):'')+'">'+(m?bmVal(m):'—')+'</b>']); }
 function secPeers(d){ var sg=(d.extras||{}).segment_ctx||{}; return sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''))+sumLine(['Sector GVM <b>'+fx(sg.mcap_wtd_gvm,2)+'</b>',(num(sg.sector_rank)&&num(sg.sector_total)?'rank <b>'+sg.sector_rank+' of '+sg.sector_total+'</b>':'')]); }
 function secResults(d){ var ra=(d.content||{}).result_analysis||'', first=ra.split('\n')[0]||''; return sectHead('results','Results',first.split('·')[0].trim())+sumLine([first?esc(first):'No result analysis yet for this quarter.',(d.content&&d.content.last_result_analysis_updated?'updated <b>'+esc(d.content.last_result_analysis_updated)+'</b>':'')]); }
 function secFinancials(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
