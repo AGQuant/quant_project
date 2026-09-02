@@ -46,7 +46,7 @@
 (function(){
 'use strict';
 /* ── fetch layer: the three GVM endpoints the card allows, nothing else ─────────────── */
-var URLS = { company:'/api/gvm/company/', search:'/api/gvm/search', list:'/api/mobile/gvm?limit=25', history:'/api/gvm/history/' };
+var URLS = { company:'/api/gvm/company/', search:'/api/gvm/search', history:'/api/gvm/history/', recent:'/api/gvm/recent' };   /* cc#1622: the landing list is gone */
 var STATE = { sym:null, co:null, list:null, hist:null, fetchedAt:null };
 function getJ(url){ return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); }); }
 /* ── helpers ─────────────────────────────────────────────────────────────────────────── */
@@ -101,6 +101,7 @@ function loadCompany(sym){
     if(STATE.sym !== sym) return;
     if(!d || d.error || !d.symbol){ fail('No GVM report for '+sym+'. Scores exist only for companies the nightly run covers'+((d && d.error) ? ' ('+String(d.error)+')' : '')+'.', sym); return; }
     STATE.co = d; STATE.hist = null; STATE.fetchedAt = istNow(); renderCompany();
+    recentWrite(sym);   /* cc#1622: one history row per successful open, this device */
     getJ(URLS.history+encodeURIComponent(sym)+'?days=60').then(function(h){ if(STATE.sym !== sym) return; STATE.hist = (h && h.points) ? h.points : []; renderTrend(); },
                                                                    function(){ if(STATE.sym === sym){ STATE.hist = false; renderTrend(); } });
   }).catch(function(){ if(STATE.sym === sym) fail('Could not load the GVM report for '+sym+'.', sym); });
@@ -1213,27 +1214,62 @@ function renderCompany(){
   foot.textContent = 'Scores rebuild nightly. Prices live.'+(num(d.peer_count)?' Peer set = same segment, '+d.peer_count+' companies.':'');
 }
 /* ── landing: no symbol yet → today's top 25 by GVM, tap to open ─────────────────────── */
+/* ── cc#1622 · LANDING = the last 10 symbols this device opened, as chips (founder 02-Sep 20:46:
+   "just give last 10 searches, only symbols"). Today's Top list removed. Device key = a random id
+   kept in browser storage (no per-user identity reaches the page); /api/gvm/recent keeps 50 per
+   device and serves 10. Tap = open; long-press (600 ms) = remove. Empty = one muted line. */
+var DEV_KEY = null;
+function devKey(){
+  if(DEV_KEY) return DEV_KEY;
+  var k = null;
+  try { k = localStorage.getItem('scorr_gvm_dev'); } catch(e){}
+  if(!k){
+    k = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    try { localStorage.setItem('scorr_gvm_dev', k); } catch(e){}
+  }
+  DEV_KEY = k; return k;
+}
+function recentWrite(sym){
+  try { fetch(URLS.recent, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({dev: devKey(), symbol: sym})}).catch(function(){}); } catch(e){}
+}
+function recentRemove(sym){
+  return fetch(URLS.recent+'/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({dev: devKey(), symbol: sym})}).then(function(r){ return r.json(); });
+}
+function recentHtml(list){
+  var head = '<div style="margin-top:14px;font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--mute)">RECENT</div>';
+  if(!list || !list.length) return '<div class="g-empty" style="text-align:left;padding:14px 0 0">Search any listed company</div>';
+  return head + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">' + list.map(function(sym){
+    return '<button type="button" data-go="'+esc(sym)+'" data-recent="'+esc(sym)+'" style="min-height:40px;padding:8px 13px;border-radius:9px;border:1px solid var(--line);background:var(--well);color:var(--chalk);font-family:var(--mono);font-size:12.5px;font-weight:700;letter-spacing:.3px;cursor:pointer;-webkit-user-select:none;user-select:none">'+esc(sym)+'</button>';
+  }).join('') + '</div><div style="margin-top:10px;font-family:var(--mono);font-size:9.5px;color:var(--dim)">tap to open · hold to remove</div>';
+}
 function loadLanding(){
   STATE.sym = null; STATE.co = null; document.title = 'GVM'; qEl.value = ''; disarmCapsule();
-  main.innerHTML = '<div class="slab g-empty">Loading today’s scores…</div>'; foot.textContent = '';
-  getJ(URLS.list).then(function(d){
+  main.innerHTML = '<div class="g-empty" style="text-align:left;padding:14px 0 0">…</div>'; foot.textContent = '';
+  getJ(URLS.recent+'?dev='+encodeURIComponent(devKey())+'&limit=10').then(function(d){
     if(STATE.sym) return;
-    var rs = (d && d.results) || [];
-    if(!rs.length){ fail('No GVM scores to show yet. Scores land after the 22:00 nightly run.', ''); return; }
-    var h = '<div class="sect">Today’s top <span class="g-r">by GVM · '+esc(rs[0].as_of||'')+'</span></div><section class="slab">';
-    for(var i=0;i<rs.length;i++){ var r = rs[i];
-      h += '<div class="g-row" data-go="'+esc(r.symbol)+'"><span class="g-rk">'+(num(r.rank)?r.rank:i+1)+'</span><span class="g-sy">'+esc(r.symbol)+'</span>'+
-           '<span class="g-nm">'+esc(r.name||'')+(r.segment?' · '+esc(r.segment):'')+'</span>'+
-           '<span class="g-sc '+verdictCls(r.verdict)+'">'+fx(r.gvm,2)+'<small>'+esc(r.verdict||'')+'</small></span></div>';
-    }
-    h += '</section><div class="g-asof">'+(d.rail && d.rail.label ? esc(d.rail.label)+' · ' : '')+'scored nightly 22:00</div>';
-    main.innerHTML = h;
-    foot.textContent = 'Type any symbol or company name above to open its full GVM page.';
-  }).catch(function(){ fail('Could not load today’s GVM list.', ''); });
+    var seen = {}, list = ((d && d.recent) || []).filter(function(x){ x = String(x||'').toUpperCase(); if(!x || seen[x]) return false; seen[x] = 1; return true; }).slice(0, 10);
+    main.innerHTML = recentHtml(list);
+  }).catch(function(){ if(!STATE.sym) main.innerHTML = recentHtml([]); });
 }
+/* long-press on a RECENT chip removes it from this device's history (DELETE that row) */
+var LP = { t:null, sym:null, fired:false };
+function lpStart(e){
+  var c = e.target.closest('[data-recent]'); if(!c) return;
+  LP.sym = c.getAttribute('data-recent'); LP.fired = false;
+  clearTimeout(LP.t);
+  LP.t = setTimeout(function(){
+    LP.fired = true; c.style.opacity = '.4';
+    recentRemove(LP.sym).then(function(){ loadLanding(); }, function(){ c.style.opacity = ''; });
+  }, 600);
+}
+function lpEnd(){ clearTimeout(LP.t); LP.t = null; }
+document.getElementById('gvp').addEventListener('pointerdown', lpStart);
+document.getElementById('gvp').addEventListener('pointerup', lpEnd);
+document.getElementById('gvp').addEventListener('pointercancel', lpEnd);
+document.getElementById('gvp').addEventListener('pointerleave', lpEnd, true);
 /* ── clicks ──────────────────────────────────────────────────────────────────────────── */
 document.getElementById('gvp').addEventListener('click', function(e){
-  var g = e.target.closest('[data-go]'); if(g){ go(g.getAttribute('data-go')); return; }
+  var g = e.target.closest('[data-go]'); if(g){ if(LP.fired && g.hasAttribute('data-recent')){ LP.fired = false; return; } go(g.getAttribute('data-go')); return; }
   var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); return; }
   var t = e.target.closest('[data-trend]'); if(t){ openScoreTrend(); return; }   /* cc#1615: the score chart, not the chart card */
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
