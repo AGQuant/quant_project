@@ -513,12 +513,13 @@ def v10_summary():
 
 
 @router.get("/performance")
-def v10_performance():
+def v10_performance(leg: str = ""):
     """Full live-paper performance stats from v10_trades — total trades, win rate,
     total P&L, avg win/loss pts, profit factor, max drawdown, last 7 days, and
-    by-symbol / by-leg breakdowns. Powers the dashboard performance panel."""
+    by-symbol / by-leg breakdowns. Powers the dashboard performance panel.
+    cc#1597: ?leg=OPT|FUT restricts every figure to that leg (36703); blank = whole book."""
     import v10_st_ema
-    return v10_st_ema.get_performance()
+    return v10_st_ema.get_performance(leg=leg or None)
 
 
 @router.get("/vix")
