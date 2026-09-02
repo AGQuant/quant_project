@@ -1076,49 +1076,54 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
 /* cc#1037 (founder-set): EIGHT tiles per row, fixed. cc#1036 grew each group to fill the row, so a
    3-tile row stretched every tile to a third of the panel and read as broken. The level row is now a
    real 8-column grid and each group spans exactly its own tile count, so EVERY tile on the panel is
-   the same width, nothing stretches, and the 16 DAY tiles land in 2 rows instead of 3. */
-.hs-lvl{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));column-gap:8px;row-gap:14px;
+   the same width, nothing stretches, and the 16 DAY tiles land in 2 rows instead of 3.
+   cc#1562 (founder-set): every tile dimension, gap and tile font below is the cc#1037 value x0.75.
+   Group labels (.hs-glab) and leg headers (.hs-title/.hs-sub/.hs-head-wk) keep their size. The
+   sizing rules are scoped to #panel13 (the V8 Global Indices tab) — the only surface that renders
+   these tiles. Markup and JS untouched. */
+#panel13 .hs-lvl{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));column-gap:6px;row-gap:10.5px;
   align-items:stretch}
 .hs-eod{opacity:.97}
 /* --s is the group's column span, set inline at render as min(tile count, 8). One variable drives
    both the outer span and the inner tile columns, so the two can never disagree. min-width:0 is what
    actually permits a grid item to shrink to its track. */
-.hs-grp{display:flex;flex-direction:column;gap:5px;padding-right:8px;min-width:0;
+#panel13 .hs-grp{display:flex;flex-direction:column;gap:5px;padding-right:6px;min-width:0;
   grid-column:span var(--s,1);
   border-right:1px solid var(--line,rgba(148,166,210,.12))}
-.hs-grp:last-child{border-right:none;padding-right:0}
+#panel13 .hs-grp:last-child{border-right:none;padding-right:0}
 .hs-glab{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim,#5E6B8F)}
 /* cc#1037: exactly --s columns, matching the group's span in the 8-column row above, and the same
    8px gap — that is what makes a tile in a 7-wide group the same width as a tile in a 1-wide group.
    A group with more tiles than columns simply wraps to a second inner row; it never scrolls, so the
    founder-locked cc#842 rule still holds. */
-.hs-tiles{display:grid;grid-template-columns:repeat(var(--s,1),minmax(0,1fr));gap:8px}
+#panel13 .hs-tiles{display:grid;grid-template-columns:repeat(var(--s,1),minmax(0,1fr));gap:6px}
 /* 44px tap floor per MOBILE_UX_STANDARD_V1 — the taller tile below keeps clear of it */
-.hs-tile{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:68px;
-  padding:14px;border-radius:8px;cursor:pointer;font-family:inherit;text-align:left;transition:transform .12s}
+#panel13 .hs-tile{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:51px;
+  padding:10.5px;border-radius:6px;cursor:pointer;font-family:inherit;text-align:left;transition:transform .12s}
 .hs-tile:hover{transform:translateY(-1px)}
 /* cc#1031: one step up each — the change% is the headline number and now reads like one. */
-.hs-nm{font-size:15px;font-weight:600;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#panel13 .hs-nm{font-size:11.25px;font-weight:600;opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* cc#1036: 18 -> 19px. All three lines stay single-line — the name has ellipsis, and the change%
    and price are short monospace strings. At the 8-per-row width the narrowest tile gives ~104px of
    content: "-1.10%" is ~68px at 19px mono and "53,732.41" ~70px at 13px, so neither clips. */
-.hs-ch{font-size:19px;font-weight:800;font-family:var(--mono,ui-monospace,monospace);white-space:nowrap}
+#panel13 .hs-ch{font-size:14.25px;font-weight:800;font-family:var(--mono,ui-monospace,monospace);white-space:nowrap}
 /* cc#925: the CURRENT level on the tile itself. t.price already came from the heatstrip
    payload (it was only being used in the tooltip), so nothing new is fetched or derived. */
-.hs-px{font-size:13px;font-weight:600;opacity:.72;font-family:var(--mono,ui-monospace,monospace);white-space:nowrap}
+#panel13 .hs-px{font-size:9.75px;font-weight:600;opacity:.72;font-family:var(--mono,ui-monospace,monospace);white-space:nowrap}
 /* cc#1037: below ~1100px an 8-column row would put each tile under ~110px, so the 8-per-row rule is
    dropped and each category takes the full width with its tiles auto-fitting — the old behaviour. */
 @media (max-width:1100px){
-  .hs-lvl{grid-template-columns:1fr;row-gap:12px}
-  .hs-grp{grid-column:1/-1;padding-right:0;border-right:none}
-  .hs-tiles{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+  #panel13 .hs-lvl{grid-template-columns:1fr;row-gap:9px}
+  #panel13 .hs-grp{grid-column:1/-1;padding-right:0;border-right:none}
+  #panel13 .hs-tiles{grid-template-columns:repeat(auto-fit,minmax(105px,1fr))}
 }
 /* cc#1031 item 5: below ~700px the floor drops so tiles wrap 2-3 per row instead of overflowing,
    and each category takes the full width so its grid has room to do that. Never a scrollbar. */
 @media (max-width:700px){
-  .hs-tiles{grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:5px}
-  .hs-tile{min-height:56px;padding:9px 10px}
-  .hs-nm{font-size:13px}.hs-ch{font-size:16px}.hs-px{font-size:11.5px}
+  #panel13 .hs-tiles{grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:4px}
+  /* cc#1562: min-height holds at the 44 tap floor (MOBILE_UX_STANDARD_V1), not 56x0.75 */
+  #panel13 .hs-tile{min-height:44px;padding:7px 7.5px}
+  #panel13 .hs-nm{font-size:9.75px}#panel13 .hs-ch{font-size:12px}#panel13 .hs-px{font-size:8.6px}
 }
 .hs-head-wk{margin-top:20px;padding-top:16px;border-top:1px solid var(--line,#1E2A44)}
 .hs-foot{margin-top:9px;font-size:10px;color:var(--dim,#5E6B8F);line-height:1.5}
