@@ -135,8 +135,8 @@
   chat order retires on this view. The manual price-alert create flow (cc#1507, the + button and
   its sheet) is kept as-is below — 34521 says alerts are set from here.
 
-  Pushes: P3 skeleton + header strip + filters (this one) · P4 idea cards · P5 waiting cards +
-  actions · P6 sparkline + why lines · P7 theme check + screenshot.
+  Pushes: P3 skeleton + header strip + filters · P4 plan tiles + track + footer · P5 waiting cards +
+  actions · P6 sparkline + why lines · P7 caption polish + theme check + screenshot request.
 -->
 <div class="screen">
 
@@ -280,7 +280,7 @@ function spark(c){
   return '<svg class="ia-spark ' + cls + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
     + (base != null ? '<line class="base" x1="' + L + '" y1="' + y(base) + '" x2="' + R + '" y2="' + y(base) + '"/>' : '')
     + '<polyline class="ln" points="' + poly + '"/><circle class="dot" cx="' + x(pts.length - 1) + '" cy="' + y(pts[pts.length - 1]) + '" r="3.5"/></svg>'
-    + '<div class="ia-sparkn">' + (sp.tf === '1d' ? 'daily closes' : '5-min closes') + ' since approval · ' + sp.n + ' bars · dotted = approved price</div>';
+    + '<div class="ia-sparkn">' + sp.n + (sp.tf === '1d' ? ' daily bars' : ' × 5-min bars') + ' since approval · dotted = entry</div>';
 }
 function why(c){
   var t = String(c.why || '').trim(); if (!t) return '';
