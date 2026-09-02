@@ -410,15 +410,44 @@ def mobile_breadth(request: Request):
             themed AS (
                 SELECT b.symbol, b.day_chg_pct, COALESCE(fu.theme, 'Unclassified') AS theme
                 FROM base b LEFT JOIN futures_universe fu ON fu.symbol = b.symbol
+            ),
+            gs AS (
+                -- cc#1592: the GVM segment + market cap of each row, latest score_date per symbol,
+                -- so the sector strip is grouped and weighted from THESE rows and no other snapshot.
+                SELECT DISTINCT ON (symbol) symbol, segment, market_cap
+                FROM gvm_scores WHERE segment IS NOT NULL ORDER BY symbol, score_date DESC
             )
-            SELECT symbol, day_chg_pct, theme,
-                   ROUND(AVG(day_chg_pct) OVER (PARTITION BY theme)::numeric, 2) AS sector_day_chg_pct
-            FROM themed ORDER BY symbol
+            SELECT t.symbol, t.day_chg_pct, t.theme,
+                   ROUND(AVG(t.day_chg_pct) OVER (PARTITION BY t.theme)::numeric, 2) AS sector_day_chg_pct,
+                   gs.segment, gs.market_cap
+            FROM themed t LEFT JOIN gs ON gs.symbol = t.symbol ORDER BY t.symbol
         """, {"d": anchor_ts.date(), "cut": anchor_ts})
         rows = _rows(cur)
     advances = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] > 0)
     declines = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] < 0)
     unchanged = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] == 0)
+    # cc#1592 (ADV_DECL_SECTOR_CAPS_V1, session_log 36539): MCAP-WEIGHTED day% per gvm_scores.segment
+    # — SUM(mcap * day_pct) / SUM(mcap) — the same formula tc_v4_scan._segment_day_map uses (cc#455),
+    # applied to THIS payload's own rows so the chips and the table below them are one snapshot.
+    # Never a simple average: one giant stock must not be outvoted by nine small ones. A member with
+    # no market cap cannot be weighted and is counted in `n` but not in `n_weighted`; a segment with
+    # nothing weightable is left out rather than shown as 0.
+    acc = {}
+    for r in rows:
+        seg = r.get("segment")
+        if not seg or r["day_chg_pct"] is None:
+            continue
+        a = acc.setdefault(seg, {"segment": seg, "wsum": 0.0, "msum": 0.0, "n": 0, "n_weighted": 0})
+        a["n"] += 1
+        mc = r.get("market_cap")
+        if mc is not None and float(mc) > 0:
+            a["wsum"] += float(r["day_chg_pct"]) * float(mc)
+            a["msum"] += float(mc)
+            a["n_weighted"] += 1
+    sectors = [{"segment": a["segment"], "day_pct": round(a["wsum"] / a["msum"], 2),
+                "n": a["n"], "n_weighted": a["n_weighted"]}
+               for a in acc.values() if a["msum"] > 0]
+    sectors.sort(key=lambda z: (-abs(z["day_pct"]), z["segment"]))   # biggest movers first, either way
     return {
         "rows": [{"symbol": r["symbol"],
                   "day_chg_pct": float(r["day_chg_pct"]) if r["day_chg_pct"] is not None else None,
@@ -427,6 +456,11 @@ def mobile_breadth(request: Request):
                  for r in rows],
         "advances": advances, "declines": declines, "unchanged": unchanged,
         "as_of": str(anchor_ts),
+        "sectors": sectors,
+        "sectors_basis": ("mcap-weighted: SUM(market_cap x day_pct) / SUM(market_cap) per gvm_scores.segment, "
+                          "over these same rows (prev-close basis, anchored to the same adr_intraday ts)"),
+        "sectors_unweighted_rows": sum(1 for r in rows if r.get("segment") and r["day_chg_pct"] is not None
+                                       and not (r.get("market_cap") is not None and float(r["market_cap"]) > 0)),
     }
 
 
