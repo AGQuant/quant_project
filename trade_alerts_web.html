@@ -45,6 +45,8 @@
   .al-st.dismissed{color:var(--red);border-color:var(--red)}
   .al-pend{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
   .al-why{font-size:10.5px;color:var(--mut,#8A8A93)}
+  .al-dis{margin-left:6px;color:var(--mut,#8A8A93)}
+  .al-pend .al-dis{margin-left:0}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .al-eng{font:600 10px ui-monospace,monospace;color:var(--mut);border:1px solid var(--line2);
           border-radius:5px;padding:2px 6px;white-space:nowrap}
@@ -214,13 +216,15 @@ function rowHtml(a){
      the reason in words, using the resolver price the list ships (the same price the trigger
      sweep compares). APPROVED / DISMISSED -> the decision, no button. */
   var act = '';
+  var dis = '<button type="button" class="btn al-dis" id="dm-' + a.id + '" onclick="dismiss(' + a.id + ')">Dismiss</button>';
   if (st === 'triggered') {
-    act = '<div class="twa"><button type="button" class="btn pri" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve</button></div>';
+    act = '<div class="twa"><button type="button" class="btn pri" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve</button>' + dis + '</div>';
   } else if (st === 'pending') {
     var cond = a.trigger_condition === 'ABOVE' ? '≥' : '≤';
     var liveTxt = a.cmp == null ? 'no live price right now'
                 : 'live ' + fmtPx(a.cmp) + (a.cmp_live === false ? ' (last close)' : '');
     act = '<div class="twa al-pend"><button type="button" class="btn pri" disabled title="Approve becomes active when the trigger crosses">Approve</button>'
+        + dis
         + '<span class="al-why">waits for cross ' + cond + ' ' + fmtPx(a.trigger_price) + ' (' + esc(liveTxt) + ')</span></div>';
   }
   return '<tr id="al-' + a.id + '">'
@@ -277,6 +281,32 @@ function approve(id){
         err.className = 'twa-err';
         err.textContent = 'Could not approve — ' + e.message;
         cell.appendChild(err);
+      }
+    });
+}
+
+/* cc#1586 scope 3: Dismiss on every pending / triggered row — POST /api/alerts/dismiss {id}
+   (pending | triggered -> dismissed, server-enforced). The reason lands on glass on failure. */
+function dismiss(id){
+  var btn = document.getElementById('dm-' + id);
+  if (btn) { btn.disabled = true; btn.textContent = 'Dismissing…'; }
+  fetchWithTimeout('/api/alerts/dismiss', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(x){
+      if (!x.ok || !x.d || !x.d.alert) throw new Error((x.d && x.d.detail) || 'dismiss failed');
+      for (var i = 0; i < STATE.alerts.length; i++)
+        if (STATE.alerts[i].id === id) STATE.alerts[i] = x.d.alert;
+      render();
+    })
+    .catch(function(e){
+      if (btn) { btn.disabled = false; btn.textContent = 'Dismiss'; }
+      var row = document.getElementById('al-' + id);
+      if (row && !row.querySelector('.twa-err')) {
+        var err = document.createElement('span');
+        err.className = 'twa-err';
+        err.textContent = 'Could not dismiss — ' + e.message;
+        row.lastElementChild.appendChild(err);
       }
     });
 }
