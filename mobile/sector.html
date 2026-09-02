@@ -40,7 +40,7 @@
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
 <script>
-var SC = { data:null, err:null, filter:'all', sort:'gvm', all:false, sheet:null, detail:{} };
+var SC = { data:null, err:null, filter:'all', sort:'gvm', all:false, sheet:null, detail:{}, cap:'all', caps:null };
 var SHOW_N = 20;
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -57,7 +57,10 @@ function hhmm(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).s
 function verdictOf(r){ var g = nv(r.gvm); return r.verdict || (g == null ? '—' : g >= 8 ? 'Excellent' : g >= 7 ? 'Good' : g >= 6 ? 'Average' : 'Weak'); }
 function vCol(r){ var g = nv(r.gvm); return g == null ? 'var(--mute)' : g >= 7 ? 'var(--gold)' : g >= 6 ? 'var(--chalk,var(--txt))' : 'var(--down)'; }
 function nameOf(r){ return r.display_segment || r.segment || '—'; }
-var TONE = { g:'var(--up)', v:'var(--amber)', m:'var(--aqua, var(--blu))' };
+/* cc#1624 bug: --up is declared only inside the #gvp / #v8p blocks of mobile_app.css and not at all in
+   scorr_themes.css, so on this page var(--up) resolved to nothing and the G segment painted
+   transparent. Every tone now falls back through the global name to the token's own value. */
+var TONE = { g:'var(--up, var(--grn, #2FD48B))', v:'var(--amber, #FF9F45)', m:'var(--aqua, var(--blu, #35E0FF))' };
 
 /* ── header + rotation strip ─────────────────────────────────────────────────────────── */
 function renderTop(){
@@ -66,17 +69,37 @@ function renderTop(){
   $('sc-sub').textContent = (d.raw_segments || 0) + ' segments · ' + (d.total_segments || 0) + ' shown';
   $('sc-r').innerHTML = 'mcap-weighted GVM<br>scores ' + esc(dmy(d.score_date)) + ' · prices ' + esc(hhmm(SC.fetchedAt || istNow()));
 }
+/* cc#1624 · cap class per sector = bucket of avg mcap (total_mcap / stocks_count) on the platform
+   cuts served by /api/mobile/sector/caps (investment_check.get_cap_category, the GVM page chip rule) */
+function avgMcap(r){ var t = nv(r.total_mcap), n = nv(r.stocks_count); return (t != null && n) ? t / n : null; }
+function capOf(r){ var c = SC.caps; if(!c) return null; var a = avgMcap(r); if(a == null) return null; return a >= c.large_min ? 'large' : a >= c.mid_min ? 'mid' : 'small'; }
+function capTag(r){ var k = capOf(r); return k ? '<span style="font-family:var(--mono);font-size:8.5px;font-weight:800;padding:0 4px;border:1px solid var(--line);color:var(--mute)" title="' + k + ' cap by average mcap">' + k[0].toUpperCase() + '</span>' : ''; }
+function capRows(rows){ return SC.cap === 'all' || !SC.caps ? rows : rows.filter(function(r){ return capOf(r) === SC.cap; }); }
+function crWords(v){ v = nv(v); return v == null ? '—' : (v >= 100000 ? (v/100000).toFixed(v % 100000 ? 1 : 0) + 'L' : v >= 1000 ? Math.round(v/1000) + 'k' : String(Math.round(v))) + ' Cr'; }
+function capSeg(){
+  if(!SC.caps) return '';
+  var all = rowsAll();
+  return '<div style="display:flex;gap:2px;padding:2px;background:var(--well);border:1px solid var(--line);border-radius:8px;margin-bottom:10px">' + [['all','ALL'],['large','LARGE'],['mid','MID'],['small','SMALL']].map(function(t){
+    var n = t[0] === 'all' ? all.length : all.filter(function(r){ return capOf(r) === t[0]; }).length, on = SC.cap === t[0];
+    return '<button type="button" data-cap="' + t[0] + '" style="flex:1;border:0;border-radius:6px;min-height:30px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:1px;cursor:pointer;' + (on ? 'background:var(--gold);color:var(--well)' : 'background:transparent;color:var(--mute)') + '">' + t[1] + ' ' + n + '</button>';
+  }).join('') + '</div>';
+}
 function laneRow(r, cls){ return '<div data-open="' + esc(nameOf(r)) + '" role="button" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.25;cursor:pointer"><span style="color:var(--chalk,var(--txt));min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(nameOf(r)) + '</span><b class="' + cls + '" style="font-family:var(--mono);font-weight:800;font-size:12.5px;flex:none">' + f2(r.gvm) + '</b></div>'; }
 function renderRot(){
   var d = SC.data; if(!d){ $('sc-rot').innerHTML = ''; return; }
-  var hot = (d.top5 || []).slice(0, 5), cold = (d.bottom5 || []).slice(0, 5);
+  var pool = capRows(rowsAll());   /* rowsAll is GVM-ordered; HOT / COLD recompute inside the chosen cap */
+  var hot = SC.cap === 'all' ? (d.top5 || []).slice(0, 5) : pool.slice(0, 5);
+  var cold = SC.cap === 'all' ? (d.bottom5 || []).slice(0, 5) : pool.filter(function(r){ return nv(r.gvm) != null && r.gvm < 6; }).reverse().slice(0, 5);
+  var capWord = SC.cap === 'all' ? '' : ' · ' + SC.cap.toUpperCase();
+  var cuts = SC.caps ? 'Large > ' + crWords(SC.caps.large_min) + ' avg · Mid ' + crWords(SC.caps.mid_min) + '–' + crWords(SC.caps.large_min) + ' · Small < ' + crWords(SC.caps.mid_min) : '';
   $('sc-rot').innerHTML = '<section class="pressed" style="padding:12px 14px">'
     + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--mute);margin-bottom:8px"><span>ROTATION</span><span style="letter-spacing:.3px">GVM is the rating and the order</span></div>'
+    + capSeg()
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--up);margin-bottom:2px">▲ HOT · TOP 5</div>' + (hot.length ? hot.map(function(r){ return laneRow(r, 'up'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">none today</div>') + '</div>'
-    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--down);margin-bottom:2px">▼ COLD · WEAK</div>' + (cold.length ? cold.map(function(r){ return laneRow(r, 'dn'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">no weak sector today</div>') + '</div>'
+    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--up);margin-bottom:2px">▲ HOT · TOP ' + hot.length + ' OF ' + pool.length + esc(capWord) + '</div>' + (hot.length ? hot.map(function(r){ return laneRow(r, 'up'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">none today</div>') + '</div>'
+    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--down);margin-bottom:2px">▼ COLD · WEAK ' + cold.length + esc(capWord) + '</div>' + (cold.length ? cold.map(function(r){ return laneRow(r, 'dn'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">no weak sector today</div>') + '</div>'
     + '</div>'
-    + '<div style="font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 10px"><span>Excellent 8+ · Good 7+ · Average 6+ · Weak</span><span>' + (num(d.merged_away) ? d.merged_away + ' one-stock segments merged into families' : '') + '</span></div>'
+    + '<div style="font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 10px"><span>Excellent 8+ · Good 7+ · Average 6+ · Weak</span>' + (cuts ? '<span>' + esc(cuts) + '</span>' : '') + '<span>' + (num(d.merged_away) ? d.merged_away + ' one-stock segments merged into families' : '') + '</span></div>'
     + '</section>';
 }
 
@@ -87,12 +110,12 @@ function rowsAll(){ return (SC.data && SC.data.all) || []; }
 function rankMap(){ var m = {}; rowsAll().forEach(function(r, i){ m[nameOf(r)] = i + 1; }); return m; }
 function visible(){
   var f = FILTERS.filter(function(x){ return x.k === SC.filter; })[0] || FILTERS[0], s = SORTS.filter(function(x){ return x.k === SC.sort; })[0] || SORTS[0];
-  var rows = rowsAll().filter(f.f);
+  var rows = capRows(rowsAll()).filter(f.f);   /* cc#1624: cap AND the chip */
   rows.sort(function(a, b){ var x = s.v(a), y = s.v(b); if(x == null && y == null) return 0; if(x == null) return 1; if(y == null) return -1; return y - x; });
   return rows;
 }
 function renderFilters(){
-  var all = rowsAll();
+  var all = capRows(rowsAll());
   $('sc-filters').innerHTML = '<div style="display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:12px 0 8px">' + FILTERS.map(function(x){
     var n = all.filter(x.f).length, on = SC.filter === x.k;
     return '<button type="button" data-f="' + x.k + '" style="flex:none;min-height:34px;font-family:var(--mono);font-size:11px;font-weight:700;padding:6px 11px;border:1px solid ' + (on ? 'var(--gold)' : 'var(--line)') + ';background:' + (on ? 'var(--gold-d, var(--well))' : 'var(--well)') + ';color:' + (on ? 'var(--gold)' : 'var(--mute)') + ';clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer">' + x.l + ' ' + n + '</button>';
@@ -121,7 +144,7 @@ function rowHtml(r, rank){
     + '<div style="font-weight:700;font-size:14px;line-height:1.2;color:var(--chalk,var(--txt))">' + esc(nameOf(r)) + '</div>'
     + '<div style="grid-column:3;grid-row:1/span 2;text-align:right"><b style="font-family:var(--mono);font-size:19px;font-weight:800;letter-spacing:-.3px;display:block;line-height:1;color:' + vCol(r) + '">' + f2(r.gvm) + '</b><small style="font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mute)">' + esc(String(verdictOf(r)).toUpperCase()) + '</small></div>'
     + stackBar(r)
-    + '<div style="grid-column:2/span 2;display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:4px"><span style="color:' + TONE.g + '">G <b>' + f1(r.g_score) + '</b></span><span style="color:' + TONE.v + '">V <b>' + f1(r.v_score) + '</b></span><span style="color:' + TONE.m + '">M <b>' + f1(r.m_score) + '</b></span><span style="color:var(--mute)">· ' + (num(r.stocks_count) ? r.stocks_count + ' stocks' : '') + (nv(r.total_mcap) != null ? ' · ' + crS(r.total_mcap) : '') + '</span></div>'
+    + '<div style="grid-column:2/span 2;display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:4px"><span style="color:' + TONE.g + '">G <b>' + f1(r.g_score) + '</b></span><span style="color:' + TONE.v + '">V <b>' + f1(r.v_score) + '</b></span><span style="color:' + TONE.m + '">M <b>' + f1(r.m_score) + '</b></span><span style="color:var(--mute)">· ' + (num(r.stocks_count) ? r.stocks_count + ' stocks ' : '') + capTag(r) + (nv(r.total_mcap) != null ? ' · ' + crS(r.total_mcap) : '') + '</span></div>'
     + '<div style="grid-column:2/span 2;font-family:var(--mono);font-size:10px;color:var(--mute);display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:3px">'
     + '<span class="' + sgn(dl) + '" style="font-weight:700">' + (dl == null ? '— · 30d' : (dl > 0 ? '▲ +' : dl < 0 ? '▼ −' : '') + Math.abs(dl).toFixed(2) + ' · 30d') + '</span>'
     + (pick ? '<span style="display:inline-flex;gap:5px;align-items:center;padding:1px 6px;border:1px solid var(--line);background:var(--well)">top <b style="color:var(--chalk,var(--txt))">' + esc(pick.symbol) + '</b> ' + f2(pick.gvm) + (nv(pick.day_ret) != null ? ' <span class="' + sgn(pick.day_ret) + '">' + pctS(pick.day_ret) + '</span>' : '') + '</span>' : '')
@@ -207,6 +230,7 @@ function paintSheet(){
 
 /* ── events + load ───────────────────────────────────────────────────────────────────── */
 $('secp').addEventListener('click', function(e){
+  var c = e.target.closest('[data-cap]'); if(c){ SC.cap = c.getAttribute('data-cap'); SC.all = false; render(); return; }   /* cc#1624 */
   var f = e.target.closest('[data-f]'); if(f){ SC.filter = f.getAttribute('data-f'); SC.all = false; renderFilters(); renderList(); return; }
   var s = e.target.closest('[data-s]'); if(s){ SC.sort = s.getAttribute('data-s'); SC.all = false; renderFilters(); renderList(); return; }
   if(e.target.closest('[data-more]')){ SC.all = !SC.all; renderList(); return; }
@@ -214,6 +238,7 @@ $('secp').addEventListener('click', function(e){
 });
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape') sheetClose(); });
 function load(){
+  fetchWithTimeout('/api/mobile/sector/caps').then(function(r){ return r.json(); }).then(function(c){ if(c && nv(c.large_min) != null && nv(c.mid_min) != null){ SC.caps = {large_min:Number(c.large_min), mid_min:Number(c.mid_min)}; if(SC.data) render(); } }).catch(function(){});
   fetchWithTimeout('/api/sector/rotation').then(function(r){ return r.json(); }).then(function(d){
     if(!d || d.error) throw new Error((d && d.error) || 'empty reply');
     SC.data = d; SC.err = null; SC.fetchedAt = istNow(); render();

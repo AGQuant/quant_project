@@ -62,12 +62,18 @@ def is_bfsi(segment: str) -> bool:
     return any(k in seg for k in BFSI_KEYWORDS)
 
 
+# cc#1624: the platform's cap cuts, named once so a surface can print them instead of retyping
+# them (the app Sector page reads these through /api/mobile/sector/caps). Rs Cr market cap.
+CAP_LARGE_MIN = 20000
+CAP_MID_MIN = 5000
+
+
 def get_cap_category(market_cap: Optional[float]) -> str:
     if not market_cap:
         return "Unknown"
-    if market_cap >= 20000:
+    if market_cap >= CAP_LARGE_MIN:
         return "Large"
-    if market_cap >= 5000:
+    if market_cap >= CAP_MID_MIN:
         return "Mid"
     return "Small"
 

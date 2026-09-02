@@ -589,6 +589,20 @@ def mobile_sector_detail(request: Request, segment: str = "", absorbed: str = ""
             "day_basis": "last 5-min spot tick vs the close before that tick's session (rotation picks basis, cc#811)"}
 
 
+@router.get("/api/mobile/sector/caps")
+@_json_safe
+def mobile_sector_caps(request: Request):
+    """cc#1624: the cap cuts the app Sector page buckets sector average mcap with. Read from
+    investment_check (the same rule behind the GVM page's cap chip), never typed on the page."""
+    g = _guard(request)
+    if g:
+        return g
+    from investment_check import CAP_LARGE_MIN, CAP_MID_MIN
+    return {"large_min": CAP_LARGE_MIN, "mid_min": CAP_MID_MIN, "unit": "Rs Cr market cap",
+            "rule": "Large >= large_min, Mid >= mid_min, else Small; sector cap = total_mcap / stocks_count",
+            "source": "investment_check.get_cap_category"}
+
+
 @router.get("/m/holdings", response_class=HTMLResponse)
 def m_holdings():
     return _page("holdings")
