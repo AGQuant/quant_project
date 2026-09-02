@@ -237,59 +237,80 @@ def run_scan():
 
 
 def check_exits():
-    """Check every OPEN hold against the current futures LTP for target/SL touch.
+    """Close every OPEN hold whose target or SL was TOUCHED by a futures 5-min bar since entry.
 
     cc#1529 (P0): the SELECT used to add scan_date=CURRENT_DATE. scan_date is the ENTRY day,
     fixed at insert — so the moment the calendar rolled past it, the row was excluded from this
     check forever and could never close, however far price breached (founder report 31-Aug:
     zero multi-day closes ever; every historical TARGET/SL exit was same-day). Every OPEN row
-    is in scope now, whatever day it was entered; the LTP lookup below stays CURRENT_DATE
-    because a live check prices against today's tape by definition."""
-    now = _ist_now()
+    is in scope, whatever day it was entered.
+
+    cc#1599 (P1): the check used to read ONE price per symbol — the latest fyers_fut close at
+    poll time — and compare it to target / sl. A touch inside the 15-minute gap between polls,
+    or a high/low that reversed before the sampled bar closed, was never seen: on 02-Sep, 17 of
+    the pre-today OPEN rows had already hit their level on the tape (Fable, cc_task_logs 4523).
+    Now every fyers_fut 5m bar since entry_ts is examined on HIGH / LOW, in one query:
+      BUY : target hit when bar.high >= target ; SL hit when bar.low  <= sl
+      SELL: target hit when bar.low  <= target ; SL hit when bar.high >= sl
+    The earlier touch wins. Exit price = the touched LEVEL (target or sl, never the sampled
+    close), exit_ts = that bar's ts. A row whose target and SL are first touched in the SAME
+    5-min bar cannot be ordered from a bar — it is reported as ambiguous and left OPEN for a
+    ruling, never guessed. A row with no futures bars since entry has nothing to compare and
+    stays OPEN (this check never prices a futures hold off the cash series). Re-running is
+    idempotent: an already-closed row is not OPEN and is not selected."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            SELECT id, symbol, side, entry_price, target, sl FROM tc_scanner_holds
-            WHERE exit_reason='OPEN'
+            WITH o AS (
+                SELECT id, symbol, side, entry_ts, target, sl FROM tc_scanner_holds
+                WHERE exit_reason='OPEN'
+            )
+            SELECT o.id, o.symbol, o.side, o.target, o.sl,
+                   MIN(p.ts) FILTER (WHERE (o.side='BUY'  AND p.high >= o.target)
+                                        OR (o.side='SELL' AND p.low  <= o.target)) AS tgt_ts,
+                   MIN(p.ts) FILTER (WHERE (o.side='BUY'  AND p.low  <= o.sl)
+                                        OR (o.side='SELL' AND p.high >= o.sl))     AS sl_ts,
+                   COUNT(p.id) AS bars
+            FROM o
+            LEFT JOIN intraday_prices p
+                   ON p.symbol = o.symbol AND p.source = 'fyers_fut' AND p.timeframe = '5m'
+                  AND p.ts > o.entry_ts
+            GROUP BY o.id, o.symbol, o.side, o.target, o.sl
         """)
-        open_rows = cur.fetchall()
-        if not open_rows:
+        rows = cur.fetchall()
+        if not rows:
             return {"checked": 0, "closed": 0}
-        syms = list({r[1] for r in open_rows})
-        cur.execute("""
-            SELECT DISTINCT ON (symbol) symbol, close FROM intraday_prices
-            WHERE source='fyers_fut' AND ts::date=CURRENT_DATE AND symbol = ANY(%s)
-            ORDER BY symbol, ts DESC
-        """, (syms,))
-        ltp = {r[0]: float(r[1]) for r in cur.fetchall() if r[1] is not None}
-
-        closed = 0
-        for hid, sym, side, entry, target, sl in open_rows:
-            px = ltp.get(sym)
-            if px is None:
+        closed, ambiguous, no_bars = 0, [], []
+        for hid, sym, side, target, sl, tgt_ts, sl_ts, bars in rows:
+            if tgt_ts is None and sl_ts is None:
+                if not bars:
+                    no_bars.append(sym)
                 continue
-            hit = None
-            if side == "BUY":
-                if target is not None and px >= float(target):
-                    hit = "TARGET"
-                elif sl is not None and px <= float(sl):
-                    hit = "SL"
+            if tgt_ts is not None and sl_ts is not None and tgt_ts == sl_ts:
+                ambiguous.append({"id": hid, "symbol": sym, "side": side, "bar_ts": str(tgt_ts)})
+                continue
+            if sl_ts is None or (tgt_ts is not None and tgt_ts < sl_ts):
+                hit, px, ts = "TARGET", float(target), tgt_ts
             else:
-                if target is not None and px <= float(target):
-                    hit = "TARGET"
-                elif sl is not None and px >= float(sl):
-                    hit = "SL"
-            if hit:
-                cur.execute("""UPDATE tc_scanner_holds SET exit_price=%s, exit_ts=%s, exit_reason=%s
-                               WHERE id=%s""", (px, now.replace(tzinfo=None), hit, hid))
-                closed += 1
+                hit, px, ts = "SL", float(sl), sl_ts
+            cur.execute("""UPDATE tc_scanner_holds SET exit_price=%s, exit_ts=%s, exit_reason=%s
+                           WHERE id=%s AND exit_reason='OPEN'""", (px, ts, hit, hid))
+            closed += cur.rowcount
         conn.commit()
-    return {"checked": len(open_rows), "closed": closed}
+    out = {"checked": len(rows), "closed": closed,
+           "basis": "fyers_fut 5m bar high/low since entry; exit at the touched level, ts = bar ts (cc#1599)"}
+    if ambiguous:
+        # Named, never guessed: target and SL first touched in the same 5-min bar.
+        out["ambiguous_open"] = ambiguous
+    if no_bars:
+        out["no_bars_open"] = sorted(set(no_bars))
+    return out
 
 
 def eod_sweep():
-    """One final check at EOD against the last available price — catches a touch that
-    happened between 15-min polls. Positions still unresolved after this stay OPEN
-    (screener-only; no forced close, no paper engine)."""
+    """One final check at EOD. cc#1599: the same bar-based check_exits — every 5m bar of the
+    session is examined on high/low, so a touch between polls is closed at the touched level
+    with the bar's ts. Positions still unresolved after this stay OPEN (screener-only; no forced
+    close, no paper engine)."""
     res = check_exits()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
