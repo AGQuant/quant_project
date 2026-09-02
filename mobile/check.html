@@ -55,12 +55,13 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
 (function(){
 'use strict';
 var URLS = { tc:'/api/mobile/check/tc?symbol=', scan:'/api/mobile/check/scan?universe=',
+             scanStart:'/api/mobile/check/scan/start?universe=', scanProg:'/api/mobile/check/scan/progress?job=',
              invest:'/api/mobile/check/invest?symbol=', search:'/api/gvm/search?q=' };
 /* Modes are added to this list as each view lands (cc#1593 pushes P4 → P6 → P8); a mode not in
    the list has no view yet, so its button is not drawn and its deep link falls back to #tc. */
 var MODES = [ {key:'tc', label:'Trade Check'}, {key:'scan', label:'Run Scan'}, {key:'ic', label:'Invest Check'} ];
 var S = { mode:'tc', sym:'', tc:null, tcErr:null, bucket:null, busy:false,
-          scan:{ universe:'nifty50', data:null, err:null, busy:false, showFail:false },
+          scan:{ universe:'nifty50', data:null, err:null, busy:false, showFail:false, prog:null },
           ic:{ sym:'', data:null, err:null, busy:false } };
 
 function $(id){ return document.getElementById(id); }
@@ -307,27 +308,90 @@ function renderTCLanding(){
 var UNI = [ {key:'nifty50', label:'Nifty 50', btn:'50 STOCKS'}, {key:'futures', label:'All Futures', btn:'ALL FUTURES'} ];
 function scanBand(r){ return r.weighted ? (r.band || '—') : 'UNWEIGHTED'; }
 function scanCls(r){ if (!r.weighted) return 'u'; var b = bandCls(r.band); return b === 'pass' ? '' : (b === 'watch' ? 'w' : 'f'); }
+/* cc#1593 amendment (founder 02-Sep 20:40): on tap the RUN button collapses into a round fill.
+   The ring reads the scan's OWN progress row (/scan/start then /scan/progress every 500 ms) and
+   fills by scored / total; it is capped at 99% until the result is in, so it can never sit at
+   100% before the data. If the job path is not there (older build, another process) the one-call
+   scan runs and the ring paces to 90% over the median wall time seen this session (memory only,
+   no localStorage), then snaps to 100% on completion. On error the ring turns red with the message
+   and a Retry. The "Ran" line reads the real tap-to-table time. */
+var RING_C = 2 * Math.PI * 32;
+var SCAN_HIST = { nifty50:[], futures:[] };
+var SCAN_GUESS = { nifty50:2500, futures:10000 };
+function scanMedianMs(uni){ var a = (SCAN_HIST[uni] || []).slice().sort(function(x, y){ return x - y; }); return a.length ? a[Math.floor(a.length / 2)] : (SCAN_GUESS[uni] || 5000); }
+function ringCentre(p){ return p.total != null ? (p.scored || 0) + ' / ' + p.total : (p.err ? '!' : Math.round(clamp(Number(p.pct) || 0, 0, 100)) + '%'); }
+function ringSub(p){ return p.err ? p.err : (p.symbol ? 'scoring ' + p.symbol : ((p.pct || 0) >= 100 ? 'done' : 'starting…')); }
+function ringHtml(p){
+  p = p || {pct:0};
+  var pct = clamp(Number(p.pct) || 0, 0, 100), off = RING_C * (1 - pct / 100);
+  return '<div class="c-ringwrap' + (p.err ? ' err' : '') + '" id="scan-ring" style="gap:6px;padding:16px 0 6px">'
+    + '<svg class="c-ring" viewBox="0 0 72 72" aria-hidden="true"><circle class="trk" cx="36" cy="36" r="32"/>'
+    + '<circle class="arc" cx="36" cy="36" r="32" stroke-dasharray="' + RING_C.toFixed(2) + '" stroke-dashoffset="' + off.toFixed(2) + '"/>'
+    + '<text class="num" x="36" y="40" text-anchor="middle" style="font-size:12px">' + esc(ringCentre(p)) + '</text></svg>'
+    + '<div class="c-ringsub" style="font-size:10.5px;letter-spacing:.5px;min-height:14px;padding:0 12px">' + esc(ringSub(p)) + '</div>'
+    + (p.err ? '<div><button type="button" class="c-btn" data-act="scan">Retry</button></div>' : '') + '</div>';
+}
+function ringUpdate(p){
+  var el = $('scan-ring'); if (!el){ renderScan(); return; }
+  var pct = clamp(Number(p.pct) || 0, 0, 100);
+  el.querySelector('.arc').setAttribute('stroke-dashoffset', (RING_C * (1 - pct / 100)).toFixed(2));
+  el.querySelector('.num').textContent = ringCentre(p);
+  el.querySelector('.c-ringsub').textContent = ringSub(p);
+}
 function runScan(){
   var sc = S.scan; if (sc.busy) return;
-  sc.busy = true; sc.err = null; renderScan();
-  apiGet(URLS.scan + encodeURIComponent(sc.universe)).then(function(d){
-    sc.data = d; sc.busy = false; sc.showFail = false; renderScan();
-  }).catch(function(e){ sc.busy = false; sc.err = e.message || 'scan failed'; renderScan(); });
+  var uni = sc.universe, t0 = Date.now();
+  sc.busy = true; sc.err = null; sc.prog = {pct:0, scored:0, total:null, symbol:null}; renderScan();
+  function finish(d, ms){
+    sc.prog = {pct:100, scored:sc.prog.total, total:sc.prog.total, symbol:null}; ringUpdate(sc.prog);
+    SCAN_HIST[uni] = (SCAN_HIST[uni] || []).concat([ms]).slice(-12);
+    d.elapsed_wall_s = Math.round(ms / 100) / 10;
+    var el = $('scan-ring'); if (el) el.classList.add('out');
+    setTimeout(function(){ sc.data = d; sc.busy = false; sc.showFail = false; renderScan(); }, 380);
+  }
+  function fail(e){ sc.busy = false; sc.err = (e && e.message) || 'scan failed'; renderScan(); }
+  function viaJob(){
+    return apiGet(URLS.scanStart + encodeURIComponent(uni)).then(function(j){
+      if (!j || !j.job) throw new Error('no job');
+      return new Promise(function(res, rej){
+        function tick(){
+          if (!sc.busy) return;
+          if (Date.now() - t0 > 180000){ var te = new Error('scan timed out after 180 s'); te.fatal = true; return rej(te); }
+          fetchWithTimeout(URLS.scanProg + encodeURIComponent(j.job)).then(function(r){ return r.json(); }).then(function(p){
+            if (!p || p.error){
+              var pe = new Error((p && p.error) || 'no progress'); pe.fatal = !!(p && p.error && p.error !== 'unknown job'); return rej(pe);
+            }
+            if (p.total){ sc.prog = {pct: Math.min(99, 100 * (p.scored || 0) / p.total), scored:p.scored, total:p.total, symbol:p.symbol}; ringUpdate(sc.prog); }
+            if (p.done){ if (p.result) return res(p.result); var ne = new Error('scan returned no result'); ne.fatal = true; return rej(ne); }
+            setTimeout(tick, 500);
+          }).catch(rej);
+        }
+        setTimeout(tick, 500);
+      });
+    });
+  }
+  function viaOneCall(){
+    var med = scanMedianMs(uni);
+    var tm = setInterval(function(){ sc.prog.pct = Math.min(90, 90 * (Date.now() - t0) / med); sc.prog.symbol = null; ringUpdate(sc.prog); }, 100);
+    return apiGet(URLS.scan + encodeURIComponent(uni)).then(function(d){ clearInterval(tm); return d; }, function(e){ clearInterval(tm); throw e; });
+  }
+  viaJob().catch(function(e){ if (e && e.fatal) throw e; return viaOneCall(); })
+    .then(function(d){ finish(d, Date.now() - t0); }).catch(fail);
 }
 function renderScan(){
   var sc = S.scan, d = (sc.data && sc.data.universe === sc.universe) ? sc.data : null;
   var u = UNI.filter(function(x){ return x.key === sc.universe; })[0] || UNI[0];
   var count = d ? d.universe_count : null;
   var h = '<div class="c-row2"><div class="c-seg" id="scan-uni">' + UNI.map(function(x){ return '<button type="button" data-uni="' + x.key + '"' + (x.key === sc.universe ? ' class="on"' : '') + '>' + esc(x.label) + '</button>'; }).join('') + '</div></div>'
-    + '<button type="button" class="c-runbtn" id="scan-run"' + (sc.busy ? ' disabled' : '') + '>' + (sc.busy ? '… SCORING' : '▶ RUN TRADE CHECK') + ' · ' + (count != null ? count + ' STOCKS' : u.btn) + ' × 4</button>';
-  if (sc.busy) h += '<div class="c-prog">Scoring all four buckets on ' + esc(u.label) + '… a fresh run, about 2 seconds.</div>';
-  else if (sc.err) h += emptyBox('Scan failed', sc.err, 'scan');
+    + ((sc.busy || sc.err) ? '' : '<button type="button" class="c-runbtn" id="scan-run">▶ RUN TRADE CHECK · ' + (count != null ? count + ' STOCKS' : u.btn) + ' × 4</button>');
+  if (sc.busy) h += ringHtml(sc.prog);
+  else if (sc.err) h += ringHtml({pct:100, scored:(sc.prog || {}).scored, total:(sc.prog || {}).total, err:sc.err});
   else if (!d) h += '<div class="c-note">' + (sc.universe === 'nifty50' ? 'Nifty 50 here = the 50 biggest futures stocks by market cap.' : 'All Futures = every active symbol in the futures universe.') + ' Each stock is scored on all 4 buckets; the best one is shown. Tap RUN to score now.</div>';
   else {
     var rows = d.rows || [], counts = d.counts || {};
     var shown = rows.filter(function(r){ return sc.showFail || !(r.weighted && r.band === 'FAIL'); });
     var hidden = rows.length - shown.length;
-    h += '<div class="c-scanhd"><span>Ran ' + esc(hhmm(d.computed_at) || '—') + ' IST · ' + (d.scored || 0) + ' scored · ' + (d.runtime_s != null ? n1(d.runtime_s) + ' s' : '—') + '</span><span>best of 4 · /100 · live</span></div>';
+    h += '<div class="c-scanhd"><span>Ran ' + esc(hhmm(d.computed_at) || '—') + ' IST · ' + (d.scored || 0) + ' scored · ' + (d.elapsed_wall_s != null ? n1(d.elapsed_wall_s) + ' s' : (d.runtime_s != null ? n1(d.runtime_s) + ' s' : '—')) + '</span><span>best of 4 · /100 · live</span></div>';
     h += '<section class="slab" style="padding:8px 12px"><table class="c-tbl"><thead><tr><th>Symbol · best bucket</th><th>Score /100</th><th>Day %</th><th>GVM</th></tr></thead><tbody>'
       + (shown.length ? shown.map(function(r){
           var tagCls = String(r.best_label || '').indexOf('BUY') === 0 ? 'up' : 'dn';

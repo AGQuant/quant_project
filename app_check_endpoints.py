@@ -10,6 +10,9 @@ WHY THIS FILE EXISTS
 WHAT IT SERVES
     GET /api/mobile/check/tc?symbol=X        one symbol, all four cards, best of four, rules per card
     GET /api/mobile/check/scan?universe=     nifty50 | futures — a FRESH universe scan, best card per
+    GET /api/mobile/check/scan/start?universe=   the same scan as a background job: {job, poll}
+    GET /api/mobile/check/scan/progress?job=     {scored, total, symbol, done, error, elapsed_s, result}
+                                             (cc#1593 amendment: the page's round-fill ring reads this)
                                              symbol, Day % on the prev-close basis, GVM
     GET /api/mobile/check/invest?symbol=X    invest_check_v2 payload + CMP for the hero
 
@@ -28,6 +31,9 @@ HONESTY
 """
 
 import logging
+import threading
+import time
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Request
@@ -164,16 +170,10 @@ def _nifty50_symbols(cur):
     return [r[0] for r in cur.fetchall()]
 
 
-@router.get("/api/mobile/check/scan")
-@_json_safe
-def app_check_scan(request: Request, universe: str = "nifty50"):
-    g = _guard(request)
-    if g:
-        return g
-    uni = (universe or "nifty50").strip().lower()
-    if uni not in UNIVERSES:
-        return {"error": "universe must be nifty50 or futures"}
-    sc = get_primary_scan()("ALL", "ALL", None, 400)
+def _scan_payload(uni, progress=None):
+    """The whole scan for one universe, as the page renders it. `progress(scored, total, symbol)`
+    is forwarded to tc_v4_scan.scan (cc#1593 amendment) so a background job can expose a live row."""
+    sc = get_primary_scan()("ALL", "ALL", None, 400, progress=progress)
     if not isinstance(sc, dict) or sc.get("error"):
         return {"error": (sc or {}).get("error", "scan failed")}
     results = sc.get("results") or []
@@ -225,6 +225,114 @@ def app_check_scan(request: Request, universe: str = "nifty50"):
         "day_basis": "cmp_resolver prev-close basis (cc#1565)",
         "rows": rows,
     }
+
+
+@router.get("/api/mobile/check/scan")
+@_json_safe
+def app_check_scan(request: Request, universe: str = "nifty50"):
+    g = _guard(request)
+    if g:
+        return g
+    uni = (universe or "nifty50").strip().lower()
+    if uni not in UNIVERSES:
+        return {"error": "universe must be nifty50 or futures"}
+    return _scan_payload(uni)
+
+
+# ── cc#1593 amendment (founder 02-Sep 20:40): the scan as a background job with a progress row ──
+# The page taps RUN, gets a job id back at once, and polls /progress every 500 ms to fill a ring by
+# scored / total (the engine's own count, see tc_v4_scan.scan progress). The synchronous route above
+# is unchanged and is the page's fallback when the job path is not there. One process, in-memory:
+# a poll that lands on a process that does not know the job answers "unknown job" and the page falls
+# back to the one-call scan, so a second replica can only cost a slower ring, never a wrong number.
+_JOBS = {}
+_JOBS_LOCK = threading.Lock()
+_JOB_TTL_S = 600        # a finished job stays this long for a late poll, then is dropped
+_JOB_REUSE_S = 90       # a second tap inside this window joins the running job instead of starting another
+
+
+def _job_public(j, with_result=False):
+    out = {"job": j["id"], "universe": j["universe"], "scored": j["scored"], "total": j["total"],
+           "symbol": j["symbol"], "done": j["done"], "error": j["error"],
+           "elapsed_s": round((j["finished"] or time.time()) - j["started"], 2)}
+    if with_result and j["done"] and not j["error"]:
+        out["result"] = j["result"]
+    return out
+
+
+def _reap_jobs(now):
+    dead = [k for k, j in _JOBS.items() if j["done"] and (now - (j["finished"] or now)) > _JOB_TTL_S]
+    for k in dead:
+        _JOBS.pop(k, None)
+
+
+def _job_worker(job_id, runner=None):
+    j = _JOBS.get(job_id)
+    if not j:
+        return
+
+    def progress(i, n, sym):
+        j["scored"], j["total"], j["symbol"] = int(i), int(n), sym
+
+    try:
+        res = (runner or _scan_payload)(j["universe"], progress=progress)
+        if not isinstance(res, dict) or res.get("error"):
+            j["error"] = (res or {}).get("error", "scan failed") if isinstance(res, dict) else "scan failed"
+        else:
+            j["result"] = res
+    except Exception as e:
+        log.exception("check scan job %s failed", job_id)
+        j["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+    finally:
+        j["finished"] = time.time()
+        j["symbol"] = None
+        j["done"] = True
+
+
+def _start_job(uni, runner=None):
+    """Returns (job, fresh). A running job for the same universe younger than _JOB_REUSE_S is
+    joined rather than duplicated, so a double tap cannot run the engine twice."""
+    now = time.time()
+    with _JOBS_LOCK:
+        _reap_jobs(now)
+        for j in _JOBS.values():
+            if j["universe"] == uni and not j["done"] and now - j["started"] < _JOB_REUSE_S:
+                return j, False
+        job_id = uuid.uuid4().hex[:12]
+        j = {"id": job_id, "universe": uni, "scored": 0, "total": None, "symbol": None,
+             "done": False, "error": None, "result": None, "started": now, "finished": None}
+        _JOBS[job_id] = j
+    threading.Thread(target=_job_worker, args=(job_id, runner), daemon=True,
+                     name="ckscan-" + job_id).start()
+    return j, True
+
+
+@router.get("/api/mobile/check/scan/start")
+@_json_safe
+def app_check_scan_start(request: Request, universe: str = "nifty50"):
+    g = _guard(request)
+    if g:
+        return g
+    uni = (universe or "nifty50").strip().lower()
+    if uni not in UNIVERSES:
+        return {"error": "universe must be nifty50 or futures"}
+    j, fresh = _start_job(uni)
+    out = _job_public(j)
+    out["fresh"] = fresh
+    out["poll"] = "/api/mobile/check/scan/progress?job=" + j["id"]
+    return out
+
+
+@router.get("/api/mobile/check/scan/progress")
+@_json_safe
+def app_check_scan_progress(request: Request, job: str = ""):
+    g = _guard(request)
+    if g:
+        return g
+    j = _JOBS.get((job or "").strip())
+    if not j:
+        return {"error": "unknown job", "job": job}
+    return _job_public(j, with_result=True)
 
 
 # ── INVEST CHECK ───────────────────────────────────────────────────────────────────────────────

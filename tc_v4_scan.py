@@ -250,7 +250,7 @@ def _segment_day_map(cur):
         return {}
 
 
-def scan(side="ALL", verdict="ALL", segment=None, limit=250):
+def scan(side="ALL", verdict="ALL", segment=None, limit=250, progress=None):
     side = (side or "ALL").upper()
     verdict = (verdict or "ALL").upper()
     sides = ["BUY", "SELL"] if side == "ALL" else [side]
@@ -260,11 +260,26 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
         seg_day = _segment_day_map(cur)   # cc#455: mcap-weighted segment day% for the Sector Day% column
 
     results = []
-    for sym, d in D.items():
-        if not d.get("daily") or d.get("cmp") is None:
-            continue
-        if segment and (d.get("segment") or "") != segment:
-            continue
+    # cc#1593 (founder 20:40 amendment): the scan reports its own progress. `progress(scored, total,
+    # symbol)` is called before each symbol is scored and once more at the end with symbol=None, so
+    # a caller can draw a ring that fills from real work, never from a timer. The eligible list is
+    # fixed up front so `total` cannot move while the ring is filling. A failing callback is
+    # swallowed: progress is a window onto the scan, not a part of it.
+    todo = [(sym, d) for sym, d in D.items()
+            if d.get("daily") and d.get("cmp") is not None
+            and not (segment and (d.get("segment") or "") != segment)]
+    n_total = len(todo)
+
+    def _tick(i, sym):
+        if progress is None:
+            return
+        try:
+            progress(i, n_total, sym)
+        except Exception:
+            pass
+
+    for i, (sym, d) in enumerate(todo):
+        _tick(i, sym)
         # cc#677: ZERO-VETO — score every side/style; the verdict is score bands alone (no gate filter).
         cards = []
         for s in sides:
@@ -305,6 +320,7 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
             "failed_rules": failed,
             "v8_basket": ctx.get("v8_baskets", {}).get(sym, []),
         })
+    _tick(n_total, None)
     results.sort(key=lambda x: x["best_score"], reverse=True)
     # ── cc#1222 TC_SCANNER_GATED_CONFIG_V1.1 — MARK, DO NOT CUT (session_log 29448) ─────────────
     # OBSERVATION MODE: every row that was scored still ships. annotate() adds the bucket bar, the
