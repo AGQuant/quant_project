@@ -313,17 +313,16 @@ function icDetailText(det){
   if (!det || typeof det !== 'object') return '—';
   var parts = [];
   Object.keys(det).forEach(function(k){ var x = det[k]; if (x == null || k === 'checks' || k === 'gate' || k === 'note') return;
-    if (Array.isArray(x)) x = x.map(function(y){ return typeof y === 'number' ? num(y, 1) : String(y); }).join(' / ');
-    parts.push(keyName(k).toLowerCase() + ' ' + (typeof x === 'number' ? num(x, Math.abs(x) >= 100 ? 0 : 2) : (typeof x === 'boolean' ? (x ? 'yes' : 'no') : String(x)))); });
+    parts.push(keyName(k).toLowerCase() + ' ' + fmtVal(x)); });
   return parts.length ? parts.join(' · ') : '—';
 }
 /* the ONE line per component — until the per-key templates pass review (P10) it is the engine
    detail, unedited, plus the credit word */
-function icWhy(c){
+function icWhy(c, noWord){
   if (!c.computable) return 'Not scored: ' + esc(c.excluded_reason || 'no data') + '. Left out of the denominator, not scored zero.';
   var det = c.detail || {};
-  if (c.key === 'fundamentals' && det.checks) return '<b>' + det.passed + ' of ' + det.of + '</b> pass: ' + esc(det.checks.map(function(x){ return x.name + (x.pass === true ? ' ✓' : (x.pass === false ? ' ✗' : ' ?')); }).join(' · ')) + '. ' + esc(icCreditWord(c));
-  return '<b>' + esc(icDetailText(det)) + '</b>. ' + esc(icCreditWord(c));
+  if (c.key === 'fundamentals' && det.checks) return '<b>' + det.passed + ' of ' + det.of + '</b> pass: ' + esc(det.checks.map(function(x){ return x.name + (x.pass === true ? ' ✓' : (x.pass === false ? ' ✗' : ' ?')); }).join(' · ')) + '.' + (noWord ? '' : ' ' + esc(icCreditWord(c)));
+  return '<b>' + esc(icDetailText(det)) + '</b>.' + (noWord ? '' : ' ' + esc(icCreditWord(c)));
 }
 function icRead(d){
   var b = icBandInfo(d), s = Number(d.score10), out = '';
@@ -375,8 +374,29 @@ function renderIC(){
   h += '<div class="c-cover">Bar length = weight. Gold fill = credit earned. Weights from ' + esc(d.weight_source || 'ic_rule_weights') + ' · ' + esc(d.version || 'IC-V2') + '</div>';
   $('ic-main').innerHTML = h;
 }
+/* P10b: the component sheet — same container and field set as the rule sheet: key + label,
+   weight of total, credit earned, the detail dict as tiles (fundamentals lists its 5 checks),
+   the credit ladder lit by credit, the plain line, excluded_reason when excluded, source + as-of. */
+function compSheet(d, c){
+  var det = c.detail || {}, w = Number(c.weight) || 0, tot = Number(d.total_weight) || 100;
+  var cr = c.computable ? Number(c.credit) : null, got = cr == null ? null : w * cr;
+  var tier = cr == null ? 'na' : (cr >= 1 ? 'full' : (cr > 0 ? 'half' : 'none'));
+  var tiles = '';
+  Object.keys(det).forEach(function(k){ var x = det[k]; if (x == null || k === 'checks' || k === 'gate') return;
+    tiles += '<div' + (String(x).length > 22 ? ' class="wide"' : '') + '><div class="c-kk">' + esc(keyName(k)) + '</div><div class="c-kvv">' + esc(fmtVal(x)) + '</div></div>'; });
+  if (det.checks) tiles += '<div class="wide"><div class="c-kk">THE 5 CHECKS</div><div class="c-kvv">' + det.checks.map(function(x){
+      return '<span class="' + (x.pass === true ? 'up' : (x.pass === false ? 'dn' : 'mu')) + '">' + (x.pass === true ? '✓' : (x.pass === false ? '✗' : '?')) + '</span> ' + esc(x.name) + ' · ' + esc(fmtVal(x.value)) + ' vs ' + esc(fmtVal(x.vs)); }).join('<br>') + '</div></div>';
+  return '<div class="c-shd"><div class="c-t">' + esc(icName(c)) + '<small>' + esc(c.key) + ' · INVEST · WEIGHT ' + wfmt(w) + ' OF ' + num(tot, 0) + '</small></div>'
+    + '<div class="c-credit"><div class="c-n ' + (tier === 'full' ? 'up' : (tier === 'half' ? 'am' : (tier === 'none' ? 'dn' : 'mu'))) + '">' + (got == null ? '—' : wfmt(Math.round(got * 10) / 10)) + '</div><div class="c-l">OF ' + wfmt(w) + ' EARNED · credit ' + (cr == null ? '—' : wfmt(Math.round(cr * 100) / 100)) + '</div></div></div>'
+    + '<div class="c-kv"><div class="wide"><div class="c-kk">CHECK</div><div class="c-kvv">' + esc(c.label || c.key) + (det.gate ? ' · ' + esc(det.gate) : '') + '</div></div>'
+    + (c.computable ? '' : '<div class="wide"><div class="c-kk">EXCLUDED</div><div class="c-kvv no">' + esc(c.excluded_reason || 'no data') + '</div></div>') + tiles + '</div>'
+    + '<div class="c-ladder"><div class="' + (tier === 'full' ? 'on full' : '') + '"><b>FULL</b>credit 1</div><div class="' + (tier === 'half' ? 'on' : '') + '"><b>PART</b>credit between 0 and 1</div><div class="' + (tier === 'none' ? 'on none' : '') + '"><b>NONE</b>credit 0</div></div>'
+    + '<div class="c-swhy"><b>' + esc(icCreditWord(c)) + '</b> ' + icWhy(c, true) + '</div>'
+    + '<div class="c-sfoot"><span>source invest_check_v2 · ' + esc(d.weight_source || 'ic_rule_weights') + '</span><span>as of ' + esc((d.as_of && d.as_of.price_date) || '—') + '</span></div>';
+}
 $('ic-main').addEventListener('click', function(e){
   if (e.target.closest('[data-act="ic"]')){ loadIC(); return; }
+  var row = e.target.closest('[data-comp]'); if (row && S.ic.data){ var c = (S.ic.data.components || [])[Number(row.getAttribute('data-comp'))]; if (c) openSheet(compSheet(S.ic.data, c)); }
 });
 
 /* ── the detail sheet (R3, cc_task_logs 4495): FIELD PARITY with the web Check page rule card —
@@ -393,7 +413,7 @@ var KEYNAMES = { mom_2d:'2-DAY MOVE', mom2d:'2-DAY MOVE', week_return:'WEEK', wk
   dgvm180:'GVM Δ180D', dma_50:'50-DAY %', w52:'52W INDEX', gvm:'GVM', deliv_3d:'DELIV 3D %', deliv_base:'DELIV BASE %', days:'DAYS', d20:'20D %', d50:'50D %', d200:'200D %',
   strong:'STRONG PEERS', dir:'PEERS UP', n:'PEERS', ma9v21:'MA9 VS MA21 %', state:'STATE', entryday_credit:'ENTRY-DAY CREDIT', leg_today:'TODAY LEG', leg_1m:'MONTH LEG', range_ok:'RANGE OK', cash_na:'CASH', chip:'NOTE', no_data:'NO DATA', no_history:'NO HISTORY', m_180d:'M 180D AGO', delta_m_180d:'M Δ180D' };
 function keyName(k){ return KEYNAMES[k] || String(k).replace(/_/g, ' ').toUpperCase(); }
-function fmtVal(x){ if (x == null) return '—'; if (typeof x === 'boolean') return x ? 'yes' : 'no'; if (typeof x === 'number') return num(x, Math.abs(x) >= 100 ? 0 : 2); return String(x); }
+function fmtVal(x){ if (x == null) return '—'; if (typeof x === 'boolean') return x ? 'yes' : 'no'; if (typeof x === 'number') return num(x, (Number.isInteger(x) || Math.abs(x) >= 100) ? 0 : 2); if (Array.isArray(x)) return x.map(fmtVal).join(' / '); return String(x); }
 function ladderText(required){
   var s = String(required || ''), i = s.indexOf('(');
   var full = (i > 0 ? s.slice(0, i) : s).trim(), half = (i > 0 ? s.slice(i + 1).replace(/\)\s*$/, '') : '').trim();
