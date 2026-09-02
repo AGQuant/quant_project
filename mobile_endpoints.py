@@ -2275,6 +2275,13 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #gvp .g-ftbl tr:last-child td{border-bottom:0}
 #gvp .g-ftbl td.g-ttm{color:var(--gold)}
 #gvp .g-fbk{margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)}
+/* cc#1617: financial chart carousels (sizes are inline in gvm.html) */
+#gvp .g-car{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#gvp .g-car::-webkit-scrollbar{display:none}
+#gvp .g-cc{flex:0 0 100%;scroll-snap-align:start;min-width:0}
+#gvp .g-dots{display:flex;justify-content:center}
+#gvp .g-dot{background:var(--line);border-radius:50%}
+#gvp .g-dot.g-on{background:var(--gold)}
 #gvp .g-ffoot{margin-top:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim)}
 /* tape: pivot strip + entry checks (ref .pv/.checks) */
 #gvp .g-pv{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:10px}
