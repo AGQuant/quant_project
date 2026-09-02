@@ -1,98 +1,105 @@
 <!doctype html>
-<!-- ══ DESIGN AUTHORITY = previews/gvm.html — do not restyle without a founder card ══════════
-     (cc#978 item 3.) That file is the immutable design record, viewable at /preview/gvm. Any
-     change to the report card's shape, accents, hierarchy or type scale needs a card that names
-     it. Shared-module constraints still apply on top: scorr_mobile_cards.js roles and the card
-     grammar in session_log 16157.
+<!-- ══ mobile/gvm.html — the app GVM company page (cc#1591, APP_GVM_PAGE_V2, session_log 36513) ══
+     DESIGN AUTHORITY = design_refs/scorr_mobile_gvm_R3.html (R3 on R2 on R1; cc_task_logs 4470,
+     4473, 4475). Bind field for field to GET /api/gvm/company/{symbol}; nothing is computed
+     here that the API already carries. Routes: /m/gvm (search landing) and
+     /m/gvm?sym=SYMBOL[#growth|value|momentum|peers|results|financials|holders|tape].
 
-     WHERE THE FINISH ACTUALLY LIVES, so the next person does not look for it here: cc#897 folded
-     this page's 12 CSS blocks into the shared sheet (mobile_app.css, served at
-     /static/mobile_app.css). The report card's tokens — .rep, .verd, .bar, .fill, .pil, .pr,
-     .punch, .acts — are defined THERE, not in this file. previews/gvm.html is standalone and
-     carries its own copy of the whole app shell inline, so a token-for-token diff against it will
-     look like total divergence when the two are in fact identical. Compare against the shared
-     sheet, not against the preview's inline <style>.
-
-     cc#978 DIFF RESULT (09-Aug, measured, no restyle applied): every shared token matches the
-     preview exactly — .rep background/border/radius/padding, the 3px accent rail, .verd, the
-     pillar bars, .punch. The three differences are deliberate improvements, not drift:
-       .a       min-height 40px -> 44px   (touch minimum, framework 15913)
-       .verd/.fill  var(--grn) -> var(--rc, var(--grn))   (tint by score band)
-       .sc      dropped its hardcoded green; the leaderboard tints per row by score
-     Plus .gvmv (the 36px score headline) and .src, which the preview never had at all. -->
+     STYLE SCOPE: every rule lives under #gvp and every inner class is page-local (g-… names),
+     because the shared sheets this page loads (mobile_app.css, scorr_theme_r5.css,
+     theme_mobile.css, mobile.css) declare bare short selectors (.v .c .g .m .k .s .l .bar .row
+     .word .tag …) that would restyle a ref class with the same name. Shell classes the ref shares
+     with the app (.pressed .slab .well-up .well .sect .seg .tag .chip .mono) are used as-is.
+     Bottom nav markup is the app's own and is not touched (card do_not_touch). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>GVM · Scorr</title>
+<title>GVM</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <style>
-/* ══ APP_QA_R5 P7 · /m/gvm MIGRATION ═══════════════════════════════════════════════════════
-   Refs: scorr_sprint2_goldnight_R1 @ cd75e2c (scale) + scorr_appshell_R1 @ a20ae0d (shell).
-
-   THE .screen SCOPE ISSUE IS PRESENT HERE — checked first, as P7 asks. This page renders inside
-   <div class="screen">, and mobile_app.css declares the palette on `.screen,.bnav`, so tokens set
-   on body are shadowed for everything inside it. Same bridge as home P2, same reason; without it
-   the goldnight default below would repaint the header strip and nothing else.
-
-   NO LEGACY PALETTE HEX TO REMOVE: grepped before touching anything — this page carries zero
-   hardcoded colours (cc#897 folded its CSS into the shared sheet). The only #-matches in the file
-   are card references like cc#913, not colours. So P7's "zero legacy hex in the migrated
-   sections" verify is satisfied by the page as it already stood, not by edits here. */
-body[data-theme]{
-  --t-field:var(--field); --t-panel:var(--panel); --t-hi:var(--hi); --t-edge:var(--edge);
-  --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
-  --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
+/* tokens: GOLD NIGHT with page-local fallbacks (theme sheets win when present) */
+#gvp{
+  --field:var(--field,#0A0A0C); --panel:var(--panel,#17171B); --well:var(--well,#131316); --sunk:var(--sunk,#0C0C0F);
+  --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
+  --gold:var(--gold,#D4AF37); --gold-lo:var(--gold-lo,#7A6320); --gold-hi:var(--gold-hi,#F0D070); --gold-d:rgba(212,175,55,.12);
+  --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45; --aqua:#35E0FF;
+  --up-d:rgba(47,212,139,.14); --down-d:rgba(255,92,108,.14); --amber-d:rgba(255,159,69,.14);
+  --display:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;
+  --body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
+  color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45;
+  max-width:430px;margin:0 auto;padding:0 12px 150px;
 }
-.screen,.bnav{
-  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
-  --line:var(--t-edge); --line2:var(--t-edge);
-  --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
-  --grn:var(--t-win); --red:var(--t-loss);
-  --blu:var(--t-accent); --cyan:var(--t-brand);
-}
-/* raised scale, goldnight ref — 9.5px floor, page-scoped so no other screen shifts */
-.g-lrow .rs{font-size:var(--type-13)}
-.g-lrow .rg{font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px12)}
-.g-lrow{min-height:48px}
-.punch{font-size:var(--type-125)}
-.verd{font-size:var(--type-12)}
-.src{font-size:var(--type-95)}
-.bnav .bn{font-size:var(--type-11)}
-.bnav .bn .i{font-size:var(--type-16)}
-.bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+#gvp *{box-sizing:border-box}
+#gvp .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+#gvp .up{color:var(--up)} #gvp .dn{color:var(--down)} #gvp .mu{color:var(--mute)} #gvp .gd{color:var(--gold)} #gvp .am{color:var(--amber)}
+/* search */
+#gvp .g-search{position:relative;margin:12px 0 14px}
+#gvp .g-sbox{display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--well);border:1px solid var(--line);border-radius:12px;box-shadow:inset 0 2px 6px rgba(0,0,0,.7)}
+#gvp .g-sbox .g-ic{color:var(--gold);font-size:15px}
+#gvp .g-sbox input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--chalk);font-family:var(--mono);font-size:14px;min-height:24px;padding:0}
+#gvp .g-sbox input::placeholder{color:var(--dim)}
+#gvp .g-sbox .g-k{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--line);padding:2px 6px;white-space:nowrap}
+#gvp .g-drop{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.6);overflow:hidden}
+#gvp .g-drop[hidden]{display:none}
+#gvp .g-drow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+#gvp .g-drow:last-child{border-bottom:0}
+#gvp .g-drow:active{background:var(--gold-d)}
+#gvp .g-drow .g-ds{font-weight:800;font-size:14px}
+#gvp .g-drow .g-dn{grid-column:1;font-size:11.5px;color:var(--mute)}
+#gvp .g-drow .g-dg{grid-column:2;grid-row:1 / span 2;font-family:var(--mono);font-weight:800;font-size:15px;align-self:center;text-align:right}
+#gvp .g-drow .g-dg small{display:block;font-size:9.5px;font-weight:700;letter-spacing:.5px;color:var(--mute)}
+/* shells (ref) */
+#gvp .pressed{background:var(--sunk);border:1px solid #000;border-radius:12px;padding:16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
+#gvp .slab{background:var(--panel);border:1.5px solid var(--line);border-radius:13px;padding:14px 15px;box-shadow:0 5px 0 0 var(--gold-lo),0 5px 0 1.5px var(--line)}
+#gvp .well-up{background:var(--well);border-radius:7px;box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000}
+#gvp .well{background:var(--sunk);border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 0 0 #000}
+#gvp .tag{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;border-radius:0;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+#gvp .tag.gd{background:var(--gold-d);color:var(--gold)} #gvp .tag.up{background:var(--up-d);color:var(--up)} #gvp .tag.dn{background:var(--down-d);color:var(--down)} #gvp .tag.am{background:var(--amber-d);color:var(--amber)} #gvp .tag.mu{background:var(--well);color:var(--mute);border:1px solid var(--line)}
+#gvp .sect{display:flex;align-items:center;gap:10px;margin:22px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center;scroll-margin-top:12px}
+#gvp .sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
+#gvp .sect .g-r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;text-transform:none;transform:skewX(6deg);white-space:nowrap}
+/* landing list (no symbol yet) */
+#gvp .g-row{display:grid;grid-template-columns:22px 1fr auto;gap:4px 10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer}
+#gvp .g-row:last-child{border-bottom:0}
+#gvp .g-row .g-rk{font-family:var(--mono);color:var(--dim);font-size:11px}
+#gvp .g-row .g-sy{font-weight:800;font-size:14px}
+#gvp .g-row .g-nm{grid-column:2;font-size:11px;color:var(--mute);margin-top:-2px}
+#gvp .g-row .g-sc{grid-column:3;grid-row:1 / span 2;font-family:var(--mono);font-weight:800;font-size:16px;text-align:right}
+#gvp .g-row .g-sc small{display:block;font-size:9.5px;letter-spacing:.5px;font-weight:700;color:var(--mute)}
+/* compact company head (the P3 hero replaces this block) */
+#gvp .g-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+#gvp .g-head .g-sym{font-family:var(--display);font-size:26px;letter-spacing:-.3px;line-height:1}
+#gvp .g-head .g-nm{color:var(--mute);font-size:12.5px;margin-top:4px}
+#gvp .g-head .g-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+#gvp .g-head .g-px{text-align:right}
+#gvp .g-head .g-px .g-v{font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:-.3px}
+#gvp .g-head .g-px .g-s{font-family:var(--mono);font-size:10px;color:var(--mute);white-space:nowrap}
+#gvp .g-score{display:flex;gap:14px;align-items:baseline;margin-top:12px;font-family:var(--mono)}
+#gvp .g-score b{font-size:34px;font-weight:800;color:var(--gold);letter-spacing:-1px}
+#gvp .g-score span{font-size:11px;color:var(--mute);letter-spacing:1px}
+/* states */
+#gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
+#gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+#gvp .g-asof{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;text-align:right}
+#gvp .g-foot{text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:18px}
+/* active bottom-nav slot takes the ref's gold (markup untouched) */
+.bnav .bn.on{color:var(--gold,#D4AF37);text-shadow:0 0 10px rgba(212,175,55,.35)}
+@media (prefers-reduced-motion:reduce){#gvp *{transition:none !important}}
 </style>
-<script src="/scorr_card_common.js"></script>
 </head>
-<body data-theme="goldnight">
-<!-- APP_QA_R5 P7: goldnight forced before first paint; stored key read and KEPT, same as P1. -->
-<script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
-     applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
-     White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
-document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');})();</script>
-<div class="screen">
-  <!-- APP_QA_R5 P7 · SHELL VARIANT B. The 5-slot nav with GVM lit was ALREADY here, so the only
-       missing shell element was appshell rule 1: the wordmark, first, at a 44px target, tapping
-       to /m/home. #sub keeps its id — the loader writes the rail into it. -->
-  <div class="head" style="display:flex;align-items:center;gap:12px">
-    <a href="/m/home" aria-label="Scorr home" style="min-width:44px;min-height:44px;display:flex;
-       align-items:center;text-decoration:none;color:var(--txt);font-weight:800;font-size:17px;
-       letter-spacing:-.4px">SC<span style="color:var(--grn)">O</span>RR</a>
-    <div style="flex:1;min-width:0">
-      <h1>GVM</h1>
-      <div class="s" id="sub">Growth · Value · Momentum · scored nightly 22:00</div>
-    </div>
+<body>
+<div id="gvp">
+  <div class="g-search">
+    <div class="g-sbox"><span class="g-ic">◈</span><input id="g-q" type="search" placeholder="Search a company" autocomplete="off" autocapitalize="characters" aria-label="Search a company"><span class="g-k">ANY STOCK</span></div>
+    <div class="g-drop" id="g-drop" hidden></div>
   </div>
-  <div class="search">
-    <span class="ic">&#9906;</span>
-    <input id="q" type="search" placeholder="Search any stock — RELIANCE, TCS, LODHA…" autocomplete="off">
-  </div>
-  <div class="body" id="body"><div class="loading">Loading scores…</div></div>
+  <div id="g-main"><div class="g-empty">Loading…</div></div>
+  <div class="g-foot" id="g-foot"></div>
 </div>
-
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn on" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -100,382 +107,111 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
-
+<script src="/scorr_card_common.js"></script>
 <script>
-var STATE = { results: [], sel: 0, frOpen: false, fr: null, frSym: null,
-              sectors: null, secOpen: false, secAll: false };
-
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function n1(v){ return (v == null || isNaN(Number(v))) ? '--' : Number(v).toFixed(1); }
-/* cc#913 — fmt() USED TO PRINT "[object Object]". String({hi,lo}) is "[object Object]", which is
-   15 characters, so it passed the <=28 length test and was rendered as a value. Every nested
-   object in the payload printed that literal string on the founder's screen: extras.pivot,
-   extras.range52, extras.percentile, extras.earnings, extras.volume, extras.delivery,
-   extras.segment_ctx, extras.tier1 — the whole MARKET CONTEXT section. Objects are now REFUSED
-   here and unpacked by deepRows() instead, which is where they belong. */
-function fmt(v){
-  if (v == null) return '--';
-  if (typeof v === 'number') return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en-IN') : (Math.round(v*100)/100).toString();
-  if (typeof v === 'object') return null;
-  var s = String(v); return s.length <= 28 ? s : null;
-}
-function px(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v); return '₹' + (x < 100 ? x.toFixed(1) : Math.round(x).toLocaleString('en-IN'));
-}
-function scoreCol(g){
-  if (g == null) return 'var(--dim)';
-  return g >= 7.5 ? 'var(--grn)' : (g >= 5 ? 'var(--amber)' : 'var(--red)');
-}
-function railHtml(r){
-  if (!r) return '';
-  var s = (r.state || 'CLOSED').toLowerCase();
-  return '<span class="rail rail-' + s + '" title="' + esc(r.why || '') + '"><i></i>' + esc(r.state) + '</span>';
-}
-function pillarRow(k, v){
-  var w = (v == null) ? 0 : Math.max(0, Math.min(100, Number(v) * 10));
-  return '<div class="pr"><span class="pk">' + k + '</span>'
-    + '<div class="bar"><div class="fill" style="width:' + w + '%"></div></div>'
-    + '<span class="pv">' + n1(v) + '</span></div>';
-}
-
-/* ── section renderers ─────────────────────────────────────────────────────── */
-function kvRows(obj){
-  var out = '';
-  Object.keys(obj).forEach(function(k){
-    var s = fmt(obj[k]);
-    if (s == null || obj[k] == null) return;
-    out += '<div class="frr"><span class="k2">' + esc(k.replace(/_/g,' ')) + '</span>'
-         + '<span class="v2">' + esc(s) + '</span></div>';
-  });
-  return out;
-}
-/* cc#913 — the payload is two levels deep and only the first was ever shown. extras alone holds
-   pivot, range52, percentile, earnings, volume, delivery, segment_ctx and tier1, each an object
-   of real numbers, and all of them were collapsing to "[object Object]". deepRows walks ONE
-   level in: scalars render as rows, a nested object renders under its own sub-heading, a list of
-   objects renders as a table, a list of scalars is joined. Depth stops at one — deeper than that
-   is a data browser, not a company view. */
-function deepRows(obj){
-  var flat = '', nested = '';
-  Object.keys(obj).forEach(function(k){
-    var v = obj[k];
-    if (v == null) return;
-    var label = esc(k.replace(/_/g,' '));
-    if (Array.isArray(v)){
-      if (!v.length) return;
-      if (typeof v[0] === 'object' && v[0] !== null){
-        var t = arrTable(v);
-        if (t) nested += '<div class="frs">' + label + '</div>' + t;
-      } else {
-        flat += '<div class="frr"><span class="k2">' + label + '</span>'
-              + '<span class="v2">' + esc(v.slice(0, 8).join(', ')) + '</span></div>';
-      }
-      return;
-    }
-    if (typeof v === 'object'){
-      var inner = kvRows(v);
-      if (inner) nested += '<div class="frs">' + label + '</div>' + inner;
-      return;
-    }
-    var sc = fmt(v);
-    if (sc != null) flat += '<div class="frr"><span class="k2">' + label + '</span>'
-                          + '<span class="v2">' + esc(sc) + '</span></div>';
-  });
-  return flat + nested;   // scalars first, then the sub-blocks
-}
-function arrTable(list){
-  if (!list.length || typeof list[0] !== 'object') return '';
-  var keys = Object.keys(list[0]).filter(function(k){
-    return list.some(function(r){ return r[k] != null && typeof r[k] !== 'object'; });
-  }).slice(0, 5);
-  if (!keys.length) return '';
-  var h = '<table class="tbl"><tr>' + keys.map(function(k){
-    return '<th>' + esc(k.replace(/_/g,' ')) + '</th>'; }).join('') + '</tr>';
-  list.slice(0, 12).forEach(function(r){
-    h += '<tr>' + keys.map(function(k){
-      var s = fmt(r[k]); return '<td>' + (s == null ? '--' : esc(s)) + '</td>'; }).join('') + '</tr>';
-  });
-  return h + '</table>' + (list.length > 12 ? '<div class="frr"><span class="k2">and ' + (list.length - 12) + ' more rows</span></div>' : '');
-}
-function sparkline(pts){
-  var vals = pts.map(function(p){
-    return typeof p === 'number' ? p : (p.gvm_score != null ? p.gvm_score : (p.score != null ? p.score : p.gvm));
-  }).filter(function(v){ return v != null && !isNaN(Number(v)); }).map(Number);
-  if (vals.length < 2) return '';
-  var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
-  var rng = (max - min) || 1;
-  var W = 300, H = 40;
-  var d = vals.map(function(v, i){
-    return (i * (W / (vals.length - 1))).toFixed(1) + ',' + (H - 4 - ((v - min) / rng) * (H - 8)).toFixed(1);
-  }).join(' ');
-  return '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">'
-    + '<polyline points="' + d + '" fill="none" stroke="var(--blu)" stroke-width="2"/></svg>'
-    + '<div class="frr"><span class="k2">range</span><span class="v2">' + n1(min) + ' \u2192 ' + n1(max) + '</span></div>';
-}
-function section(title, inner){
-  return inner ? '<div class="frh">' + esc(title) + '</div>' + inner : '';
-}
-/* cc#895 — the section order and titles, CHECKED AGAINST THE REAL /api/gvm/company PAYLOAD.
-   The previous KNOWN list was guessed from the web page's visual sections: of its twenty names
-   only 'financials' actually exists in the response, so the ordering did nothing and every
-   section fell through to the generic pass with a machine title (PILLAR COVERAGE, OPERATIONAL
-   METRICS). These are the real keys, in the web's order, with the web's human titles. */
-var KNOWN = ['scores','benchmark','pillar_coverage','positives','negatives','ladder',
-  'content','financials','extras'];
-var TITLES = {
-  scores:          'GVM SCORES',
-  benchmark:       'PEER BENCHMARKING',
-  pillar_coverage: 'PILLAR COVERAGE',
-  positives:       "WHAT'S WORKING",
-  negatives:       "WHAT'S NOT",
-  ladder:          'SEGMENT LADDER',
-  content:         'ANALYSIS',
-  financials:      'FINANCIALS',
-  extras:          'MARKET CONTEXT'
-};
-/* NEVER rendered. operational_metrics is INTERNAL ONLY (OPS_METRICS_INTERNAL_ONLY, session_log
-   13348) and the generic "render every object key" pass was leaking it onto a retail screen.
-   The rest are plumbing flags that mean nothing to a founder reading a company view. */
-var HIDE = { operational_metrics: 1, persisted: 1, persist_error: 1, degraded: 1,
-             in_scrape_universe: 1, price_is_live: 1, is_bfsi: 1, generated_at: 1,
-             symbol: 1, score_date: 1 };
-function frBlock(){
-  var f = STATE.fr;
-  if (f === 'loading') return '<div class="fr"><div class="loading" style="padding:4px">Loading company view…</div></div>';
-  if (!f) return '';
-  var d = f.company || {};
-  if (d.error) return '<div class="fr"><div class="empty" style="padding:8px"><b>Report unavailable</b>' + esc(d.error) + '</div></div>';
-  var out = '';
-  /* 1 · overview scalars */
-  var over = {};
-  Object.keys(d).forEach(function(k){
-    if (d[k] != null && typeof d[k] !== 'object' && !HIDE[k]) over[k] = d[k];
-  });
-  out += section('SNAPSHOT', kvRows(over));
-  /* 2 · score trend */
-  if (f.trend && f.trend.length) out += section('GVM TREND', sparkline(f.trend));
-  /* 3 · payload sections, known order first, everything else after — nothing dropped */
-  var done = {};
-  function renderKey(k){
-    var v = d[k];
-    if (v == null || typeof v !== 'object' || done[k] || HIDE[k]) return '';
-    done[k] = 1;
-    var inner = Array.isArray(v) ? arrTable(v) : deepRows(v);
-    return section(TITLES[k] || k.replace(/_/g,' ').toUpperCase(), inner);
-  }
-  KNOWN.forEach(function(k){ out += renderKey(k); });
-  Object.keys(d).forEach(function(k){ out += renderKey(k); });
-  /* 4 · fib / pivot levels */
-  if (f.fib && !f.fib.error){
-    var inner = Array.isArray(f.fib) ? arrTable(f.fib)
-      : (typeof f.fib === 'object' ? kvRows(f.fib) : '');
-    out += section('FIB & PIVOT LEVELS', inner);
-  }
-  /* 5 · company news */
-  if (f.news && f.news.length){
-    out += section('COMPANY NEWS', f.news.slice(0, 4).map(function(n){
-      var hl = n.headline || n.title || '';
-      var w = n.when || n.display_time || n.published_time || '';
-      return hl ? '<div class="nrow">' + esc(hl) + '<div class="w">' + esc(String(w)) + '</div></div>' : '';
-    }).join(''));
-  }
-  /* 6 · sector brief */
-  if (f.brief){
-    /* Field by field with the web's own labels. esc() on the object would have printed
-       "[object Object]" — the fields are what carry the meaning. */
-    var BF = [['what_is_it','What it is'], ['business_model','Business model'],
-              ['growth_drivers','Growth drivers'], ['application_type','Applications'],
-              ['key_risks','Key risks']];
-    var bh = BF.map(function(x){
-      var v = f.brief[x[0]];
-      return v ? '<div class="frh">' + esc(x[1]) + '</div><div class="prose">'
-               + esc(String(v).slice(0, 900)) + '</div>' : '';
-    }).join('');
-    out += section('SECTOR BRIEF', bh);
-  }
-  return '<div class="fr">' + (out || '<div class="empty" style="padding:8px"><b>Nothing to show</b></div>') + '</div>';
-}
-/* cc#1070: the strip sits under the actions row, full width, evenly spaced. Only layout is set
-   here — the buttons' own look comes from scorr_card_strip.js so the mobile and web strips cannot
-   drift apart. */
-function repCard(x){
-  var col = scoreCol(x.gvm);
-  /* cc#1090 P3: the report card TAKES THE SHELL. This is the densest surface in the app and the
-     card names it as the hardest test of whether the ledge crowds the score — so the ledge lands
-     here rather than on something quieter. --rc stays exactly as it was: the 3px verdict rail and
-     the score colour are the money/score language, and the shell is depth only. */
-  return '<div class="rep slab" style="--rc:' + col + '">'
-    + '<div class="r1"><span class="rsym">' + esc(x.symbol) + '</span>'
-    + '<span class="rseg">' + esc(x.segment || '') + '</span>'
-    + '<span class="rpx">' + px(x.price) + '</span></div>'
-    + '<div class="big"><span class="gvmv">' + n1(x.gvm) + '<span class="of">/10</span></span>'
-    + (x.verdict ? '<span class="verd">' + esc(String(x.verdict).toUpperCase()) + '</span>' : '')
-    + '</div>'
-    + '<div class="pil">'
-    + pillarRow('GROWTH', x.g) + pillarRow('VALUE', x.v) + pillarRow('MOMENTUM', x.m)
-    + '</div>'
-    + (x.punchline
-        ? '<div class="punch"><b>What the score says:</b> ' + esc(x.punchline) + '</div>' : '')
-    + '<div class="acts">'
-    + '<button class="a" onclick="toggleFR(\'' + esc(x.symbol) + '\')">'
-    + (STATE.frOpen ? 'Hide company view \u25b4' : 'Company view \u25be') + '</button>'
-    + '<a class="a" href="/m/check">Run Trade Check</a></div>'
-    /* cc#1070 · C·A·R·D — the REAL strip, not a lookalike. scorr_card_strip.js is the single
-       source (cc#789) and its own header says never to re-implement it, so this CONSUMES
-       window.ScorrCardStripHtml: the markup, the availability gating (D futures-only, R only when
-       a result exists) and the ScorrCardNav dispatch all come from that one file. The letters mean
-       what they mean everywhere else on the platform — C Chart, A Analysis, R Result, D Cockpit —
-       and each opens the same in-page modal the web dashboard opens.
-       THE SYMBOL COMES FROM PAGE STATE, x.symbol, the record this very function is rendering. The
-       enhancer stub it replaces scraped the largest all-caps DOM leaf >=20px to guess it, which is
-       exactly what the card forbids and would mis-target the moment a heading changed size.
-       Guarded: if the shared file did not load, the strip is simply absent — never a dead button. */
-    + (window.ScorrCardStripHtml ? '<div class="cardstrip">'
-        + window.ScorrCardStripHtml(x.symbol, '') + '</div>' : '')
-    + '<div class="src">Rank ' + (x.rank == null ? '--' : esc(x.rank))
-    + (x.as_of ? ' · scored ' + esc(x.as_of) : '') + '</div>'
-    + '</div>'
-    + (STATE.frOpen ? frBlock() : '');
-}
-function toggleFR(sym){
-  if (STATE.frOpen && STATE.frSym === sym){ STATE.frOpen = false; render(); return; }
-  STATE.frOpen = true; STATE.frSym = sym; STATE.fr = 'loading'; render();
-  var seg = (STATE.results[STATE.sel] || {}).segment || '';
-  Promise.all([
-    fetchWithTimeout('/api/gvm/company/' + encodeURIComponent(sym)).then(function(r){ return r.json(); }).catch(function(e){ return {error: e.message}; }),
-    fetchWithTimeout('/api/gvm/trend/' + encodeURIComponent(sym)).then(function(r){ return r.json(); }).catch(function(){ return null; }),
-    fetchWithTimeout('/api/news/company/' + encodeURIComponent(sym)).then(function(r){ return r.json(); }).catch(function(){ return null; }),
-    fetchWithTimeout('/api/trade-check/fibcheck?symbol=' + encodeURIComponent(sym)).then(function(r){ return r.json(); }).catch(function(){ return null; }),
-    seg ? fetchWithTimeout('/api/sector/brief?segment=' + encodeURIComponent(seg)).then(function(r){ return r.json(); }).catch(function(){ return null; }) : Promise.resolve(null)
-  ]).then(function(res){
-    /* cc#895: /api/gvm/trend returns {symbol, range, gvm:[{d,gvm,g,v,m}], price:[...]}. The
-       guessed keys trend/history/series exist nowhere, so this was ALWAYS null and the sparkline
-       never drew once. sparkline() already reads p.gvm, so the array key was the whole bug. */
-    var trend = res[1]; trend = trend && (trend.gvm || (Array.isArray(trend) ? trend : null));
-    var news = res[2]; news = news && (news.articles || news.items || news.results || (Array.isArray(news) ? news : null));
-    /* cc#895: /api/sector/brief returns an OBJECT — {segment, what_is_it, growth_drivers,
-       application_type, business_model, key_risks, generated_at, cached, constituents}. The
-       guessed keys brief/text/summary exist nowhere, so the chain yielded null and the SECTOR
-       BRIEF section silently never appeared. Kept whole and rendered field by field below. */
-    var brief = res[4] && !res[4].error ? res[4] : null;
-    STATE.fr = { company: res[0] || {}, trend: trend || [], news: news || [], fib: res[3], brief: brief };
-    render();
-  });
-}
-/* ══ cc#913: SECTOR RATINGS ═════════════════════════════════════════════════════════════════
-   The one old-app GVM surface with NO counterpart on the rebuilt screen. sector_ratings holds
-   130 rows scored the same night as the stocks (verified: 130 segments, mcap-weighted GVM 4.80
-   to 7.29), and /api/sectors with no segment argument is the web's own read of it — reused
-   exactly, so the app and the web cannot disagree about a sector score (DISPLAY_PARITY 16202).
-   Ranked by MCAP-WEIGHTED GVM, which is the column the web orders by; the simple average is
-   shown beside it because the two differ and a reader should see both rather than be handed one
-   and told it is "the" sector score. Top stock per sector is the row's own top_stock. */
-function secRow(x, i){
-  var mw = x.mcap_weighted_gvm, av = x.avg_gvm;
-  return '<div class="g-lrow">'
-    + '<span class="rk">' + (i + 1) + '</span>'
-    + '<div><div class="rs">' + esc(x.segment || '--') + '</div>'
-    + '<div class="rg">' + (x.stock_count == null ? '' : esc(x.stock_count) + ' stocks')
-    + (x.top_stock ? ' · top <b class="rsym">' + esc(x.top_stock) + '</b>' : '')
-    + (x.verdict ? ' · ' + esc(x.verdict) : '') + '</div></div>'
-    + '<span class="sc" style="color:' + scoreCol(mw) + '">' + n1(mw) + '</span>'
-    + '<span class="rg" style="min-width:34px;text-align:right">' + n1(av) + '</span>'
-    + '</div>';
-}
-function secBlock(){
-  if (STATE.sectors === 'loading') return '<div class="loading" style="padding:6px 2px">Loading sector ratings…</div>';
-  var rows = STATE.sectors;
-  if (!rows) return '';
-  if (rows.error || !rows.length)
-    return '<div class="sum" style="padding:6px 2px">Sector ratings unavailable.</div>';
-  var shown = STATE.secAll ? rows : rows.slice(0, 12);
-  return '<div class="frr"><span class="k2">sector</span>'
-    + '<span class="v2">mcap-wtd · simple</span></div>'
-    + shown.map(secRow).join('')
-    + (rows.length > shown.length
-        ? '<button class="chip" onclick="secMore()">Show all ' + rows.length + ' sectors</button>'
-        : '');
-}
-function secMore(){ STATE.secAll = true; render(); }
-function toggleSec(){
-  STATE.secOpen = !STATE.secOpen;
-  if (STATE.secOpen && STATE.sectors == null){
-    STATE.sectors = 'loading'; render();
-    fetchWithTimeout('/api/sectors')
-      .then(function(r){ return r.json(); })
-      .then(function(d){ STATE.sectors = Array.isArray(d) ? d : (d && d.error ? d : []); render(); })
-      .catch(function(e){ STATE.sectors = {error: e.message}; render(); });
-    return;
-  }
-  render();
-}
-
-function render(){
-  var rs = STATE.results;
-  if (!rs.length){
-    document.getElementById('body').innerHTML =
-      '<div class="empty"><b>Nothing found</b>No company matches your search.</div>';
-    return;
-  }
-  var sel = Math.max(0, Math.min(STATE.sel, rs.length - 1));
-  var h = '<div class="sect">THE REPORT · TAP ANY STOCK TO GET THIS</div>' + repCard(rs[sel]);
-  h += '<div class="sect">' + (STATE.q ? 'MATCHES' : "TODAY'S TOP · BY GVM") + '</div>';
-  h += rs.map(function(x, i){
-    /* cc#1090 P3: leaderboard rows are the app's clearest SLAB case — tapping one goes somewhere
-       (pick(i) swaps the report card above). 25 rows by default, so .dense: fifteen full 5px
-       ledges down a screen stop reading as depth and start reading as stripes. */
-    return '<div class="g-lrow slab dense" onclick="pick(' + i + ')">'
-      + '<span class="rk">' + (x.rank == null ? '' : esc(x.rank)) + '</span>'
-      + '<div><div class="rs">' + esc(x.symbol) + '</div>'
-      + '<div class="rg">' + esc(x.segment || esc(x.name || '')) + '</div></div>'
-      + '<span class="sc" style="color:' + scoreCol(x.gvm) + '">' + n1(x.gvm) + '</span>'
-      + '<span class="g-chev">&#8250;</span></div>';
-  }).join('');
-  /* cc#913: sector ratings, the old-app surface the rebuilt screen never carried. Folded rather
-     than always-open so the stock leaderboard stays the first thing read. */
-  h += '<div class="sect">SECTORS \u00b7 GVM BY SEGMENT</div>'
-    /* cc#1090 P3: the sector card takes the shell; the sector ROWS inside it deliberately do NOT.
-       secRow() renders .g-lrow and this card holds 130 of them — slab inside slab is the one
-       nesting the card forbids outright, and P8 greps for exactly this. The rows stay flat. */
-    + '<div class="c slab"><div class="chd"><div class="t">Sector ratings</div>'
-    + '<div class="rgt"><button class="chip" onclick="toggleSec()">'
-    + (STATE.secOpen ? 'Hide \u25b4' : 'Show \u25be') + '</button></div></div>'
-    + (STATE.secOpen ? secBlock()
-        : '<div class="sum">130 segments scored nightly, ranked by mcap-weighted GVM.</div>')
-    + '</div>';
-  document.getElementById('body').innerHTML = h;
-}
-function pick(i){ STATE.sel = i; STATE.frOpen = false; STATE.fr = null; render();
-  window.scrollTo({top: 0, behavior: 'smooth'}); }
-
-function load(q){
-  document.getElementById('body').innerHTML = '<div class="loading">Loading scores…</div>';
-  fetchWithTimeout('/api/mobile/gvm?limit=25' + (q ? '&q=' + encodeURIComponent(q) : ''))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.error) throw new Error(d.error);
-      STATE.results = d.results || []; STATE.sel = 0; STATE.q = d.query;
-      STATE.frOpen = false; STATE.fr = null;
-      document.getElementById('sub').innerHTML =
-        'Growth · Value · Momentum · scored nightly 22:00 ' + railHtml(d.rail);
-      render();
-    })
-    .catch(function(e){
-      document.getElementById('body').innerHTML =
-        '<div class="empty"><b>Could not load GVM</b>' + esc(e.message)
-        + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-      document.getElementById('sub').textContent = 'failed to load';
-    });
-}
-var t = null;
-document.getElementById('q').addEventListener('input', function(e){
-  clearTimeout(t);
-  var v = e.target.value.trim();
-  t = setTimeout(function(){ load(v); }, 300);
+(function(){
+'use strict';
+/* ── fetch layer: the three GVM endpoints the card allows, nothing else ─────────────── */
+var URLS = { company:'/api/gvm/company/', search:'/api/gvm/search', list:'/api/mobile/gvm?limit=25' };
+var STATE = { sym:null, co:null, list:null, fetchedAt:null };
+function getJ(url){ return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); }); }
+/* ── helpers ─────────────────────────────────────────────────────────────────────────── */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function num(v){ return typeof v === 'number' && isFinite(v); }
+function fx(v, dp){ return num(v) ? v.toFixed(dp==null?1:dp) : '—'; }
+function inr(v){ if(!num(v)) return '—'; var s = Math.abs(v).toFixed(1); var p = s.split('.'), a = p[0], last3 = a.slice(-3), rest = a.slice(0,-3); if(rest) last3 = ','+last3; return (v<0?'−':'')+'₹'+rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',')+last3+'.'+p[1]; }
+function cr(v){ if(!num(v)) return '—'; if(Math.abs(v)>=1e5) return '₹'+(v/1e5).toFixed(2)+'L Cr'; if(Math.abs(v)>=1000) return '₹'+(v/1000).toFixed(1)+'k Cr'; return '₹'+v.toFixed(0)+' Cr'; }
+function istNow(){ var n = new Date(); return new Date(n.getTime() + (330 + n.getTimezoneOffset())*60000); }
+function hhmm(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function symFromUrl(){ var m = /[?&]sym=([^&#]+)/.exec(location.search); return m ? decodeURIComponent(m[1]).trim().toUpperCase() : null; }
+function verdictCls(v){ v = String(v||'').toLowerCase(); return v==='excellent'||v==='good' ? 'up' : v==='weak' ? 'dn' : 'am'; }
+/* ── search: /api/gvm/search autocomplete, tap navigates to /m/gvm?sym= ───────────────── */
+var qEl = document.getElementById('g-q'), drop = document.getElementById('g-drop'), qT = null, qSeq = 0;
+qEl.addEventListener('input', function(){
+  clearTimeout(qT); var v = qEl.value.trim();
+  if(v.length < 2){ drop.hidden = true; drop.innerHTML = ''; return; }
+  qT = setTimeout(function(){
+    var seq = ++qSeq;
+    getJ(URLS.search+'?q='+encodeURIComponent(v)+'&limit=8').then(function(d){
+      if(seq !== qSeq) return;
+      var rs = (d && d.results) || [];
+      if(!rs.length){ drop.innerHTML = '<div class="g-drow"><span class="g-ds mu">No match for '+esc(v)+'</span></div>'; drop.hidden = false; return; }
+      drop.innerHTML = rs.map(function(r){
+        return '<div class="g-drow" data-go="'+esc(r.symbol)+'"><span class="g-ds">'+esc(r.symbol)+'</span><span class="g-dn">'+esc(r.company_name||'')+(r.segment?' · '+esc(r.segment):'')+'</span>'+
+               '<span class="g-dg '+verdictCls(r.verdict)+'">'+fx(r.gvm_score,2)+'<small>'+esc(r.verdict||'')+'</small></span></div>';
+      }).join('');
+      drop.hidden = false;
+    }).catch(function(){ drop.innerHTML = '<div class="g-drow"><span class="g-ds mu">Search is not available right now.</span></div>'; drop.hidden = false; });
+  }, 250);
 });
-load('');
+qEl.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ var v = qEl.value.trim().toUpperCase(); if(v){ go(v); } } });
+document.addEventListener('click', function(e){ if(!e.target.closest('.g-search')) drop.hidden = true; });
+function go(sym){
+  drop.hidden = true; qEl.blur();
+  var url = '/m/gvm?sym='+encodeURIComponent(sym);
+  try { history.pushState({sym:sym}, '', url); } catch(e){ location.href = url; return; }
+  loadCompany(sym);
+}
+window.addEventListener('popstate', function(){ var s = symFromUrl(); if(s) loadCompany(s); else loadLanding(); });
+/* ── company view ────────────────────────────────────────────────────────────────────── */
+var main = document.getElementById('g-main'), foot = document.getElementById('g-foot');
+function fail(words, retrySym){
+  main.innerHTML = '<div class="slab g-empty">'+esc(words)+'<br><span class="chip" data-retry="'+esc(retrySym||'')+'">Retry</span></div>';
+}
+function loadCompany(sym){
+  STATE.sym = sym; qEl.value = sym; document.title = sym+' · GVM';
+  main.innerHTML = '<div class="slab g-empty">Loading '+esc(sym)+'…</div>'; foot.textContent = '';
+  getJ(URLS.company+encodeURIComponent(sym)).then(function(d){
+    if(STATE.sym !== sym) return;
+    if(!d || d.error || !d.symbol){ fail((d && d.error) ? String(d.error) : 'No GVM report for '+sym+'. Scores exist only for companies the nightly run covers.', sym); return; }
+    STATE.co = d; STATE.fetchedAt = istNow(); renderCompany();
+  }).catch(function(){ if(STATE.sym === sym) fail('Could not load the GVM report for '+sym+'.', sym); });
+}
+function renderCompany(){
+  var d = STATE.co, sc = d.scores || {};
+  var chips = '';
+  if(d.segment) chips += '<span class="tag gd">'+esc(String(d.segment).toUpperCase())+'</span>';
+  if(d.cap_category) chips += '<span class="tag mu">'+esc(String(d.cap_category).toUpperCase())+' CAP'+(num(d.mcap_rank)?' · #'+d.mcap_rank:'')+'</span>';
+  if(num(d.segment_rank) && num(d.segment_total)) chips += '<span class="tag mu">RANK '+d.segment_rank+' / '+d.segment_total+'</span>';
+  var r52 = d.extras && d.extras.range52;
+  var h = '<section class="pressed" id="score">'+
+    '<div class="g-head"><div><div class="g-sym">'+esc(d.symbol)+'</div><div class="g-nm">'+esc(d.company_name||'')+'</div><div class="g-chips">'+chips+'</div></div>'+
+    '<div class="g-px"><div class="g-v">'+inr(d.price)+'</div><div class="g-s">'+esc(d.price_label||'CMP')+(d.price_is_live?' · live '+hhmm(STATE.fetchedAt):(d.price_date?' · '+esc(d.price_date):''))+'</div>'+
+    (r52 && num(r52.lo) && num(r52.hi) ? '<div class="g-s">52W '+Math.round(r52.lo).toLocaleString('en-IN')+'–'+Math.round(r52.hi).toLocaleString('en-IN')+'</div>' : '')+'</div></div>'+
+    '<div class="g-score"><b>'+fx(sc.gvm,1)+'</b><span>GVM / 10 · <span class="'+verdictCls(d.verdict)+'">'+esc(d.verdict||'—')+'</span> · G '+fx(sc.g,1)+' · V '+fx(sc.v,1)+' · M '+fx(sc.m,1)+'</span></div>'+
+    '<div class="g-asof">score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</div>'+
+    '</section>';
+  main.innerHTML = h;
+  foot.textContent = 'Scores rebuild nightly. Prices live.'+(num(d.peer_count)?' Peer set = same segment, '+d.peer_count+' companies.':'');
+}
+/* ── landing: no symbol yet → today's top 25 by GVM, tap to open ─────────────────────── */
+function loadLanding(){
+  STATE.sym = null; STATE.co = null; document.title = 'GVM'; qEl.value = '';
+  main.innerHTML = '<div class="slab g-empty">Loading today’s scores…</div>'; foot.textContent = '';
+  getJ(URLS.list).then(function(d){
+    if(STATE.sym) return;
+    var rs = (d && d.results) || [];
+    if(!rs.length){ fail('No GVM scores to show yet. Scores land after the 22:00 nightly run.', ''); return; }
+    var h = '<div class="sect">Today’s top <span class="g-r">by GVM · '+esc(rs[0].as_of||'')+'</span></div><section class="slab">';
+    for(var i=0;i<rs.length;i++){ var r = rs[i];
+      h += '<div class="g-row" data-go="'+esc(r.symbol)+'"><span class="g-rk">'+(num(r.rank)?r.rank:i+1)+'</span><span class="g-sy">'+esc(r.symbol)+'</span>'+
+           '<span class="g-nm">'+esc(r.name||'')+(r.segment?' · '+esc(r.segment):'')+'</span>'+
+           '<span class="g-sc '+verdictCls(r.verdict)+'">'+fx(r.gvm,2)+'<small>'+esc(r.verdict||'')+'</small></span></div>';
+    }
+    h += '</section><div class="g-asof">'+(d.rail && d.rail.label ? esc(d.rail.label)+' · ' : '')+'scored nightly 22:00</div>';
+    main.innerHTML = h;
+    foot.textContent = 'Type any symbol or company name above to open its full GVM page.';
+  }).catch(function(){ fail('Could not load today’s GVM list.', ''); });
+}
+/* ── clicks ──────────────────────────────────────────────────────────────────────────── */
+document.getElementById('gvp').addEventListener('click', function(e){
+  var g = e.target.closest('[data-go]'); if(g){ go(g.getAttribute('data-go')); return; }
+  var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); }
+});
+/* ── boot ────────────────────────────────────────────────────────────────────────────── */
+var s0 = symFromUrl();
+if(s0) loadCompany(s0); else loadLanding();
+})();
 </script>
 </body>
 </html>
