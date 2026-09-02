@@ -215,12 +215,38 @@ def position_stars_v2():
                 "note": "table exists but holds no rows — absent, not empty"}
     out, stars = [], {}
     uncal = 0
+    # cc#1603: the /100 display fields ride beside the /10 ones (TC_SCORE_100_V1, 29138), and the
+    # best-of-four card gets a band word DERIVED from the scorer's own cuts (the batch stores no
+    # verdict for best_any; the cuts are read through the resolver, never typed). Marked derived.
+    try:
+        from tc_resolver import get_primary_style_bands
+        _cuts = get_primary_style_bands()
+    except Exception:
+        _cuts = None
+
+    def _band(s10):
+        if s10 is None or not _cuts:
+            return None
+        return ("STRONG" if s10 >= _cuts["strong"] else "VALID" if s10 >= _cuts["valid"]
+                else "WATCH" if s10 >= _cuts["watch"] else "REJECT")
+
+    def _opposes(pos_side, any_bucket):
+        if not any_bucket or not pos_side:
+            return None
+        want = "BUY" if str(pos_side).upper() == "LONG" else "SELL"
+        return not str(any_bucket).upper().startswith(want)
+
     for (sym, side, dir_side, bucket, s10, v10, wt, raw, rawmax,
          any_b, any_s10, cmp_v, cat) in db_rows:
         item = {"symbol": sym, "side": side, "dir_side": dir_side, "bucket": bucket,
                 "score10": _f(s10), "verdict10": v10, "weighted": bool(wt),
+                "score100": (round(float(s10) * 10.0, 1) if s10 is not None else None),
                 "score": _f(raw), "max": _f(rawmax),
                 "best_any_bucket": any_b, "best_any_score10": _f(any_s10),
+                "best_any_score100": (round(float(any_s10) * 10.0, 1) if any_s10 is not None else None),
+                "best_any_verdict10": _band(_f(any_s10)),
+                "best_any_verdict_derived": True,
+                "best_any_opposes_position": _opposes(side, any_b),
                 "cmp": _f(cmp_v),
                 "computed_at": cat.strftime("%Y-%m-%d %H:%M:%S") if cat else None}
         if not wt:
@@ -228,4 +254,7 @@ def position_stars_v2():
         out.append(item)
         stars[f"{sym}|{side}"] = item
     return {"status": "ok", "count": len(out), "uncalibrated_rows": uncal,
-            "engine": "tc_v4_dual four-bucket (cc#1172)", "rows": out, "stars": stars}
+            "engine": "tc_v4_dual four-bucket (cc#1172)",
+            "cuts100": ({k: round(v * 10.0, 1) for k, v in _cuts.items()} if _cuts else None),
+            "scale": "score100 / best_any_score100 = score10 x 10 (29138); best_any_verdict10 is derived from cuts",
+            "rows": out, "stars": stars}

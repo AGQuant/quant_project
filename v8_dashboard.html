@@ -1536,7 +1536,7 @@ const EP={
   mood:"/api/v8/market_mood",
   metricsAll:"/api/v8/metrics/all",
   segmentDay:"/api/v8/segment_day",          // cc#1102: futures-theme equal-weight day change
-  tcScoreLatest:"/api/v8/tc_score_latest",   // cc#1542: latest Trade Check score per open position
+  tcScoreLatest:"/api/trade-check/position-stars-v2",   // cc#1603: the four-bucket batch (best of four + the side card); was /api/v8/tc_score_latest (side-restricted 5-min ticks, cc#1542)
   adrHistory:"/api/v8/adr_history?days=5",    // cc#443: 5 trading-day ADR trend for the mood panel
   qualified:b=>`/api/v8/qualified/${b}`,
   paper:"/api/paper/status",
@@ -3791,6 +3791,64 @@ function renderMaster(){
 // vocabulary, not layout. Nothing renders raw V8_COLS.
 const V8_COL_MONO="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums";
 const _cD=(v,f)=>v==null?'--':f(v);                       // the dash rule, in one place
+// ── cc#1603: the TC /100 cell, the (i) header note and the trend popover ──────────────────────
+function tcHdrInfo(){
+  return `<span class="info-btn" onclick="event.stopPropagation()" title="Best of the 4 cards, any direction. Tag = which card. Click a number for its 30-day trend." style="margin-left:4px;cursor:help">i</span>`;
+}
+function tcCell(x){
+  if(x.tc_score==null) return '--';
+  const b=String(x.tc_bucket||''), buy=b.indexOf('BUY')===0, opp=!!x.tc_opposes;
+  const capCol=buy?'var(--grn)':'var(--red)', capBg=buy?'rgba(47,212,139,.12)':'rgba(255,92,108,.12)';
+  const sideTip=(x.tc_side_score!=null)?`on your side: ${x.tc_side_bucket||'--'} ${Number(x.tc_side_score).toFixed(0)}`:'on your side: no card scored';
+  const cap=b?`<span class="tccap" title="${(opp?'strongest card is against your position · ':'')+sideTip}" style="display:inline-block;margin-left:5px;font-family:'Sora',sans-serif;font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:1px 5px;border-radius:999px;color:${capCol};background:${capBg};border:1px solid ${opp?'var(--amber)':'transparent'};vertical-align:middle">${b}</span>`:'';
+  return `<button type="button" class="tcq-btn" onclick="tcTrendOpen(event,'${x.symbol}','${String(x.side||'').toUpperCase()}','${x.entry_ts||''}')" title="${sideTip} · click for the 30-day trend" style="font:inherit;font-weight:700;color:var(--txt);background:none;border:0;border-bottom:1px dotted var(--mut);cursor:pointer;padding:0">${Number(x.tc_score).toFixed(0)}</button>${cap}`;
+}
+const TC_TREND_CACHE={};
+function _tcFam(b){ return String(b||'').indexOf('BUY')===0?'var(--grn)':(String(b||'').indexOf('SELL')===0?'var(--red)':'var(--mut)'); }
+function _tcFmtD(ts){ if(!ts)return '--'; const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; const m=String(ts).match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/); if(!m)return String(ts); return `${m[3]}-${M[+m[2]-1]}${m[4]?' '+m[4]+':'+m[5]:''}`; }
+async function tcTrendOpen(ev,sym,side,entryTs){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  // The cc#1561/1579 modal shell, reused as-is (title / sub / body / msg + Esc + scrim).
+  const ov=_dlModal(); ov.style.display='flex'; document.addEventListener('keydown',_dlChartEsc);
+  const title=document.getElementById('dlChartTitle'), sub=document.getElementById('dlChartSub'), body=document.getElementById('dlChartBody'), msg=document.getElementById('dlChartMsg');
+  title.textContent=`TC trend · ${sym}`; sub.textContent=''; msg.textContent=''; body.innerHTML='<div class="loading">Loading TC history...</div>';
+  let d=TC_TREND_CACHE[sym];
+  try{ if(!d){ d=await getJSON('/api/trade-check/position-stars/history?symbol='+encodeURIComponent(sym)+'&days=30'); TC_TREND_CACHE[sym]=d; } }
+  catch(e){ body.innerHTML=''; msg.textContent='TC history unavailable - '+(e&&e.message||e); return; }
+  if(!d||d.error){ body.innerHTML=''; msg.textContent='TC history unavailable - '+((d&&d.error)||'no payload'); return; }
+  const rows=(d.rows||[]).filter(r=>r.best_score100!=null);
+  title.textContent=`TC trend · ${sym} · ${d.sessions||0} of ${d.days||30} days available`;
+  if(!rows.length){ body.innerHTML='<div class="empty">No TC history yet</div>'; msg.textContent=d.note||''; return; }
+  const cuts=d.cuts100||{};
+  sub.innerHTML=`Bold = best of the 4 cards, any direction (colour = card family) · faint = the card on your side (${side||'--'}) · cuts ${[cuts.watch,cuts.valid,cuts.strong].filter(v=>v!=null).join(' / ')||'--'} · ${d.source||'hourly batch'}`;
+  body.innerHTML=tcTrendSvg(rows,cuts,entryTs,side);
+  const vals=rows.map(r=>r.best_score100), hi=Math.max(...vals), lo=Math.min(...vals), last=rows[rows.length-1];
+  const lb=String(last.best_bucket||''), lbuy=lb.indexOf('BUY')===0;
+  msg.innerHTML=`Now <b>${Number(last.best_score100).toFixed(0)}</b> <span style="font-size:8.5px;font-weight:800;padding:1px 5px;border-radius:999px;color:${_tcFam(lb)};background:${lbuy?'rgba(47,212,139,.12)':'rgba(255,92,108,.12)'}">${lb||'--'}</span> · window high <b>${hi.toFixed(0)}</b> · low <b>${lo.toFixed(0)}</b> · ${rows.length} readings ${_tcFmtD(rows[0].ts)} → ${_tcFmtD(last.ts)}${entryTs?' · entry '+_tcFmtD(entryTs):''}`;
+}
+function tcTrendSvg(rows,cuts,entryTs,side){
+  const W=760,H=300,L=34,R=12,T=12,B=44, iw=W-L-R, ih=H-T-B;
+  const t0=Date.parse(String(rows[0].ts).replace(' ','T')), t1=Date.parse(String(rows[rows.length-1].ts).replace(' ','T'));
+  const span=Math.max(1,(t1-t0)||1);
+  const X=ts=>{ const t=Date.parse(String(ts).replace(' ','T')); return L+((isNaN(t)?0:(t-t0))/span)*iw; };
+  const Y=v=>T+ih-(Math.max(0,Math.min(100,Number(v)))/100)*ih;
+  let out=`<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" preserveAspectRatio="none" style="display:block;font-family:'Sora',sans-serif">`;
+  // band cuts, dashed, labelled at the left
+  [['watch',cuts.watch],['valid',cuts.valid],['strong',cuts.strong]].forEach(([k,v])=>{ if(v==null)return; out+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line2)" stroke-dasharray="4 4"/><text x="${L-4}" y="${Y(v)+3}" font-size="9" fill="var(--dim)" text-anchor="end">${Number(v).toFixed(0)}</text>`; });
+  [0,100].forEach(v=>{ out+=`<text x="${L-4}" y="${Y(v)+3}" font-size="9" fill="var(--dim)" text-anchor="end">${v}</text>`; });
+  // entry marker
+  if(entryTs){ const ex=X(entryTs); if(ex>=L&&ex<=W-R) out+=`<line x1="${ex}" x2="${ex}" y1="${T}" y2="${T+ih}" stroke="var(--amber)" stroke-dasharray="3 3"/><text x="${ex+3}" y="${T+10}" font-size="9" fill="var(--amber)">entry</text>`; }
+  // faint side-card line
+  const sidePts=rows.filter(r=>r.side_score100!=null).map(r=>`${X(r.ts).toFixed(1)},${Y(r.side_score100).toFixed(1)}`);
+  if(sidePts.length>1) out+=`<polyline points="${sidePts.join(' ')}" fill="none" stroke="var(--mut)" stroke-width="1.2" opacity=".45"/>`;
+  // bold best-of-four line, coloured by card family per segment
+  for(let i=1;i<rows.length;i++){ const a=rows[i-1], b=rows[i]; out+=`<line x1="${X(a.ts).toFixed(1)}" y1="${Y(a.best_score100).toFixed(1)}" x2="${X(b.ts).toFixed(1)}" y2="${Y(b.best_score100).toFixed(1)}" stroke="${_tcFam(b.best_bucket)}" stroke-width="2.4" stroke-linecap="round"/>`; }
+  rows.forEach(r=>{ out+=`<circle cx="${X(r.ts).toFixed(1)}" cy="${Y(r.best_score100).toFixed(1)}" r="2" fill="${_tcFam(r.best_bucket)}"><title>${_tcFmtD(r.ts)} · best ${r.best_bucket||'--'} ${Number(r.best_score100).toFixed(1)}${r.side_score100!=null?' · your side '+(r.side_bucket||'--')+' '+Number(r.side_score100).toFixed(1):''}</title></circle>`; });
+  // x axis: one label per day boundary; bucket strip under it: one label per run of best_bucket
+  let lastDay=null; rows.forEach(r=>{ const day=String(r.ts).slice(0,10); if(day!==lastDay){ lastDay=day; const x=X(r.ts); out+=`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${T+ih}" y2="${T+ih+4}" stroke="var(--line2)"/><text x="${x.toFixed(1)}" y="${T+ih+14}" font-size="9" fill="var(--dim)">${_tcFmtD(day)}</text>`; } });
+  let runStart=0; for(let i=1;i<=rows.length;i++){ if(i===rows.length||rows[i].best_bucket!==rows[runStart].best_bucket){ const xa=X(rows[runStart].ts), xb=X(rows[i-1].ts), b=rows[runStart].best_bucket||'--'; out+=`<rect x="${xa.toFixed(1)}" y="${T+ih+20}" width="${Math.max(2,xb-xa).toFixed(1)}" height="4" fill="${_tcFam(b)}" opacity=".7"/>`; if(xb-xa>44||i===rows.length) out+=`<text x="${((xa+xb)/2).toFixed(1)}" y="${T+ih+36}" font-size="8.5" fill="${_tcFam(b)}" text-anchor="middle">${b}</text>`; runStart=i; } }
+  return out+'</svg>';
+}
 const V8_COLS=[
   // cc#1030 — THREE FIXES IN ONE CELL, each with a diagnosis behind it.
   //
@@ -3831,7 +3889,9 @@ const V8_COLS=[
   // colour on purpose — the amber star already carries the >80%-and-rising judgement; a second
   // colour rule on the raw number would double-encode it. Dash-on-null per _cD: expected until
   // a symbol's first tick lands.
-  ["tc_score","TC %",     x=>`<td style="text-align:center">${_cD(x.tc_score,v=>Number(v).toFixed(0)+'%')}</td>`],
+  // cc#1603: TC /100 = best of the four cards, any direction, with the bucket capsule (amber border
+  // when that card opposes the position); hover = the side-restricted card; click = 30-day trend.
+  ["tc_score","TC /100"+tcHdrInfo(), x=>`<td style="text-align:center;white-space:nowrap">${tcCell(x)}</td>`],
   ["day_1d","1D%",        x=>`<td class="${cls(x.day_1d)}">${_cD(x.day_1d,v=>sign(v,1)+'%')}</td>`],
   ["mom_2d","2D Mom%",    x=>`<td class="${cls(x.mom_2d)}">${_cD(x.mom_2d,v=>sign(v,1)+'%')}</td>`],
   ["dma_50","DMA50",      x=>`<td class="${cls(x.dma_50)}">${_cD(x.dma_50,v=>num(v,0))}</td>`],
@@ -3914,7 +3974,15 @@ function v8NormRow(x,ctx){
   // them from metricsAll and prints -- for what even that lacks (pivots, which live per basket).
   ['day_1d','mom_2d','dma_50','rsi_month','gvm_score'].forEach(k=>{if(x[k]==null&&m[k]!=null)x[k]=m[k];});
   // cc#1542: TC % from the tcScores map, side-keyed like ctx.paper. Null stays null — _cD dashes it.
-  if(x.tc_score==null){const _t=(ctx.tcScores||{})[x.symbol+'|'+String(x.side||'').toUpperCase()];if(_t&&_t.score_pct!=null)x.tc_score=_t.score_pct;}
+  // cc#1603 (TC_BEST_OF_FOUR_V1 22353 + founder 02-Sep 15:34): the column VALUE is the best of the
+  // four cards in ANY direction (best_any_score100 = best_any_score10 x 10, 29138); the position's
+  // own-side card rides along for the hover, never as the headline. Both straight off the batch row.
+  if(x.tc_score==null){const _t=(ctx.tcScores||{})[x.symbol+'|'+String(x.side||'').toUpperCase()];
+    if(_t){
+      if(_t.best_any_score100!=null)x.tc_score=_t.best_any_score100; else if(_t.best_any_score10!=null)x.tc_score=Math.round(Number(_t.best_any_score10)*100)/10;
+      x.tc_bucket=_t.best_any_bucket||null; x.tc_band=_t.best_any_verdict10||null; x.tc_opposes=(_t.best_any_opposes_position===true);
+      x.tc_side_bucket=_t.bucket||null; x.tc_side_score=(_t.score100!=null?_t.score100:(_t.score10!=null?Math.round(Number(_t.score10)*100)/10:null)); x.tc_ts=_t.computed_at||null;
+    }}
   ['pp','r1','s1'].forEach(k=>{if(x[k]===undefined)x[k]=null;});
   x.sector_seg=seg; x.sector_day=sd?sd.day_pct:null; x.sector_sd=sd||null;
   if(!isOpen){
@@ -4063,7 +4131,12 @@ function markerFlag(x){
   // cc#1542's own tcScores map, side-keyed \u2014 same lookup v8NormRow already does for the TC %
   // column (that column is UNTOUCHED by this card; this is a second, independent read of the same
   // cached data for the popover's TC section, shown regardless of amber per scope 3c).
-  const tc=((cache.tcScores&&cache.tcScores.rows)||[]).find(t=>t&&t.symbol===sym&&String(t.side||'').toUpperCase()===side)||null;
+  // cc#1603 scope 5: ONE TC number per row — the popover's "TC score" line reads the same best-of-
+  // four value + bucket the column shows, in the {score_pct, verdict_class} shape the shared
+  // ScorrMarkerFlagDetailHtml already parses ("<VERDICT> | <BUCKET>").
+  const _tcRow=((cache.tcScores&&cache.tcScores.rows)||[]).find(t=>t&&t.symbol===sym&&String(t.side||'').toUpperCase()===side)||null;
+  const _tcPct=_tcRow?(_tcRow.best_any_score100!=null?_tcRow.best_any_score100:(_tcRow.best_any_score10!=null?Math.round(Number(_tcRow.best_any_score10)*100)/10:(_tcRow.score_pct!=null?_tcRow.score_pct:null))):null;
+  const tc=(_tcRow&&_tcPct!=null)?{score_pct:_tcPct, verdict_class:(_tcRow.best_any_verdict10||'')+(_tcRow.best_any_bucket?' | '+_tcRow.best_any_bucket:'')}:null;
   const detail=window.ScorrMarkerFlagDetailHtml?window.ScorrMarkerFlagDetailHtml(fired,tc,MK_LEGEND):'';
   // cc#1582: the popover used to be an absolute div INSIDE the row (.mk-flagwrap position:relative),
   // so the table's own scroll box (.tbl-scroll / overflow-x:auto) clipped it \u2014 on the last visible
