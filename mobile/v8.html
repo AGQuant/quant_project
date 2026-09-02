@@ -597,7 +597,7 @@ function renderDay(){
   var pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64);
   var W = Math.max(rows.length * pitch, 10), H = 150, BASE = 78, MAXH = 60, bw = pitch * 0.62;
   var svg = '<svg data-dbars="1" viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" style="display:block;height:'+H+'px;width:'+W+'px;min-width:100%" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="'+BASE+'" x2="'+W+'" y2="'+BASE+'" stroke="var(--line)" stroke-width="1"/>';
-  var lastMonth = '';
+  var lastMonth = '', lastLab = -9;
   for(var k=0;k<rows.length;k++){
     var r = rows[k], v = num(r.net_pnl)?r.net_pnl:0, isCur = dayIsCurrent(r) && k === rows.length-1;
     var x = (k*pitch + (pitch-bw)/2).toFixed(1);
@@ -605,9 +605,13 @@ function renderDay(){
     var op = isCur ? 1 : (0.45 + 0.50*(k/Math.max(1,rows.length-1))).toFixed(2);
     svg += '<rect data-dbar="'+k+'" x="'+x+'" y="'+BASE+'" width="'+bw.toFixed(1)+'" height="1" fill="'+fill+'" opacity="'+op+'" style="cursor:pointer"/>';
     var mo = String(r.date).slice(0, 7), lab = '';
-    if(DAY_VIEW === 'daily'){ if(mo !== lastMonth || k === rows.length-1){ lab = mo !== lastMonth ? dmy(r.date) : dmy(r.date); } }
+    /* daily: the first session of each month is named (3 Aug), then every fifth bar shows its day
+       number, never closer than two bars to the last label so the tail cannot collide */
+    if(DAY_VIEW === 'daily'){
+      if(mo !== lastMonth){ lab = dmy(r.date); lastLab = k; }
+      else if(k - lastLab >= 5){ lab = (+String(r.date).slice(8,10))+''; lastLab = k; }
+    }
     else lab = DAY_VIEW === 'weekly' ? dmy(r.date) : dayBarLabel(r);
-    if(DAY_VIEW === 'daily' && mo === lastMonth && k !== rows.length-1 && k % 5 === 0) lab = (+String(r.date).slice(8,10))+'';
     lastMonth = mo;
     if(lab) svg += '<text x="'+(k*pitch + pitch/2).toFixed(1)+'" y="'+(H-4)+'" font-family="var(--mono)" font-size="9" fill="'+(isCur?'var(--gold)':'var(--dim)')+'" text-anchor="middle">'+esc(lab)+'</text>';
     if(isCur) svg += '<text x="'+(k*pitch + pitch/2).toFixed(1)+'" y="9" font-family="var(--mono)" font-size="9" fill="var(--gold)" text-anchor="middle">'+(marketOpen()?'live':'now')+'</text>';
