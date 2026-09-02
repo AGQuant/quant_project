@@ -55,6 +55,21 @@
 .ia-sect::after{content:"";flex:1;height:1px;background:var(--line)}
 .ia-sect .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;font-weight:600}
 .ia-err{padding:10px 16px 0;font-family:var(--mono);font-size:10.5px;color:var(--down);line-height:1.5}
+/* P4: plan tiles, the stop -> target track, footer */
+.ia-plan{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.ia-plan>div{padding:7px 8px;background:var(--well);border:1px solid var(--line);border-radius:7px;min-width:0}
+.ia-plan .k{font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)}
+.ia-plan .v{font-family:var(--mono);font-size:13.5px;font-weight:800;margin-top:1px;color:var(--chalk,var(--txt))}
+.ia-plan .v.mu{color:var(--mute)}
+.ia-trk{position:relative;height:7px;margin:12px 0 0;background:var(--well);border:1px solid var(--line)}
+.ia-trk .fill{position:absolute;top:0;bottom:0;left:0;display:block}
+.ia-trk.long .fill{background:var(--up)}.ia-trk.short .fill{background:var(--down)}
+.ia-trk .z{position:absolute;top:-4px;width:1px;height:13px;background:var(--dim);display:block}
+.ia-trk .cmp{position:absolute;top:-4px;width:2px;height:13px;background:var(--gold);box-shadow:0 0 6px var(--gold);display:block}
+.ia-trk .lab{position:absolute;top:10px;font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap}
+.ia-ft{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;padding-top:24px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.ia-ft.tight{padding-top:10px}
+.ia-ft b{color:var(--mute);font-weight:600}
 /* cc#1507 — create-alert flow. All classes namespaced al- (this app has collided four times on
    short class names — the intel.html nc- lesson). The sheet is home.html's .pfveil/.pfsheet
    shape (veil z-80, bottom sheet z-81, grab handle), re-declared here because those classes are
@@ -190,8 +205,54 @@ function cardHead(c){
     + '<div class="ia-appr">' + appr + '</div></div>'
     + '<div>' + rib + ch + '</div></div>';
 }
+/* P4: the plan. Engine ideas: TARGET · STOP · TO TARGET (FINAL on a closed card) tiles and the
+   stop -> target track — stop on the left, target on the right for BOTH sides (the payload's
+   track positions are already on that axis), the fill grows toward the target, a thin mark at
+   entry, the gold mark at the current (or closing) price. Manual ideas: TRIGGER · FROM TRIGGER ·
+   NOTE — the trigger is the plan, there is no engine target to draw. Footer: held · expiry (FUT) /
+   cash equity · R:R at entry, or closed at + the close word. */
+function noteShort(n){ n = String(n || '').replace(/^cc#\d+[^:]*:\s*/, ''); return n ? (n.length > 26 ? n.slice(0, 24) + '…' : n) : '—'; }
+function track(c){
+  var t = c.track || {}, fill = t.price_pos == null ? 0 : t.price_pos;
+  return '<div class="ia-trk ' + (c.direction === 'BUY' ? 'long' : 'short') + '"><i class="fill" style="width:' + fill + '%"></i>'
+    + (t.entry_pos != null ? '<i class="z" style="left:' + t.entry_pos + '%"></i>' : '')
+    + (t.price_pos != null ? '<i class="cmp" style="left:' + t.price_pos + '%"></i>' : '')
+    + '<span class="lab" style="left:0">stop ' + fmtPx(c.stop) + '</span><span class="lab" style="right:0">target ' + fmtPx(c.target) + '</span></div>';
+}
+function foot(c, tight){
+  var p = ['held <b>' + esc(c.held || '—') + '</b>'];
+  if (c.status === 'closed' && c.closed) p.push('closed <b>' + esc(c.closed.at_ist || '—') + '</b>' + (c.closed.reason ? ' · ' + esc(c.closed.reason) : ''));
+  else if (c.instrument === 'FUT' && c.expiry) p.push(esc(c.expiry.label) + ' · <b>' + (c.expiry.days != null ? c.expiry.days + ' days' : '—') + '</b>');
+  else if (c.instrument === 'OPT') p.push('option leg');
+  else p.push('cash equity');
+  if (c.rr_at_entry != null) p.push('R:R at entry <b>' + Number(c.rr_at_entry).toFixed(1) + '</b>');
+  else if (c.style === 'Price level') p.push('handpicked · founder');
+  return '<div class="ia-ft' + (tight ? ' tight' : '') + '">' + p.map(function(x){ return '<span>' + x + '</span>'; }).join('') + '</div>';
+}
+function cardBody(c){
+  if (c.status === 'waiting') return '<div class="ia-body"></div>';   /* P5 */
+  var h = '', done = c.status === 'closed';
+  if (c.target != null && c.stop != null){
+    h += '<div class="ia-plan"><div><div class="k">TARGET</div><div class="v up">' + fmtPx(c.target) + '</div></div>'
+      + '<div><div class="k">STOP</div><div class="v dn">' + fmtPx(c.stop) + '</div></div>'
+      + (done
+          ? '<div><div class="k">FINAL</div><div class="v ' + pctCls(c.closed && c.closed.final_pct) + '">' + pctS(c.closed && c.closed.final_pct) + '</div></div>'
+          : '<div><div class="k">TO TARGET</div><div class="v">' + (c.to_target_pct == null ? '—' : Number(c.to_target_pct).toFixed(1) + '%') + '</div></div>')
+      + '</div>';
+    if (c.track) h += track(c);
+    h += foot(c, !c.track);
+  } else if (c.trigger_price != null){
+    h += '<div class="ia-plan"><div><div class="k">TRIGGER</div><div class="v">' + (c.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(c.trigger_price) + '</div></div>'
+      + '<div><div class="k">FROM TRIGGER</div><div class="v ' + pctCls(c.from_trigger_pct) + '">' + pctS(c.from_trigger_pct, 1) + '</div></div>'
+      + '<div><div class="k">NOTE</div><div class="v mu" style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(c.notes || '') + '">' + esc(noteShort(c.notes)) + '</div></div></div>';
+    h += foot(c, true);
+  } else {
+    h += foot(c, true);
+  }
+  return '<div class="ia-body">' + h + '</div>';
+}
 function card(c){
-  return '<article class="slab ia-idea" id="ia-' + c.id + '" data-status="' + esc(c.status) + '">' + cardHead(c) + '<div class="ia-body"></div></article>';
+  return '<article class="slab ia-idea" id="ia-' + c.id + '" data-status="' + esc(c.status) + '">' + cardHead(c) + cardBody(c) + '</article>';
 }
 
 function renderList(){
