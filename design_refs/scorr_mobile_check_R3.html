@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Check</title>
+<!-- DESIGN REF scorr_mobile_check_R3 (cc_task_logs 4495 on 4488 on 4481: every rule row and invest component row opens a bottom detail sheet with web rule-card field parity; R2 = cc_task_logs 4488 applied on 4481: four-bucket engine, best of 4, /100, LONG|SHORT toggle removed). Score bar rule: full = PASS (green), half = WATCH (amber), empty with red edge = FAIL, hatched = no data. Every bar carries ONE plain-words line (what it checks + what the stock did). Invest bars: length = weight, gold fill = credit earned, red stub = zero. -->
+<style>
+:root{--field:#0A0A0C;--panel:#17171B;--well:#131316;--sunk:#0C0C0F;--chalk:#F5F2EA;--mute:#8A8A93;--dim:#5E5E66;--line:#2A2A31;--gold:#D4AF37;--gold-lo:#7A6320;--gold-d:rgba(212,175,55,.12);--up:#2FD48B;--down:#FF5C6C;--amber:#FF9F45;--aqua:#35E0FF;--up-d:rgba(47,212,139,.14);--down-d:rgba(255,92,108,.14);--amber-d:rgba(255,159,69,.14);--display:'Archivo Black','Space Grotesk',system-ui,sans-serif;--body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;--mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--field);color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45}
+body{background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);padding-bottom:90px}
+.wrap{max-width:430px;margin:0 auto;padding:0 12px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.up{color:var(--up)}.dn{color:var(--down)}.am{color:var(--amber)}.mu{color:var(--mute)}.gd{color:var(--gold)}
+.pressed{background:var(--sunk);border:1px solid #000;border-radius:12px;padding:14px 16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
+.slab{background:var(--panel);border:1.5px solid var(--line);border-radius:13px;padding:13px 15px;box-shadow:0 5px 0 0 var(--gold-lo),0 5px 0 1.5px var(--line)}
+.well-up{background:var(--well);border-radius:7px;box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000}
+.tag{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.tag.up{background:var(--up-d);color:var(--up)}.tag.dn{background:var(--down-d);color:var(--down)}.tag.am{background:var(--amber-d);color:var(--amber)}.tag.gd{background:var(--gold-d);color:var(--gold)}.tag.mu{background:var(--well);color:var(--mute);border:1px solid var(--line)}
+.top{display:flex;align-items:center;justify-content:space-between;padding:14px 0 10px}
+.brand{font-family:var(--display);font-size:20px;letter-spacing:1px}.brand b{color:var(--gold)}
+.live{font-family:var(--mono);font-size:11px;color:var(--mute)}
+.modes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;padding:4px;background:var(--well);border:1px solid var(--line);border-radius:11px;margin-bottom:12px}
+.modes button{border:0;background:transparent;color:var(--mute);font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:10px 4px;border-radius:8px;cursor:pointer;text-transform:uppercase}
+.modes button.on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--gold-lo)}
+.search{display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--well);border:1px solid var(--line);border-radius:12px;box-shadow:inset 0 2px 6px rgba(0,0,0,.7)}
+.search .ic{color:var(--gold)}.search input{flex:1;background:transparent;border:0;outline:0;color:var(--chalk);font-family:var(--mono);font-size:14px}
+.seg{display:flex;gap:4px;padding:4px;background:var(--well);border:1px solid var(--line);border-radius:9px}
+.seg button{flex:1;border:0;background:transparent;color:var(--mute);font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 6px;border-radius:6px;cursor:pointer}
+.seg button.on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--gold-lo)}
+.seg button.on.long{background:var(--up);color:#062}.seg button.on.short{background:var(--down);color:#400}
+.row2{display:grid;grid-template-columns:1fr 150px;gap:8px;margin-bottom:14px}
+.row2 .seg{min-width:0}.row2 .seg button{padding:8px 2px;font-size:10.5px}
+.sect{display:flex;align-items:center;gap:10px;margin:20px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center}
+.sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
+.sect .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
+.hero .hd{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.hero .sym{font-family:var(--display);font-size:24px;line-height:1}
+.hero .nm{font-size:12px;color:var(--mute);margin-top:3px}
+.hero .px{text-align:right}.hero .px .v{font-family:var(--mono);font-size:20px;font-weight:800}.hero .px .s{font-family:var(--mono);font-size:10px;color:var(--mute);white-space:nowrap}
+.vrow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:14px 0 8px}
+.vword{font-family:var(--display);font-size:44px;line-height:.95;letter-spacing:-.5px;transform:skewX(-6deg);transform-origin:left center}
+.vword.pass{color:var(--up);text-shadow:0 0 24px rgba(47,212,139,.35)}.vword.watch{color:var(--amber);text-shadow:0 0 24px rgba(255,159,69,.35)}.vword.fail{color:var(--down);text-shadow:0 0 24px rgba(255,92,108,.35)}
+.vscore{text-align:right}.vscore .n{font-family:var(--mono);font-size:34px;font-weight:800;letter-spacing:-1px;line-height:1}.vscore .n small{font-size:14px;color:var(--mute);letter-spacing:0}.vscore .l{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.2px}
+.meter{position:relative;height:12px;background:var(--well);border:1px solid var(--line);margin:6px 0 4px;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+.meter i{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,var(--amber),var(--up))}
+.meter .cut{position:absolute;top:-5px;width:2px;height:22px;background:var(--chalk);opacity:.6}
+.mlabels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:8px}
+.tally{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.tally div{text-align:center;padding:7px 4px}.tally .k{font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--mute)}.tally .v{font-family:var(--mono);font-size:17px;font-weight:800;margin-top:1px}
+.read{margin-top:12px;font-size:13.5px;line-height:1.5}.read b{color:var(--gold)}
+.hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.grp{font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--mute);margin:12px 0 6px;display:flex;justify-content:space-between}
+.grp:first-child{margin-top:0}
+.rule{display:grid;grid-template-columns:34px 1fr auto;gap:4px 10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.rule:last-child{border-bottom:0}
+.rule .id{font-family:var(--mono);font-size:10px;color:var(--dim);grid-row:1/span 3}
+.rule .k{font-size:13px;font-weight:700}
+.rule .st{font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.8px;text-align:right}
+.rule .st.pass{color:var(--up)}.rule .st.watch{color:var(--amber)}.rule .st.fail{color:var(--down)}.rule .st.na{color:var(--dim)}
+.rule .bar{grid-column:2/span 2;height:7px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px)}
+.rule .bar i{position:absolute;left:0;top:0;bottom:0}
+.rule.pass .bar i{background:var(--up)}.rule.watch .bar i{background:var(--amber)}.rule.fail .bar{border-color:rgba(255,92,108,.45)}
+.buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.bk{text-align:center;padding:8px 4px;background:var(--well);border:1px solid var(--line);border-radius:7px}
+.bk .k{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mute)}.bk .v{font-family:var(--mono);font-size:17px;font-weight:800;margin-top:2px}.bk .s{font-family:var(--mono);font-size:9px;color:var(--dim)}
+.bk.on{border-color:var(--gold);background:var(--gold-d)}.bk.on .k{color:var(--gold)}
+.rule.na .bar{background:repeating-linear-gradient(45deg,var(--well) 0 4px,var(--line) 4px 6px)}
+.rule .why{grid-column:2/span 2;font-size:11.5px;color:var(--mute);line-height:1.35}
+.rule .why b{color:var(--chalk);font-family:var(--mono);font-weight:600}
+.scanhd{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10px;color:var(--mute);margin:10px 0 6px}
+table{width:100%;border-collapse:collapse}
+thead th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.3px;color:var(--mute);text-align:right;padding:6px 4px;border-bottom:1px solid var(--line);font-weight:700}
+thead th:first-child{text-align:left}
+tbody td{padding:9px 4px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);font-size:12.5px}
+tbody td:first-child{text-align:left;font-family:var(--body);font-weight:800;font-size:13.5px}
+tbody tr:last-child td{border-bottom:0}
+.sb{display:inline-block;width:46px;height:6px;background:var(--well);border:1px solid var(--line);vertical-align:middle;margin-left:6px;position:relative}
+.sb i{position:absolute;left:0;top:0;bottom:0;background:var(--up)}
+.sb.w i{background:var(--amber)}
+.runbtn{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;background:var(--gold);color:#141005;font-family:var(--mono);font-weight:800;letter-spacing:1px;border-radius:11px;box-shadow:0 4px 0 var(--gold-lo);margin-top:10px}
+.ic{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.ic:last-child{border-bottom:0}
+.ic .k{grid-column:1;grid-row:1;font-size:13px;font-weight:700}
+.ic .w{grid-column:2;grid-row:1;font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right}
+.ic .bar{grid-column:1/span 2;grid-row:2;height:10px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px)}
+.ic .bar .cap{position:absolute;left:0;top:0;bottom:0;background:rgba(212,175,55,.18)}
+.ic .bar .got{position:absolute;left:0;top:0;bottom:0;background:var(--gold)}
+.ic .bar .got.z{background:var(--down);width:3px !important}
+.ic .why{grid-column:1/span 2;grid-row:3;font-size:11.5px;color:var(--mute);line-height:1.35}
+.ic .why b{color:var(--chalk);font-family:var(--mono);font-weight:600}
+.bands{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:10px}
+.bands div{text-align:center;padding:6px 2px;font-family:var(--mono);font-size:9.5px;color:var(--dim);border:1px solid var(--line)}
+.bands div b{display:block;font-size:11px;color:var(--mute)}
+.bands div.on{border-color:var(--down);background:var(--down-d)}.bands div.on b{color:var(--down)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;background:#0A101E;border-top:1px solid var(--line);padding:8px 0 max(10px,env(safe-area-inset-bottom))}
+.bn{display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--body);font-size:11px;letter-spacing:1px;font-weight:700;color:var(--aqua);text-decoration:none;position:relative}
+.bn .i{font-size:16px;opacity:.85}.bn.on{color:var(--gold)}.bn.on::before{content:"";position:absolute;top:-9px;left:25%;right:25%;height:3px;background:var(--gold)}
+.rule{cursor:pointer}.rule:active{background:rgba(255,255,255,.03)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:9999;background:var(--panel);border:1.5px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;padding:14px 16px max(18px,env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.7);transform:translateY(110%);transition:transform .18s ease}
+.sheet.open{transform:none}
+.sheet .grab{width:44px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.sheet .hd{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-right:44px}
+.sheet .hd .t{font-family:var(--display);font-size:17px}.sheet .hd .t small{display:block;font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.2px;margin-top:3px}
+.sheet .credit{text-align:right}.sheet .credit .n{font-family:var(--mono);font-size:26px;font-weight:800;line-height:1}.sheet .credit .l{font-family:var(--mono);font-size:9.5px;color:var(--mute);letter-spacing:1.2px}
+.sheet .kv{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}
+.sheet .kv div{padding:9px 10px}.sheet .kv .k{font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)}.sheet .kv .v{font-family:var(--mono);font-size:14px;font-weight:800;margin-top:2px}
+.sheet .kv .v.ok{color:var(--up)}.sheet .kv .v.half{color:var(--amber)}.sheet .kv .v.no{color:var(--down)}
+.sheet .ladder{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:6px 0 12px}
+.sheet .ladder div{text-align:center;padding:6px 4px;border:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--dim)}
+.sheet .ladder div b{display:block;font-size:11px;color:var(--mute)}.sheet .ladder div.on{border-color:var(--amber);background:var(--amber-d)}.sheet .ladder div.on b{color:var(--amber)}
+.sheet .why{font-size:13px;line-height:1.5}.sheet .why b{color:var(--gold)}
+.sheet .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 10px;margin-top:12px;font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+.sheet .x{position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--well);color:var(--mute);display:flex;align-items:center;justify-content:center}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:none}.scrim.open{display:block}
+.view{display:none}.view.on{display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><div class="brand">CHE<b>CK</b></div><div class="live">Market open · 13:20 IST</div></div>
+<div class="modes" id="modes"><button class="on" data-v="tc">Trade Check</button><button data-v="scan">Run Scan</button><button data-v="ic">Invest Check</button></div>
+<div class="view on" id="v-tc">
+<div class="search" style="margin-bottom:14px"><span class="ic">◈</span><input value="BHARATFORG"></div>
+<section class="pressed hero">
+  <div class="hd"><div><div class="sym">BHARATFORG</div><div class="nm">Bharat Forge · Castings &amp; Forgings · GVM 6.90</div></div><div class="px"><div class="v">₹2,045.0</div><div class="s">CMP · 01-Sep 16:05 · spot</div></div></div>
+  <div class="vrow"><div><div style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)">BEST OF 4 · BUY-REV</div><div class="vword watch">Watch</div></div><div class="vscore"><div class="n">54.8<small> / 100</small></div><div class="l">TC SCORE</div></div></div>
+  <div class="meter"><i style="width:54.8%"></i><span class="cut" style="left:50%"></span><span class="cut" style="left:65%"></span><span class="cut" style="left:84%"></span></div>
+  <div class="mlabels"><span>FAIL</span><span>WATCH 50</span><span>VALID 65</span><span>STRONG 84</span></div>
+  <div class="buckets"><div class="bk on"><div class="k">BUY-REV</div><div class="v am">54.8</div><div class="s">WATCH</div></div><div class="bk"><div class="k">BUY-MOM</div><div class="v dn">38.9</div><div class="s">FAIL</div></div><div class="bk"><div class="k">SELL-MOM</div><div class="v dn">30.2</div><div class="s">FAIL</div></div><div class="bk"><div class="k">SELL-REV</div><div class="v dn">26.7</div><div class="s">FAIL</div></div></div>
+  <div class="read"><b>Watch, not a buy yet.</b> Volume backs a bounce and the month is up. But price is under its pivot, the market is against it, and the 5-minute tape is weak. Buy-reversal is the closest fit of the four.</div>
+  <div class="foot"><span>score = weighted passes ÷ 21.0 (registry) · full 1 · half ½</span><span>spot price, not futures</span></div>
+</section>
+<div class="sect">BUY-REV · 17 rules <span class="r">heaviest first · raw 11.5 / 21</span></div>
+<section class="slab">
+  <div class="grp"><span>RULE · CREDIT · WEIGHT</span><span>bar = credit earned</span></div>
+  <div class="rule watch"><span class="id">R11</span><span class="k">Location + room</span><span class="st watch">HALF · w3</span><div class="bar"><i style="width:50%"></i></div><div class="why">Near S1/PP with room to R1? CMP <b>2,045</b> is under PP 2,054. Half.</div></div>
+  <div class="rule pass"><span class="id">R5</span><span class="k">Volume confirm</span><span class="st pass">FULL · w3</span><div class="bar"><i style="width:100%"></i></div><div class="why">Both volume checks clear. RVOL <b>1.17×</b>. Full.</div></div>
+  <div class="rule watch"><span class="id">R10</span><span class="k">Turn-up (2-day)</span><span class="st watch">HALF · w2</span><div class="bar"><i style="width:50%"></i></div><div class="why">Two-day move turning up from a fall? <b>Flat</b>. Half.</div></div>
+  <div class="rule watch"><span class="id">R7</span><span class="k">RSI monthly</span><span class="st watch">HALF · w2</span><div class="bar"><i style="width:50%"></i></div><div class="why">Monthly RSI should be low for a reversal. <b>65</b> — not oversold. Half.</div></div>
+  <div class="rule fail"><span class="id">R9</span><span class="k">5m + VWAP</span><span class="st fail">NONE · w2</span><div class="bar"><i style="width:0%"></i></div><div class="why">Price above VWAP and last bar green? <b>Below</b> VWAP. None.</div></div>
+  <div class="rule watch"><span class="id">R16</span><span class="k">Fib position (3M)</span><span class="st watch">HALF · w1</span><div class="bar"><i style="width:50%"></i></div><div class="why">Near a 3-month retracement level? <b>Close</b>, not on it. Half.</div></div>
+  <div class="rule watch"><span class="id">R17</span><span class="k">Valuation (V)</span><span class="st watch">HALF · w1</span><div class="bar"><i style="width:50%"></i></div><div class="why">V pillar 6.3 — fair, not cheap. Half.</div></div>
+  <div class="rule watch"><span class="id">R18</span><span class="k">Momentum (M)</span><span class="st watch">HALF · w1</span><div class="bar"><i style="width:50%"></i></div><div class="why">Stock M 7.5 ok, sector M soft. Half.</div></div>
+  <div class="rule pass"><span class="id">R19</span><span class="k">Relative strength 63d</span><span class="st pass">FULL · w1</span><div class="bar"><i style="width:100%"></i></div><div class="why">Beat Nifty over 63 days? <b>+9 pts</b>. Full.</div></div>
+  <div class="rule watch"><span class="id">R4</span><span class="k">MAs graded</span><span class="st watch">HALF · w1</span><div class="bar"><i style="width:50%"></i></div><div class="why">Above 1 of 3 averages. Half.</div></div>
+  <div class="rule pass"><span class="id">R8</span><span class="k">Returns month</span><span class="st pass">FULL · w1</span><div class="bar"><i style="width:100%"></i></div><div class="why">Month return positive. <b>+1.9%</b>. Full.</div></div>
+  <div class="rule fail"><span class="id">R1</span><span class="k">Mood</span><span class="st fail">NONE · w0.5</span><div class="bar"><i style="width:0%"></i></div><div class="why">Market gate: <b>4 of 4</b> fail. None.</div></div>
+  <div class="rule fail"><span class="id">R12</span><span class="k">Derivatives</span><span class="st fail">NONE · w0.5</span><div class="bar"><i style="width:0%"></i></div><div class="why">Futures premium rising? Falling <b>0.27→0.22%</b>. None.</div></div>
+  <div class="rule pass"><span class="id">R2</span><span class="k">Sector month</span><span class="st pass">FULL · w0.5</span><div class="bar"><i style="width:100%"></i></div><div class="why">Sector up on the month. <b>+5.6%</b>. Full.</div></div>
+  <div class="rule fail"><span class="id">R20</span><span class="k">GVM trend 180d</span><span class="st fail">NONE · w0.5</span><div class="bar"><i style="width:0%"></i></div><div class="why">GVM up over 180 days? <b>7.35→6.90</b>. None.</div></div>
+  <div class="rule pass"><span class="id">R23</span><span class="k">GVM floor</span><span class="st pass">FULL · w0.5</span><div class="bar"><i style="width:100%"></i></div><div class="why">GVM at least 6. <b>6.9</b>. Full.</div></div>
+  <div class="rule fail"><span class="id">R3</span><span class="k">Peers</span><span class="st fail">NONE · w0.5</span><div class="bar"><i style="width:0%"></i></div><div class="why">Two peers up today? <b>1 of 16</b>. None.</div></div>
+</section>
+<div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:12px">Personal trade context · not a V8 signal · v3.4</div>
+</div>
+<div class="view" id="v-scan">
+<div class="row2" style="grid-template-columns:1fr;margin-bottom:0"><div class="seg"><button class="on">Nifty 50</button><button>All Futures</button></div></div>
+<div class="runbtn">▶ RUN TRADE CHECK · 50 STOCKS × 4</div>
+<div class="scanhd"><span>Ran 13:18 IST · 50 scored · 22 s</span><span>best of 4 · /100 · SAMPLE ROWS</span></div>
+<section class="slab" style="padding:8px 12px"><table><thead><tr><th>Symbol · best bucket</th><th>Score /100</th><th>Day %</th><th>GVM</th></tr></thead><tbody data-sample="1">
+<tr><td>BHARATFORG <span class="tag up">BUY-REV</span></td><td>54.8<span class="sb w"><i style="width:55%"></i></span></td><td class="up">+1.70%</td><td>6.9</td></tr>
+<tr><td>BHARTIARTL <span class="tag dn">SELL-MOM</span></td><td>41.5<span class="sb w"><i style="width:42%"></i></span></td><td class="up">+0.61%</td><td class="gd">8.1</td></tr>
+<tr><td>COALINDIA <span class="tag dn">SELL-REV</span></td><td>33.3<span class="sb w"><i style="width:33%"></i></span></td><td class="up">+3.59%</td><td>7.5</td></tr>
+</tbody></table></section>
+<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px"><span>0 STRONG · 0 VALID · 1 WATCH · 49 FAIL (hidden)</span><span>show FAIL ▾</span></div>
+<div style="font-size:12px;color:var(--mute);margin-top:10px;line-height:1.5">Nifty 50 here = the 50 biggest futures stocks by market cap. Each stock is scored on all 4 buckets; the best one is shown. Tap a row to open its card.</div>
+</div>
+<div class="view" id="v-ic">
+<div class="search" style="margin-bottom:14px"><span class="ic">◈</span><input value="BHARATFORG"></div>
+<section class="pressed hero">
+  <div class="hd"><div><div class="sym">BHARATFORG</div><div class="nm">Bharat Forge · Castings &amp; Forgings · ₹97.4k Cr</div></div><div class="px"><div class="v">₹2,010.9</div><div class="s">CMP · 13:20</div></div></div>
+  <div class="vrow"><div class="vword fail">Avoid</div><div class="vscore"><div class="n">4.5<small> / 10</small></div><div class="l">INVEST SCORE</div></div></div>
+  <div class="bands"><div class="on"><b>AVOID</b>under 5.0</div><div><b>WATCH</b>5.0+</div><div><b>ACCUMULATE</b>6.5+</div><div><b>STRONG BUY</b>8.4+</div></div>
+  <div class="read"><b>Good business, wrong moment.</b> Growth and long-term strength are real. But the score is fading, the stock is under its pivot, and sellers have had the volume for a month.</div>
+  <div class="foot"><span>9 checks · weight-based · all 9 computable</span><span>scores as of 01-Sep</span></div>
+</section>
+<div class="sect">9 checks by weight <span class="r">earned 45 of 100</span></div>
+<section class="slab">
+  <div class="ic"><span class="k">GVM level</span><span class="w">20 / 40</span><div class="bar"><i class="cap" style="width:40%"></i><i class="got" style="width:20%"></i></div><div class="why">Quality score. <b>6.9 = Average</b>, so half credit. The biggest weight here.</div></div>
+  <div class="ic"><span class="k">Fundamentals</span><span class="w">7.2 / 12</span><div class="bar"><i class="cap" style="width:12%"></i><i class="got" style="width:7.2%"></i></div><div class="why"><b>3 of 5</b> pass: sales, profit growth, margins yes. ROCE 12.6 under 15, and last quarter profit fell.</div></div>
+  <div class="ic"><span class="k">GVM direction, 90 days</span><span class="w">0 / 10</span><div class="bar"><i class="cap" style="width:10%"></i><i class="got z"></i></div><div class="why">Score went <b>7.35 → 6.90</b> since June. Fading. No credit.</div></div>
+  <div class="ic"><span class="k">Moving averages</span><span class="w">4 / 8</span><div class="bar"><i class="cap" style="width:8%"></i><i class="got" style="width:4%"></i></div><div class="why">Wants 20 &gt; 50 &gt; 200. Only <b>1 of 2</b> legs true. Half credit.</div></div>
+  <div class="ic"><span class="k">Accumulation, 21 days</span><span class="w">0 / 8</span><div class="bar"><i class="cap" style="width:8%"></i><i class="got z"></i></div><div class="why">Up-day volume vs down-day. <b>0.69</b> — sellers had it. No credit.</div></div>
+  <div class="ic"><span class="k">Support reclaim</span><span class="w">0 / 8</span><div class="bar"><i class="cap" style="width:8%"></i><i class="got z"></i></div><div class="why">Touched S1 yesterday but CMP <b>2,052</b> is still under pivot 2,054. Credit only above it.</div></div>
+  <div class="ic"><span class="k">Strength vs Nifty, 1 year</span><span class="w">8 / 8</span><div class="bar"><i class="cap" style="width:8%"></i><i class="got" style="width:8%"></i></div><div class="why">Stock <b>+82%</b>, Nifty −2%. Full credit.</div></div>
+  <div class="ic"><span class="k">Sector month</span><span class="w">4 / 4</span><div class="bar"><i class="cap" style="width:4%"></i><i class="got" style="width:4%"></i></div><div class="why">Sector up <b>+5.6%</b> on the month. Full credit.</div></div>
+  <div class="ic"><span class="k">Monthly RSI guard</span><span class="w">2 / 2</span><div class="bar"><i class="cap" style="width:2%"></i><i class="got" style="width:2%"></i></div><div class="why">Between 35 and 75. It is <b>65</b>. Full credit.</div></div>
+</section>
+<div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:12px">Bar length = weight. Gold fill = credit earned. Weights from ic_rule_weights · IC-V2</div>
+</div>
+</div>
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="ruleSheet" role="dialog" aria-modal="true">
+  <div class="grab"></div><button class="x" id="sheetX" aria-label="Close">✕</button>
+  <div class="hd"><div class="t">Location + room<small>R11 · BUY-REV · WEIGHT 3 OF 21</small></div><div class="credit"><div class="n am">1.5</div><div class="l">OF 3.0 EARNED</div></div></div>
+  <div class="kv">
+    <div class="well-up"><div class="k">REQUIRED</div><div class="v">S1 ≤ CMP ≤ PP + room to R1 &gt; 1%</div></div>
+    <div class="well-up"><div class="k">COMPANY</div><div class="v half">CMP 2,045 · PP 2,054 · S1 2,003</div></div>
+    <div class="well-up"><div class="k">ROOM TO R1</div><div class="v">2.8%</div></div>
+    <div class="well-up"><div class="k">POSITION</div><div class="v half">0.4% under PP</div></div>
+  </div>
+  <div class="ladder"><div><b>FULL</b>above PP, room &gt; 1%</div><div class="on"><b>HALF</b>S1–PP zone, room ok</div><div><b>NONE</b>below S1 or no room</div></div>
+  <div class="why"><b>Half credit.</b> Price is in the buy-reversal zone between S1 and the pivot, and there is room to run to R1. It has not yet reclaimed the pivot, so the rule holds back the other half.</div>
+  <div class="foot"><span>pivots: rolling 5-day (v8_paper_pivots) · CMP spot 01-Sep 16:05</span><span>source tc_v4_dual R11</span></div>
+</div>
+<nav class="bnav"><a class="bn" href="#"><span class="i">◧</span>Home</a><a class="bn" href="#"><span class="i">△</span>V8</a><a class="bn" href="#"><span class="i">◈</span>GVM</a><a class="bn on" href="#"><span class="i">◉</span>Check</a><a class="bn" href="#"><span class="i">⚠</span>Alerts</a></nav>
+<script>
+var sh=document.getElementById('ruleSheet'),sc=document.getElementById('scrim');function openSheet(){sh.classList.add('open');sc.classList.add('open')}function closeSheet(){sh.classList.remove('open');sc.classList.remove('open')}
+[].forEach.call(document.querySelectorAll('.rule'),function(r){r.addEventListener('click',openSheet)});document.getElementById('sheetX').addEventListener('click',closeSheet);sc.addEventListener('click',closeSheet);document.addEventListener('keydown',function(e){if(e.key==='Escape')closeSheet()});
+document.getElementById('modes').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;[].forEach.call(this.querySelectorAll('button'),function(x){x.classList.toggle('on',x===b)});[].forEach.call(document.querySelectorAll('.view'),function(v){v.classList.toggle('on',v.id==='v-'+b.getAttribute('data-v'))});});
+</script>
+</body>
+</html>
