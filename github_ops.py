@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import sys
 import base64
 import traceback
 import httpx
@@ -167,11 +168,28 @@ async def github_push(req: Request, x_admin_token: Optional[str] = Header(None))
             theme_note = f"theme validator skipped: {type(e).__name__}: {str(e)[:120]}"
     else:
         theme_note = "theme regression allowed explicitly by the caller"
+    # cc#1588 NO_BRAND_IN_TAB_TITLE_V1 — a WEB page's <title> / document.title is the page name
+    # only, never "Scorr". Same shape as the theme gate: judges the content about to land, is
+    # scoped by the script itself (mobile/, previews/, design_refs/ are not web pages), and a
+    # broken checker never blocks a push.
+    title_note = None
+    try:
+        _tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools")
+        if _tools_dir not in sys.path:
+            sys.path.append(_tools_dir)
+        from check_tab_titles import gate as _title_gate
+        allowed, why = _title_gate(filepath, new_content)
+        if not allowed:
+            raise HTTPException(422, why)
+    except HTTPException:
+        raise
+    except Exception as e:
+        title_note = f"tab-title check skipped: {type(e).__name__}: {str(e)[:120]}"
     sha = existing["sha"] if existing["exists"] else None
     result = await _gh_put_file(filepath, new_content, commit_message, sha)
     return {"status":"ok","filepath":filepath,"action":"updated" if existing["exists"] else "created",
             "commit_sha":result.get("commit",{}).get("sha"),"commit_url":result.get("commit",{}).get("html_url"),
-            "old_size":existing["size"],"new_size":len(new_content),"theme_gate":theme_note}
+            "old_size":existing["size"],"new_size":len(new_content),"theme_gate":theme_note,"tab_title_gate":title_note}
 
 @router.post("/api/admin/github_delete")
 @_json_errors
