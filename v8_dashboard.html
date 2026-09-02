@@ -5005,11 +5005,48 @@ function hsRerender(){
   el.innerHTML=renderHeatStrip(HS_DATA);
   bindHeatStrip();
 }
+// cc#1580 P3: As-of column. Live tick -> "HH:MM · live"; otherwise "prev close · DD-Mon". The
+// as_of string comes from the payload as-is; only the display shape changes here, never the value.
+function hsAsOf(t){
+  const s=String(t.as_of||'');
+  if(t.as_of_is_live){
+    const m=s.match(/(\d{1,2}:\d{2})/);
+    return (m?m[1]:s)+' · live';
+  }
+  const m=s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(m){
+    const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m[2])-1]||m[2];
+    return 'prev close · '+m[3]+'-'+mon;
+  }
+  return s?('prev close · '+s):'prev close';
+}
+function hsCell(v,band,emph){
+  const c=HS_BAND[band]||HS_BAND.none;   // same tint rule as the tiles, inverted VIX included
+  return `<td class="num${emph?' emph':''}" style="background:${c.bg};color:${c.fg}">${hsPct(v)}</td>`;
+}
 function hsTableBlock(d){
-  // P2 shell — P3 fills the body.
+  const tiles=(d.tiles||[]).concat(d.eod_tiles||[]);
+  const order=(d.category_order)||['index','volatility','commodity','currency','crypto'];
+  const label=(d.category_label)||{};
+  const emphDay=HS_EMPH!=='week';
+  let body='';
+  order.forEach(cat=>{
+    const g=tiles.filter(t=>t.category===cat);
+    if(!g.length)return;
+    body+=`<tr class="hs-cat"><td colspan="5">${escHtml(label[cat]||cat)}</td></tr>`;
+    g.forEach(t=>{
+      const px=t.price==null?'--':Number(t.price).toLocaleString('en-IN',{maximumFractionDigits:2});
+      body+=`<tr class="hs-row" data-sym="${escAttr(t.symbol)}" title="${escAttr(t.name||t.symbol)}${t.inverted?' · inverted (up = risk-off)':''}">`
+        +`<td>${escHtml(t.name||t.symbol)}<span class="hs-sym">${escHtml(t.symbol)}</span></td>`
+        +`<td class="num">${px}</td>`
+        +hsCell(t.day_chg_pct,t.day_band,emphDay)
+        +hsCell(t.week_chg_pct,t.week_band,!emphDay)
+        +`<td class="asof">${escHtml(hsAsOf(t))}</td></tr>`;
+    });
+  });
   return '<div class="hs-tbl-wrap"><table class="hs-tbl"><thead><tr>'
     +'<th>Symbol</th><th class="num">Price</th><th class="num">Day %</th><th class="num">Week %</th><th>As of</th>'
-    +'</tr></thead><tbody></tbody></table></div>';
+    +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
 function hsTile(t,level){
