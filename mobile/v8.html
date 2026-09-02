@@ -150,6 +150,10 @@
   <div class="sect">Day performance <span class="n" id="day-n"></span><span class="r">net / day</span></div>
   <section class="pressed" id="sec-day" aria-label="Daily net P&L bars"><div class="empty">Loading the day log…</div></section>
   <div class="vmore" id="day-more"></div>
+  <div class="sect">Closed <span class="n" id="cl-n"></span><span class="r" id="cl-r"></span></div>
+  <div class="kpi" id="cl-kpi"></div>
+  <div class="plist" id="sec-closed"><div class="slab dense empty">Loading closed trades…</div></div>
+  <div class="vmore" id="cl-more"></div>
   <div style="height:18px"></div>
   <div class="tbl-note" style="text-align:center" id="foot-note">Numbers are the paper book.</div>
 </div>
@@ -436,6 +440,62 @@ function renderDay(){
   var note = lastIsToday ? '' : '<div class="tbl-note">No exit booked today yet, so today reads ₹0. The last bar is '+esc(dmy(last.date))+'.</div>';
   el.innerHTML = head + svg + foot + note + asofLine(STATE.fetchedAt, 'era '+(dl.era||'fresh')+' · '+(num(last.closed)?last.closed+' closed on last day':''));
 }
+/* ── 5 · CLOSED ──────────────────────────────────────────────────────────────────────── */
+/* Wells read the canon keys straight off /api/mobile/v8book (rule 13): realised is NET of
+   brokerage, wins = TARGET, losses = SL, win_rate on decided. Nothing is re-added on the page. */
+var CL_LIMIT = 6, clAll = false;
+var RES_LABEL = { TARGET:['t','TARGET'], SL:['s','SL'], GAP_TARGET_EXIT:['g','GAP TGT'], GAP_SL_EXIT:['g','GAP SL'],
+                  GATE_EXIT:['g','GATE'], CONFLICT_EXIT:['g','CONFLICT'], SUITE_REBUILD:['g','REBUILD'] };
+function resTag(r){
+  var k = String(r||'').toUpperCase(); if(!k) return '';
+  var m = RES_LABEL[k] || ['g', k.replace(/_EXIT$/,'').replace(/_/g,' ')];
+  return '<span class="tag res '+m[0]+'">'+esc(m[1])+'</span>';
+}
+function recTxt(o){ return (o && num(o.wins) && num(o.decided)) ? o.wins+'/'+o.decided : '—'; }
+function closedAge(t){
+  var a = t.entry_label ? String(t.entry_label).replace(/ \d\d:\d\d$/,'') : '';
+  var x = '';
+  if(t.exit_ts){
+    var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(t.exit_ts);
+    if(m){ var d = istNow(); var same = (+m[1]===d.getFullYear() && +m[2]===d.getMonth()+1 && +m[3]===d.getDate());
+      x = same ? 'today '+m[4]+':'+m[5] : (+m[3])+' '+MON[+m[2]-1]; }
+  }
+  var held = num(t.days_held) ? (t.days_held===0 ? 'same day' : t.days_held+'d') : '';
+  return [a, x].filter(Boolean).join(' → ') + (held ? ' · '+held : '');
+}
+function closedRow(t){
+  var side = (t.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
+  return '<div class="slab dense prow">'+
+    '<div class="psym">'+esc(t.symbol)+' <span class="tag '+sl+'">'+esc(side||'—')+'</span>'+resTag(t.result)+'</div>'+
+    '<div class="pnl '+sgn(t.realised)+'">'+inr(t.realised)+'</div>'+
+    '<div class="pmeta"><span>'+px(t.entry_price)+' → <b>'+px(t.exit_price)+'</b> · '+pct(t.return_pct,2)+'</span>'+
+    '<span class="age">'+esc(closedAge(t))+'</span></div></div>';
+}
+function renderClosed(){
+  var bk = STATE.book, el = document.getElementById('sec-closed'), nEl = document.getElementById('cl-n'),
+      rEl = document.getElementById('cl-r'), kpi = document.getElementById('cl-kpi'), more = document.getElementById('cl-more');
+  if(!bk || !bk.closed){ nEl.textContent = ''; rEl.textContent = ''; kpi.innerHTML = ''; more.innerHTML = '';
+    el.innerHTML = '<div class="slab dense" id="cl-empty"></div>'; emptyBox('cl-empty', 'Closed trades are not available right now.'); return; }
+  var rows = bk.closed, n = num(bk.trades) ? bk.trades : rows.length;
+  nEl.textContent = n;
+  var first = rows.length ? rows[rows.length-1] : null;
+  rEl.textContent = (first && first.exit_ts ? 'since '+dmy(first.exit_ts)+' · ' : '') + 'all baskets';
+  kpi.innerHTML =
+    kpiWell('REALISED', inr(bk.realised), sgn(bk.realised), 'gross '+inrShort(bk.gross)+' · brk '+inrShort(bk.brokerage)) +
+    kpiWell('WIN / LOSS', (num(bk.wins)?bk.wins:'—')+' / '+(num(bk.losses)?bk.losses:'—'), '',
+            num(bk.win_rate) && num(bk.decided) && bk.decided>0 ? 'accuracy '+bk.win_rate.toFixed(1)+'%' : 'no decided trade yet') +
+    kpiWell('REC L / S', '<span class="up">'+recTxt(bk.rec_long)+'</span><span class="mu" style="font-size:12px"> / </span><span class="dn">'+recTxt(bk.rec_short)+'</span>', '', 'wins / decided');
+  if(!rows.length){
+    more.innerHTML = '';
+    el.innerHTML = '<div class="slab dense empty">No closed trades in this era yet. The first exit lands here.</div>' + asofLine(bk.as_of);
+    return;
+  }
+  var show = clAll ? rows : rows.slice(0, CL_LIMIT), h = '';
+  for(var i=0;i<show.length;i++) h += closedRow(show[i]);
+  el.innerHTML = h + asofLine(bk.as_of, 'book');
+  more.innerHTML = rows.length > CL_LIMIT
+    ? '<span class="chip" data-cl-toggle="1">'+(clAll ? 'Fewer closed ▴' : 'All '+rows.length+' closed ▾')+'</span>' : '';
+}
 function renderTop(){
   var d = istNow(), open = marketOpen();
   document.getElementById('tdot').className = 'dot' + (open?'':' off');
@@ -450,7 +510,7 @@ function renderTop(){
   if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book. ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
 }
 /* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
-function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); }
+function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); renderClosed(); }
 function load(){
   return Promise.all([
     getJ(URLS.mood).catch(function(){ return null; }),
@@ -470,7 +530,8 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var o = e.target.closest('[data-open-toggle]'); if(o){ openAll = !openAll; renderOpen(); return; }
   var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); return; }
   var sv = e.target.closest('[data-sec-view]'); if(sv){ secView = sv.getAttribute('data-sec-view'); secAll = false; renderSectors(); return; }
-  var st = e.target.closest('[data-sec-toggle]'); if(st){ secAll = !secAll; renderSectors(); }
+  var st = e.target.closest('[data-sec-toggle]'); if(st){ secAll = !secAll; renderSectors(); return; }
+  var ct = e.target.closest('[data-cl-toggle]'); if(ct){ clAll = !clAll; renderClosed(); }
 });
 load();
 setInterval(function(){ if(document.visibilityState === 'visible') load(); }, 300000);
