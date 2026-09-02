@@ -945,7 +945,14 @@ def gvm_recompute(refresh_momentum: bool = True, x_admin_token: Optional[str] = 
 #   GVM trend    — gvm_score now vs at window start, FLAT band ABSOLUTE +/-0.15 points
 #   level        — current gvm_score: >=7 high / 6-7 mid / <6 low
 # Full GVM is used (not G+V) for consistency with the rating shown everywhere else.
-_TF_DAYS = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "ALL": 365 * 20}
+# cc#1577 (cc#1566 P4 follow-up): 1W and 3Y are real windows now. Before this, any other tf was
+# coerced to 1Y and the response echoed timeframe=1Y, so scorr_chart_card.js dropped the badge on
+# those pills. The verdict cells are unchanged (founder-locked): on a 7-session window the same
+# +/-2% price band and +/-0.15 GVM band apply — measured on 02-Sep across 1,823 names, 60% moved
+# more than 2% in a week and 46% moved GVM by more than 0.15, so the week read is busier, not
+# broken; it is served, not gated. gvm_history reaches back to Jul-2021, so 3Y has real GVM
+# points; only ALL falls back to the oldest point (flagged below as gvm_window_truncated).
+_TF_DAYS = {"1W": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 1095, "ALL": 365 * 20}
 _VERDICT_CACHE = {}   # (symbol, tf, date) -> payload; per spec "cached per symbol+timeframe per day"
 
 
@@ -1006,6 +1013,7 @@ def gvm_trend_verdict(symbol: str, tf: str = "1Y"):
         g = cur.fetchone()
         g_now, g_date = (float(g[0]), g[1]) if g else (None, None)
         g_then = None
+        truncated = False
         if g_date:
             cur.execute("""SELECT gvm_score FROM gvm_history WHERE symbol=%s AND gvm_score IS NOT NULL
                            AND score_date <= %s ORDER BY score_date DESC LIMIT 1""",
@@ -1017,8 +1025,11 @@ def gvm_trend_verdict(symbol: str, tf: str = "1Y"):
                                ORDER BY score_date ASC LIMIT 1""", (sym,))
                 gg = cur.fetchone()
                 g_then = float(gg[0]) if gg else None
+                truncated = g_then is not None   # cc#1577: said in the payload, never silent
     p_chg = ((p_now - p_then) / p_then * 100.0) if (p_now and p_then) else None
-    out = {"symbol": sym, "timeframe": tf, "verdict": _trend_verdict(p_chg, g_now, g_then)}
+    out = {"symbol": sym, "timeframe": tf, "window_days": days,
+           "gvm_window_truncated": truncated,   # cc#1577: GVM start point is our oldest, not the window's
+           "verdict": _trend_verdict(p_chg, g_now, g_then)}
     _VERDICT_CACHE[key] = out
     if len(_VERDICT_CACHE) > 4000:
         _VERDICT_CACHE.clear()
