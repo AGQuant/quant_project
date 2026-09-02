@@ -3404,12 +3404,16 @@ function renderMaster(){
   // endpoint. A null realised (futures view before the cutover is served) keeps the dash: "cannot
   // tell you" must not print as a number.
   const netTotal=(netClosed==null)?null:(netUnreal+netClosed);
+  // Accuracy = wins / (wins + losses), 1dp, on decided trades only (V8_PNL_CANON_V1: wins = TARGET,
+  // losses = SL; anything else is undecided and stays out of both). Dash when nothing is decided.
+  const _w=Number(winsTxt), _l=Number(lossTxt);
+  const _acc=(isFinite(_w)&&isFinite(_l)&&(_w+_l)>0)?(_w/(_w+_l)*100).toFixed(1)+'%':'-';
   const cards=`<div class="cards kpi5">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div>${_posSub}</div>
     <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(netUnreal)}">${inr(netUnreal)}</div><div class="v-sub">Gross ${inr(unreal)}</div>${_unrealSub}</div>
     <div class="card"><div class="k">Realised P&L${_reTag}</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
     <div class="card"><div class="k">Net Total${_reTag}</div><div class="v ${pnlCls(netTotal)}">${inr(netTotal)}</div><div class="v-sub">Open ${inr(netUnreal)} + Closed ${inr(netClosed)}</div></div>
-    <div class="card"><div class="k">Win / Loss${_reTag}</div><div class="v">${winsTxt}/${lossTxt}</div></div>
+    <div class="card"><div class="k">Win / Loss${_reTag}</div><div class="v">${winsTxt} / ${lossTxt}</div><div class="v-sub">Accuracy ${_acc}</div></div>
   </div>`;
   // [ All ] [ Long ] [ Short ] toggle — active tints per spec, count badge per side.
   const tgl=(key,label,cnt)=>{
