@@ -4206,7 +4206,11 @@ function renderFunnel(b){
 // comment above is left in place deliberately, as the record of what was superseded and when.
 // Session-scoped by design, per scope 3 — never persisted, so a reload always returns to default.
 let TLOG_DUR='all', TLOG_BASKET='all', TLOG_RETIRED=true, TLOG_ERA='fresh';
-function setTlogEra(v){TLOG_ERA=(v==='all'?'all':'fresh');const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
+// cc#1604 V8_ERA_CUTOVER_ONLY_V1 (36757): the era switch is gone. The tab always shows the cutover
+// era and prints the caption the API serves (era_block.era_label, e.g. "Since 18-Jul-2026").
+function setTlogEra(v){TLOG_ERA='fresh';const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
+window.V8_ERA_LABEL=window.V8_ERA_LABEL||'Since cutover';
+function v8EraLabel(blk){if(blk&&blk.era_label)window.V8_ERA_LABEL=blk.era_label;return window.V8_ERA_LABEL;}
 function setTlogDur(v){TLOG_DUR=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogBasket(v){TLOG_BASKET=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
 function setTlogRetired(v){
@@ -4236,7 +4240,8 @@ function renderTradeLog(){
   // v8_book_canon.py, built by cc#970 under rule 13, is THE one formula, and main.py already
   // serves both of its eras as p.summary (fresh) and p.all_summary (all). Writing a second helper
   // would be the duplication rule 13 exists to prevent, so this tab consumes the canon instead.
-  const _era = (TLOG_ERA==='all') ? 'all' : 'fresh';
+  const _era = 'fresh';   // cc#1604: cutover era only; the full ledger is suspended server-side (410)
+  const eraLabel = v8EraLabel(p.era_block);
   const _cutTs = p.rebuild_cutover_ts || null;
   const _allT0 = p.all_trades||p.recent_trades||[];
   // No cutover served => no era split is possible. Show the full ledger and SAY SO, rather than
@@ -4326,8 +4331,8 @@ function renderTradeLog(){
   const bAvgLoss=_lossRows.length?_lossRows.reduce((a,x)=>a+Number(x.return_pct||0),0)/_lossRows.length:null;
   const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
   // cc#1156 scope 3: the era switch. Two states, default 'Since cutover', never remembered.
-  const eraBtns=[['fresh','Since cutover'],['all','Full ledger since inception']]
-    .map(([v,l])=>`<button class="btn${TLOG_ERA===v?' on':''}" onclick="setTlogEra('${v}')" title="${v==='fresh'?'The post-cutover book — the era the Day Log counts, so the two tabs agree.':'Every closed trade since inception, including the retired pre-cutover era.'}">${l}</button>`).join('');
+  // cc#1604: no era buttons. One caption, served by the API from app_config, never typed here.
+  const eraBtns=`<span style="font-size:11px;font-weight:700;color:var(--txt)" title="V8 performance is reported for the post-cutover era only (V8_ERA_CUTOVER_ONLY_V1). The full ledger since inception is suspended.">${eraLabel}${TLOG_BASKET!=='all'?' &middot; '+basketLabel(TLOG_BASKET):''}</span>`;
   // cc#751: DYNAMIC basket row — derived from the baskets actually present in the trade ledger (union
   // any currently-qualifying basket), so it always reflects what has run/is running instead of a stale
   // hardcoded 6. Canonical display order; unknown baskets sort last.
@@ -4368,11 +4373,10 @@ function renderTradeLog(){
   // cc#1156: the note follows the ERA as well as the filters. The full-ledger view carries an
   // explicit caption saying it includes the retired pre-cutover era — scope 3. That view stays
   // fully reachable; it just no longer speaks first.
-  const _eraNote = (_era==='fresh')
-    ? (_eraOk
-        ? 'Counting the POST&#8209;CUTOVER era only &mdash; the same book the Day Log counts, so the two tabs agree to the rupee. Switch to the full ledger for every trade since inception.'
-        : 'Cutover not served by the API this load, so no era split could be applied &mdash; this is the FULL ledger. It is labelled honestly rather than shown as post&#8209;cutover.')
-    : 'FULL LEDGER SINCE INCEPTION &mdash; includes the retired pre&#8209;cutover era, so these totals are LARGER than the Day Log and larger than this tab\'s default. History, not the book being traded.';
+  // cc#1604: one era, one note. The full-ledger wording is gone with the ledger.
+  const _eraNote = _eraOk
+        ? `${eraLabel} &mdash; the post&#8209;cutover book, the same one the Day Log counts, so the two tabs agree to the rupee. The full ledger since inception is suspended.`
+        : 'Cutover not served by the API this load, so no era split could be applied &mdash; the rows below are unfiltered and are labelled so rather than shown as post&#8209;cutover.';
   const scopeNote = isAll ? _eraNote
     : (_eraNote+'<br>Counting a FILTERED subset &mdash; '+[TLOG_DUR==='all'?null:(TLOG_DUR==='1w'?'last 1 week':'last 1 month'),
         TLOG_BASKET==='all'?null:basketLabel(TLOG_BASKET),
@@ -4832,7 +4836,7 @@ async function dlOpenChart(which,ctxKey){
     document.getElementById('dlChartTitle').textContent=`${_title} - since ${dlFmtD(d.window_start)} (${d.trading_days??0} trading days)`;
     // Series switch inside the modal: the two chips re-emphasise without a refetch (cached series).
     const chip=k=>`<span onclick="dlOpenChart('${k}')" style="cursor:pointer;padding:1px 7px;border-radius:999px;border:1px solid var(--line);${DL_FOCUS===k?'color:var(--txt);font-weight:700;background:var(--line)':'color:var(--dim)'}">${k==='net'?'Net':'Gross'}</span>`;
-    document.getElementById('dlChartSub').innerHTML=`Cumulative by exit date · ${chip('net')} ${chip('gross')} · clicked series emphasised, other faint · Net is after Rs.500/closed trade brokerage`;
+    document.getElementById('dlChartSub').innerHTML=`${v8EraLabel(d.era_block)} · Cumulative by exit date · ${chip('net')} ${chip('gross')} · clicked series emphasised, other faint · Net is after Rs.500/closed trade brokerage`;
     const pts=d.points||[];
     body.innerHTML=pts.length?'<canvas id="dlChartCv"></canvas>':'<div class="empty">No closed trades in window.</div>';
     if(pts.length)dlDrawChart(d);
@@ -6360,7 +6364,7 @@ function rPerf(){
   return `<div class="card">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
       <div class="s">Live paper stats from v10_trades · ${tot} closed trades</div></div></div>
-    <div class="stat-grid">${cards}</div>
+    <div class="stat-grid">${cards}<div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(data.era_block)} &middot; closed trades by exit date, post&#8209;cutover era only</div><div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(cache.paper&&cache.paper.era_block)} &middot; V8 book, post&#8209;cutover era only</div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
       ${seg(p.by_symbol,'By Symbol','SYMBOL')}${seg(p.by_leg,'By Leg','LEG')}
     </div>
