@@ -126,6 +126,7 @@ from mobile_endpoints import wants_mobile_home                 # cc#886 mobile e
 # Fable cannot edit main.py. They belong here, with every other router.
 from mobile_home2 import router as mobile_home2_router         # cc#889 Home (market-first rebuild)
 from v8_book_canon import router as v8_book_canon_router     # cc#970 V8_PNL_CANON_V1 (rule 13)
+from v8_era import router as v8_era_router                    # cc#1604 V8_ERA_CUTOVER_ONLY_V1: /api/v8/era
 from v8_daylog_extras import router as v8_daylog_extras_router   # cc#1561 /api/v8/daylog/series
 from mobile_ext import router as mobile_ext_router             # cc#892 breadth + cc#893 depth
 from trade_wall_endpoints import router as trade_wall_router    # cc#991 Wall of Trades
@@ -787,6 +788,7 @@ app.include_router(v8_futures_book_router)
 # helpers both modules import.
 app.include_router(mobile_home2_router)
 app.include_router(v8_book_canon_router)
+app.include_router(v8_era_router)   # cc#1604: era caption + suspension flag, one source
 app.include_router(v8_daylog_extras_router)   # cc#1561: Day Log P&L series + return facts
 app.include_router(mobile_ext_router)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
