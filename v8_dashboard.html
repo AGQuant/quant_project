@@ -4673,6 +4673,19 @@ function _dlModal(){
   ov.addEventListener('click',e=>{if(e.target===ov)dlCloseModal();});
   return ov;
 }
+// Chart.js is a plain <script src> above this block (chart.umd.min.js, L1488), so it is normally
+// present before any glyph can be clicked. If a CDN hiccup left it missing, load it on the open
+// path and wait, so the modal never draws against an undefined Chart.
+function _dlEnsureChart(){
+  if(window.Chart)return Promise.resolve();
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+    s.onload=()=>window.Chart?res():rej(new Error('Chart.js did not load'));
+    s.onerror=()=>rej(new Error('Chart.js did not load'));
+    document.head.appendChild(s);
+  });
+}
 async function dlOpenChart(which){
   DL_FOCUS=which==='gross'?'gross':'net';
   const ov=_dlModal();
@@ -4683,9 +4696,11 @@ async function dlOpenChart(which){
   document.getElementById('dlChartTitle').textContent='P&L performance';
   body.innerHTML='<div class="loading">Loading P&L series...</div>';
   try{
-    const d=await dlLoadSeries();
+    const [d]=await Promise.all([dlLoadSeries(),_dlEnsureChart()]);
     document.getElementById('dlChartTitle').textContent=`P&L performance - since ${dlFmtD(d.window_start)} (${d.trading_days??0} trading days)`;
-    document.getElementById('dlChartSub').innerHTML=`Cumulative by exit date · <b style="color:var(--txt)">${DL_FOCUS==='net'?'Net':'Gross'}</b> emphasised · other series faint · Net is after Rs.500/closed trade brokerage`;
+    // Series switch inside the modal: the two chips re-emphasise without a refetch (cached series).
+    const chip=k=>`<span onclick="dlOpenChart('${k}')" style="cursor:pointer;padding:1px 7px;border-radius:999px;border:1px solid var(--line);${DL_FOCUS===k?'color:var(--txt);font-weight:700;background:var(--line)':'color:var(--dim)'}">${k==='net'?'Net':'Gross'}</span>`;
+    document.getElementById('dlChartSub').innerHTML=`Cumulative by exit date · ${chip('net')} ${chip('gross')} · clicked series emphasised, other faint · Net is after Rs.500/closed trade brokerage`;
     const pts=d.points||[];
     body.innerHTML=pts.length?'<canvas id="dlChartCv"></canvas>':'<div class="empty">No closed trades in window.</div>';
     if(pts.length)dlDrawChart(d);
