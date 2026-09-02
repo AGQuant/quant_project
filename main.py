@@ -514,7 +514,20 @@ async def auth_gate(request: Request, call_next):
             if (do_logout or do_pwa) and not _web and b'id="scorr-th"' not in body:
                 body = body.replace(b"</body>", _THEME_BTN + b"</body>", 1)
             if do_pwa and b'src="/pwa.js"' not in body:
-                body = body.replace(b"</body>", _PWA_TAG + b"</body>", 1)
+                # cc#1595 (NAV_EMPTY_STALE_RACE_02SEP, session_log 36681): the nav script used to be
+                # appended at </body>, so on a 630 KB page the browser could not even discover the
+                # tag until it had parsed the whole document, and /pwa.js is served no-store on
+                # purpose (cc#178) — every load is a fresh fetch. The first click after paint hit
+                # an empty or stale nav. The tag now goes into <head> at the same position the
+                # shared-asset block below uses; `defer` keeps the run order after parsing exactly
+                # as before. The </body> fallback exists only for a document with no </head> —
+                # every page that lacked one was given one in the same push, so it is a safety
+                # net, not a path any served page takes.
+                _pat = _find_outside_comments(body, b"</head>")
+                if _pat >= 0:
+                    body = body[:_pat] + _PWA_TAG + body[_pat:]
+                else:
+                    body = body.replace(b"</body>", _PWA_TAG + b"</body>", 1)
             # cc#805: a page may carry its OWN early <script src="/scorr_card_common.js"> tag when it
             # needs the shared primitives at PARSE time — v8_dashboard.html does, because the injected
             # tags below are `defer` and (that document having no </head>) land at the END of <body>,
