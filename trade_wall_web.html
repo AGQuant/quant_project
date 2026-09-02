@@ -114,6 +114,8 @@
   <div class="tabs" id="tabsInstrument"></div>
   <!-- level 3: engine bucket -->
   <div class="tabs lvl3" id="tabsBucket"></div>
+  <!-- cc#1609: level 4, open rows only — approval state -->
+  <div class="tabs lvl3" id="tabsState"></div>
 
   <div class="card">
     <div class="meta" id="meta">Loading…</div>
@@ -161,7 +163,9 @@ var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: nul
                  three-level engine hierarchy above, used only when the flag names other buckets.
                  The mode is read from the API response, never assumed, so widening the flag
                  brings the old wall back with no deploy. */
-              mode: 'approved', approvedAsOf: null };
+              mode: 'approved', approvedAsOf: null,
+              /* cc#1609: engine 'ALL' = every engine of the instrument; stateFilter over open rows */
+              stateFilter: 'pending-approval', approvalCounts: null };
 var PAGE  = { cursor: null, more: true, busy: false };
 var LIMIT = 100;
 
@@ -258,9 +262,25 @@ function instrumentTabsHtml(){
   }).join('');
 }
 
+function stateTabsHtml(){
+  if (STATE.status !== 'open') return '';
+  var view = STATE.events.filter(function(e){ return STATE.bucket === 'ALL' || e.engine === STATE.bucket; });
+  var n = { 'pending-approval': 0, approved: 0, dismissed: 0 };
+  view.forEach(function(e){ var st = e.state || 'pending-approval'; if (n[st] != null) n[st]++; });
+  return [['pending-approval','Pending'],['approved','Approved'],['dismissed','Dismissed'],['all','All']].map(function(p){
+    var c = p[0] === 'all' ? view.length : n[p[0]];
+    return '<button class="tab' + (p[0] === STATE.stateFilter ? ' on' : '') + '" onclick="pickState(\'' + p[0] + '\')">'
+      + p[1] + ' <span class="n">' + c + '</span></button>';
+  }).join('');
+}
+function pickState(k){ if (k === STATE.stateFilter) return; STATE.stateFilter = k; render(); }
 function bucketTabsHtml(){
-  var list = BUCKETS[STATE.instrument] || [];
+  var list = ['ALL'].concat(BUCKETS[STATE.instrument] || []);
   return list.map(function(eng){
+    if (eng === 'ALL'){
+      var tot = 0; (BUCKETS[STATE.instrument] || []).forEach(function(x){ tot += ((STATE.byEngine || {})[x] || {})[STATE.status] || 0; });
+      return '<button class="tab' + (STATE.bucket === 'ALL' ? ' on' : '') + '" onclick="pickBucket(\'ALL\')">All <span class="n">' + tot + '</span></button>';
+    }
     var n = ((STATE.byEngine || {})[eng] || {})[STATE.status] || 0;
     return '<button class="tab' + (eng === STATE.bucket ? ' on' : '') + '" onclick="pickBucket(\'' + eng + '\')">'
       + esc(eng) + ' <span class="n">' + n + '</span></button>';
@@ -316,7 +336,13 @@ function setSubline(){
       + 'the same endpoint the app reads.';
     if (ib) ib.style.display = 'none';
   } else {
-    el.innerHTML = SUB_ENGINES;
+    /* cc#1609 scope 6: the approval-surface header line, numbers from the API head-of-feed. */
+    var ac = STATE.approvalCounts;
+    el.innerHTML = '<b>Approval surface</b>'
+      + (ac ? ' · ' + ac.pending + ' pending · ' + ac.approved_today + ' approved today'
+              + (ac.newest_signal_ts ? ' · as of ' + esc(twStampFull(ac.newest_signal_ts)) + ' IST (newest signal)' : '')
+            : '')
+      + '. Engine signals with an Approve per row; an approval prints in Alerts. ' + SUB_ENGINES;
     if (ib) ib.style.display = '';
   }
 }
@@ -342,17 +368,24 @@ function render(){
   document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
   document.getElementById('tabsInstrument').innerHTML = instrumentTabsHtml();
   document.getElementById('tabsBucket').innerHTML = bucketTabsHtml();
+  document.getElementById('tabsState').innerHTML = stateTabsHtml();
   document.getElementById('thead').innerHTML = theadHtml();
 
-  var view = STATE.events.filter(function(e){ return e.engine === STATE.bucket; });
-  var bucketTotal = ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
+  var view = STATE.events.filter(function(e){ return STATE.bucket === 'ALL' || e.engine === STATE.bucket; });
+  if (STATE.status === 'open' && STATE.stateFilter !== 'all'){
+    view = view.filter(function(e){ return (e.state || 'pending-approval') === STATE.stateFilter; });
+  }
+  var bucketTotal = STATE.bucket === 'ALL'
+        ? (function(){ var t = 0; (BUCKETS[STATE.instrument] || []).forEach(function(x){ t += ((STATE.byEngine || {})[x] || {})[STATE.status] || 0; }); return t; })()
+        : ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
   document.getElementById('meta').textContent =
     'showing ' + view.length + ' of ' + (bucketTotal == null ? '--' : bucketTotal) + ' ' + STATE.status + ' positions'
     + ' · ' + STATE.bucket
     + ' · since 10 Aug 2026'
     + (STATE.asOf ? ' · as of ' + STATE.asOf + ' IST' : '');
 
-  var emptyMsg = 'No ' + STATE.status + ' positions for ' + esc(STATE.bucket) + '.';
+  var emptyMsg = 'No ' + STATE.status + ' positions for ' + esc(STATE.bucket === 'ALL' ? 'any engine' : STATE.bucket)
+    + (STATE.status === 'open' && STATE.stateFilter !== 'all' ? ' in state ' + esc(STATE.stateFilter.replace('-approval', '')) : '') + '.';
   /* cc#1295 verify 7: Investment Scanner's Closed bucket is expected to render empty for some
      time (the engine landed its first signal today, no exits proven yet) — honest, not an error. */
   if (STATE.bucket === 'Investment Scanner' && STATE.status === 'closed' && !view.length){
@@ -433,6 +466,7 @@ function boot(keepCounts){
         return boot(false);
       }
       STATE.approvedAsOf = d.approved_as_of || null;
+      if (d.approval_counts) STATE.approvalCounts = d.approval_counts;
       STATE.events = d.events || [];
       if (!keepCounts || STATE.total == null){
         STATE.counts = d.counts || {};
@@ -492,6 +526,7 @@ document.addEventListener('keydown', function(e){
 var TWA = { approved: {} };
 
 function twRef(e){ return e.symbol + '@' + ((e.entry && e.entry.ts) || ''); }
+function twStampFull(sIn){ var t = String(sIn || ''); return t.length >= 16 ? t.slice(0, 16) : t; }
 function twStampTime(sIn){
   try {
     var d = new Date(String(sIn).replace(' ', 'T'));
