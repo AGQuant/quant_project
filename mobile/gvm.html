@@ -178,6 +178,20 @@
 #gvp .g-res .g-dot{width:9px;height:9px;border-radius:50%;flex:none}
 #gvp .g-res .g-rsub{grid-column:1;grid-row:2;font-family:var(--mono);font-size:10.5px;color:var(--mute)}
 #gvp .g-res .g-rv{grid-column:2;grid-row:1 / span 2;font-family:var(--mono);font-size:15px;font-weight:800;text-align:right;align-self:center}
+/* financials: page-local seg + table (shared sheets own .seg/.on and bare table rules) */
+#gvp .g-seg{display:flex;gap:4px;padding:4px;background:var(--well);border:1px solid var(--line);border-radius:9px;margin-bottom:12px}
+#gvp .g-seg button{flex:1;border:0;background:transparent;color:var(--mute);font-family:var(--mono);font-size:11px;font-weight:700;padding:7px 4px;border-radius:6px;cursor:pointer}
+#gvp .g-seg button.g-on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--g-gold-lo)}
+#gvp .g-ftw{overflow-x:auto}
+#gvp table.g-ftbl{width:100%;border-collapse:collapse}
+#gvp .g-ftbl th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute);text-align:right;padding:6px 4px;border-bottom:1px solid var(--line);font-weight:700;white-space:nowrap}
+#gvp .g-ftbl th:first-child{text-align:left}
+#gvp .g-ftbl td{padding:7px 4px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);font-size:12px;color:var(--chalk);white-space:nowrap}
+#gvp .g-ftbl td:first-child{text-align:left;font-family:var(--body);font-weight:600;font-size:12.5px;white-space:normal}
+#gvp .g-ftbl tr:last-child td{border-bottom:0}
+#gvp .g-ftbl td.g-ttm{color:var(--gold)}
+#gvp .g-fbk{margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)}
+#gvp .g-ffoot{margin-top:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim)}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -613,7 +627,58 @@ function secResults(d){
   return head+'<section class="slab">'+body+profitBars(q)+'<div class="g-asof">'+(upd ? 'analysis updated '+esc(upd) : 'no analysis date')+'</div></section>';
 }
 function secResults_old(d){ var ra=(d.content||{}).result_analysis||'', first=ra.split('\n')[0]||''; return sectHead('results','Results',first.split('·')[0].trim())+sumLine([first?esc(first):'No result analysis yet for this quarter.',(d.content&&d.content.last_result_analysis_updated?'updated <b>'+esc(d.content.last_result_analysis_updated)+'</b>':'')]); }
-function secFinancials(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
+/* Financials card (36513 cards.financials): seg P&L | Balance | Cash | Ratios, each a compact
+   table of the last FYs (+ TTM where the block carries one) from the matching payload block, rows
+   marked display=true only; footer debt/equity, interest cover, ROCE from ratios_v2. */
+var finView = 'pl';
+function fyLabel(pd){ var m = /^(\w{3}) (\d{4})$/.exec(String(pd||'')); if(!m) return String(pd||''); return (m[1]==='Mar' ? 'FY' : m[1]+' ') + m[2].slice(2); }
+function finCell(v, unit, label){
+  if(!num(v)) return '—';
+  if(unit === 'pct') return Math.round(v)+'%';
+  if(/EPS/i.test(label||'')) return v.toFixed(1);
+  if(unit === 'cr') return Math.round(v).toLocaleString('en-IN');
+  if(Math.abs(v) >= 100) return Math.round(v).toLocaleString('en-IN');
+  return v.toFixed(2).replace(/\.?0+$/,'');
+}
+function finTable(tbl, want, maxCols){
+  if(!tbl || !tbl.rows || !tbl.periods) return '';
+  var per = tbl.periods.slice(), idx = [], seen = {};
+  for(var i=per.length-1;i>=0 && idx.length<maxCols;i--){ if(seen[per[i]]) continue; seen[per[i]] = 1; idx.unshift(i); }
+  var rows = tbl.rows.filter(function(r){ return r.display !== false; });
+  var picked = want ? want.map(function(w){ return rows.filter(function(r){ return w.test(r.label||''); })[0]; }).filter(Boolean) : rows;
+  if(!picked.length) picked = rows.slice(0,4);
+  var h = '<div class="g-ftw"><table class="g-ftbl"><thead><tr><th></th>'+idx.map(function(i){ return '<th>'+esc(fyLabel(per[i]))+'</th>'; }).join('')+'</tr></thead><tbody>';
+  picked.forEach(function(r){
+    h += '<tr><td>'+esc(String(r.label).replace(/^Cash from (\w+) Activity$/,'Cash from $1').replace(' in Rs',''))+'</td>'+idx.map(function(i){ var ttm = /TTM|Current/.test(per[i]); return '<td'+(ttm?' class="g-ttm"':'')+'>'+finCell(r.values[i], r.unit, r.label)+'</td>'; }).join('')+'</tr>';
+  });
+  return h+'</tbody></table></div>';
+}
+function ratioLatest(r2, bucket, label){
+  if(!r2 || !r2.buckets) return null;
+  for(var i=0;i<r2.buckets.length;i++){ var b = r2.buckets[i]; if(b.title !== bucket) continue;
+    var row = (b.table.rows||[]).filter(function(r){ return r.label === label; })[0]; if(!row) return null;
+    for(var k=row.values.length-1;k>=0;k--) if(num(row.values[k])) return row.values[k]; }
+  return null;
+}
+function secFinancials(d){
+  var f = d.financials || {}, r2 = f.ratios_v2;
+  var head = sectHead('financials','Financials',(f.basis?String(f.basis).toLowerCase():'')+' · ₹ Cr');
+  if(!f.profit_loss && !f.balance_sheet && !f.cash_flow && !r2) return head+'<section class="slab"><div class="g-empty">No financial statements in this report.</div></section>';
+  var seg = '<div class="g-seg" role="tablist">'+[['pl','P&amp;L'],['bs','Balance'],['cf','Cash'],['ra','Ratios']].map(function(t){ return '<button data-fin="'+t[0]+'"'+(t[0]===finView?' class="g-on"':'')+'>'+t[1]+'</button>'; }).join('')+'</div>';
+  var body = '';
+  if(finView === 'pl') body = finTable(f.profit_loss, [/^Sales$/, /^OPM/, /^Net Profit/, /^EPS/], 6) || '<div class="g-empty">No profit and loss table.</div>';
+  else if(finView === 'bs') body = finTable(f.balance_sheet, [/^Reserves/, /^Borrowings/, /^Fixed Assets/, /^Total Assets/], 6) || '<div class="g-empty">No balance sheet.</div>';
+  else if(finView === 'cf') body = finTable(f.cash_flow, [/Operating/, /Investing/, /Financing/, /^Free Cash/], 6) || '<div class="g-empty">No cash flow table.</div>';
+  else {
+    if(r2 && r2.buckets && r2.buckets.length){
+      r2.buckets.forEach(function(b){ var t = finTable(b.table, null, 4); if(t) body += '<div class="g-fbk">'+esc(String(b.title).toUpperCase())+'</div>'+t; });
+    } else body = '<div class="g-empty">No ratio table.</div>';
+  }
+  var de = ratioLatest(r2,'Solvency','Debt / Equity'), ic = ratioLatest(r2,'Solvency','Interest Coverage'), roce = ratioLatest(r2,'Profitability','ROCE %');
+  var foot = '<div class="g-ffoot"><span>Debt / equity '+(num(de)?de.toFixed(2):'—')+' · interest cover '+(num(ic)?ic.toFixed(1)+'×':'—')+'</span><span>ROCE '+(num(roce)?Math.round(roce)+'%':'—')+'</span></div>';
+  return head+'<section class="slab">'+seg+body+foot+'<div class="g-asof">'+(f.profit_loss && f.profit_loss.periods ? 'statements to '+esc(fyLabel(f.profit_loss.periods.filter(function(x){ return x!=='TTM'; }).slice(-1)[0]||''))+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : '')+'</div></section>';
+}
+function secFinancials_old(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
 function secHolders(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
   return sectHead('holders','Holders',per)+sumLine(['Promoters <b>'+fx(pr,1)+'%</b>','FII <b>'+fx(fii,1)+'</b> · DII <b>'+fx(dii,1)+'</b>']); }
 function secTape(d){ var ex=d.extras||{}, t1=ex.tier1||{}, vc=ex.vol_canon||{}; return sectHead('tape','Tape',(d.price_is_live?'live':'last close')+(ex.pivot&&ex.pivot.pivot_date?' · '+ex.pivot.pivot_date:''))+
@@ -676,6 +741,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var g = e.target.closest('[data-go]'); if(g){ go(g.getAttribute('data-go')); return; }
   var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); return; }
   var t = e.target.closest('[data-trend]'); if(t){ openChart(); return; }
+  var fb = e.target.closest('[data-fin]'); if(fb){ finView = fb.getAttribute('data-fin'); var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling; if(fs){ var tmp2 = document.createElement('div'); tmp2.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp2.children[1], fs); } return; }
   var pt = e.target.closest('[data-peers-toggle]'); if(pt){ peersFull = !peersFull; var pe = document.getElementById('peers'); var sec = pe && pe.nextElementSibling; if(sec){ var tmp = document.createElement('div'); tmp.innerHTML = secPeers(STATE.co); pe.parentNode.replaceChild(tmp.children[1], sec); } }
 });
 /* ── boot ────────────────────────────────────────────────────────────────────────────── */
