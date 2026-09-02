@@ -607,8 +607,19 @@ def _cut_stats(r):
     }
 
 
-def get_performance():
-    """Full live-paper stats from v10_trades for the dashboard performance panel."""
+def get_performance(leg=None):
+    """Full live-paper stats from v10_trades for the dashboard performance panel.
+
+    cc#1597 (V10_DISPLAY_OPTIONS_ONLY_V1, session_log 36703): optional `leg` ("OPT" / "FUT")
+    restricts EVERY figure below to that leg's rows — one WHERE clause on the same queries, the
+    same formulas, so a surface that must show the option book only gets the option book from
+    the server rather than filtering aggregates on the client. None = the whole book, as before."""
+    leg = (leg or "").strip().upper() or None
+    if leg not in (None, "OPT", "FUT"):
+        leg = None
+    lw = " WHERE COALESCE(NULLIF(UPPER(leg), ''), 'FUT') = %s" if leg else ""
+    la = " AND COALESCE(NULLIF(UPPER(leg), ''), 'FUT') = %s" if leg else ""
+    lp = (leg,) if leg else ()
     conn = _db()
     try:
         with conn.cursor() as cur:
@@ -617,7 +628,7 @@ def get_performance():
                 "COALESCE(AVG(points) FILTER (WHERE pnl>0),0), "
                 "COALESCE(AVG(points) FILTER (WHERE pnl<=0),0), "
                 "COALESCE(SUM(pnl) FILTER (WHERE pnl>0),0), "
-                "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0) FROM v10_trades")
+                "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0) FROM v10_trades" + lw, lp)
             tot, wins, pnl, avg_win, avg_loss, gross_profit, gross_loss = cur.fetchone()
             # cc#1247: the two cuts now carry gross profit and gross loss as well, so win rate and
             # profit factor can be struck PER SEGMENT from the SAME formulas the total uses. This is
@@ -625,15 +636,15 @@ def get_performance():
             # grouped these rows. No engine logic, no new table, no changed definition.
             _CUT = ("SELECT {k}, COUNT(*), COUNT(*) FILTER (WHERE pnl>0), COALESCE(SUM(pnl),0), "
                     "COALESCE(SUM(pnl) FILTER (WHERE pnl>0),0), "
-                    "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0) FROM v10_trades GROUP BY {k}")
-            cur.execute(_CUT.format(k="symbol"))
+                    "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0) FROM v10_trades" + lw + " GROUP BY {k}")
+            cur.execute(_CUT.format(k="symbol"), lp)
             by_symbol = {r[0]: _cut_stats(r) for r in cur.fetchall()}
-            cur.execute(_CUT.format(k="leg"))
+            cur.execute(_CUT.format(k="leg"), lp)
             by_leg = {r[0]: _cut_stats(r) for r in cur.fetchall()}
             cur.execute("SELECT exit_ts::date d, COALESCE(SUM(pnl),0) FROM v10_trades "
-                        "WHERE exit_ts >= NOW() - INTERVAL '7 days' GROUP BY d ORDER BY d")
+                        "WHERE exit_ts >= NOW() - INTERVAL '7 days'" + la + " GROUP BY d ORDER BY d", lp)
             last_7 = [{"date": str(r[0]), "pnl": float(r[1])} for r in cur.fetchall()]
-            cur.execute("SELECT points FROM v10_trades WHERE points IS NOT NULL ORDER BY exit_ts")
+            cur.execute("SELECT points FROM v10_trades WHERE points IS NOT NULL" + la + " ORDER BY exit_ts", lp)
             pts = [float(r[0]) for r in cur.fetchall()]
     finally:
         conn.close()
@@ -657,6 +668,7 @@ def get_performance():
         "last_7_days": last_7,
         "by_symbol": by_symbol,
         "by_leg": by_leg,
+        "leg": leg,   # cc#1597: which leg these figures describe; None = whole book
     }
 
 

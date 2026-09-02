@@ -6099,6 +6099,14 @@ async function loadClosed(){
   let rows=[];
   try{ const r = await getJSON('/api/v10/trades/paired?limit=500'); rows=(r&&r.trades)||[];
        D.pairedSummary=(r&&r.summary)||{}; }catch(e){ D.pairedSummary={}; }
+  /* cc#1597 (V10_DISPLAY_OPTIONS_ONLY_V1, 36703): the trade LOG is the option legs, one row per
+     closed OPT leg, from the per-leg endpoint (v10_endpoints.closed_legs — leg is the only
+     classifier there). The paired list above stays for the honest "N signals fired futures-only"
+     note; nothing futures is rendered from it. Client filter on `leg` documented here: the legs
+     endpoint carries the field on every row. */
+  D.legs=[];
+  try{ const l = await getJSON('/api/v10/trades/legs?limit=2000');
+       D.legs=((l&&l.trades)||[]).filter(t=>t&&t.leg==='OPT'&&idxOnly({symbol:t.symbol})); }catch(e){ D.legs=[]; }
   D.loaded.closed = true;   // cc#1154: after the await, not before it
   D.closed = rows.filter(x=>idxOnly({symbol:x.symbol})).map((x,i)=>{
     const entry=Number(x.entry_price)||0, ex=Number(x.exit_price)||0;
@@ -6112,7 +6120,7 @@ async function loadClosed(){
 }
 async function loadPerf(){
   /* V10 own performance stats (replaces the old V8 qualified pull) */
-  try{ D.perf = await getJSON('/api/v10/performance'); }catch(e){}
+  try{ D.perf = await getJSON('/api/v10/performance?leg=OPT'); }catch(e){}   // cc#1597: option legs only (36703); the server filters every figure
 }
 
 async function loadLive(){
@@ -6126,7 +6134,8 @@ async function loadLive(){
 ════════════════════════════════════════════════════════════════ */
 function rTopBar(){
   const ist = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const tot = D.open.reduce((a,p)=>a+p.pnl,0)+D.closed.reduce((a,p)=>a+p.pnl,0);
+  /* cc#1597 (36703): the pane's book is the OPTION book — open option legs + closed option legs. */
+  const tot = D.open.filter(p=>p.type==='OPT').reduce((a,p)=>a+p.pnl,0)+(D.legs||[]).reduce((a,t)=>a+(Number(t.pnl)||0),0);
   const live = isMarketHours();
   /* cc#1150: topbar per the ref — brand wordmark, section label, spacer, then the live block.
      The ref has no clock and no P&L; the card explicitly says keep the 1s IST clock, so the card
@@ -6495,10 +6504,10 @@ function rPerf(){
   };
   return `<div class="card">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
-      <div class="s">Live paper stats from v10_trades · ${tot} closed trades</div></div></div>
+      <div class="s">Live paper stats from v10_trades · option legs only (36703) · ${tot} closed option trades</div></div></div>
     <div class="stat-grid">${cards}<div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(data.era_block)} &middot; closed trades by exit date, post&#8209;cutover era only</div><div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(cache.paper&&cache.paper.era_block)} &middot; V8 book, post&#8209;cutover era only</div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
-      ${seg(p.by_symbol,'By Symbol','SYMBOL')}${seg(p.by_leg,'By Leg','LEG')}
+      ${seg(p.by_symbol,'By Symbol','SYMBOL')}   <!-- cc#1597: the BY LEG table is hidden (36703) -->
     </div>
   </div>`;
 }
@@ -7068,8 +7077,8 @@ function ipCard(key){
      IN POSITION badge, the open total and View-on-chart stay here. */
   /* footer: the shared chart card (cc#706/803 - never a second chart implementation), the open
      total, and the engine state with the vs-PP read. */
-  var dir = (legs.find(function(l){ return l.type === 'FUT'; }) || {}).side || sig.dir || '—';
-  var tot = legs.reduce(function(a, l){ return a + (l.pnl || 0); }, 0);
+  var dir = sig.dir || '—';   // cc#1597: the engine's own state, never read off a futures leg
+  var tot = legs.filter(function(l){ return l.type === 'OPT'; }).reduce(function(a, l){ return a + (l.pnl || 0); }, 0);   // cc#1597: option legs only
   var vsPp = (d.cmp && pvt && pvt.pp)
     ? ' · <span style="color:' + (d.cmp >= pvt.pp ? 'var(--gr)' : 'var(--rd)') + '">'
       + (d.cmp >= pvt.pp ? 'above' : 'below') + ' PP ' + Math.abs((d.cmp - pvt.pp) / pvt.pp * 100).toFixed(2) + '%</span>'
@@ -7087,24 +7096,26 @@ function ipCard(key){
 function ipLegs(key){
   var feed = key === 'NIFTY' ? 'NIFTY50' : 'BANKNIFTY';
   var sig = D.sig[key] || {};
-  var legs = D.open.filter(function(p){ return (p.sym || '').toUpperCase() === feed; });
+  /* cc#1597 (V10_DISPLAY_OPTIONS_ONLY_V1, 36703, tightened 4503): ONLY the option leg renders —
+     strike + CE/PE, BUY/SELL, premium entry -> live premium, qty, P&L. The futures leg is stored
+     context, never a display: no price, qty, tag or P&L for it anywhere on this pane. */
+  var legs = D.open.filter(function(p){ return (p.sym || '').toUpperCase() === feed && p.type === 'OPT'; });
   var legsHtml;
   if(legs.length){
     legsHtml = legs.map(function(l){
       var cls = l.side === 'SHORT' ? 'short' : 'long';
-      var what = esc(l.sym) + (l.str ? '<small>' + l.str + ' ' + esc(l.opt || '') + ' wrt</small>' : (l.type === 'FUT' ? '<small>FUT</small>' : ''));
-      var kv = '<span>entry <b>' + num(l.entry) + '</b></span>'
-        + '<span>cmp <b>' + (l.cmp ? num(l.cmp) : '—') + '</b></span>'
-        + (l.sl ? '<span>stop <b>' + num(l.sl) + '</b></span>' : '')
-        + (l.tgt ? '<span>target <b>' + num(l.tgt) + '</b></span>' : '')
+      var what = (l.str ? num(l.str) + ' ' + esc(l.opt || '') : esc(l.sym)) + '<small>' + esc(l.sym) + ' option</small>';
+      var kv = '<span>premium <b>' + num(l.entry, 2) + '</b> → <b>' + (l.cmp ? num(l.cmp, 2) : '—') + '</b></span>'
+        + (l.sl ? '<span>stop <b>' + num(l.sl, 2) + '</b></span>' : '')
+        + (l.tgt ? '<span>target <b>' + num(l.tgt, 2) + '</b></span>' : '')
         + '<span>qty <b>' + l.qty + '</b></span>';
-      return '<div class="leg ' + cls + '"><span class="side">' + cls.toUpperCase() + '</span>'
+      return '<div class="leg ' + cls + '"><span class="side">' + (cls === 'short' ? 'SELL' : 'BUY') + '</span>'
         + '<div><div class="what">' + what + '</div><div class="kv">' + kv + '</div></div>'
         + '<div class="pnl ' + (l.pnl >= 0 ? 'pos' : 'neg') + '">' + (l.pnl < 0 ? '−' : '+') + '₹' + num(Math.abs(l.pnl))
         + '<small>' + sgn(l.pPct, 2) + '%</small></div></div>';
     }).join('');
   } else if(sig.dir === 'LONG' || sig.dir === 'SHORT'){
-    legsHtml = '<div class="empty">Live ' + sig.dir + ' signal — no open leg.</div>';
+    legsHtml = '<div class="empty">Live ' + sig.dir + ' signal — no open option leg.</div>';
   } else if(sig.dir === 'FLAT'){
     /* cc#1572 (founder comment 3, 02-Sep-2026): the entry rule left this box for the Index
        Position (i) guide ("How V10 enters", ipGuide) - the card states the state, not the rule. */
@@ -7175,51 +7186,72 @@ function rIndexPos(){
     + '<div class="two">' + ipCard('NIFTY') + ipCard('BANKNIFTY') + '</div></section>';
 }
 
-/* ── THE RECORD - the closed book collapses to one strip (scope 4) ── */
+/* ── THE RECORD - the closed OPTION-leg trade log (cc#1597; V10_DISPLAY_OPTIONS_ONLY_V1 36703) ──
+   Tiles WIN RATE / NET P&L / PROFIT FACTOR from /api/v10/performance?leg=OPT; one row per closed
+   option leg from /api/v10/trades/legs (D.legs); NIFTY | BANKNIFTY | ALL toggle with counts from
+   the same rows; newest first, 20 then load more; the chart glyph opens the shared V10 chart for
+   the symbol (the cc#1573 trade-scrolled overlay follows — room note). Columns mirror the app View
+   Logs option row: strike + CE/PE, BUY/SELL, premium entry -> exit, dates, P&L rupees, +pts,
+   result tag. Nothing futures renders here. */
+var REC = { sym: 'ALL', shown: 20 };
+function recRows(){
+  var all = D.legs || [];
+  if(REC.sym === 'NIFTY') return all.filter(function(t){ return t.symbol === 'NIFTY50'; });
+  if(REC.sym === 'BANKNIFTY') return all.filter(function(t){ return t.symbol === 'BANKNIFTY'; });
+  return all;
+}
+function recSetSym(k){ REC.sym = k; REC.shown = 20; recRepaint(); }
+function recMore(){ REC.shown += 20; recRepaint(); }
+function recRepaint(){ var el = document.getElementById('sec-record'); if(el) el.outerHTML = rRecord(); }
 function rRecord(){
-  var p = D.perf || {}, list = D.closed || [];
-  var n = p.total_trades != null ? p.total_trades : list.length;
+  var p = D.perf || {}, all = D.legs || [], rows = recRows(), shown = rows.slice(0, REC.shown);
   var wr = p.win_rate != null ? p.win_rate + '%' : '—';
   var pnl = p.total_pnl != null ? Number(p.total_pnl) : null;
   var pf = p.profit_factor != null ? Number(p.profit_factor).toFixed(2) : '—';
-  var chips = list.slice(0, 5).map(function(t){
-    return '<span class="t"><i>' + esc(String(t.dt || '').slice(0, 6)) + '</i>' + esc(t.sym)
-      + ' <span class="' + (t.pnl >= 0 ? 'pos' : 'neg') + '">'
-      + (t.netKnown ? (t.pnl < 0 ? '−' : '+') + num(Math.abs(Math.round(t.pnl))) : '—')
-      + '</span><i>' + esc(t.rsn) + '</i></span>';
+  var cN = all.filter(function(t){ return t.symbol === 'NIFTY50'; }).length, cB = all.filter(function(t){ return t.symbol === 'BANKNIFTY'; }).length;
+  var tg = function(k, label, n){
+    var on = REC.sym === k;
+    return '<button type="button" onclick="iiRecSym(\'' + k + '\')" aria-pressed="' + on + '" style="' + (on ? 'background:rgba(var(--cy-rgb),.14);color:var(--cy);border:1px solid rgba(var(--cy-rgb),.45)' : 'background:var(--panel);color:var(--tx3);border:1px solid var(--line2)') + ';font:600 10.5px var(--f-m);letter-spacing:.06em;padding:5px 11px;border-radius:999px;cursor:pointer">' + label + ' <b>' + n + '</b></button>';
+  };
+  var tagCls = function(r){ r = String(r || '').toUpperCase(); return r.indexOf('TARGET') === 0 ? 'pos' : (r === 'SL' ? 'neg' : ''); };
+  var trs = shown.map(function(t){
+    var buy = t.direction === 'LONG';
+    return '<tr><td>' + esc(t.exit_ist || t.entry_ist || '—') + (t.held ? ' <span style="opacity:.65">· ' + esc(t.held) + '</span>' : '') + '</td>'
+      + '<td class="sym">' + esc(t.symbol === 'NIFTY50' ? 'NIFTY' : t.symbol) + ' <span style="font:600 11px var(--f-m);color:var(--tx2)">' + esc(t.label || '') + '</span></td>'
+      + '<td><span class="' + (buy ? 'pos' : 'neg') + '">' + (buy ? 'BUY' : 'SELL') + '</span></td>'
+      + '<td>' + (t.entry_price != null ? num(t.entry_price, 2) : '—') + ' → ' + (t.exit_price != null ? num(t.exit_price, 2) : '—') + '</td>'
+      + '<td class="' + (t.pnl != null ? (t.pnl >= 0 ? 'pos' : 'neg') : '') + '" style="font-weight:700">' + (t.pnl != null ? (t.pnl < 0 ? '−' : '+') + '₹' + num(Math.abs(Math.round(t.pnl))) : '—')
+      + (t.points != null ? ' <span style="font-weight:500;color:var(--tx3)">' + sgn(t.points, 1) + ' pts</span>' : '') + '</td>'
+      + '<td><span class="' + tagCls(t.reason) + '" style="font:600 9.5px var(--f-m);letter-spacing:.08em">' + esc(String(t.reason || 'EXIT').toUpperCase()) + '</span></td>'
+      + '<td><button type="button" class="ib" title="View ' + esc(t.symbol) + ' on the V10 chart" aria-label="View on chart" onclick="iiRecChart(\'' + esc(t.symbol) + '\')" style="width:24px;height:24px;font-size:12px">📈</button></td></tr>';
   }).join('');
-  return '<section class="iisec"><div class="sh"><span class="st">The Record</span>'
-    + '<span class="badge b-static">' + n + ' CLOSED</span>'
-    + '<span class="asof">V10 · all-time · WR + P&amp;L + PF from /api/v10/performance</span></div>'
-    + '<div class="card rec">'
+  // the honest futures-only count (the app's own derivation): paired trades with no option leg
+  var futOnly = (D.closed || []).filter(function(t){ return !t.hedge; }).length;
+  var lastExit = all.length ? (all[0].exit_ist || '') : '';
+  return '<section class="iisec" id="sec-record"><div class="sh"><span class="st">The Record</span>'
+    + '<span class="badge b-static">' + all.length + ' CLOSED · OPTIONS</span>'
+    + '<span class="asof">V10 · option legs only · WR + P&amp;L + PF from /api/v10/performance?leg=OPT · rows from /api/v10/trades/legs</span></div>'
+    + '<div class="card rec" style="grid-template-columns:auto auto auto 1fr">'
     + '<div><div class="k">Win rate</div><div class="v">' + wr + '</div></div>'
     + '<div><div class="k">Net P&amp;L</div><div class="v ' + (pnl != null && pnl < 0 ? 'neg' : 'pos') + '">'
     + (pnl != null ? (pnl < 0 ? '−' : '') + '₹' + fK(Math.abs(pnl)) : '—') + '</div></div>'
     + '<div><div class="k">Profit factor</div><div class="v">' + pf + '</div></div>'
-    + '<div class="last">' + (chips || '<span class="scf" style="margin:0">' + (D.loaded.closed ? 'no closed trades yet' : 'loading…') + '</span>') + '</div>'
-    + '<button type="button" class="btn" onclick="iiRecordAll()">View all ' + list.length + '</button>'
+    + '<div class="last" style="justify-content:flex-end">' + tg('ALL', 'ALL', all.length) + tg('NIFTY', 'NIFTY', cN) + tg('BANKNIFTY', 'BANKNIFTY', cB) + '</div>'
+    + '</div>'
+    + '<div class="card" style="margin-top:8px;padding:6px 14px 10px"><div class="tbl-hold"><div class="tbl-scroll">'
+    + (shown.length
+        ? '<table class="tb"><thead><tr><th>EXIT (IST) · HELD</th><th>SYMBOL · STRIKE</th><th>SIDE</th><th>PREMIUM ENTRY → EXIT</th><th>P&amp;L</th><th>RESULT</th><th></th></tr></thead><tbody>' + trs + '</tbody></table>'
+        : '<div class="empty">' + (D.loaded.closed ? 'No closed trades for this filter.' : 'loading…') + '</div>')
+    + '</div></div>'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;font:500 10.5px var(--f-m);color:var(--tx3)">'
+    + '<span>' + shown.length + ' of ' + rows.length + (lastExit ? ' · last exit ' + esc(lastExit) + ' IST' : '') + (futOnly ? ' · ' + futOnly + ' signal' + (futOnly === 1 ? '' : 's') + ' fired futures-only (not rows here)' : '') + '</span>'
+    + (rows.length > shown.length ? '<button type="button" class="btn" onclick="iiRecMore()">load more ↓</button>' : '')
     + '</div></section>';
 }
-function iiRecordAll(){
-  var list = D.closed || [];
-  if(!list.length) return;
-  II_SHEET.kind = 'rec';
-  /* the cc#941 paired columns - DATE / SYMBOL / DIR / ENTRY / EXIT / POINTS / OPT / NET P&L /
-     EXIT. The OPT column is the option leg riding the same trade - a PEER, not a hedge (cc#954). */
-  var rows = list.map(function(t){
-    return '<tr><td>' + esc(t.dt) + (t.held ? ' <span style="opacity:.65">· ' + esc(t.held) + '</span>' : '') + '</td>'
-      + '<td class="sym">' + esc(t.sym) + '</td>'
-      + '<td class="' + (t.side === 'LONG' ? 'pos' : 'neg') + '">' + esc(t.side || '') + '</td>'
-      + '<td>' + num(t.entry) + '</td>'
-      + '<td>' + (t.exit ? num(t.exit) : '—') + '</td>'
-      + '<td class="' + (t.pts != null ? (t.pts >= 0 ? 'pos' : 'neg') : '') + '">' + (t.pts != null ? sgn(t.pts, 0) : '—') + '</td>'
-      + '<td>' + (t.hedge ? esc(t.hedge.label || '') + ' <span class="' + ((t.hedge.pnl || 0) >= 0 ? 'pos' : 'neg') + '">₹' + Math.round(t.hedge.pnl || 0) + '</span>' : '—') + '</td>'
-      + '<td class="' + (t.pnl >= 0 ? 'pos' : 'neg') + '" style="font-weight:700">' + (t.netKnown ? '₹' + num(Math.round(t.pnl)) : '—') + '</td>'
-      + '<td>' + esc(t.rsn) + '</td></tr>';
-  }).join('');
-  iiSheet('<div class="iish">The Record · ' + list.length + ' paired trades · all-time</div>'
-    + '<table class="tb"><thead><tr><th>DATE (IST)</th><th>SYMBOL</th><th>DIR</th><th>ENTRY</th><th>EXIT</th>'
-    + '<th>POINTS</th><th>OPT</th><th>NET P&L</th><th>EXIT</th></tr></thead><tbody>' + rows + '</tbody></table>');
+function iiRecChart(sym){
+  /* cc#1573 (the trade-scrolled overlay with BUY/TGT/FLIP/SL markers) has not landed: the glyph
+     opens the shared V10 chart for the symbol — the same "View on chart" the pane already has. */
+  try{ openV10Chart(sym === 'NIFTY' ? 'NIFTY50' : sym); }catch(e){ console.warn('[rec chart]', e && e.message); }
 }
 
 /* ── OI BUILD UPS - the app's buCard family (cc#1431/1454/1460), four cards in one row ── */
@@ -7591,7 +7623,7 @@ window.iiBuMore = buMore;
 window.iiVfMore = vfMore;
 window.iiQbMore = qbMore;
 window.iiVfTicks = vfSetTicks;
-window.iiRecordAll = iiRecordAll;
+window.iiRecSym = recSetSym; window.iiRecMore = recMore; window.iiRecChart = iiRecChart;   /* cc#1597: the log's toggles, load more, chart glyph */
 window.iiIpChart = function(k){ openIdxChart(k); };   /* the shared chart card, index mode (cc#1059) */
 
 /* cc#1151 verify E: rStrikeOI() REMOVED. cc#1152 verify D: oiHisto() REMOVED. cc#1522: their
@@ -7657,13 +7689,13 @@ function render(){
        cc#1571/1574 (02-Sep-2026): Divergence hidden; Open Positions + The Record are the last two
        blocks. Final order: TopBar, Mood, Idx/VIX, PCR/ADR, F&O ban, Index Position, Max Pain,
        Build Ups, Flow & Basis, [Settings, Performance], Open Positions, The Record, foot. */
-    rIndexPos() + rMaxPainSec() + rBuildUps() + rFlowBasis() +   /* cc#1571 P4: rRecord() moved to the foot, after rOpenPos() */
+    rIndexPos() + rOpenPos() + rMaxPainSec() + rBuildUps() + rFlowBasis() +   /* cc#1597 (supersedes cc#1571 on placement): Open Positions sits DIRECTLY ABOVE Max Pain */
     /* cc#1574 (founder comment 5, 02-Sep-2026): the Futures ⇄ Equity Divergence card is HIDDEN -
        rDivergence() and /api/v10/divergence stay intact, only this call and its loader are out. */
     `<div class="stack">` + rSettings() + rPerf() + `</div>` +
     /* cc#1571 P3 (founder comment 2, 02-Sep-2026, "V10 Open and Closed shift to last on page"):
        the open legs left the Index Position cards and render here, after every market card. */
-    rOpenPos() + rRecord() +   /* cc#1571 P4: the closed book is the last block on the page */
+    rRecord() +   /* cc#1571 P4 / cc#1597: The Record (the option-leg log) is the last block on the page */
     /* cc#1150 verify D: the company name was rendered here. The ref's own foot does not carry it,
        and the product_name_rule says this pane says INDEX INTEL. Dropped to match the ref exactly. */
     `<div class="foot">Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
