@@ -60,8 +60,9 @@ var URLS = { tc:'/api/mobile/check/tc?symbol=', scan:'/api/mobile/check/scan?uni
              invest:'/api/mobile/check/invest?symbol=', search:'/api/gvm/search?q=' };
 /* Modes are added to this list as each view lands (cc#1593 pushes P4 → P6 → P8); a mode not in
    the list has no view yet, so its button is not drawn and its deep link falls back to #tc. */
-var MODES = [ {key:'tc', label:'Trade Check'} ];
-var S = { mode:'tc', sym:'', tc:null, tcErr:null, bucket:null, busy:false };
+var MODES = [ {key:'tc', label:'Trade Check'}, {key:'scan', label:'Run Scan'} ];
+var S = { mode:'tc', sym:'', tc:null, tcErr:null, bucket:null, busy:false,
+          scan:{ universe:'nifty50', data:null, err:null, busy:false, showFail:false } };
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -96,6 +97,7 @@ function setMode(k, push){
   S.mode = modeOf(k); drawModes();
   if (push !== false){ try { history.replaceState(null, '', location.pathname + (S.sym ? '?sym=' + encodeURIComponent(S.sym) : '') + '#' + S.mode); } catch(e){} }
   if (S.mode === 'tc' && S.sym && !S.tc && !S.busy) loadTC();
+  if (S.mode === 'scan') renderScan();
 }
 
 /* ── search: the app's one autocomplete (/api/gvm/search), same as /m/gvm and /m/alerts ─── */
@@ -106,7 +108,7 @@ function search(q){
   apiGet(URLS.search + encodeURIComponent(q) + '&limit=8').then(function(d){
     var res = (d && d.results) || [];
     box.innerHTML = res.length ? res.map(function(x){
-      return '<div class="c-drow" data-sym="' + esc(x.symbol) + '"><b>' + esc(x.symbol) + '</b><i>' + (x.gvm_score != null ? 'GVM ' + n1(x.gvm_score) : '') + '</i><span>' + esc(x.company_name || x.name || '') + (x.segment ? ' · ' + esc(x.segment) : '') + '</span></div>';
+      return '<div class="c-drow" data-pick="' + esc(x.symbol) + '" data-scorr-skip="1"><b>' + esc(x.symbol) + '</b><i>' + (x.gvm_score != null ? 'GVM ' + n1(x.gvm_score) : '') + '</i><span>' + esc(x.company_name || x.name || '') + (x.segment ? ' · ' + esc(x.segment) : '') + '</span></div>';
     }).join('') : '<div class="c-drow"><span>No match. Press enter to check the typed symbol.</span></div>';
     box.hidden = false;
   }).catch(function(){ box.hidden = true; });
@@ -237,6 +239,58 @@ function renderTCLanding(){
   $('c-live').textContent = '';
 }
 
+/* ── RUN SCAN (R2 4488 scan view; spec 36637 scan_view). The scan runs on the button tap, never
+   on a toggle change. Both universes are ONE fresh /api/mobile/check/scan call (tc_v4_scan scores
+   the whole active futures universe on all four cards in ~2 s), so no background job is needed;
+   the header states the scan's own computed_at + runtime. Nifty 50 = the top-50 active futures
+   by market cap, labelled as the proxy it is. */
+var UNI = [ {key:'nifty50', label:'Nifty 50', btn:'50 STOCKS'}, {key:'futures', label:'All Futures', btn:'ALL FUTURES'} ];
+function scanBand(r){ return r.weighted ? (r.band || '—') : 'UNWEIGHTED'; }
+function scanCls(r){ if (!r.weighted) return 'u'; var b = bandCls(r.band); return b === 'pass' ? '' : (b === 'watch' ? 'w' : 'f'); }
+function runScan(){
+  var sc = S.scan; if (sc.busy) return;
+  sc.busy = true; sc.err = null; renderScan();
+  apiGet(URLS.scan + encodeURIComponent(sc.universe)).then(function(d){
+    sc.data = d; sc.busy = false; sc.showFail = false; renderScan();
+  }).catch(function(e){ sc.busy = false; sc.err = e.message || 'scan failed'; renderScan(); });
+}
+function renderScan(){
+  var sc = S.scan, d = (sc.data && sc.data.universe === sc.universe) ? sc.data : null;
+  var u = UNI.filter(function(x){ return x.key === sc.universe; })[0] || UNI[0];
+  var count = d ? d.universe_count : null;
+  var h = '<div class="c-row2"><div class="c-seg" id="scan-uni">' + UNI.map(function(x){ return '<button type="button" data-uni="' + x.key + '"' + (x.key === sc.universe ? ' class="on"' : '') + '>' + esc(x.label) + '</button>'; }).join('') + '</div></div>'
+    + '<button type="button" class="c-runbtn" id="scan-run"' + (sc.busy ? ' disabled' : '') + '>' + (sc.busy ? '… SCORING' : '▶ RUN TRADE CHECK') + ' · ' + (count != null ? count + ' STOCKS' : u.btn) + ' × 4</button>';
+  if (sc.busy) h += '<div class="c-prog">Scoring all four buckets on ' + esc(u.label) + '… a fresh run, about 2 seconds.</div>';
+  else if (sc.err) h += emptyBox('Scan failed', sc.err, 'scan');
+  else if (!d) h += '<div class="c-note">' + (sc.universe === 'nifty50' ? 'Nifty 50 here = the 50 biggest futures stocks by market cap.' : 'All Futures = every active symbol in the futures universe.') + ' Each stock is scored on all 4 buckets; the best one is shown. Tap RUN to score now.</div>';
+  else {
+    var rows = d.rows || [], counts = d.counts || {};
+    var shown = rows.filter(function(r){ return sc.showFail || !(r.weighted && r.band === 'FAIL'); });
+    var hidden = rows.length - shown.length;
+    h += '<div class="c-scanhd"><span>Ran ' + esc(hhmm(d.computed_at) || '—') + ' IST · ' + (d.scored || 0) + ' scored · ' + (d.runtime_s != null ? n1(d.runtime_s) + ' s' : '—') + '</span><span>best of 4 · /100 · live</span></div>';
+    h += '<section class="slab" style="padding:8px 12px"><table class="c-tbl"><thead><tr><th>Symbol · best bucket</th><th>Score /100</th><th>Day %</th><th>GVM</th></tr></thead><tbody>'
+      + (shown.length ? shown.map(function(r){
+          var tagCls = String(r.best_label || '').indexOf('BUY') === 0 ? 'up' : 'dn';
+          return '<tr data-row="' + esc(r.symbol) + '" data-scorr-skip="1"><td>' + esc(r.symbol) + ' <span class="c-tag ' + tagCls + '">' + esc(r.best_label || '—') + '</span></td>'
+            + '<td>' + (r.score100 == null ? '—' : n1(r.score100)) + '<span class="c-sb ' + scanCls(r) + '"><i style="width:' + clamp(Math.round(Number(r.score100) || 0), 0, 100) + '%"></i></span></td>'
+            + '<td class="' + (r.day_pct > 0 ? 'up' : (r.day_pct < 0 ? 'dn' : '')) + '">' + pct(r.day_pct) + '</td>'
+            + '<td class="' + (r.gvm != null && r.gvm >= 7.5 ? 'gd' : '') + '">' + (r.gvm == null ? '—' : n1(r.gvm)) + '</td></tr>';
+        }).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;font-family:var(--body);font-weight:400">Every scored stock is a FAIL today. Tap show FAIL to see them.</td></tr>')
+      + '</tbody></table></section>';
+    h += '<div class="c-scanft"><span>' + (counts.STRONG || 0) + ' STRONG · ' + (counts.VALID || 0) + ' VALID · ' + (counts.WATCH || 0) + ' WATCH · ' + (counts.FAIL || 0) + ' FAIL' + (hidden ? ' (hidden)' : '') + (counts.UNWEIGHTED ? ' · ' + counts.UNWEIGHTED + ' unweighted' : '') + '</span>'
+      + '<button type="button" id="scan-fail">' + (sc.showFail ? 'hide FAIL ▴' : 'show FAIL ▾') + '</button></div>';
+    h += '<div class="c-note">' + esc(d.label || u.label) + ' = ' + esc(d.universe_note || '') + '. Each stock is scored on all 4 buckets; the best one is shown. Day % on the previous-close basis. Tap a row to open its card.</div>';
+  }
+  $('scan-main').innerHTML = h;
+}
+$('scan-main').addEventListener('click', function(e){
+  var u = e.target.closest('[data-uni]'); if (u){ S.scan.universe = u.getAttribute('data-uni'); renderScan(); return; }
+  if (e.target.closest('#scan-run')){ runScan(); return; }
+  if (e.target.closest('#scan-fail')){ S.scan.showFail = !S.scan.showFail; renderScan(); return; }
+  if (e.target.closest('[data-act="scan"]')){ runScan(); return; }
+  var row = e.target.closest('tr[data-row]'); if (row){ setMode('tc'); chooseSym(row.getAttribute('data-row')); window.scrollTo(0, 0); }
+});
+
 /* ── the detail sheet (R3, cc_task_logs 4495): FIELD PARITY with the web Check page rule card —
    id + label, bucket + weight + registry sum, credit earned / weight, REQUIRED (the engine
    condition), COMPANY (the engine reading), the value fields as tiles, the credit ladder with the
@@ -283,7 +337,7 @@ document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeS
 $('c-modes').addEventListener('click', function(e){ var b = e.target.closest('button[data-mode]'); if (b) setMode(b.getAttribute('data-mode')); });
 $('c-q').addEventListener('input', function(e){ clearTimeout(searchT); var v = e.target.value.trim(); searchT = setTimeout(function(){ search(v); }, 250); });
 $('c-q').addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); chooseSym(e.target.value); } });
-$('c-drop').addEventListener('click', function(e){ var r = e.target.closest('[data-sym]'); if (r) chooseSym(r.getAttribute('data-sym')); });
+$('c-drop').addEventListener('click', function(e){ var r = e.target.closest('[data-pick]'); if (r) chooseSym(r.getAttribute('data-pick')); });
 document.addEventListener('click', function(e){ if (!e.target.closest('.c-search')) $('c-drop').hidden = true; });
 $('tc-main').addEventListener('click', function(e){
   var bk = e.target.closest('[data-bucket]'); if (bk){ S.bucket = bk.getAttribute('data-bucket'); renderTC(); return; }
@@ -296,6 +350,7 @@ window.addEventListener('hashchange', function(){ setMode(location.hash, false);
 (function boot(){
   var q = null; try { q = new URLSearchParams(location.search).get('sym'); } catch(e){}
   S.mode = modeOf(location.hash); drawModes();
+  if (S.mode === 'scan') renderScan();
   if (q){ $('c-q').value = String(q).toUpperCase(); S.sym = String(q).trim().toUpperCase(); }
   if (S.sym) loadTC(); else renderTCLanding();
 })();
