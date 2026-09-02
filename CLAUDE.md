@@ -209,6 +209,8 @@ which is the point.
 
 Ends after 2 hours unless the founder re-arms. `production mode off` / `stop` ends it immediately.
 
+Effort on the heartbeat: Sonnet 5 at high, never ultracode - see MODEL_EFFORT_CACHE_RULE_V1.
+
 ### The Fable Room (CC_COMMS_LOOP_V1, session_log 24138, founder-set 17-Aug-2026)
 The meeting room is `cc_tasks` + `cc_task_logs`. Arpit moderates and watches on the app; Fable (Claude AI) and CC talk THROUGH THE TABLE, not through him.
 
@@ -270,3 +272,35 @@ pushes → **Fable verifies** with BOTH the committed diff AND a DB query on rea
 Neither seat marks its own work verified. A result is a claim; the artifact is the evidence.
 A card that leaves a design question open is an unfinished card — but a data-source gate is a
 legitimate question TO CC, and CC answers it before the build proceeds rather than guessing.
+
+## MODEL_EFFORT_CACHE_RULE_V1 (founder-locked 02-Sep-2026, session_log 36144)
+
+Which model, how hard it thinks, and how to keep the prompt cache warm. Amends PRODUCTION_MODE_V3
+(session_log 29164) without changing its wake/claim mechanics.
+
+**(a) Models — pick by card category first, effort second. Effort never substitutes for model.**
+- **Fable 5.1**: backend, engine, schema, trading logic, backend bugfixes and audits, backtests and
+  parameter sweeps, root-cause of any wrong number.
+- **Sonnet 5**: app/design, pure frontend bugs a screenshot can verify, the Browser / Claude-in-Chrome
+  agent, and the production-mode heartbeat.
+
+**(b) Effort.**
+- Fable 5.1 = **MEDIUM**. Sonnet 5 = **HIGH**.
+- ultracode / xhigh only for a single named heavy card (multi-file drift hunt, wide audit). State it
+  on the card. Switch it off in the same session.
+- **NEVER** ultracode on the 60s production-mode heartbeat. An empty-queue poll at xhigh is pure
+  drain (seen 02-Sep-2026: Sonnet 5 + Ultracode, queue empty, re-arming every minute).
+
+**(c) Preserve the prompt cache.**
+- One long CC session per drain window. Do not restart sessions between cards.
+- CLAUDE.md, spec files and the system prefix stay stable inside a session. No churn at the head
+  of context.
+- Volatile data (DB dumps, tool output, timestamps) goes at the END of the prompt, never the start.
+- Read big files once and keep them in context. Do not re-read or rewrite them needlessly.
+
+**(d) Cost.** Fable 5.1 cache reads are $0.25/MTok — 75% below Fable 5. Input and output prices are
+unchanged. Agentic loops are mostly cache reads, so the cache is the main cost lever. (Confirmed for
+API billing; not confirmed for Max-plan allowances.)
+
+Out of scope here: building a cache-preserving pipeline. That gets its own card only if a real
+workflow is shown to churn the prefix.
