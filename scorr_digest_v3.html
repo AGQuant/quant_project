@@ -144,19 +144,29 @@ section{margin-top:26px}
 /* cc#1521 R4: the rung LIST becomes a PIVOT RAIL — one horizontal band from the lowest support
    to the highest resistance, a tick per rung, the live CMP as a pulsing dot on the band. The old
    .rung grid CSS is deleted with the markup it styled. */
-.rail-wrap{margin-top:34px;padding:0 10px 30px}
+/* cc#1606 (founder 02-Sep 15:26 "clumsy - increase card height 2x, stacked rows not overlapping,
+   vertical dotted light lines to indicate the bar position"): the card is ~2x; the bar stays one
+   track across the top third; every level label now lives in one of three stacked rows BELOW the
+   bar (A: S2 S1 PP R1 R2 · B: DAY LOW DAY HIGH · C: CMP), each joined to its tick by a thin dotted
+   guide (an SVG polyline — straight, or one elbow when two labels in a row would collide, so
+   nothing ever overprints). Ticks on the bar are unchanged in meaning. */
+.rail-wrap{margin-top:34px;padding:0 10px 0;min-height:236px;position:relative}
 .rail{position:relative;height:6px;border-radius:3px;
   background:linear-gradient(90deg,rgba(var(--gr-rgb),.55),rgba(var(--gr-rgb),.16) 42%,rgba(var(--rd-rgb),.16) 58%,rgba(var(--rd-rgb),.55))}
 .rail .tick{position:absolute;top:-5px;width:2px;height:16px;background:var(--tx3);border-radius:1px;transform:translateX(-50%)}
 .rail .tick.pp{background:var(--cy);height:20px;top:-7px}
-.rail .tl{position:absolute;top:16px;transform:translateX(-50%);text-align:center;white-space:nowrap}
-.rail .tl .a{font-family:var(--f-m);font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--tx3)}
-.rail .tl .b{font-family:var(--f-m);font-size:11px;font-weight:600;color:var(--tx2);margin-top:1px}
-.rail .tl.sup .a{color:var(--gr)} .rail .tl.res .a{color:var(--rd)} .rail .tl.pp .a{color:var(--cy)}
+.rail .tick.sup{background:var(--gr)} .rail .tick.res{background:var(--rd)} .rail .tick.day{background:var(--tx3);opacity:.6}
+.lguide{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.lrow{position:absolute;left:0;right:0}
+.ll{position:absolute;transform:translateX(-50%);text-align:center;white-space:nowrap;background:var(--panel)}
+.ll .a{font-family:var(--f-m);font-size:9.5px;font-weight:600;letter-spacing:.1em;color:var(--tx3)}
+.ll .b{font-family:var(--f-m);font-size:12px;font-weight:600;color:var(--tx2);margin-top:1px}
+.ll.sup .a,.ll.sup .b{color:var(--gr)} .ll.res .a,.ll.res .b{color:var(--rd)} .ll.pp .a{color:var(--cy)}
+.ll.day .a,.ll.day .b{color:var(--tx3)} .ll.cmp .a,.ll.cmp .b{color:var(--am)}
 .cmpdot{position:absolute;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;
-  background:var(--cy);box-shadow:0 0 0 3px rgba(var(--cy-rgb),.25),0 0 16px var(--cy);animation:pulse 1.6s infinite}
+  background:var(--am);box-shadow:0 0 0 3px rgba(var(--am-rgb),.25),0 0 16px var(--am);animation:pulse 1.6s infinite}
 .cmptag{position:absolute;top:-30px;transform:translateX(-50%);font-family:var(--f-m);font-size:10.5px;
-  font-weight:600;color:var(--cy);white-space:nowrap}
+  font-weight:600;color:var(--am);white-space:nowrap}
 .idxfoot{display:flex;gap:18px;margin-top:8px;font-family:var(--f-m);font-size:11px;font-weight:500;
   color:var(--tx3);flex-wrap:wrap}
 .idxfoot b{color:var(--tx2);font-weight:500}
@@ -226,6 +236,7 @@ section{margin-top:26px}
   font-family:var(--f-m);font-size:10.5px;color:var(--tx3);display:flex;gap:18px;flex-wrap:wrap}
 /* cc#1521 R4 breakpoints: the tape grid narrows 8 -> 6 -> 4 -> 3 columns; hero segs 5 -> 2 -> 1. */
 @media(max-width:1000px){.tape{grid-template-columns:repeat(4,1fr)}}   /* cc#1605: 4 x 4 below 1000px */
+@media(max-width:900px){.two{grid-template-columns:1fr}}   /* cc#1606: the two ladder cards stack below 900px */
 @media(max-width:860px){
   .two,.three{grid-template-columns:1fr} .segs{grid-template-columns:repeat(2,1fr)}
   .tape{grid-template-columns:repeat(4,1fr)}
@@ -555,24 +566,36 @@ function secLadders(s){
     var span=(hi-lo)||1;
     function pctOf(v){ return Math.max(0,Math.min(100,(v-lo)/span*100)).toFixed(2)+'%'; }
     var s1=null, r1=null;
-    h += '<div class="rail-wrap"><div class="rail">';
-    rungs.forEach(function(r){
+    rungs.forEach(function(r){ var lab=String(r.label||'').toUpperCase(); if(lab==='S1') s1=r; if(lab==='R1') r1=r; });
+    /* cc#1606: the CMP joins the level set as its own row; every level keeps its tick on the bar,
+       every label sits in a row (A pivots · B day range · C CMP) at its true x where it can, and is
+       pushed right (elbowed guide) only when a neighbour in the SAME row would be closer than 70px.
+       Geometry is in % of the bar so both cards share it; the collision rule is resolved in px at
+       render time from the card's own width, then re-run on resize. */
+    var lv = rungs.map(function(r){
       var lab=String(r.label||'').toUpperCase();
-      var mod = lab.charAt(0)==='R' ? 'res' : (lab.charAt(0)==='S' ? 'sup' : 'pp');
-      if(lab==='S1') s1=r; if(lab==='R1') r1=r;
-      h += '<div class="tick'+(mod==='pp'?' pp':'')+'" style="left:'+pctOf(r.value)+'"></div>'+
-           '<div class="tl '+mod+'" style="left:'+pctOf(r.value)+'"><div class="a">'+esc(r.label)+'</div>'+
-           '<div class="b">'+num(r.value,2)+'</div></div>';
+      var kind = lab.indexOf('DAY')===0 ? 'day' : (lab.charAt(0)==='R' ? 'res' : (lab.charAt(0)==='S' ? 'sup' : 'pp'));
+      return {label:r.label, value:Number(r.value), kind:kind, row:(kind==='day'?1:0), sub:''};
     });
     if(ix.cmp!=null){
-      h += '<div class="cmptag" style="left:'+pctOf(ix.cmp)+'">CMP '+num(ix.cmp,2)+'</div>'+
-           '<div class="cmpdot" style="left:'+pctOf(ix.cmp)+'"></div>';
+      var cmpSub=[]; if(s1&&s1.dist_pct!=null) cmpSub.push('to S1 '+pc(s1.dist_pct)); if(r1&&r1.dist_pct!=null) cmpSub.push('to R1 '+pc(r1.dist_pct));
+      lv.push({label:'CMP', value:Number(ix.cmp), kind:'cmp', row:2, sub:cmpSub.join(' · ')});
     }
-    h += '</div></div>';
+    h += '<div class="rail-wrap" data-ladder="1"><div class="rail">'+
+         lv.filter(function(l){return l.kind!=='cmp';}).map(function(l){ return '<div class="tick '+l.kind+'" style="left:'+pctOf(l.value)+'"></div>'; }).join('')+
+         (ix.cmp!=null?'<div class="cmptag" style="left:'+pctOf(ix.cmp)+'">CMP '+num(ix.cmp,2)+'</div><div class="cmpdot" style="left:'+pctOf(ix.cmp)+'"></div>':'')+
+         '</div>'+
+         '<svg class="lguide" aria-hidden="true"></svg>'+
+         [0,1,2].map(function(ri){
+           return '<div class="lrow" data-row="'+ri+'" style="top:'+(52+ri*62)+'px">'+lv.filter(function(l){return l.row===ri;}).map(function(l){
+             return '<div class="ll '+l.kind+'" data-x="'+pctOf(l.value)+'"><div class="a">'+esc(l.label)+'</div><div class="b">'+num(l.value,2)+(l.sub?' <span style="font-size:9.5px;color:var(--tx3)">'+esc(l.sub)+'</span>':'')+'</div></div>';
+           }).join('')+'</div>';
+         }).join('')+
+         '</div>';
     var foot=[];
+    if(s1&&r1) foot.push('<span>S1–R1 band <b>'+num(s1.value,2)+' – '+num(r1.value,2)+'</b></span>');
     if(s1&&s1.dist_pct!=null) foot.push('<span>to S1 <b>'+pc(s1.dist_pct)+'</b></span>');
     if(r1&&r1.dist_pct!=null) foot.push('<span>to R1 <b>'+pc(r1.dist_pct)+'</b></span>');
-    if(s1&&r1) foot.push('<span>S1–R1 band <b>'+num(s1.value,2)+' – '+num(r1.value,2)+'</b></span>');
     if(foot.length) h += '<div class="idxfoot">'+foot.join('')+'</div>';
     h += '</div>';
   });
@@ -583,6 +606,38 @@ function secLadders(s){
   return '<section>'+h+'</section>';
 }
 
+
+/* cc#1606: label placement + dotted guides. Each label starts at its tick's x (% of the bar);
+   within a row, left to right, a label closer than 70px to the previous one is pushed right to
+   70px, and its guide gets one elbow (vertical from the tick, horizontal at mid-row, vertical to
+   the label). Labels are clamped inside the card. Runs after every render and on resize. */
+function ladderLayout(){
+  document.querySelectorAll('[data-ladder]').forEach(function(wrap){
+    var W=wrap.clientWidth; if(!W) return;
+    var rail=wrap.querySelector('.rail'); var railTop=rail?rail.offsetTop+3:3;
+    var svg=wrap.querySelector('.lguide'); var paths=[];
+    wrap.querySelectorAll('.lrow').forEach(function(row){
+      var rowTop=row.offsetTop, labels=[].slice.call(row.querySelectorAll('.ll'));
+      labels.sort(function(a,b){ return parseFloat(a.getAttribute('data-x'))-parseFloat(b.getAttribute('data-x')); });
+      var prevRight=-1e9;
+      labels.forEach(function(el){
+        var tx=parseFloat(el.getAttribute('data-x'))/100*W;   // the tick's x
+        var half=el.offsetWidth/2||30;
+        var x=Math.max(half, Math.min(W-half, tx));           // clamp inside the card
+        if(x-half < prevRight+8) x=prevRight+8+half;           // no overprint: shift right (70px rule via widths)
+        x=Math.min(x, W-half);
+        el.style.left=x+'px';
+        prevRight=x+half;
+        var top=rowTop; var elbow=(Math.abs(x-tx)>1);
+        var midY=Math.round(top-10);
+        paths.push('<polyline points="'+(elbow?(tx+','+railTop+' '+tx+','+midY+' '+x+','+midY+' '+x+','+top):(tx+','+railTop+' '+x+','+top))+'" fill="none" stroke="var(--line2)" stroke-width="1" stroke-dasharray="2 3"/>');
+      });
+    });
+    if(svg) svg.innerHTML=paths.join('');
+  });
+}
+var _ladderRT=null;
+window.addEventListener('resize',function(){ clearTimeout(_ladderRT); _ladderRT=setTimeout(ladderLayout,120); });
 
 function secInternals(s){
   if(!s) return '';
@@ -938,6 +993,7 @@ function render(d){
     pill.textContent=(d.market||{}).label||'—';
     pill.className='mkt'+(((d.market||{}).state==='OPEN')?' open':'');
   }
+  try{ ladderLayout(); }catch(e){ console.warn('[ladder layout]', e&&e.message); }   // cc#1606: place the level labels + guides on the painted cards
   tickClock();
   var t=(s.global_tape||{});
   document.getElementById('footStats').textContent =
