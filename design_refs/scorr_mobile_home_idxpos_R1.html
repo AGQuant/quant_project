@@ -1,0 +1,190 @@
+<!-- DESIGN REF scorr_mobile_home_idxpos_R1 @ 8f48d24 · cc#1569 · 02-Sep-2026
+     Hero deck Card 4 (Index Positions) on mobile/home.html — EMPTY STATES, as SHIPPED at main 8f48d24.
+     READ-ONLY extract of the live template + the CSS that shapes it. Source of truth is
+     mobile/home.html at that sha; this file is the numbered ref chain (R1) per ROLE_CHARTER_V4.
+     Never overwrite this revision; the next change is R2.
+
+     WHAT R1 IS
+     · Shell: .c > .c2body > .chd ("Index Positions" + NIFTY/BANKNIFTY toggle) + #heroPositionsBody
+       + VIEW LOGS button (.digl.slab). #heroPositionsBody is a flex column that fills .c2body.
+     · WITH ROWS (unchanged by cc#1569): legwrap FUTURES (range bar) · .legdiv · legwrap OPTIONS
+       (decay bar).
+     · EMPTY SECTION (one leg only): that .legwrap carries .empty and grows to its share of the body;
+       inside it, after the .leghd heading, one .legempty block centred both ways — muted section
+       name above (Futures / Options), message below (No open futures position / No open options
+       position). The other leg keeps its rows. Divider stays.
+     · BOTH EMPTY: one .posempty block centred in the whole body — line 1 "No open NIFTY position"
+       (symbol = the toggle label, live with the toggle), line 2 muted "Futures or options". No
+       section blocks, no divider (not rendered). VIEW LOGS stays pinned below by .c2body's floor.
+     · Empty = the same condition the bars already used: FUT with no stop/target, OPT absent. An OPT
+       leg with a missing live premium is a real position and keeps its own unavail line.
+     · Height: empty blocks fill space the card already has; they never push the deck taller.
+     · Feed: /api/mobile/v10chart?symbol=<sym>&bars=0 (loadHeroPositions). Pairing rule untouched.
+     · Colours/sizes: tokens only (--mut, --txt, --type-9/10/12/13, --space-4/6/10/12). No raw hex added.
+-->
+<section data-ref="scorr_mobile_home_idxpos_R1" data-sha="8f48d24">
+
+<!-- ═══ 1. CARD 4 SHELL (mobile/home.html) ═══ -->
+<script type="text/plain" id="ref-shell">
+function heroCardPositions(d){
+  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Index Positions</div>'
+    + '<div class="rgt pstg" id="heroPositionsToggle">' + posToggleHtml() + '</div></div>'
+    + '<div id="heroPositionsBody"><div class="unavail">Loading&hellip;</div></div>'
+    + '</div>'
+    + '<button type="button" class="digl slab" id="heroPositionsBtn" onclick="openV10(event,\'' + POS.sym + '\',\'OPT\',true)">VIEW LOGS &#8594;</button>'
+    + '</div>';
+}
+</script>
+
+<!-- ═══ 2. BODY RENDER — the three states live here (mobile/home.html) ═══ -->
+<script type="text/plain" id="ref-render">
+function renderHeroPositions(){
+  var rec = POS.data[POS.sym] || {};
+  var cmp = posCmp(POS.sym);
+  var fut = rec.fut, opt = rec.opt;
+  var futBadge = fut ? dirBadge(fut.side, fut.side === 'BUY' ? 'LONG' : 'SHORT') : '';
+  var optBadge = opt ? dirBadge(opt.side, Math.round(Number(opt.opt_strike)) + ' ' + opt.opt_type
+      + (opt.side === 'SELL' ? ' · wrt' : ' · bot')) : '';
+  /* cc#1569 · EMPTY STATE PER SECTION. "Empty" is the exact condition posRangeBar()/posDecayBar()
+     already treat as no-position (fut with no stop/target; opt absent) -- an OPT leg with a missing
+     live premium is a real open position and keeps its own unavail line. An empty section renders
+     ONE centred block (.legempty: muted section name above, message below) that fills that
+     section's share of #heroPositionsBody (.legwrap.empty grows), with the .leghd heading left in
+     flow above it. Sections WITH rows are byte-identical to before -- only the empty branch moved. */
+  var futEmpty = !fut || fut.stop == null || fut.target == null;
+  var optEmpty = !opt;
+  var legEmpty = function(nm, msg){
+    return '<div class="legempty"><span class="nm">' + nm + '</span><span class="msg">' + msg + '</span></div>';
+  };
+  var body = document.getElementById('heroPositionsBody');
+  /* cc#1569 P3 · BOTH EMPTY collapses to ONE centred block: "No open <symbol> position" with a muted
+     "Futures or options" line under it. The two section blocks and the divider are not rendered at
+     all (divider hidden by absence, not by a style toggle). VIEW LOGS is outside this body and keeps
+     its pinned place. Mixed (one leg open, one empty) never comes here -- it uses the P2 block. */
+  /* cc#1569 P4 · the symbol word is the toggle's own LABEL (POS_SYMS: NIFTY50 -> "NIFTY"), not the
+     internal key — the card must read "No open NIFTY position", the same word the pill shows. */
+  var symLabel = (POS_SYMS.filter(function(s){ return s.key === POS.sym; })[0] || {}).label || POS.sym;
+  if (body && futEmpty && optEmpty){
+    body.innerHTML = posFeedAlertHtml(rec.feed_alert)
+      + '<div class="posempty"><span class="msg">No open ' + esc(symLabel) + ' position</span>'
+      + '<span class="sub">Futures or options</span></div>';
+  } else if (body) body.innerHTML =
+      posFeedAlertHtml(rec.feed_alert)
+      + '<div class="legwrap' + (futEmpty ? ' empty' : '') + '"><div class="leghd"><span class="nm">FUTURES</span>' + futBadge + '</div>'
+      + (futEmpty ? legEmpty('Futures', 'No open futures position') : posRangeBar(fut, cmp)) + '</div>'
+      + '<div class="legdiv"></div>'
+      + '<div class="legwrap' + (optEmpty ? ' empty' : '') + '"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
+      + (optEmpty ? legEmpty('Options', 'No open options position') : posDecayBar(opt)) + '</div>';
+  var tg = document.getElementById('heroPositionsToggle');
+  if (tg) tg.innerHTML = posToggleHtml();
+  var btn = document.getElementById('heroPositionsBtn');
+  /* cc#1403 · RESTORED (cc#1393 removed it with the button, now back as VIEW LOGS). cc#1386 scope
+     item 5's own note still applies unchanged: the card does not say which leg the founder was
+     last looking at, so VIEW LOGS opens on FUT — same default openV10()/the modal itself already
+     carried before cc#1383 gave it an explicit-leg 3rd param. */
+  /* cc#1480 (founder 30-Aug): VIEW LOGS opens the OPTIONS log only, switch hidden — was 'FUT'. */
+  if (btn) btn.setAttribute('onclick', "openV10(event,'" + POS.sym + "','OPT',true)");
+  /* cc#1382's lesson again: this swap can shrink the card (Loading -> a real, possibly shorter,
+     range/decay layout; a symbol toggle to a leg with no open position -> a much shorter unavail
+     block), and ResizeObserver does not fire on a shrink pinned at the old min-height -- explicit
+     resync, rAF-wrapped so the write commits before syncHeroCardHeights measures. Re-levels ALL 4
+     cards via cc#1382's generalized loop, not just this one -- confirmed in this task's own
+     verification, not assumed from the function's name. */
+  requestAnimationFrame(syncHeroCardHeights);
+}
+</script>
+
+<!-- ═══ 3. CSS — body rule + card-4 block incl. cc#1569 empty-state rules (mobile/home.html) ═══ -->
+<style id="ref-css-card4">
+#heroPositionsBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-between}
+.legwrap{margin-top:var(--space-12)}
+.leghd{display:flex;justify-content:space-between;align-items:center}
+.leghd .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
+  font-weight:800;letter-spacing:1px;color:var(--txt,#E9EEFB)}
+.dirbadge{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);
+  font-weight:700;letter-spacing:1px;border:var(--bw-1) solid;
+  padding:var(--space-2) var(--space-7);border-radius:var(--radius-9)}
+.dirbadge.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
+.dirbadge.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
+/* cc#1404 · posbar's own margin-bottom is the "range bar -> label row" breathing-room gap the
+   founder asked for (4px -> 20px). Everything else about this rule (position/height/zone bars)
+   is do-not-touch per the task's own scope -- untouched. */
+.posbar{position:relative;height:6px;margin:var(--space-12) 2px var(--space-20);border-radius:3px;
+  background:var(--panel2)}
+.posbar i{position:absolute;top:0;height:100%}
+.posbar .zr{background:var(--red);opacity:.32}
+.posbar .zg{background:var(--grn);opacity:.32}
+.posbar .ben{position:absolute;top:-4px;width:2px;height:14px;background:var(--mut)}
+.posbar .bdot{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;
+  border-radius:50%;background:var(--amber);border:2px solid var(--panel)}
+/* cc#1404 · height 26px -> 34px: room for .poslb b's own +2-notch bump (below) without crowding
+   .poslb em, which stays at its existing literal 8px -- not on the file's --type-* scale, so it
+   is outside this task's own "on the existing --type-* scale" instruction and is left alone. */
+.poslb{position:relative;height:34px;margin:0 2px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9)}
+.poslb span{position:absolute;top:0;text-align:center}
+/* cc#1404 · +2 notches on the round --type-* steps, read from the file before guessing:
+   --type-10 (10px) -> --type-12 (12px). */
+.poslb b{display:block;font-weight:800;font-size:var(--type-12);color:var(--txt,#E9EEFB)}
+.poslb em{display:block;font-style:normal;font-size:8px;color:var(--mut);letter-spacing:.5px}
+.decwrap{margin:var(--space-12) 2px var(--space-4)}
+.decbar{position:relative;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
+.decbar i{display:block;height:100%;background:var(--grn)}
+.decbar.loss i{background:var(--red)}
+.declb{display:flex;justify-content:space-between;margin-top:var(--space-5);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--mut)}
+.declb b{color:var(--txt,#E9EEFB);font-weight:800}
+/* .legfoot is SHARED with the OPTIONS decay bar's own P&L line (posDecayBar(), out of this
+   task's scope) -- left completely unchanged so Options is not affected. */
+.legfoot{text-align:right;margin-top:var(--space-6);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10)}
+/* cc#1404 · .posfoot is the FUTURES-only override (posRangeBar() alone renders it, see
+   renderHeroPositions()) for the "label row -> cmp summary row" breathing-room gap (6px -> 20px)
+   and the same +2-notch font bump (--type-10 -> --type-12) as .poslb b, above. Placed after
+   .legfoot in source order so the cascade tie (equal 0,1,0 specificity) resolves in its favour
+   for elements carrying both classes, without touching the shared .legfoot rule itself. */
+.posfoot{margin-top:var(--space-20);font-size:var(--type-12)}
+.legdiv{border-top:var(--bw-1) solid var(--line);margin-top:var(--space-14)}
+/* cc#1569 · EMPTY STATE PER SECTION. Card-4-scoped: only a .legwrap carrying .empty grows to fill
+   its share of #heroPositionsBody (a section with rows keeps its natural size -- "with rows
+   unchanged"), and .legempty centres itself both ways inside that share. Muted section name above,
+   message below, heading (.leghd) still in flow above the block. Tokens only, no new colours:
+   --mut for the name, --txt for the message, existing --type-* / --space-* steps. */
+#heroPositionsBody > .legwrap.empty{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
+#heroPositionsBody .legempty{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;row-gap:var(--space-4);
+  padding:var(--space-10) 0 var(--space-6)}
+#heroPositionsBody .legempty .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-9);font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mut)}
+#heroPositionsBody .legempty .msg{font-size:var(--type-12);color:var(--txt)}
+/* cc#1569 P3 · BOTH EMPTY: one block, centred in the whole body (the body is already a flex column,
+   so flex:1 on this single child takes the full area). Line 1 the symbol line, line 2 muted. No
+   divider exists in this state -- renderHeroPositions() does not emit .legdiv when both are empty. */
+#heroPositionsBody > .posempty{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;row-gap:var(--space-4);
+  margin-top:var(--space-12)}
+#heroPositionsBody .posempty .msg{font-size:var(--type-13);font-weight:700;color:var(--txt)}
+#heroPositionsBody .posempty .sub{font-family:'IBM Plex Mono',ui-monospace,monospace;
+</style>
+
+<!-- ═══ 4. RENDERED SHAPE (static, dummy text — what each state looks like) ═══ -->
+<div class="c"><div class="c2body">
+  <div class="chd"><div class="t">Index Positions</div><div class="rgt pstg"><button class="on">NIFTY</button><button>BANKNIFTY</button></div></div>
+  <div id="heroPositionsBody">
+    <div class="posempty"><span class="msg">No open NIFTY position</span><span class="sub">Futures or options</span></div>
+  </div>
+  <button type="button" class="digl slab">VIEW LOGS &#8594;</button>
+</div></div>
+
+<div class="c"><div class="c2body">
+  <div class="chd"><div class="t">Index Positions</div><div class="rgt pstg"><button class="on">NIFTY</button><button>BANKNIFTY</button></div></div>
+  <div id="heroPositionsBody">
+    <div class="legwrap"><div class="leghd"><span class="nm">FUTURES</span><span class="dirbadge bull">LONG</span></div>
+      <!-- posRangeBar() rows — unchanged, see mobile/home.html --></div>
+    <div class="legdiv"></div>
+    <div class="legwrap empty"><div class="leghd"><span class="nm">OPTIONS</span></div>
+      <div class="legempty"><span class="nm">Options</span><span class="msg">No open options position</span></div></div>
+  </div>
+  <button type="button" class="digl slab">VIEW LOGS &#8594;</button>
+</div></div>
+</section>
