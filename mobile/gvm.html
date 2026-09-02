@@ -171,6 +171,13 @@
 #gvp .g-ladhead{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 12px;font-family:var(--mono);font-size:10.5px;color:var(--mute);margin-bottom:8px}
 #gvp .g-more{margin-top:10px;display:flex;justify-content:center}
 #gvp .g-more .tag{padding:6px 12px;cursor:pointer}
+/* results rows (ref .res) */
+#gvp .g-res{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 0;border-bottom:1px solid var(--line)}
+#gvp .g-res:last-child{border-bottom:0}
+#gvp .g-res .g-rk2{grid-column:1;grid-row:1;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+#gvp .g-res .g-dot{width:9px;height:9px;border-radius:50%;flex:none}
+#gvp .g-res .g-rsub{grid-column:1;grid-row:2;font-family:var(--mono);font-size:10.5px;color:var(--mute)}
+#gvp .g-res .g-rv{grid-column:2;grid-row:1 / span 2;font-family:var(--mono);font-size:15px;font-weight:800;text-align:right;align-self:center}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -548,7 +555,64 @@ function secPeers(d){
   return head+'<section class="slab">'+top+body+more+'<div class="g-asof">score as of '+esc(sg.score_date||d.score_date||'—')+'</div></section>';
 }
 function secPeers_old(d){ var sg=(d.extras||{}).segment_ctx||{}; return sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''))+sumLine(['Sector GVM <b>'+fx(sg.mcap_wtd_gvm,2)+'</b>',(num(sg.sector_rank)&&num(sg.sector_total)?'rank <b>'+sg.sector_rank+' of '+sg.sector_total+'</b>':'')]); }
-function secResults(d){ var ra=(d.content||{}).result_analysis||'', first=ra.split('\n')[0]||''; return sectHead('results','Results',first.split('·')[0].trim())+sumLine([first?esc(first):'No result analysis yet for this quarter.',(d.content&&d.content.last_result_analysis_updated?'updated <b>'+esc(d.content.last_result_analysis_updated)+'</b>':'')]); }
+/* Results card (36513 cards.results): content.result_analysis parsed into Sales / PAT / Margins /
+   PE rows with the traffic-light dot the text carries, the remaining lines as the plain-words
+   read, and net profit bars from financials.quarterly. Absent text → the honest sentence. */
+function parseResultAnalysis(txt){
+  var out = { title:'', rows:[], words:[] };
+  if(!txt) return out;
+  var lines = String(txt).split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean);
+  if(lines.length && !/^[\u{1F7E2}\u{1F7E1}\u{1F534}\u{1F7E0}]/u.test(lines[0])) out.title = lines.shift();
+  lines.forEach(function(l){
+    var m = /^([\u{1F7E2}\u{1F7E1}\u{1F534}\u{1F7E0}])\s*(Sales|PAT|Profit|Margins?|PE)\s+(.*)$/u.exec(l);
+    if(m){
+      var col = m[1] === '\u{1F7E2}' ? 'var(--up)' : m[1] === '\u{1F534}' ? 'var(--down)' : 'var(--amber)';
+      var body = m[3], val = '', sub = body;
+      var v = /^([+\-−]?\d[\d.,]*(?:%|x|×)?)/.exec(body);
+      if(v){ val = v[1]; sub = body.slice(v[0].length).trim(); }
+      sub = sub.replace(/^YoY\s*/,'').replace(/[()]/g,'').replace(/\s{2,}/g,' ').replace(/\s*·\s*/g,' · ').trim();
+      var label = /^Sales/i.test(m[2]) ? 'Sales' : /^(PAT|Profit)/i.test(m[2]) ? 'Profit' : /^Margin/i.test(m[2]) ? 'Margin' : 'PE';
+      out.rows.push({ label:label, colour:col, value:val, sub:sub });
+    } else out.words.push(l);
+  });
+  return out;
+}
+function profitBars(q){
+  if(!q || !q.rows) return '';
+  var row = null; for(var i=0;i<q.rows.length;i++) if(/^net profit/i.test(q.rows[i].label||'')) { row = q.rows[i]; break; }
+  if(!row || !row.values) return '';
+  var vals = row.values.slice(-13), per = (q.periods||[]).slice(-13);
+  if(vals.filter(num).length < 2) return '';
+  var W = 360, H = 100, BASE = 80, n = vals.length, slot = W/n, bw = slot*0.66, mx = Math.max.apply(null, vals.filter(num).map(Math.abs)) || 1;
+  var svg = '<svg class="g-ch2" viewBox="0 0 '+W+' '+H+'" aria-hidden="true"><line x1="0" y1="'+BASE+'" x2="'+W+'" y2="'+BASE+'" stroke="var(--line)"/>';
+  for(var k=0;k<n;k++){ var v = vals[k]; if(!num(v)) continue;
+    var h = Math.max(1, Math.abs(v)/mx*(BASE-10)), x = (k*slot+(slot-bw)/2).toFixed(1), y = v >= 0 ? (BASE-h).toFixed(1) : BASE;
+    var last = k === n-1, fill = v >= 0 ? 'var(--up)' : 'var(--down)', op = last ? 1 : (0.55 + 0.35*k/Math.max(1,n-1)).toFixed(2);
+    svg += '<rect x="'+x+'" y="'+y+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="'+fill+'" opacity="'+op+'"/>';
+    if(last) svg += '<text x="'+(k*slot+slot/2).toFixed(1)+'" y="'+(v>=0 ? Math.max(9,BASE-h-4) : Math.min(H-2,BASE+h+11)).toFixed(1)+'" font-family="var(--mono)" font-size="9" fill="'+fill+'" text-anchor="middle">'+Math.round(v)+'</text>';
+  }
+  svg += '</svg>';
+  var cap = '<div class="g-cap2"><span>'+esc(per[0]||'')+'</span><span>'+esc(per[Math.floor(n/2)]||'')+'</span><span>'+esc(per[n-1]||'')+'</span></div>';
+  return '<div class="g-lbl">NET PROFIT, LAST '+n+' QUARTERS (₹ CR)</div>'+svg+cap;
+}
+function secResults(d){
+  var ra = parseResultAnalysis((d.content||{}).result_analysis), q = (d.financials||{}).quarterly;
+  var qlab = ra.title ? ra.title.split('·')[0].trim() : ((q && q.periods && q.periods.length) ? q.periods[q.periods.length-1] : '');
+  var head = sectHead('results','Results', qlab + (ra.rows.length && /\d+\/\d+ reported/.test(ra.rows[0].sub) ? ' · vs '+ra.rows[0].sub.match(/(\d+)\/\d+ reported/)[1]+' peers' : ''));
+  var body = '';
+  if(!ra.rows.length && !ra.words.length){
+    body = '<div class="g-empty">No result analysis yet for this quarter.</div>';
+  } else {
+    body = ra.rows.map(function(r){
+      var vcls = /^[+]/.test(r.value) ? 'up' : /^[-−]/.test(r.value) ? 'dn' : '';
+      return '<div class="g-res"><div class="g-rk2"><span class="g-dot" style="background:'+r.colour+'"></span>'+esc(r.label)+'</div><div class="g-rsub">'+esc(r.sub||'')+'</div><div class="g-rv '+vcls+'">'+esc(r.value||'—')+'</div></div>';
+    }).join('');
+    if(ra.words.length) body += '<div class="g-note">'+esc(ra.words.join(' '))+'</div>';
+  }
+  var upd = (d.content||{}).last_result_analysis_updated;
+  return head+'<section class="slab">'+body+profitBars(q)+'<div class="g-asof">'+(upd ? 'analysis updated '+esc(upd) : 'no analysis date')+'</div></section>';
+}
+function secResults_old(d){ var ra=(d.content||{}).result_analysis||'', first=ra.split('\n')[0]||''; return sectHead('results','Results',first.split('·')[0].trim())+sumLine([first?esc(first):'No result analysis yet for this quarter.',(d.content&&d.content.last_result_analysis_updated?'updated <b>'+esc(d.content.last_result_analysis_updated)+'</b>':'')]); }
 function secFinancials(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
 function secHolders(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
   return sectHead('holders','Holders',per)+sumLine(['Promoters <b>'+fx(pr,1)+'%</b>','FII <b>'+fx(fii,1)+'</b> · DII <b>'+fx(dii,1)+'</b>']); }
