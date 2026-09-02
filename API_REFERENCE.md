@@ -350,6 +350,13 @@ loudly on anything not in its documented `KNOWN_EXCEPTIONS` (the four above), an
 | GET | `/api/scanners/positional` | V8 qualified swing setups. Query: `basket`, `min_gvm`, `limit` |
 | GET | `/api/scanners/investment` | GVM≥7 quality. Query: `min_gvm`, `verdict`, `limit` |
 
+### OI Structure — `oi_structure.py` (cc#1575, OI_STRUCTURE_INTERPRET_V1 · session_log 36283)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/oi/structure?underlying=NIFTY\|BANKNIFTY` | Max Pain (i) read for both surfaces: live snapshot (spot + basis, max pain, call/put walls + OI, second walls, PCR, one_sided, mp_dist_pct, range_width_pct, days_to_expiry), `scenario` (PIN \| RANGE \| ABOVE_CALL_WALL \| BELOW_PUT_WALL \| MAX_PAIN_FAR \| ONE_SIDED), `headline` + `read[]` + `caveats[]` in plain words, `evidence {n, up, down, avg_next_pct, scored}` + `evidence_line` counted only from `oi_structure_daily` close rows with a filled next day (same scenario, last 60 sessions; `scored=false` below 20), `history[]` = last 10 close snapshots. Descriptive only, never a signal. |
+
+Snapshots: `oi_structure_daily` (PK underlying, d, snapshot_kind) written by the app scheduler at 11:00 IST (`bg_oi_structure_mid`) and 15:25 IST (`bg_oi_structure_close`); `bg_oi_structure_fill` at 09:20 fills `next_day_pct/high/low` from index spot bars; `bg_oi_structure_backfill` is armed by `app_config.oi_structure_backfill_run='pending'`. Max pain math stays in `max_pain.py`.
+
 ### Wall of Trades — `trade_wall_endpoints.py` (cc#991 / cc#1295 / cc#1587)
 | Method | Path | Description |
 |---|---|---|

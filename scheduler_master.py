@@ -102,6 +102,8 @@ _CADENCE_OVERRIDES = {
     "bg_mf_mc_oneshot": "armed-flag-only (app_config mf_mc_oneshot_run); checked every tick, runs only when armed",
     "bg_ops_text_fetch": "armed-flag-only (app_config ops_text_fetch_run='pending'), window-gated "
                           "23:00-06:00 IST; checked every tick, runs only when armed and in-window",
+    "bg_oi_structure_backfill": "armed-flag-only (app_config oi_structure_backfill_run='pending'); "
+                                "checked every tick, runs only when armed (cc#1575 one-shot backfill)",
 }
 
 
