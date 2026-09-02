@@ -2282,6 +2282,9 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #gvp .g-dots{display:flex;justify-content:center}
 #gvp .g-dot{background:var(--line);border-radius:50%}
 #gvp .g-dot.g-on{background:var(--gold)}
+/* cc#1618: the pillar eyebrow carries a Rows | Grid toggle; the score text yields before the row overflows */
+#gvp .sect .g-r{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#gvp .sect [data-gv-seg]{flex:none}
 #gvp .g-ffoot{margin-top:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim)}
 /* tape: pivot strip + entry checks (ref .pv/.checks) */
 #gvp .g-pv{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:10px}
