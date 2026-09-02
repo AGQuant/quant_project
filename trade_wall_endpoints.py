@@ -375,7 +375,12 @@ def wot_buckets_enabled(cur):
     unknown = [n for n in names if n not in WOT_BUCKETS]
     if unknown:
         log.warning("wot_buckets_enabled: ignoring unknown bucket names %s", unknown)
-    return [n for n in names if n in WOT_BUCKETS], False
+    known = [n for n in names if n in WOT_BUCKETS]
+    # Names given but NONE of them known = a typo, not a decision. A typo must not blank the wall;
+    # fall to the default. An explicit empty list ([]) is a decision and stays empty.
+    if names and not known:
+        return list(WOT_BUCKETS_DEFAULT), True
+    return known, False
 
 
 def _wall_sql(names):
