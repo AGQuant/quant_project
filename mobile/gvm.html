@@ -658,6 +658,22 @@ function finRatios(f){
   if(!n) h += '<div class="g-empty">No ratios picked. Tap FILTER to add some.</div>';
   return h;
 }
+/* P5 · "see table" under every tab: the full statement table the card used to show (finTable,
+   rows marked display=true, last six periods; the ratio bucket tables on Ratios) folds out under
+   the charts, collapsed by default, one state per tab. No data removed, only re-shaped. */
+var finTableOpen = {};
+function finSeeTable(f, key){
+  var open = !!finTableOpen[key], inner = '';
+  if(open){
+    if(key === 'pl') inner = finTable(f.profit_loss, null, 6);
+    else if(key === 'bs') inner = finTable(f.balance_sheet, null, 6);
+    else if(key === 'cf') inner = finTable(f.cash_flow, null, 6);
+    else if(f.ratios_v2 && f.ratios_v2.buckets) f.ratios_v2.buckets.forEach(function(b){ var t = finTable(b.table, null, 4); if(t) inner += '<div class="g-fbk">'+esc(String(b.title).toUpperCase())+'</div>'+t; });
+    if(!inner) inner = '<div class="g-empty">No table in this report.</div>';
+  }
+  return '<button type="button" data-fin-table="'+key+'" aria-expanded="'+(open?'true':'false')+'" style="display:block;width:100%;min-height:36px;margin-top:4px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--gold);font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:1px;text-align:center;cursor:pointer">'+(open ? 'hide table ▴' : 'see table ▾')+'</button>'
+    + (open ? '<div style="padding-bottom:6px">'+inner+'</div>' : '');
+}
 function refreshFin(){
   var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling;
   if(fs && STATE.co){ var tmp = document.createElement('div'); tmp.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp.children[1], fs); }
@@ -705,10 +721,11 @@ function secFinancials(d){
   if(!f.profit_loss && !f.balance_sheet && !f.cash_flow && !r2) return head+'<section class="slab"><div class="g-empty">No financial statements in this report.</div></section>';
   var seg = '<div class="g-seg" role="tablist">'+[['pl','P&amp;L'],['bs','Balance'],['cf','Cash'],['ra','Ratios']].map(function(t){ return '<button data-fin="'+t[0]+'"'+(t[0]===finView?' class="g-on"':'')+'>'+t[1]+'</button>'; }).join('')+'</div>';
   var body = '';
-  if(finView === 'pl') body = finPL(f);   /* cc#1617 P2: the P&L carousel; the table returns under see table in P5 */
+  if(finView === 'pl') body = finPL(f);   /* cc#1617 P2: the P&L carousel; the table sits under see table */
   else if(finView === 'bs') body = finBS(f);   /* cc#1617 P3 */
   else if(finView === 'cf') body = finCF(f);
-  else body = finRatios(f);   /* cc#1617 P4: strips + filter sheet; the bucket tables return under see table in P5 */
+  else body = finRatios(f);   /* cc#1617 P4: strips + filter sheet */
+  body += finSeeTable(f, finView);   /* cc#1617 P5: the full table folds out under every tab */
   var de = ratioLatest(r2,'Solvency','Debt / Equity'), ic = ratioLatest(r2,'Solvency','Interest Coverage'), roce = ratioLatest(r2,'Profitability','ROCE %');
   var foot = '<div class="g-ffoot"><span>Debt / equity '+(num(de)?de.toFixed(2):'—')+' · interest cover '+(num(ic)?ic.toFixed(1)+'×':'—')+'</span><span>ROCE '+(num(roce)?Math.round(roce)+'%':'—')+'</span></div>';
   return head+'<section class="slab">'+seg+body+foot+'<div class="g-asof">'+(f.profit_loss && f.profit_loss.periods ? 'statements to '+esc(fyLabel(f.profit_loss.periods.filter(function(x){ return x!=='TTM'; }).slice(-1)[0]||''))+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : '')+'</div></section>';
@@ -1045,6 +1062,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
   if(e.target.closest('[data-ratio-filter]')){ ratioSheetOpen(); return; }   /* cc#1617 P4 */
+  var ft = e.target.closest('[data-fin-table]'); if(ft){ var fk = ft.getAttribute('data-fin-table'); finTableOpen[fk] = !finTableOpen[fk]; refreshFin(); return; }   /* cc#1617 P5 */
   var fb = e.target.closest('[data-fin]'); if(fb){ finView = fb.getAttribute('data-fin'); var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling; if(fs){ var tmp2 = document.createElement('div'); tmp2.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp2.children[1], fs); } return; }
   var pt = e.target.closest('[data-peers-toggle]'); if(pt){ peersFull = !peersFull; var pe = document.getElementById('peers'); var sec = pe && pe.nextElementSibling; if(sec){ var tmp = document.createElement('div'); tmp.innerHTML = secPeers(STATE.co); pe.parentNode.replaceChild(tmp.children[1], sec); } }
 });
