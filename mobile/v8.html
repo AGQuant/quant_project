@@ -42,8 +42,8 @@
 #v8p .live .pill.stale{color:var(--amber)}
 #v8p .sect{display:flex;align-items:center;gap:10px;margin:22px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center}
 #v8p .sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
-#v8p .sect .n{text-transform:none;font-family:var(--mono);color:var(--mute);letter-spacing:0;transform:none;font-size:11px}
-#v8p .sect .r{text-transform:none;margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
+#v8p .sect .n{white-space:nowrap;text-transform:none;font-family:var(--mono);color:var(--mute);letter-spacing:0;transform:none;font-size:11px}
+#v8p .sect .r{white-space:nowrap;text-transform:none;margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
 #v8p .asof{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;text-align:right}
 #v8p .asof.stale{color:var(--amber)}
 #v8p .empty{font-size:13px;color:var(--mute);line-height:1.5}
@@ -119,6 +119,12 @@
 #v8p .stbl td.h.nil span{color:var(--mute)}
 #v8p .stbl td.pass{color:var(--gold);font-weight:800}
 #v8p .stbl td.pass.nil{color:var(--mute);font-weight:600}
+/* day performance: inline SVG bars, geometry from the ref (viewBox 360x150, baseline y=75) */
+#v8p .dp-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+#v8p .dp-head .dbig{font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:-.3px}
+#v8p .dp-head .dlbl{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.2px}
+#v8p svg.dbars{display:block;width:100%;height:auto}
+#v8p .dp-foot{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px}
 /* foot note */
 #v8p .tbl-note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
 /* bottom nav: markup is the app's own (do_not_touch); the active tab takes the ref's gold */
@@ -141,6 +147,9 @@
   <div class="stbl-wrap" id="sec-sectors"><div class="slab dense empty">Loading the sector table…</div></div>
   <div class="vmore" id="sec-more"></div>
   <div class="tbl-note" id="sec-note"></div>
+  <div class="sect">Day performance <span class="n" id="day-n"></span><span class="r">net / day</span></div>
+  <section class="pressed" id="sec-day" aria-label="Daily net P&L bars"><div class="empty">Loading the day log…</div></section>
+  <div class="vmore" id="day-more"></div>
   <div style="height:18px"></div>
   <div class="tbl-note" style="text-align:center" id="foot-note">Numbers are the paper book.</div>
 </div>
@@ -161,9 +170,10 @@ var URLS = {
   mood:   '/api/v8/market_mood',
   book:   '/api/mobile/v8book',
   sectors:'/api/v8/theme_sectors',
-  n50:    '/api/v8/nifty50_sectors'
+  n50:    '/api/v8/nifty50_sectors',
+  daylog: '/api/v8/daylog'
 };
-var STATE = { mood:null, book:null, sectors:null, n50:null, fetchedAt:null };
+var STATE = { mood:null, book:null, sectors:null, n50:null, daylog:null, fetchedAt:null };
 function getJ(url){
   return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); });
 }
@@ -292,7 +302,6 @@ function heldLabel(p){
     return 'today · ' + (mins>=60 ? Math.floor(mins/60)+'h '+(mins%60)+'m' : mins+'m');
   }
   var dh = num(p.days_held) ? p.days_held : Math.round((now - ent)/86400000);
-  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return ent.getDate()+' '+MON[ent.getMonth()]+' · '+dh+'d';
 }
 function bkTag(p){ var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'); return l ? '<span class="tag bk">'+esc(l.toUpperCase())+'</span>' : ''; }
@@ -385,6 +394,48 @@ function renderSectors(){
     : 'Pass = how many of 6 checks the sector clears (1D / 1W / 1M and 52W index, live; GVM and momentum EOD as of last close). Sorted by Pass, then 1D.'
       + (num(ts.suppressed_count) && ts.suppressed_count>0 ? ' '+ts.suppressed_count+' thin sector'+(ts.suppressed_count===1?'':'s')+' shown but not scored (under '+(ts.min_members||'')+' priced members).' : '');
 }
+/* ── 4 · DAY PERFORMANCE ─────────────────────────────────────────────────────────────── */
+/* Bars are drawn from /api/v8/daylog day rows (net_pnl is the canon's per-day net, brokerage
+   already taken). The page only sums the 10 rows it shows; it never recomputes a day. */
+var DAY_N = 10;
+var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function istToday(){ var d = istNow(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m ? (+m[3])+' '+MON[+m[2]-1] : String(iso||''); }
+function renderDay(){
+  var el = document.getElementById('sec-day'), nEl = document.getElementById('day-n'), more = document.getElementById('day-more');
+  var dl = STATE.daylog, days = dl && dl.days;
+  more.innerHTML = '<a class="chip gd" href="/v8_dashboard.html" title="Day Log tab on the web dashboard">Open Day Log →</a>';
+  if(!days){ nEl.textContent = ''; emptyBox('sec-day', 'Day log is not available right now.'); return; }
+  var rows = days.slice(0, DAY_N).reverse();
+  if(!rows.length){
+    nEl.textContent = 'no sessions yet';
+    el.innerHTML = '<div class="empty">No closed trades in this era yet. The bars start with the first exit.</div>' + asofLine(STATE.fetchedAt, 'era '+(dl.era||'fresh'));
+    return;
+  }
+  var today = istToday(), last = rows[rows.length-1], lastIsToday = String(last.date).slice(0,10) === today;
+  var todayNet = lastIsToday ? last.net_pnl : 0;
+  var sum = 0, maxAbs = 0;
+  for(var i=0;i<rows.length;i++){ var v = num(rows[i].net_pnl)?rows[i].net_pnl:0; sum += v; if(Math.abs(v) > maxAbs) maxAbs = Math.abs(v); }
+  nEl.textContent = 'last '+rows.length+(rows.length===1?' session':' sessions');
+  var W = 360, H = 150, BASE = 75, MAXH = 60, slot = W/rows.length, bw = slot*0.62;
+  var svg = '<svg class="dbars" viewBox="0 0 '+W+' '+H+'" aria-hidden="true"><line x1="0" y1="'+BASE+'" x2="'+W+'" y2="'+BASE+'" stroke="var(--line)" stroke-width="1"/>';
+  for(var k=0;k<rows.length;k++){
+    var v = num(rows[k].net_pnl)?rows[k].net_pnl:0, h = maxAbs ? Math.max(1, Math.abs(v)/maxAbs*MAXH) : 1;
+    var x = (k*slot + (slot-bw)/2).toFixed(1), y = (v>=0 ? BASE-h : BASE).toFixed(1), isToday = (k===rows.length-1 && lastIsToday);
+    var fill = isToday ? 'var(--gold)' : (v>=0 ? 'var(--up)' : 'var(--down)');
+    var op = isToday ? 1 : (0.55 + 0.40*(k/Math.max(1,rows.length-1))).toFixed(2);
+    svg += '<rect x="'+x+'" y="'+y+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="'+fill+'" opacity="'+op+'"/>';
+    if(isToday) svg += '<text x="'+(k*slot + slot/2).toFixed(1)+'" y="9" font-family="var(--mono)" font-size="9" fill="var(--gold)" text-anchor="middle">'+(marketOpen()?'live':'today')+'</text>';
+  }
+  svg += '</svg>';
+  var mid = rows[Math.floor(rows.length/2)];
+  var foot = '<div class="dp-foot"><span>'+esc(dmy(rows[0].date))+'</span>'+(rows.length>2?'<span>'+esc(dmy(mid.date))+'</span>':'')+
+             '<span>'+(lastIsToday ? 'today '+esc(hhmm(istNow())) : esc(dmy(last.date)))+'</span></div>';
+  var head = '<div class="dp-head"><div><div class="dlbl">TODAY · NET</div><div class="dbig '+sgn(todayNet)+'">'+inr(todayNet)+'</div></div>'+
+             '<div style="text-align:right"><div class="dlbl">'+rows.length+'-SESSION NET</div><div class="dbig '+sgn(sum)+'">'+inr(sum)+'</div></div></div>';
+  var note = lastIsToday ? '' : '<div class="tbl-note">No exit booked today yet, so today reads ₹0. The last bar is '+esc(dmy(last.date))+'.</div>';
+  el.innerHTML = head + svg + foot + note + asofLine(STATE.fetchedAt, 'era '+(dl.era||'fresh')+' · '+(num(last.closed)?last.closed+' closed on last day':''));
+}
 function renderTop(){
   var d = istNow(), open = marketOpen();
   document.getElementById('tdot').className = 'dot' + (open?'':' off');
@@ -399,15 +450,16 @@ function renderTop(){
   if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book. ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
 }
 /* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
-function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); }
+function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); }
 function load(){
   return Promise.all([
     getJ(URLS.mood).catch(function(){ return null; }),
     getJ(URLS.book).catch(function(){ return null; }),
     getJ(URLS.sectors).catch(function(){ return null; }),
-    getJ(URLS.n50).catch(function(){ return null; })
+    getJ(URLS.n50).catch(function(){ return null; }),
+    getJ(URLS.daylog).catch(function(){ return null; })
   ]).then(function(res){
-    STATE.mood = res[0]; STATE.book = res[1]; STATE.sectors = res[2]; STATE.n50 = res[3];
+    STATE.mood = res[0]; STATE.book = res[1]; STATE.sectors = res[2]; STATE.n50 = res[3]; STATE.daylog = res[4];
     var d = istNow();
     STATE.fetchedAt = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+hhmm(d);
     renderAll();
