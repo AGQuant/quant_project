@@ -1395,6 +1395,18 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    for elements carrying both classes, without touching the shared .legfoot rule itself. */
 .posfoot{margin-top:var(--space-20);font-size:var(--type-12)}
 .legdiv{border-top:var(--bw-1) solid var(--line);margin-top:var(--space-14)}
+/* cc#1569 · EMPTY STATE PER SECTION. Card-4-scoped: only a .legwrap carrying .empty grows to fill
+   its share of #heroPositionsBody (a section with rows keeps its natural size -- "with rows
+   unchanged"), and .legempty centres itself both ways inside that share. Muted section name above,
+   message below, heading (.leghd) still in flow above the block. Tokens only, no new colours:
+   --mut for the name, --txt for the message, existing --type-* / --space-* steps. */
+#heroPositionsBody > .legwrap.empty{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
+#heroPositionsBody .legempty{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;row-gap:var(--space-4);
+  padding:var(--space-10) 0 var(--space-6)}
+#heroPositionsBody .legempty .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-9);font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mut)}
+#heroPositionsBody .legempty .msg{font-size:var(--type-12);color:var(--txt)}
 /* THE DIGEST DOORWAY IS A BUTTON NOW, and it is cc#1181's button — same .slab, the one bevel
    grammar in the repo for tappable things, at the same full-width primary scale rather than
    .dense. It keeps its own blue: the card asks for the bevel FAMILY, and the Digest doorway has
@@ -3117,14 +3129,25 @@ function renderHeroPositions(){
   var futBadge = fut ? dirBadge(fut.side, fut.side === 'BUY' ? 'LONG' : 'SHORT') : '';
   var optBadge = opt ? dirBadge(opt.side, Math.round(Number(opt.opt_strike)) + ' ' + opt.opt_type
       + (opt.side === 'SELL' ? ' · wrt' : ' · bot')) : '';
+  /* cc#1569 · EMPTY STATE PER SECTION. "Empty" is the exact condition posRangeBar()/posDecayBar()
+     already treat as no-position (fut with no stop/target; opt absent) -- an OPT leg with a missing
+     live premium is a real open position and keeps its own unavail line. An empty section renders
+     ONE centred block (.legempty: muted section name above, message below) that fills that
+     section's share of #heroPositionsBody (.legwrap.empty grows), with the .leghd heading left in
+     flow above it. Sections WITH rows are byte-identical to before -- only the empty branch moved. */
+  var futEmpty = !fut || fut.stop == null || fut.target == null;
+  var optEmpty = !opt;
+  var legEmpty = function(nm, msg){
+    return '<div class="legempty"><span class="nm">' + nm + '</span><span class="msg">' + msg + '</span></div>';
+  };
   var body = document.getElementById('heroPositionsBody');
   if (body) body.innerHTML =
       posFeedAlertHtml(rec.feed_alert)
-      + '<div class="legwrap"><div class="leghd"><span class="nm">FUTURES</span>' + futBadge + '</div>'
-      + posRangeBar(fut, cmp) + '</div>'
+      + '<div class="legwrap' + (futEmpty ? ' empty' : '') + '"><div class="leghd"><span class="nm">FUTURES</span>' + futBadge + '</div>'
+      + (futEmpty ? legEmpty('Futures', 'No open futures position') : posRangeBar(fut, cmp)) + '</div>'
       + '<div class="legdiv"></div>'
-      + '<div class="legwrap"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
-      + posDecayBar(opt) + '</div>';
+      + '<div class="legwrap' + (optEmpty ? ' empty' : '') + '"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
+      + (optEmpty ? legEmpty('Options', 'No open options position') : posDecayBar(opt)) + '</div>';
   var tg = document.getElementById('heroPositionsToggle');
   if (tg) tg.innerHTML = posToggleHtml();
   var btn = document.getElementById('heroPositionsBtn');
