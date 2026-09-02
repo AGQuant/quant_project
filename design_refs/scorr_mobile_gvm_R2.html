@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GVM</title>
+<!--
+  DESIGN REF scorr_mobile_gvm_R2 — app GVM company page. R2 (founder 02-Sep 13:15): hero gains the C·A·R·D strip and a 60-trading-day trend (GVM, G, V, M on 0-10; price dashed on its own axis) that opens FULL SCREEN on tap with 60D / 1Y / ALL, source /api/gvm/history/{symbol} (gvm_history, daily since 2021) + raw_prices close.
+  Source of every number: GET /api/gvm/company/{symbol}, BHARATFORG @ 2026-09-02 12:39 IST.
+  Capsule -> card map: Growth (benchmark pillar G/Trackrecord) . Value (pe, fwd_pe, hist_pe.pe_trend, pb, annual_upside, sector_pe) . Momentum (ret_*, dma_*, rsi_month, vol_trend) . Peers (ladder, segment_ctx) . Results (content.result_analysis, financials.quarterly) . Financials (profit_loss, balance_sheet, cash_flow, ratios_v2) . Holders (shareholding, inst_abs, inst_chg) . Tape (extras.volume, delivery, pivot, range52, tier1, vol_canon).
+  Tokens: GOLD NIGHT, var(--token,#fallback). Shells: .pressed hero, .slab cards, .well-up tiles. Numbers mono.
+  Deep link: /m/gvm?sym=BHARATFORG#value opens with the Value capsule active.
+-->
+<style>
+:root{--field:#0A0A0C;--panel:#17171B;--well:#131316;--sunk:#0C0C0F;--chalk:#F5F2EA;--mute:#8A8A93;--dim:#5E5E66;--line:#2A2A31;--gold:#D4AF37;--gold-lo:#7A6320;--gold-hi:#F0D070;--gold-d:rgba(212,175,55,.12);--up:#2FD48B;--down:#FF5C6C;--amber:#FF9F45;--aqua:#35E0FF;--up-d:rgba(47,212,139,.14);--down-d:rgba(255,92,108,.14);--amber-d:rgba(255,159,69,.14);--display:'Archivo Black','Space Grotesk',system-ui,sans-serif;--body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;--mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{scroll-behavior:smooth}
+html,body{background:var(--field);color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45}
+body{background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);padding-bottom:150px}
+.wrap{max-width:430px;margin:0 auto;padding:0 12px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .dn{color:var(--down)} .mu{color:var(--mute)} .gd{color:var(--gold)} .am{color:var(--amber)}
+.search{display:flex;align-items:center;gap:10px;margin:12px 0 14px;padding:11px 14px;background:var(--well);border:1px solid var(--line);border-radius:12px;box-shadow:inset 0 2px 6px rgba(0,0,0,.7)}
+.search .ic{color:var(--gold);font-size:15px}
+.search input{flex:1;background:transparent;border:0;outline:0;color:var(--chalk);font-family:var(--mono);font-size:14px}
+.search input::placeholder{color:var(--dim)}
+.search .k{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--line);padding:2px 6px}
+.pressed{background:var(--sunk);border:1px solid #000;border-radius:12px;padding:16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
+.slab{background:var(--panel);border:1.5px solid var(--line);border-radius:13px;padding:14px 15px;box-shadow:0 5px 0 0 var(--gold-lo),0 5px 0 1.5px var(--line)}
+.well-up{background:var(--well);border-radius:7px;box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000}
+.well{background:var(--sunk);border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 0 0 #000}
+.tag{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.tag.gd{background:var(--gold-d);color:var(--gold)} .tag.up{background:var(--up-d);color:var(--up)} .tag.dn{background:var(--down-d);color:var(--down)} .tag.am{background:var(--amber-d);color:var(--amber)} .tag.mu{background:var(--well);color:var(--mute);border:1px solid var(--line)}
+.hero .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.hero .sym{font-family:var(--display);font-size:26px;letter-spacing:-.3px;line-height:1}
+.hero .nm{color:var(--mute);font-size:12.5px;margin-top:4px}
+.hero .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.hero .px{text-align:right}
+.hero .px .v{font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:-.3px}
+.hero .px .s{font-family:var(--mono);font-size:10px;color:var(--mute);white-space:nowrap}
+.score{display:grid;grid-template-columns:130px 1fr;gap:14px;align-items:center;margin:16px 0 12px}
+.dial{position:relative;width:130px;height:130px}
+.dial svg{width:130px;height:130px;transform:rotate(-90deg)}
+.dial .n{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.dial .n b{font-family:var(--mono);font-size:38px;font-weight:800;letter-spacing:-1.5px;line-height:1;color:var(--gold)}
+.dial .n small{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.5px;margin-top:2px}
+.pillars{display:flex;flex-direction:column;gap:9px}
+.pl .l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute)}
+.pl .l b{color:var(--chalk);letter-spacing:0;font-size:13px}
+.pl .bar{height:7px;margin-top:4px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.pl .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-lo),var(--gold))}
+.pl.g .bar i{background:linear-gradient(90deg,#3d6b3f,var(--up))}
+.pl.v .bar i{background:linear-gradient(90deg,#6b4a1e,var(--amber))}
+.pl.m .bar i{background:linear-gradient(90deg,#1f5a6b,var(--aqua))}
+.verdict{display:flex;align-items:center;gap:10px;margin:6px 0 10px}
+.verdict .w{font-family:var(--display);font-size:22px;letter-spacing:.5px;color:var(--amber);transform:skewX(-6deg)}
+.verdict .w.good{color:var(--up)} .verdict .w.weak{color:var(--down)}
+.punch{font-size:13.5px;line-height:1.5;color:var(--chalk)}
+.punch b{color:var(--gold);font-weight:700}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.f{padding:9px 10px}
+.f .l{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)}
+.f .v{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px}
+.f .s{font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+.pn{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.pn .col .t{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;margin-bottom:5px}
+.pn .col .r{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)}
+.pn .col .r:last-child{border-bottom:0}
+.pn .col .r span{font-family:var(--mono);font-weight:700}
+.hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:12px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+/* ── C·A·R·D strip on the hero (shared scorr_card_strip.js contract; letters LOCKED: C chart, A analysis, R result, D derivative) */
+.card4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:12px}
+.card4 a{display:flex;align-items:center;justify-content:center;gap:5px;padding:10px 2px;min-width:0;overflow:hidden;background:var(--panel);border:1.5px solid var(--line);border-radius:10px;text-decoration:none;color:var(--chalk);font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.2px;box-shadow:0 3px 0 0 var(--gold-lo),0 3px 0 1.5px var(--line)}
+.card4 a b{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;background:var(--gold);color:#141005;font-family:var(--display);font-size:11px;border-radius:5px}
+.card4 a:active{transform:translateY(3px);box-shadow:0 0 0 0 var(--gold-lo),0 0 0 1.5px var(--line)}
+/* ── 60-day trend on the hero: tap opens full screen */
+.trend{margin-top:14px;padding:10px 10px 8px;cursor:pointer}
+.trend .hd{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute);margin-bottom:6px}
+.trend .hd .exp{color:var(--gold);letter-spacing:.3px}
+.lg{display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:6px}
+.lg i{display:inline-block;width:10px;height:2px;margin-right:4px;vertical-align:middle}
+/* full-screen trend overlay (same shell as the V10 chart overlay: fixed, X, Esc) */
+.ov{position:fixed;inset:0;z-index:9998;background:var(--field);display:none;flex-direction:column}
+.ov.open{display:flex}
+.ov .bar{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.ov .bar .t{font-family:var(--display);font-size:16px;letter-spacing:.3px}
+.ov .bar .t small{display:block;font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1px;margin-top:2px}
+.ov .x{margin-left:auto;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--mute);font-size:18px;display:flex;align-items:center;justify-content:center}
+.ov .body{flex:1;padding:14px 12px;overflow:auto}
+.ov .seg{max-width:260px}
+.ov .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:12px}
+.ov .stats>div{text-align:center;padding:8px 4px;background:var(--well);border:1px solid var(--line);border-radius:7px}
+.ov .stats .k{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mute)} .ov .stats .v{font-family:var(--mono);font-size:14px;font-weight:800;margin-top:2px}
+.ov .note{font-size:12.5px;color:var(--mute);line-height:1.5;margin-top:12px}
+.sect{display:flex;align-items:center;gap:10px;margin:22px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center;scroll-margin-top:12px}
+.sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
+.sect .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
+.bm{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.bm:last-child{border-bottom:0;padding-bottom:0}
+.bm .k{grid-column:1;grid-row:1;font-size:12.5px;font-weight:600}
+.bm .sub{grid-column:1;grid-row:2;font-family:var(--mono);font-size:10.5px;color:var(--mute)}
+.bm .val{grid-column:2;grid-row:1 / span 2;text-align:right;display:flex;flex-direction:column;align-items:flex-end;justify-content:center}
+.bm .val b{font-family:var(--mono);font-size:15px;font-weight:800}
+.bm .val .rt{font-family:var(--mono);font-size:10px;letter-spacing:.5px;padding:1px 6px;margin-top:2px;clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px)}
+.rt.hi{background:var(--up-d);color:var(--up)} .rt.mid{background:var(--amber-d);color:var(--amber)} .rt.lo{background:var(--down-d);color:var(--down)}
+.bm .peer{grid-column:1 / span 2;grid-row:3;position:relative;height:6px;margin-top:6px;background:var(--well);border:1px solid var(--line)}
+.bm .peer .rng{position:absolute;top:0;bottom:0;background:rgba(138,138,147,.25)}
+.bm .peer .me{position:absolute;top:-4px;width:2px;height:12px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
+.bm .peer .med{position:absolute;top:-3px;width:1px;height:10px;background:var(--mute)}
+.legend{display:flex;gap:14px;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:10px}
+.legend i{display:inline-block;width:8px;height:8px;margin-right:4px;vertical-align:-1px}
+svg.ch{display:block;width:100%;height:auto}
+.chart-cap{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px}
+.lad{display:grid;grid-template-columns:22px 1fr auto auto;gap:4px 10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.lad:last-child{border-bottom:0}
+.lad .rk{font-family:var(--mono);color:var(--dim);font-size:11px}
+.lad .s{font-weight:700}
+.lad .g{font-family:var(--mono);font-weight:800;min-width:34px;text-align:right}
+.lad .vd{font-family:var(--mono);font-size:9.5px;letter-spacing:.5px;padding:1px 6px;clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px);min-width:64px;text-align:center}
+.lad.me{background:var(--gold-d);margin:0 -8px;padding:7px 8px;border-radius:6px;border-bottom:0}
+.lad.me .s{color:var(--gold)}
+table{width:100%;border-collapse:collapse}
+thead th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute);text-align:right;padding:6px 4px;border-bottom:1px solid var(--line);font-weight:700}
+thead th:first-child{text-align:left}
+tbody td{padding:7px 4px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);font-size:12px}
+tbody td:first-child{text-align:left;font-family:var(--body);font-weight:600;font-size:12.5px}
+tbody tr:last-child td{border-bottom:0}
+.seg{display:flex;gap:4px;padding:4px;background:var(--well);border:1px solid var(--line);border-radius:9px;margin-bottom:12px}
+.seg button{flex:1;border:0;background:transparent;color:var(--mute);font-family:var(--mono);font-size:11px;font-weight:700;padding:7px 4px;border-radius:6px;cursor:pointer}
+.seg button.on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--gold-lo)}
+.res{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.res:last-child{border-bottom:0}
+.res .k{grid-column:1;grid-row:1;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.res .k .dot{width:9px;height:9px;border-radius:50%}
+.res .sub{grid-column:1;grid-row:2;font-family:var(--mono);font-size:10.5px;color:var(--mute)}
+.res .v{grid-column:2;grid-row:1 / span 2;font-family:var(--mono);font-size:15px;font-weight:800;text-align:right;align-self:center}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{padding:10px 12px}
+.tile .l{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)}
+.tile .v{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px}
+.tile .s{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:1px}
+.checks{margin-top:12px}
+.checks .c{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+.checks .c:last-child{border-bottom:0}
+.checks .c .mk{font-family:var(--mono);font-weight:800;width:20px;text-align:center}
+.pv{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:10px}
+.pv div{text-align:center;padding:6px 2px;background:var(--well);border:1px solid var(--line)}
+.pv .k{font-family:var(--mono);font-size:9px;color:var(--mute)} .pv .v{font-family:var(--mono);font-size:11.5px;font-weight:700}
+.pv .pp{border-color:rgba(212,175,55,.5)} .pv .pp .v{color:var(--gold)}
+.capsule{position:fixed;left:12px;right:12px;bottom:72px;z-index:60;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:6px;background:rgba(19,19,22,.92);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:22px;box-shadow:0 6px 0 0 var(--gold-lo),0 6px 0 1.5px var(--line),0 -8px 30px rgba(0,0,0,.6)}
+.cap{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0 5px;border-radius:16px;color:var(--mute);text-decoration:none;font-family:var(--mono);font-size:8.5px;letter-spacing:.4px;font-weight:700;text-transform:uppercase}
+.cap .i{font-size:16px;line-height:1}
+.cap.on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--gold-lo)}
+.cap:active{transform:translateY(1px)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;background:#0A101E;border-top:1px solid var(--line);padding:8px 0 max(10px,env(safe-area-inset-bottom));z-index:50}
+.bn{display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--body);font-size:11px;letter-spacing:1px;font-weight:700;color:var(--aqua);text-decoration:none;position:relative}
+.bn .i{font-size:16px;opacity:.85}
+.bn.on{color:var(--gold);text-shadow:0 0 10px rgba(212,175,55,.35)} .bn.on .i{opacity:1}
+.bn.on::before{content:"";position:absolute;top:-9px;left:25%;right:25%;height:3px;background:var(--gold);clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none !important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="search"><span class="ic">◈</span><input value="BHARATFORG" aria-label="Search a company"><span class="k">ANY STOCK</span></div>
+<section class="pressed hero" id="score">
+  <div class="top">
+    <div><div class="sym">BHARATFORG</div><div class="nm">Bharat Forge Ltd</div>
+      <div class="chips"><span class="tag gd">CASTINGS &amp; FORGINGS</span><span class="tag mu">MID CAP · #119</span><span class="tag mu">RANK 9 / 17</span></div></div>
+    <div class="px"><div class="v">₹2,010.9</div><div class="s">CMP · live 12:39</div><div class="s">52W 1,116–2,295</div></div>
+  </div>
+  <div class="score">
+    <div class="dial"><svg viewBox="0 0 130 130"><circle cx="65" cy="65" r="56" fill="none" stroke="#1E1E23" stroke-width="12"/><circle cx="65" cy="65" r="56" fill="none" stroke="#D4AF37" stroke-width="12" stroke-linecap="round" stroke-dasharray="242.7 351.9"/></svg><div class="n"><b>6.9</b><small>GVM / 10</small></div></div>
+    <div class="pillars">
+      <div class="pl g"><div class="l"><span>G · GROWTH</span><b>7.0</b></div><div class="bar"><i style="width:70%"></i></div></div>
+      <div class="pl v"><div class="l"><span>V · VALUE</span><b>6.3</b></div><div class="bar"><i style="width:63%"></i></div></div>
+      <div class="pl m"><div class="l"><span>M · MOMENTUM</span><b>7.5</b></div><div class="bar"><i style="width:75%"></i></div></div>
+    </div>
+  </div>
+  <div class="verdict"><span class="w">Average</span><span class="tag mu">TOP 26% OF 1,794</span></div>
+  <div class="punch">Healthy growth, fair value, positive momentum. <b>Watch, and add on dips</b> for the medium to long term.</div>
+  <div class="facts">
+    <div class="f well-up"><div class="l">MCAP</div><div class="v">₹97.4k Cr</div><div class="s">mid · rank 119</div></div>
+    <div class="f well-up"><div class="l">SECTOR GVM</div><div class="v">7.03</div><div class="s">you are −0.13</div></div>
+    <div class="f well-up"><div class="l">SCORE TREND</div><div class="v mu">flat</div><div class="s">13 days · 6.9</div></div>
+  </div>
+  <div class="card4" aria-label="Chart · Analysis · Result · Derivative">
+    <a href="#chart"><b>C</b>Chart</a><a href="#analysis"><b>A</b>Analyse</a><a href="#result"><b>R</b>Result</a><a href="#deriv"><b>D</b>Deriv</a>
+  </div>
+  <div class="trend well" id="trendMini" role="button" aria-label="Open 60-day score trend full screen">
+    <div class="hd"><span>60-DAY TREND · SCORE &amp; PRICE</span><span class="exp">tap to expand ⤢</span></div>
+<svg class="ch tr" viewBox="0 0 360 90" aria-hidden="true">
+<line x1="6" y1="79.1" x2="354" y2="79.1" stroke="#2A2A31" stroke-width="1" stroke-dasharray="2 4"/>
+<line x1="6" y1="54.8" x2="354" y2="54.8" stroke="#2A2A31" stroke-width="1" stroke-dasharray="2 4"/>
+<line x1="6" y1="30.4" x2="354" y2="30.4" stroke="#2A2A31" stroke-width="1" stroke-dasharray="2 4"/>
+<polyline fill="none" stroke="#8A8A93" stroke-width="1.4" stroke-dasharray="3 3" opacity=".9" points="6.0,75.3 11.9,76.5 17.8,76.1 23.7,61.7 29.6,63.2 35.5,59.0 41.4,61.8 47.3,57.6 53.2,45.7 59.1,36.4 65.0,42.0 70.9,37.7 76.8,37.7 82.7,32.8 88.6,37.9 94.5,44.7 100.4,37.0 106.3,39.4 112.2,39.0 118.1,44.2 124.0,46.3 129.9,40.5 135.8,43.1 141.7,37.6 147.6,42.6 153.5,46.3 159.4,45.5 165.3,29.0 171.2,25.5 177.1,26.9 182.9,30.0 188.8,31.9 194.7,36.5 200.6,30.8 206.5,34.4 212.4,32.7 218.3,34.0 224.2,27.2 230.1,25.1 236.0,28.2 241.9,27.8 247.8,25.3 253.7,14.7 259.6,47.7 265.5,55.8 271.4,49.9 277.3,48.7 283.2,53.1 289.1,47.7 295.0,46.6 300.9,52.3 306.8,53.7 312.7,53.5 318.6,57.7 324.5,55.5 330.4,64.6 336.3,56.0 342.2,58.4 348.1,45.5 354.0,55.6"/>
+<polyline fill="none" stroke="#2FD48B" stroke-width="1.4" opacity=".85" points="6.0,36.4 11.9,36.4 17.8,36.4 23.7,36.4 29.6,36.4 35.5,36.4 41.4,36.4 47.3,36.4 53.2,36.4 59.1,36.4 65.0,36.4 70.9,36.4 76.8,36.4 82.7,36.4 88.6,36.4 94.5,36.4 100.4,36.4 106.3,36.4 112.2,36.4 118.1,36.4 124.0,36.4 129.9,36.4 135.8,36.4 141.7,36.4 147.6,36.4 153.5,36.4 159.4,36.4 165.3,36.4 171.2,33.0 177.1,33.0 182.9,33.0 188.8,34.8 194.7,34.8 200.6,34.8 206.5,34.8 212.4,34.8 218.3,34.8 224.2,34.8 230.1,38.2 236.0,38.2 241.9,38.2 247.8,38.2 253.7,34.8 259.6,34.8 265.5,33.0 271.4,35.6 277.3,35.6 283.2,35.6 289.1,35.6 295.0,35.6 300.9,35.6 306.8,35.6 312.7,35.6 318.6,35.6 324.5,35.6 330.4,35.6 336.3,35.6 342.2,35.6 348.1,35.6 354.0,35.6"/>
+<polyline fill="none" stroke="#FF9F45" stroke-width="1.4" opacity=".85" points="6.0,42.6 354.0,42.6"/>
+<polyline fill="none" stroke="#35E0FF" stroke-width="1.4" opacity=".85" points="6.0,22.8 11.9,21.2 17.8,27.4 23.7,19.7 29.6,19.7 35.5,19.7 41.4,18.2 47.3,19.7 53.2,19.7 59.1,19.7 65.0,12.0 70.9,12.0 76.8,12.0 82.7,9.0 88.6,12.0 94.5,13.6 100.4,12.0 106.3,13.6 112.2,13.6 118.1,13.6 124.0,13.6 129.9,13.6 135.8,16.6 141.7,15.2 147.6,15.2 153.5,18.2 159.4,18.2 165.3,15.2 171.2,12.0 177.1,18.2 182.9,19.7 188.8,22.8 194.7,22.8 200.6,25.8 206.5,25.8 212.4,25.8 218.3,25.8 224.2,21.2 230.1,24.3 236.0,25.8 241.9,25.8 247.8,24.3 253.7,22.8 259.6,33.4 265.5,30.4 271.4,30.4 277.3,30.4 283.2,30.4 289.1,30.4 295.0,30.4 300.9,30.4 306.8,30.4 312.7,30.4 318.6,30.4 324.5,30.4 330.4,30.4 336.3,30.4 342.2,30.4 348.1,27.4 354.0,30.4"/>
+<polyline fill="none" stroke="#D4AF37" stroke-width="2.4" stroke-linejoin="round" points="6.0,33.9 11.9,33.4 17.8,35.4 23.7,32.9 29.6,32.9 35.5,32.9 41.4,32.4 47.3,32.9 53.2,32.9 59.1,32.9 65.0,30.4 70.9,30.4 76.8,30.4 82.7,29.3 88.6,30.4 94.5,30.9 100.4,30.4 106.3,30.9 112.2,30.9 118.1,30.9 124.0,30.9 129.9,30.9 135.8,31.8 141.7,31.3 147.6,31.3 153.5,32.4 159.4,32.4 165.3,31.3 171.2,29.2 177.1,31.3 182.9,31.7 188.8,33.4 194.7,33.4 200.6,34.4 206.5,34.4 212.4,34.4 218.3,34.4 224.2,32.8 230.1,35.1 236.0,35.5 241.9,35.5 247.8,35.1 253.7,33.4 259.6,36.9 265.5,35.3 271.4,36.2 277.3,36.2 283.2,36.2 289.1,36.2 295.0,36.2 300.9,36.2 306.8,36.2 312.7,36.2 318.6,36.2 324.5,36.2 330.4,36.2 336.3,36.2 342.2,36.2 348.1,35.2 354.0,36.2"/>
+</svg>
+    <div class="lg"><span><i style="background:#D4AF37;height:3px"></i>GVM</span><span><i style="background:#2FD48B"></i>G</span><span><i style="background:#FF9F45"></i>V</span><span><i style="background:#35E0FF"></i>M</span><span><i style="background:#8A8A93;border-top:2px dashed #8A8A93;height:0"></i>price</span></div>
+  </div>
+  <div class="pn">
+    <div class="col well-up" style="padding:8px 10px"><div class="t up">STRONG</div><div class="r">Profit 5Y CAGR<span class="up">38.6%</span></div><div class="r">Return 1Y<span class="up">+85%</span></div><div class="r">Institutions<span class="up">47%</span></div></div>
+    <div class="col well-up" style="padding:8px 10px"><div class="t dn">WEAK</div><div class="r">Profit this year<span class="dn">−57.7%</span></div><div class="r">PE<span class="dn">96× vs 42×</span></div><div class="r">Margin<span class="dn">−208 bps</span></div></div>
+  </div>
+  <div class="foot"><span>score as of 01-Sep · peers: 17 in segment</span><span>Pick a capsule below ↓</span></div>
+</section>
+<div class="sect" id="growth">Growth <span class="r">G 7.0 · 8 of 8 scored</span></div>
+<section class="slab">
+  <div class="bm"><div class="k">Sales, 5-year growth</div><div class="sub">peers 18.4% · you rank 7 of 17</div><div class="val"><b>21.6%</b><span class="rt hi">8.8</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:31%"></i><i class="me" style="left:41%"></i></div></div>
+  <div class="bm"><div class="k">Profit, 5-year growth</div><div class="sub">peers 28.2% · rank 7</div><div class="val"><b>38.6%</b><span class="rt hi">10</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:51%"></i><i class="me" style="left:58%"></i></div></div>
+  <div class="bm"><div class="k">Profit, 3-year growth</div><div class="sub">peers 12.7% · rank 5</div><div class="val"><b>33.3%</b><span class="rt hi">10</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:46%"></i><i class="me" style="left:55%"></i></div></div>
+  <div class="bm"><div class="k">Sales this year</div><div class="sub">peers 18.7% · rank 9</div><div class="val"><b>18.7%</b><span class="rt mid">7.5</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:27%"></i><i class="me" style="left:27%"></i></div></div>
+  <div class="bm"><div class="k">Profit this year</div><div class="sub">peers +20.9% · rank 15 of 16</div><div class="val"><b class="dn">−57.7%</b><span class="rt lo">2.5</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:49%"></i><i class="me" style="left:40%"></i></div></div>
+  <div class="bm"><div class="k">Operating margin</div><div class="sub">peers 15.8% · rank 7</div><div class="val"><b>16.8%</b><span class="rt hi">8.8</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:42%"></i><i class="me" style="left:46%"></i></div></div>
+  <div class="bm"><div class="k">Margin change</div><div class="sub">peers +8 bps · rank 13</div><div class="val"><b class="dn">−208 bps</b><span class="rt lo">2.5</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:31%"></i><i class="me" style="left:22%"></i></div></div>
+  <div class="bm"><div class="k">Return on capital</div><div class="sub">peers 12.6% · rank 9</div><div class="val"><b>12.6%</b><span class="rt mid">6.3</span></div><div class="peer"><i class="rng" style="left:0;width:100%"></i><i class="med" style="left:65%"></i><i class="me" style="left:65%"></i></div></div>
+  <div class="legend"><span><i style="background:var(--gold)"></i>this company</span><span><i style="background:var(--mute)"></i>peer median</span><span><i style="background:rgba(138,138,147,.25)"></i>peer range</span></div>
+</section>
+<div class="sect" id="value">Value <span class="r">V 6.3 · expensive on PE</span></div>
+<section class="slab">
+  <div class="bm"><div class="k">PE now</div><div class="sub">own 5-year average 51× · sector 42×</div><div class="val"><b class="dn">96.5×</b><span class="rt lo">2.5</span></div></div>
+  <div class="bm"><div class="k">PE next year (FY27e)</div><div class="sub">peers 36×</div><div class="val"><b>80.4×</b><span class="rt lo">3.8</span></div></div>
+  <div class="bm"><div class="k">Price / Book</div><div class="sub">peers 4.9×</div><div class="val"><b>10.2×</b><span class="rt lo">3.8</span></div></div>
+  <div class="bm"><div class="k">Upside to fair value (FY27e)</div><div class="sub">peers 12% · rank 2 of 15</div><div class="val"><b class="up">+20%</b><span class="rt hi">10</span></div></div>
+  <div style="margin-top:14px;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)">PE, LAST 11 QUARTERS</div>
+  <svg class="ch" viewBox="0 0 360 110" aria-hidden="true"><line x1="0" y1="72" x2="360" y2="72" stroke="#7A6320" stroke-width="1" stroke-dasharray="4 4"/><polyline fill="none" stroke="#FF9F45" stroke-width="2.2" stroke-linejoin="round" points="10,60 44,69 78,49 112,55 146,60 180,66 214,65 248,70 282,64 316,55 350,6"/><circle cx="350" cy="6" r="3.5" fill="#FF5C6C"/><text x="4" y="86" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#7A6320">own 5y avg 51×</text><text x="318" y="16" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#FF5C6C">145×</text></svg>
+  <div class="chart-cap"><span>Dec 23</span><span>Dec 24</span><span>Dec 25</span><span>Jun 26</span></div>
+  <div style="margin-top:10px;font-size:12.5px;color:var(--mute);line-height:1.5">PE jumped because profit fell, not because price ran. One-time write-offs in Jun-26 cut earnings; the market is paying for the recovery.</div>
+</section>
+<div class="sect" id="momentum">Momentum <span class="r">M 7.5 · strong year, soft month</span></div>
+<section class="slab">
+  <div class="tiles">
+    <div class="tile well-up"><div class="l">1 YEAR</div><div class="v up">+85.4%</div><div class="s">peers +29% · rank 3</div></div>
+    <div class="tile well-up"><div class="l">3 YEARS</div><div class="v up">+90.2%</div><div class="s">peers +37% · rank 5</div></div>
+    <div class="tile well-up"><div class="l">VS NIFTY 52W</div><div class="v up">+83.0%</div><div class="s">rank 4 of 16</div></div>
+    <div class="tile well-up"><div class="l">1 MONTH</div><div class="v dn">−6.7%</div><div class="s">peers +3.4% · rank 13</div></div>
+  </div>
+  <div style="margin-top:12px">
+    <div class="bm"><div class="k">Price vs 50-day average</div><div class="sub">below the short trend</div><div class="val"><b class="dn">−3.5%</b><span class="rt mid">5.0</span></div></div>
+    <div class="bm"><div class="k">Price vs 200-day average</div><div class="sub">above the long trend</div><div class="val"><b class="up">+14.2%</b><span class="rt hi">10</span></div></div>
+    <div class="bm"><div class="k">Monthly RSI</div><div class="sub">peers 70 · not overheated</div><div class="val"><b>65</b><span class="rt mid">7.5</span></div></div>
+    <div class="bm"><div class="k">Volume trend</div><div class="sub">vs own 21-day average</div><div class="val"><b>1.1×</b><span class="rt mid">7.5</span></div></div>
+  </div>
+</section>
+<div class="sect" id="peers">Peers <span class="r">Castings &amp; Forgings · 17</span></div>
+<section class="slab">
+  <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 12px;font-family:var(--mono);font-size:10.5px;color:var(--mute);margin-bottom:8px"><span>Sector GVM 7.03 · rank 11 of 129</span><span>sorted by GVM</span></div>
+  <div class="lad"><span class="rk">1</span><span class="s">PTCIL</span><span class="g">8.24</span><span class="vd tag up">EXCELLENT</span></div>
+  <div class="lad"><span class="rk">2</span><span class="s">HAPPYFORGE</span><span class="g">7.89</span><span class="vd tag up">GOOD</span></div>
+  <div class="lad"><span class="rk">3</span><span class="s">SONACOMS</span><span class="g">7.86</span><span class="vd tag up">GOOD</span></div>
+  <div class="lad"><span class="rk">4</span><span class="s">MMFL</span><span class="g">7.19</span><span class="vd tag up">GOOD</span></div>
+  <div class="lad"><span class="rk">…</span><span class="s mu">3 more good</span><span class="g mu">7.0+</span><span></span></div>
+  <div class="lad"><span class="rk">8</span><span class="s">TVSHLTD</span><span class="g">6.93</span><span class="vd tag am">AVERAGE</span></div>
+  <div class="lad me"><span class="rk">9</span><span class="s">BHARATFORG</span><span class="g gd">6.90</span><span class="vd tag am">AVERAGE</span></div>
+  <div class="lad"><span class="rk">10</span><span class="s">TIRUPATIFL</span><span class="g">6.55</span><span class="vd tag am">AVERAGE</span></div>
+  <div class="lad"><span class="rk">…</span><span class="s mu">7 more · weak</span><span class="g mu">&lt;6.1</span><span></span></div>
+  <div style="margin-top:10px;display:flex;justify-content:center"><span class="tag mu" style="padding:6px 12px">Full ladder with PE · ROE · 1Y ▾</span></div>
+</section>
+<div class="sect" id="results">Results <span class="r">Q1 FY27 · vs 9 peers</span></div>
+<section class="slab">
+  <div class="res"><div class="k"><span class="dot" style="background:var(--amber)"></span>Sales</div><div class="sub">sector +20.4% · in line</div><div class="v up">+18.7%</div></div>
+  <div class="res"><div class="k"><span class="dot" style="background:var(--down)"></span>Profit</div><div class="sub">sector +37.9% · one-time write-offs</div><div class="v dn">−131.7%</div></div>
+  <div class="res"><div class="k"><span class="dot" style="background:var(--amber)"></span>Margin</div><div class="sub">15% vs 17% last year</div><div class="v dn">−2.0 pp</div></div>
+  <div class="res"><div class="k"><span class="dot" style="background:var(--down)"></span>PE</div><div class="sub">peers 55×</div><div class="v dn">96×</div></div>
+  <div style="margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)">NET PROFIT, LAST 13 QUARTERS (₹ CR)</div>
+  <svg class="ch" viewBox="0 0 360 100" aria-hidden="true"><line x1="0" y1="80" x2="360" y2="80" stroke="#2A2A31"/><rect x="8" y="41" width="18" height="39" fill="#2FD48B" opacity=".55"/><rect x="35" y="41" width="18" height="39" fill="#2FD48B" opacity=".58"/><rect x="62" y="34" width="18" height="46" fill="#2FD48B" opacity=".61"/><rect x="89" y="39" width="18" height="41" fill="#2FD48B" opacity=".64"/><rect x="116" y="48" width="18" height="32" fill="#2FD48B" opacity=".67"/><rect x="143" y="36" width="18" height="44" fill="#2FD48B" opacity=".7"/><rect x="170" y="41" width="18" height="39" fill="#2FD48B" opacity=".73"/><rect x="197" y="29" width="18" height="51" fill="#2FD48B" opacity=".76"/><rect x="224" y="29" width="18" height="51" fill="#2FD48B" opacity=".79"/><rect x="251" y="26" width="18" height="54" fill="#2FD48B" opacity=".82"/><rect x="278" y="31" width="18" height="49" fill="#2FD48B" opacity=".85"/><rect x="305" y="38" width="18" height="42" fill="#2FD48B" opacity=".9"/><rect x="332" y="80" width="18" height="16" fill="#FF5C6C"/><text x="341" y="98" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#FF5C6C" text-anchor="middle">−90</text></svg>
+  <div class="chart-cap"><span>Jun 23</span><span>Jun 24</span><span>Jun 25</span><span>Jun 26</span></div>
+  <div style="margin-top:10px;font-size:12.5px;color:var(--mute);line-height:1.5">Mixed quarter. Sales grew with the sector. Profit turned negative on a one-time hit from a subsidiary write-down and a German unit wind-down. Underlying business held.</div>
+</section>
+<div class="sect" id="financials">Financials <span class="r">consolidated · ₹ Cr</span></div>
+<section class="slab">
+  <div class="seg"><button class="on">P&amp;L</button><button>Balance</button><button>Cash</button><button>Ratios</button></div>
+  <table><thead><tr><th>Year</th><th>Sales</th><th>OPM</th><th>Profit</th><th>EPS</th></tr></thead><tbody>
+  <tr><td>FY22</td><td>10,461</td><td>19%</td><td>1,077</td><td>23.2</td></tr><tr><td>FY23</td><td>12,910</td><td>13%</td><td>508</td><td>11.4</td></tr><tr><td>FY24</td><td>15,682</td><td>16%</td><td>910</td><td>20.4</td></tr><tr><td>FY25</td><td>15,123</td><td>18%</td><td>913</td><td>19.7</td></tr><tr><td>FY26</td><td>16,812</td><td>17%</td><td>1,089</td><td>22.6</td></tr><tr><td class="gd">TTM</td><td>17,543</td><td>17%</td><td class="dn">716</td><td class="dn">14.8</td></tr>
+  </tbody></table>
+  <div style="margin-top:10px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim)"><span>Debt / equity 0.76 · interest cover 6.5×</span><span>ROCE 13%</span></div>
+</section>
+<div class="sect" id="holders">Holders <span class="r">Jun 2026</span></div>
+<section class="slab">
+  <div class="tiles">
+    <div class="tile well-up"><div class="l">PROMOTERS</div><div class="v">44.1%</div><div class="s">steady since Dec 24</div></div>
+    <div class="tile well-up"><div class="l">INSTITUTIONS</div><div class="v up">47.2%</div><div class="s">FII 15.0 · DII 32.2</div></div>
+    <div class="tile well-up"><div class="l">PUBLIC</div><div class="v">8.5%</div><div class="s">falling · 10.4 → 8.5</div></div>
+    <div class="tile well-up"><div class="l">SHAREHOLDERS</div><div class="v">2.32L</div><div class="s">+37% in 3 years</div></div>
+  </div>
+  <div style="margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)">FII vs DII, 12 QUARTERS (%)</div>
+  <svg class="ch" viewBox="0 0 360 100" aria-hidden="true"><polyline fill="none" stroke="#35E0FF" stroke-width="2" points="10,26 41,27 72,25 103,26 134,32 165,25 196,19 227,15 258,12 289,6 320,10 350,12"/><polyline fill="none" stroke="#FF9F45" stroke-width="2" points="10,66 41,65 72,65 103,64 134,58 165,61 196,67 227,73 258,75 289,79 320,73 350,70"/><text x="352" y="10" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#35E0FF" text-anchor="end">DII 32.2</text><text x="352" y="90" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#FF9F45" text-anchor="end">FII 15.0</text></svg>
+  <div class="chart-cap"><span>Sep 23</span><span>Sep 24</span><span>Sep 25</span><span>Jun 26</span></div>
+  <div style="margin-top:10px;font-size:12.5px;color:var(--mute);line-height:1.5">Domestic funds have been buying what foreign funds sold. Net institutional change this quarter <span class="up mono">+0.45%</span>, best in the segment.</div>
+</section>
+<div class="sect" id="tape">Tape <span class="r">live · 02-Sep</span></div>
+<section class="slab">
+  <div class="tiles">
+    <div class="tile well-up"><div class="l">VOLUME 21D</div><div class="v dn">43% up-days</div><div class="s">distribution · −6.5% in 21d</div></div>
+    <div class="tile well-up"><div class="l">DELIVERY</div><div class="v up">62.8%</div><div class="s">30-day avg 53.9%</div></div>
+    <div class="tile well-up"><div class="l">RVOL TODAY</div><div class="v">1.17×</div><div class="s">yesterday 0.56×</div></div>
+    <div class="tile well-up"><div class="l">BIGGEST DAY</div><div class="v dn">10 Aug</div><div class="s">5.06M shares · down</div></div>
+  </div>
+  <div class="pv"><div><div class="k">S2</div><div class="v">1,954</div></div><div><div class="k">S1</div><div class="v">2,003</div></div><div class="pp"><div class="k">PP</div><div class="v">2,054</div></div><div><div class="k">R1</div><div class="v">2,103</div></div><div><div class="k">R2</div><div class="v">2,154</div></div></div>
+  <div class="checks">
+    <div style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute);margin-bottom:4px">7 ENTRY CHECKS · 1 PASS</div>
+    <div class="c"><span>GVM 7 or more</span><span class="mk dn">✕</span></div><div class="c"><span>Sector rising (week &amp; month)</span><span class="mk dn">✕</span></div><div class="c"><span>Above 2 of 3 moving averages</span><span class="mk dn">✕</span></div><div class="c"><span>Monthly &amp; weekly RSI above 50</span><span class="mk dn">✕</span></div><div class="c"><span>Week &amp; month return positive</span><span class="mk dn">✕</span></div><div class="c"><span>Daily RSI under 80</span><span class="mk up">✓</span></div><div class="c"><span>Buying volume 50%+</span><span class="mk dn">✕</span></div>
+  </div>
+  <div style="margin-top:12px;display:flex;justify-content:center;gap:8px"><span class="tag gd" style="padding:7px 12px">Run Trade Check →</span><span class="tag mu" style="padding:7px 12px">Open chart</span></div>
+</section>
+<div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:18px">Scores rebuild nightly. Prices live. Peer set = same segment, 17 companies.</div>
+</div>
+<div class="ov" id="trendOv" aria-modal="true" role="dialog">
+  <div class="bar"><div class="t">BHARATFORG<small>SCORE TREND · GVM · G · V · M · PRICE</small></div><button class="x" id="trendX" aria-label="Close">✕</button></div>
+  <div class="body">
+    <div class="seg"><button class="on">60D</button><button>1Y</button><button>ALL</button></div>
+<svg class="ch tr" viewBox="0 0 360 300" aria-hidden="true">
+<line x1="14" y1="269.0" x2="346" y2="269.0" stroke="#2A2A31" stroke-width="1" stroke-dasharray="2 4"/>
+<line x1="14" y1="184.0" x2="346" y2="184.0" stroke="#2A2A31" stroke-width="1" stroke-dasharray="2 4"/>
+<line x1="14" y1="99.0" x2="346" y2="99.0" stroke="#2A2A31" stroke-width="1" stroke-dasharray="2 4"/>
+<polyline fill="none" stroke="#8A8A93" stroke-width="2" stroke-dasharray="3 3" opacity=".9" points="14.0,255.8 19.6,260.0 25.3,258.5 30.9,208.1 36.5,213.6 42.1,198.7 47.8,208.5 53.4,194.1 59.0,152.3 64.6,119.9 70.3,139.6 75.9,124.6 81.5,124.6 87.2,107.4 92.8,125.4 98.4,149.0 104.0,122.1 109.7,130.3 115.3,129.0 120.9,147.1 126.5,154.5 132.2,134.4 137.8,143.5 143.4,124.4 149.1,141.7 154.7,154.6 160.3,151.7 165.9,94.3 171.6,81.9 177.2,86.7 182.8,97.7 188.4,104.5 194.1,120.3 199.7,100.5 205.3,112.9 210.9,107.0 216.6,111.6 222.2,88.1 227.8,80.6 233.5,91.3 239.1,89.9 244.7,81.3 250.3,44.3 256.0,159.5 261.6,187.7 267.2,167.2 272.8,162.9 278.5,178.3 284.1,159.6 289.7,155.6 295.4,175.6 301.0,180.3 306.6,179.6 312.2,194.3 317.9,186.7 323.5,218.4 329.1,188.3 334.7,196.6 340.4,151.6 346.0,186.9"/>
+<polyline fill="none" stroke="#2FD48B" stroke-width="2" opacity=".85" points="14.0,120.1 165.9,120.1 171.6,108.2 182.8,108.2 188.4,114.3 222.2,114.3 227.8,126.2 244.7,126.2 250.3,114.3 256.0,114.3 261.6,108.2 267.2,117.4 346.0,117.4"/>
+<polyline fill="none" stroke="#FF9F45" stroke-width="2" opacity=".85" points="14.0,141.5 346.0,141.5"/>
+<polyline fill="none" stroke="#35E0FF" stroke-width="2" opacity=".85" points="14.0,72.5 19.6,67.0 25.3,88.5 30.9,61.9 36.5,61.9 42.1,61.9 47.8,56.5 53.4,61.9 59.0,61.9 64.6,61.9 70.3,35.1 75.9,35.1 81.5,35.1 87.2,24.5 92.8,35.1 98.4,40.5 104.0,35.1 109.7,40.5 115.3,40.5 120.9,40.5 126.5,40.5 132.2,40.5 137.8,51.1 143.4,46.0 149.1,46.0 154.7,56.5 160.3,56.5 165.9,46.0 171.6,35.1 177.2,56.5 182.8,61.9 188.4,72.5 194.1,72.5 199.7,83.0 205.3,83.0 210.9,83.0 216.6,83.0 222.2,67.0 227.8,77.9 233.5,83.0 239.1,83.0 244.7,77.9 250.3,72.5 256.0,109.5 261.6,99.0 340.4,88.5 346.0,99.0"/>
+<polyline fill="none" stroke="#D4AF37" stroke-width="3" stroke-linejoin="round" points="14.0,111.2 19.6,109.5 25.3,116.7 30.9,107.8 36.5,107.8 42.1,107.8 47.8,106.1 53.4,107.8 59.0,107.8 64.6,107.8 70.3,99.0 75.9,99.0 81.5,99.0 87.2,95.3 92.8,99.0 98.4,100.7 104.0,99.0 109.7,100.7 115.3,100.7 120.9,100.7 126.5,100.7 132.2,100.7 137.8,104.1 143.4,102.4 149.1,102.4 154.7,106.1 160.3,106.1 165.9,102.4 171.6,94.9 177.2,102.1 182.8,103.8 188.4,109.5 194.1,109.5 199.7,112.9 205.3,112.9 210.9,112.9 216.6,112.9 222.2,107.5 227.8,115.3 233.5,117.0 239.1,117.0 244.7,115.3 250.3,109.5 256.0,121.8 261.6,116.3 267.2,119.4 340.4,115.7 346.0,119.4"/>
+<text x="2" y="267.0" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#5E5E66">2.5</text>
+<text x="2" y="182.0" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#5E5E66">5</text>
+<text x="2" y="97.0" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#5E5E66">7.5</text>
+<text x="358" y="22" text-anchor="end" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#8A8A93">₹2,265</text>
+<text x="358" y="286" text-anchor="end" font-family="JetBrains Mono,ui-monospace,monospace" font-size="9" fill="#8A8A93">₹1,943</text>
+</svg>
+    <div class="chart-cap"><span>10 Jun</span><span>10 Jul</span><span>08 Aug</span><span>01 Sep</span></div>
+    <div class="lg" style="margin-top:8px"><span><i style="background:#D4AF37;height:3px"></i>GVM</span><span><i style="background:#2FD48B"></i>Growth</span><span><i style="background:#FF9F45"></i>Value</span><span><i style="background:#35E0FF"></i>Momentum</span><span><i style="background:#8A8A93;border-top:2px dashed #8A8A93;height:0"></i>Price (right axis)</span></div>
+    <div class="stats">
+      <div><div class="k">GVM</div><div class="v gd">6.90</div></div><div><div class="k">60D HI</div><div class="v">7.62</div></div><div><div class="k">60D LO</div><div class="v">6.83</div></div><div><div class="k">Δ 60D</div><div class="v dn">−0.24</div></div><div><div class="k">PRICE Δ</div><div class="v up">+5.3%</div></div>
+    </div>
+    <div class="note">Momentum carried the score to 7.6 in late July and gave it back in August. Growth and Value barely moved. Price is up 5% over the same 60 days — the score fell while the price held, which is why the read is Average, not Good.</div>
+  </div>
+</div>
+<nav class="capsule" aria-label="GVM sections">
+  <a class="cap on" href="#growth"><span class="i">◔</span>Growth</a><a class="cap" href="#value"><span class="i">◎</span>Value</a><a class="cap" href="#momentum"><span class="i">◭</span>Momtm</a><a class="cap" href="#peers"><span class="i">⋮⋮</span>Peers</a><a class="cap" href="#results"><span class="i">◫</span>Results</a><a class="cap" href="#financials"><span class="i">▤</span>Finance</a><a class="cap" href="#holders"><span class="i">◒</span>Holders</a><a class="cap" href="#tape"><span class="i">◧</span>Tape</a>
+</nav>
+<nav class="bnav"><a class="bn" href="#"><span class="i">◧</span>Home</a><a class="bn" href="#"><span class="i">△</span>V8</a><a class="bn on" href="#"><span class="i">◈</span>GVM</a><a class="bn" href="#"><span class="i">◉</span>Check</a><a class="bn" href="#"><span class="i">⚠</span>Alerts</a></nav>
+<script>
+(function(){var caps=[].slice.call(document.querySelectorAll('.cap'));var ids=caps.map(function(a){return a.getAttribute('href').slice(1)});function setOn(id){caps.forEach(function(a){a.classList.toggle('on',a.getAttribute('href')==='#'+id)})}var obs=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)setOn(e.target.id)})},{rootMargin:'-20% 0px -60% 0px'});ids.forEach(function(id){var el=document.getElementById(id);if(el)obs.observe(el)});if(location.hash&&ids.indexOf(location.hash.slice(1))>=0)setOn(location.hash.slice(1));
+  var ov=document.getElementById('trendOv'),mini=document.getElementById('trendMini'),cap=document.querySelector('.capsule');
+  function openOv(){ov.classList.add('open');cap.style.display='none';}
+  function closeOv(){ov.classList.remove('open');cap.style.display='';}
+  mini.addEventListener('click',openOv);document.getElementById('trendX').addEventListener('click',closeOv);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeOv();});
+})();
+</script>
+</body>
+</html>
