@@ -146,6 +146,8 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | GET | `/api/v8/domestic_live` | live domestic indices |
 | GET | `/api/v8/positions` | positions |
 | GET | `/api/v8/trades` | trades |
+| GET | `/api/v8/daylog` | Day Log: per-exit-date opened/closed/gross/brokerage/net rows + summary. Query: `era` (`fresh` default), `view` (`equity` default / `futures`) |
+| GET | `/api/v8/daylog/series` | cc#1561 (`v8_daylog_extras.py`): the `/api/v8/daylog` payload folded into cumulative gross/net points by exit date, plus return facts (window_start = first exit day, table_start, trading/calendar days, capital, return_pct, cagr_pct null under 7 calendar days, cagr_note). Feeds the Day Log chart panel + Overall Return (i). Query: `view` |
 
 ### V8 Futures — `v8_futures.py` (prefix `/api/v8/futures`)
 | Method | Path | Description |
