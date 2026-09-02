@@ -1,4 +1,4 @@
-<!-- DESIGN REF scorr_mobile_home_idxpos_R1 @ 8f48d24 · cc#1569 · 02-Sep-2026
+<!-- DESIGN REF scorr_mobile_home_idxpos_R1 @ 8f48d24 (+ P5b token fix) · cc#1569 · 02-Sep-2026
      Hero deck Card 4 (Index Positions) on mobile/home.html — EMPTY STATES, as SHIPPED at main 8f48d24.
      READ-ONLY extract of the live template + the CSS that shapes it. Source of truth is
      mobile/home.html at that sha; this file is the numbered ref chain (R1) per ROLE_CHARTER_V4.
@@ -155,7 +155,7 @@ function renderHeroPositions(){
   justify-content:center;text-align:center;row-gap:var(--space-4);
   padding:var(--space-10) 0 var(--space-6)}
 #heroPositionsBody .legempty .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-9);font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mut)}
+  font-size:var(--type-9);font-weight:700;letter-spacing:var(--track-em13);text-transform:uppercase;color:var(--mut)}
 #heroPositionsBody .legempty .msg{font-size:var(--type-12);color:var(--txt)}
 /* cc#1569 P3 · BOTH EMPTY: one block, centred in the whole body (the body is already a flex column,
    so flex:1 on this single child takes the full area). Line 1 the symbol line, line 2 muted. No
