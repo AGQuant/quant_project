@@ -119,6 +119,16 @@
 #gvp svg.g-ch{display:block;width:100%;height:auto}
 #gvp .g-lg{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:6px}
 #gvp .g-lg i{display:inline-block;width:10px;height:3px;margin-right:4px;vertical-align:middle;background:var(--gold)}
+/* capsule: fixed 8-pill section nav above the bottom nav (ref .capsule/.cap, page-local names) */
+#gvp .g-capsule{position:fixed;left:12px;right:12px;bottom:72px;z-index:60;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:6px;background:rgba(19,19,22,.92);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:22px;box-shadow:0 6px 0 0 var(--gold-lo),0 6px 0 1.5px var(--line),0 -8px 30px rgba(0,0,0,.6)}
+#gvp .g-capsule[hidden]{display:none}
+#gvp .g-cap{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0 5px;border-radius:16px;color:var(--mute);text-decoration:none;font-family:var(--mono);font-size:8.5px;letter-spacing:.4px;font-weight:700;text-transform:uppercase;min-width:0}
+#gvp .g-cap .g-ci{font-size:16px;line-height:1}
+#gvp .g-cap.g-on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--gold-lo)}
+#gvp .g-cap:active{transform:translateY(1px)}
+/* section summary line (each card body arrives in its own push; until then the line is the payload's own number) */
+#gvp .g-sum{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--mute)}
+#gvp .g-sum b{color:var(--chalk);font-weight:700}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -137,6 +147,9 @@
   </div>
   <div id="g-main"><div class="g-empty">Loading…</div></div>
   <div class="g-foot" id="g-foot"></div>
+  <nav class="g-capsule" id="g-capsule" aria-label="GVM sections" hidden>
+    <a class="g-cap" href="#growth"><span class="g-ci">◔</span>Growth</a><a class="g-cap" href="#value"><span class="g-ci">◎</span>Value</a><a class="g-cap" href="#momentum"><span class="g-ci">◭</span>Momtm</a><a class="g-cap" href="#peers"><span class="g-ci">⋮⋮</span>Peers</a><a class="g-cap" href="#results"><span class="g-ci">◫</span>Results</a><a class="g-cap" href="#financials"><span class="g-ci">▤</span>Finance</a><a class="g-cap" href="#holders"><span class="g-ci">◒</span>Holders</a><a class="g-cap" href="#tape"><span class="g-ci">◧</span>Tape</a>
+  </nav>
 </div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
@@ -197,7 +210,7 @@ function fail(words, retrySym){
   main.innerHTML = '<div class="slab g-empty">'+esc(words)+'<br><span class="chip" data-retry="'+esc(retrySym||'')+'">Retry</span></div>';
 }
 function loadCompany(sym){
-  STATE.sym = sym; qEl.value = sym; document.title = sym+' · GVM';
+  STATE.sym = sym; qEl.value = sym; document.title = sym+' · GVM'; disarmCapsule();
   main.innerHTML = '<div class="slab g-empty">Loading '+esc(sym)+'…</div>'; foot.textContent = '';
   getJ(URLS.company+encodeURIComponent(sym)).then(function(d){
     if(STATE.sym !== sym) return;
@@ -278,7 +291,7 @@ function renderHero(d){
       '<div class="g-f well-up"><div class="g-fl">SECTOR GVM</div><div class="g-fv">'+(sg?fx(sg.mcap_wtd_gvm,2):'—')+'</div><div class="g-fs">'+(sg && num(sg.stock_vs_sector) ? 'you are '+(sg.stock_vs_sector>0?'+':sg.stock_vs_sector<0?'−':'')+Math.abs(sg.stock_vs_sector).toFixed(2) : 'no sector read')+'</div></div>'+
       '<div class="g-f well-up"><div class="g-fl">SCORE TREND</div><div class="g-fv '+(tw?tw.cls:'mu')+'">'+(tw?tw.word:'—')+'</div><div class="g-fs">'+(tw?tw.days+' days · '+fx(tw.now,1):'no trend yet')+'</div></div>'+
     '</div>'+
-    '<div class="g-strip">'+(window.ScorrCardStripHtml ? window.ScorrCardStripHtml(d.symbol, '') : '')+'</div>'+
+    '<div class="g-strip"></div>'+
     '<div class="g-trend well" id="g-trend" role="button" data-trend="1" aria-label="Open the price chart with the GVM overlay"><div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for price chart ⤢</span></div><div class="g-empty" style="padding:10px">Loading the score history…</div></div>'+
     '<div class="g-pn">'+pnCol('STRONG','up',d.positives)+pnCol('WEAK','dn',d.negatives)+'</div>'+
     '<div class="g-hfoot"><span>score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</span><span>Pick a capsule below ↓</span></div>'+
@@ -304,17 +317,65 @@ function renderTrend(){
     '<div class="g-asof">'+esc(first)+' → '+esc(last)+'</div>';
 }
 function openChart(){
-  if(window.ScorrChartCard && STATE.sym){ window.ScorrChartCard.open(STATE.sym, {theme:'dark'}); return true; }
+  if(window.ScorrChartCard && STATE.sym){ window.ScorrChartCard.open(STATE.sym, {theme:'dark'}); watchModal(); return true; }
   return false;
 }
+/* ── SECTIONS: eight cards in the ref order. Each card body lands in its own push; until then a
+   section shows one summary line read straight off the payload (never a placeholder). ─────── */
+function bmRow(d, key){ var b = (d.benchmark||[]); for(var i=0;i<b.length;i++) if(b[i].key===key) return b[i]; return null; }
+function finRow(tbl, label){ if(!tbl || !tbl.rows) return null; for(var i=0;i<tbl.rows.length;i++) if(tbl.rows[i].label===label) return tbl.rows[i]; return null; }
+function lastVal(row){ if(!row || !row.values) return null; for(var i=row.values.length-1;i>=0;i--) if(num(row.values[i])) return row.values[i]; return null; }
+function sectHead(id, title, right){ return '<div class="sect" id="'+id+'">'+title+' <span class="g-r">'+esc(right||'')+'</span></div>'; }
+function sumLine(parts){ return '<section class="slab"><div class="g-sum">'+parts.map(function(x){ return '<span>'+x+'</span>'; }).join('')+'</div></section>'; }
+function secGrowth(d){ var g=(d.benchmark||[]).filter(function(b){return b.pillar==='G'&&b.group==='Trackrecord';}); var above=g.filter(function(b){return num(b.company)&&num(b.peer_median)&&b.company>b.peer_median;}).length;
+  return sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+g.filter(function(b){return num(b.rating);}).length+' of '+g.length+' scored')+sumLine(['<b>'+g.length+'</b> growth checks','<b>'+above+'</b> above the peer median']); }
+function secValue(d){ var pe=bmRow(d,'pe'), sp=bmRow(d,'sector_pe'); return sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict?' · '+String(sp.verdict.label||'').toLowerCase()+' on PE':''))+
+  sumLine(['PE <b>'+(pe?fx(pe.company,1)+'×':'—')+'</b>','sector <b>'+(pe&&num(pe.peer_median)?fx(pe.peer_median,0)+'×':'—')+'</b>']); }
+function secMomentum(d){ var y=bmRow(d,'ret_1y'), m=bmRow(d,'ret_1m'); return sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1))+sumLine(['1 year <b class="'+(y&&num(y.company)?(y.company>=0?'up':'dn'):'')+'">'+(y?bmVal(y):'—')+'</b>','1 month <b class="'+(m&&num(m.company)?(m.company>=0?'up':'dn'):'')+'">'+(m?bmVal(m):'—')+'</b>']); }
+function secPeers(d){ var sg=(d.extras||{}).segment_ctx||{}; return sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''))+sumLine(['Sector GVM <b>'+fx(sg.mcap_wtd_gvm,2)+'</b>',(num(sg.sector_rank)&&num(sg.sector_total)?'rank <b>'+sg.sector_rank+' of '+sg.sector_total+'</b>':'')]); }
+function secResults(d){ var ra=(d.content||{}).result_analysis||'', first=ra.split('\n')[0]||''; return sectHead('results','Results',first.split('·')[0].trim())+sumLine([first?esc(first):'No result analysis yet for this quarter.',(d.content&&d.content.last_result_analysis_updated?'updated <b>'+esc(d.content.last_result_analysis_updated)+'</b>':'')]); }
+function secFinancials(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
+function secHolders(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
+  return sectHead('holders','Holders',per)+sumLine(['Promoters <b>'+fx(pr,1)+'%</b>','FII <b>'+fx(fii,1)+'</b> · DII <b>'+fx(dii,1)+'</b>']); }
+function secTape(d){ var ex=d.extras||{}, t1=ex.tier1||{}, vc=ex.vol_canon||{}; return sectHead('tape','Tape',(d.price_is_live?'live':'last close')+(ex.pivot&&ex.pivot.pivot_date?' · '+ex.pivot.pivot_date:''))+
+  sumLine(['entry checks <b>'+(num(t1.passed)?t1.passed:'—')+' of '+(num(t1.total)?t1.total:'—')+'</b>','volume <b>'+esc(vc.vol_ad_label||'—')+'</b>']); }
+function renderSections(d){ return secGrowth(d)+secValue(d)+secMomentum(d)+secPeers(d)+secResults(d)+secFinancials(d)+secHolders(d)+secTape(d); }
+/* ── CAPSULE: active pill follows the scroll (IntersectionObserver), hash deep-links, hidden
+   while a modal is open (the shared chart overlay #scorrChartOv). ───────────────────────── */
+var capsule = document.getElementById('g-capsule'), caps = [].slice.call(capsule.querySelectorAll('.g-cap')), capIds = caps.map(function(a){ return a.getAttribute('href').slice(1); }), capObs = null;
+var capLock = 0;
+function setCap(id, lock){ caps.forEach(function(a){ a.classList.toggle('g-on', a.getAttribute('href') === '#'+id); }); if(lock) capLock = Date.now() + 800; }
+function armCapsule(){
+  capsule.hidden = false;
+  if(capObs) capObs.disconnect();
+  capObs = new IntersectionObserver(function(es){ if(Date.now() < capLock) return; es.forEach(function(e){ if(e.isIntersecting) setCap(e.target.id); }); }, {rootMargin:'-20% 0px -60% 0px'});
+  capIds.forEach(function(id){ var el = document.getElementById(id); if(el) capObs.observe(el); });
+  var h = (location.hash||'').slice(1);
+  if(capIds.indexOf(h) > -1){ setCap(h, true); var t = document.getElementById(h); if(t) setTimeout(function(){ t.scrollIntoView({block:'start'}); }, 50); }
+  else setCap(capIds[0]);
+}
+function disarmCapsule(){ capsule.hidden = true; if(capObs){ capObs.disconnect(); capObs = null; } }
+window.addEventListener('hashchange', function(){ var h = (location.hash||'').slice(1); if(capIds.indexOf(h) > -1) setCap(h, true); });
+var modalObs = null;
+function watchModal(){
+  var ov = document.getElementById('scorrChartOv'); if(!ov) return;
+  var sync = function(){ if(!STATE.co) return; var open = ov.style.display && ov.style.display !== 'none'; capsule.hidden = open; };
+  sync();
+  if(!modalObs){ modalObs = new MutationObserver(sync); modalObs.observe(ov, {attributes:true, attributeFilter:['style']}); }
+}
+/* the strip component is a deferred site-wide script; fill it now if present, else once the window has loaded */
+function fillStrip(){ var el = document.querySelector('#gvp .g-strip'); if(!el || el.firstChild || !STATE.co) return; if(window.ScorrCardStripHtml) el.innerHTML = window.ScorrCardStripHtml(STATE.co.symbol, ''); }
+window.addEventListener('load', fillStrip);
 function renderCompany(){
   var d = STATE.co;
-  main.innerHTML = renderHero(d);
+  main.innerHTML = renderHero(d) + renderSections(d);
+  fillStrip();
+  armCapsule();
   foot.textContent = 'Scores rebuild nightly. Prices live.'+(num(d.peer_count)?' Peer set = same segment, '+d.peer_count+' companies.':'');
 }
 /* ── landing: no symbol yet → today's top 25 by GVM, tap to open ─────────────────────── */
 function loadLanding(){
-  STATE.sym = null; STATE.co = null; document.title = 'GVM'; qEl.value = '';
+  STATE.sym = null; STATE.co = null; document.title = 'GVM'; qEl.value = ''; disarmCapsule();
   main.innerHTML = '<div class="slab g-empty">Loading today’s scores…</div>'; foot.textContent = '';
   getJ(URLS.list).then(function(d){
     if(STATE.sym) return;
