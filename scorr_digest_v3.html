@@ -104,18 +104,21 @@ section{margin-top:26px}
    number. The cc#1294 white-box override is DELETED — founder reversed it 31-Aug with this
    redesign, which restores the at-a-glance magnitude signal that ruling traded away. */
 .tape{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}
-.tgrp{grid-column:1/-1;display:flex;align-items:center;gap:10px;font-family:var(--f-m);
-  font-size:9.5px;font-weight:600;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase;margin-top:6px}
-.tgrp:first-child{margin-top:0}
-.tgrp::after{content:'';flex:1;height:1px;background:var(--line)}
-.tile{border-radius:9px;padding:11px 12px 10px;border:1px solid var(--line);
+/* cc#1605: the .tgrp category rules are retired with the grouped render. */
+/* cc#1605 (founder 02-Sep 15:24 "make tape in 2 rows with day/week toggle, box size reduce by
+   25%"): the .tgrp category rules are gone — 16 tiles flow 8 x 2 in category order with the
+   category as a small caption INSIDE each tile; one value per tile (DAY or WEEK per the toggle). */
+.tile{border-radius:8px;padding:7px 9px 6px;border:1px solid var(--line);max-height:70px;
   transition:border-color .12s,transform .12s;position:relative}
 .tile:hover{transform:translateY(-1px)}
 .tile .n{font-size:11px;font-weight:600;color:var(--tx2);display:flex;align-items:center;gap:6px;
   overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.tile .d{font-family:var(--f-m);font-size:20px;font-weight:700;margin-top:6px;
+.tile .d{font-family:var(--f-m);font-size:15px;font-weight:700;margin-top:4px;
   font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1}
-.tile .w{font-family:var(--f-m);font-size:10.5px;font-weight:500;color:var(--tx3);margin-top:6px}
+.tile .cat{font-family:var(--f-m);font-size:8.5px;font-weight:600;color:var(--tx3);text-transform:uppercase;margin-top:4px}
+.tseg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;margin-left:8px}
+.tseg button{font:600 9.5px var(--f-m);padding:4px 9px;border:0;background:transparent;color:var(--tx3);cursor:pointer}
+.tseg button.on{background:var(--raise);color:var(--tx)}
 .tile .pc{position:absolute;top:8px;right:8px;font-family:var(--f-m);font-size:8px;font-weight:600;
   letter-spacing:.1em;color:var(--am);border:1px solid rgba(var(--am-rgb),.45);border-radius:3px;padding:1px 4px}
 /* magnitude bands — fill intensity, sign colour on the number */
@@ -222,7 +225,7 @@ section{margin-top:26px}
 .foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);
   font-family:var(--f-m);font-size:10.5px;color:var(--tx3);display:flex;gap:18px;flex-wrap:wrap}
 /* cc#1521 R4 breakpoints: the tape grid narrows 8 -> 6 -> 4 -> 3 columns; hero segs 5 -> 2 -> 1. */
-@media(max-width:1000px){.tape{grid-template-columns:repeat(6,1fr)}}
+@media(max-width:1000px){.tape{grid-template-columns:repeat(4,1fr)}}   /* cc#1605: 4 x 4 below 1000px */
 @media(max-width:860px){
   .two,.three{grid-template-columns:1fr} .segs{grid-template-columns:repeat(2,1fr)}
   .tape{grid-template-columns:repeat(4,1fr)}
@@ -447,40 +450,58 @@ function tileTitle(t,level){
    the R3 day-row/week-row pair. Every tile KEEPS gtile + data-sym + tabindex + title, so the
    cc#849 drawer click/Enter handlers and refreshAges() work byte-unchanged. data-level stays
    'day' (the week reading now lives inside the same tile). */
+/* cc#1605: ONE value per tile — day_chg_pct or week_chg_pct per TAPE_LEVEL — banded on its OWN
+   reading by the same bandCls/signCls rule (inversion included), the category as a caption inside
+   the tile. gtile + data-sym + data-level + title survive, so the cc#849 drawer handlers and
+   refreshAges() keep working; data-level now follows the toggle so the tooltip is the level's. */
+var TAPE_LEVEL='day';   // in memory only for the visit (no localStorage)
 function tapeTiles(tiles){
+  var wk=(TAPE_LEVEL==='week');
   return tiles.map(function(t){
     var am = t.as_of_is_live ? ageMin(t.tick_ts) : null;
     var fresh = (am!=null && am<=LIVE_DOT_MAX_MIN);
-    return '<div class="tile gtile '+bandCls(t.day_chg_pct,t.inverted)+(fresh?' fresh':'')+'" '+
-      'data-sym="'+esc(t.symbol)+'" data-level="day" tabindex="0" role="button" '+
-      'title="'+esc(tileTitle(t,'day'))+'">'+
-      (t.as_of_is_live?'':'<span class="pc">PREV CLOSE</span>')+
-      '<div class="n">'+(t.as_of_is_live?'<span class="ldot"></span>':'')+esc(t.name||t.symbol)+'</div>'+
-      '<div class="d '+signCls(t.day_chg_pct,t.inverted)+'">'+signNum(t.day_chg_pct)+'</div>'+
-      '<div class="w">wk <span class="'+signCls(t.week_chg_pct,t.inverted)+'">'+
-      (t.week_chg_pct==null?'—':signNum(t.week_chg_pct)+'%')+'</span></div></div>';
+    var v = wk ? t.week_chg_pct : t.day_chg_pct;
+    return '<div class="tile gtile '+bandCls(v,t.inverted)+(fresh?' fresh':'')+'" '+
+      'data-sym="'+esc(t.symbol)+'" data-level="'+(wk?'week':'day')+'" tabindex="0" role="button" '+
+      'title="'+esc(tileTitle(t,wk?'week':'day'))+'">'+
+      (t.as_of_is_live||wk?'':'<span class="pc">PREV CLOSE</span>')+
+      '<div class="n">'+(t.as_of_is_live&&!wk?'<span class="ldot"></span>':'')+esc(t.name||t.symbol)+'</div>'+
+      '<div class="d '+signCls(v,t.inverted)+'">'+(v==null?'—':signNum(v)+'%')+'</div>'+
+      '<div class="cat">'+esc(t.category||'')+'</div></div>';
   }).join('');
 }
 
-/* Grouped grid: an R4 .tgrp rule opens each category, tiles flow in the shared .tape grid. */
+/* cc#1605: no group rules — tiles flow in category order (INDEX x7, VIX, COMMODITY x5, CURRENCY x2,
+   CRYPTO), left to right, top to bottom, 8 per row. */
 function tapeRun(tiles,order){
   var byCat={}; tiles.forEach(function(t){ (byCat[t.category]=byCat[t.category]||[]).push(t); });
   var cats=(order||[]).filter(function(c){return byCat[c]&&byCat[c].length;});
   Object.keys(byCat).forEach(function(c){ if(cats.indexOf(c)<0) cats.push(c); });
-  return cats.map(function(c){
-    return '<div class="tgrp">'+esc(c)+'</div>'+tapeTiles(byCat[c]);
-  }).join('');
+  return cats.map(function(c){ return tapeTiles(byCat[c]); }).join('');
+}
+function setTapeLevel(l){
+  TAPE_LEVEL=(l==='week')?'week':'day';
+  var s=((D||{}).sections||{}).global_tape; var host=document.getElementById('sec-tape');
+  if(!s||!host) return;
+  host.innerHTML=secTapeInner(s);   // re-render from the cached payload — no refetch
 }
 
 function secTape(s){
   if(!s) return '';
+  return '<section id="sec-tape">'+secTapeInner(s)+'</section>';
+}
+function secTapeInner(s){
   var live=s.tiles||[], eod=s.eod_tiles||[], all=live.concat(eod);
-  var n=all.length;
-  /* R4 header keeps the honest live count — the badge says how many tiles are genuinely live. */
+  var n=all.length, wk=(TAPE_LEVEL==='week');
+  /* R4 header keeps the honest live count — the badge says how many tiles are genuinely live.
+     cc#1605: the DAY | WEEK seg sits right of the LIVE pill; the as-of caption follows the level —
+     WEEK reads the same words the V8 Global Indices tab uses. */
   var h = '<div class="sh"><span class="snum">01</span><span class="st">Global Tape</span>'+
           '<span class="badge b-live"><span class="dot"></span>LIVE · '+live.length+' OF '+n+'</span>'+
-          '<span class="asof">as of <b>'+
-          esc(s.freshest_tick? tIST(s.freshest_tick)+' IST' : '—')+'</b></span></div>';
+          '<span class="tseg" role="tablist"><button type="button" role="tab" aria-selected="'+(!wk)+'"'+(wk?'':' class="on"')+' onclick="setTapeLevel(\'day\')">DAY</button>'+
+          '<button type="button" role="tab" aria-selected="'+wk+'"'+(wk?' class="on"':'')+' onclick="setTapeLevel(\'week\')">WEEK</button></span>'+
+          '<span class="asof">'+(wk ? 'rolling 5 sessions · each symbol\'s own calendar'
+                                    : 'as of <b>'+esc(s.freshest_tick? tIST(s.freshest_tick)+' IST' : '—')+'</b>')+'</span></div>';
   h += '<div class="card">';
   if(s.error||s.live_error){
     h += '<div class="eodnote">Live ticks unavailable ('+esc(s.live_error||s.error)+
@@ -495,7 +516,7 @@ function secTape(s){
   if(s.disclosure) notes.push(esc(s.disclosure));
   if(notes.length) h += '<div class="tnote">'+notes.join(' · ')+'</div>';
   h += '</div>';
-  return '<section>'+h+'</section>';
+  return h;
 }
 
 /* Ages live in title= now, so the 30s refresh rewrites the tooltip rather than visible text. */
