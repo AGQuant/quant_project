@@ -3397,10 +3397,18 @@ function renderMaster(){
   const _unrealSub = _fut
     ? `<div class="v-sub">${_fPriced} of ${open.length} position${open.length===1?'':'s'}${_asOf}</div>`
     : '';
-  const cards=`<div class="cards">
+  // cc#1578 (founder 02-Sep 11:36 + 11:42): FIVE boxes, every money box leads with NET so the row
+  // adds up — Unrealised headline is now the net figure (gross drops to the small grey line, the
+  // reverse of before), Realised stays net-first, and a new NET TOTAL box sits between Realised
+  // and Win/Loss. Net Total is client-side arithmetic on the two nets already on this row; no new
+  // endpoint. A null realised (futures view before the cutover is served) keeps the dash: "cannot
+  // tell you" must not print as a number.
+  const netTotal=(netClosed==null)?null:(netUnreal+netClosed);
+  const cards=`<div class="cards kpi5">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div>${_posSub}</div>
-    <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div>${_unrealSub}</div>
+    <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(netUnreal)}">${inr(netUnreal)}</div><div class="v-sub">Gross ${inr(unreal)}</div>${_unrealSub}</div>
     <div class="card"><div class="k">Realised P&L${_reTag}</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
+    <div class="card"><div class="k">Net Total${_reTag}</div><div class="v ${pnlCls(netTotal)}">${inr(netTotal)}</div><div class="v-sub">Open ${inr(netUnreal)} + Closed ${inr(netClosed)}</div></div>
     <div class="card"><div class="k">Win / Loss${_reTag}</div><div class="v">${winsTxt}/${lossTxt}</div></div>
   </div>`;
   // [ All ] [ Long ] [ Short ] toggle — active tints per spec, count badge per side.
