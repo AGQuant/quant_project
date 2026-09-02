@@ -52,6 +52,7 @@ from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
 from bt6_endpoints import router as bt6_router   # cc#544: V6 BT playground (read-mostly wrapper)
 from results_endpoints import router as results_router   # cc#572: Results "R" card backend (id=6438)
 from pcr_endpoints import router as pcr_router
+from pcr_mood import router as pcr_mood_router   # cc#1568: /api/pcr/mood composer (session_log 36200)
 from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
 from v8_backfill_endpoints import router as v8_backfill_router
@@ -701,6 +702,7 @@ app.include_router(v14_router)   # cc#442
 app.include_router(bt6_router)   # cc#544: /api/bt6/* V6 BT playground
 app.include_router(results_router)   # cc#572: /api/results/card (Results R-card backend)
 app.include_router(pcr_router)
+app.include_router(pcr_mood_router)   # cc#1568
 app.include_router(v8_replay_router)
 app.include_router(backtest_router)
 app.include_router(v8_backfill_router)
