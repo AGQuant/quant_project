@@ -23,6 +23,7 @@ import logging
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from v8_era import era_block as _eb_v8                 # cc#1604 V8_ERA_CUTOVER_ONLY_V1
 
 from mobile_endpoints import (
     rail_state, basket_label, _conn, _rows, _ist_now, _guard, _json_safe, _page,
@@ -666,6 +667,7 @@ def mobile_v8book(request: Request):
     # CONTEXT ISOLATION (rule 7): v8_paper_* only. tc_intraday_* is not touched anywhere here.
     with _conn() as conn, conn.cursor() as cur:
         canon = book_canon(conn, era="fresh")           # cc#970: every summary figure, one source
+        _era_block_v8 = _eb_v8(cur)                     # cc#1604: caption, served not typed
         _retired, _ = retired_baskets(cur)
         cur.execute("""
             SELECT id, symbol, side, basket, entry_price, entry_ts, exit_price, exit_ts, qty,
@@ -770,6 +772,7 @@ def mobile_v8book(request: Request):
         "win_rate": canon["win_rate"],
         "rec_long": canon["rec_long"],
         "rec_short": canon["rec_short"],
+        "era_block": _era_block_v8,          # cc#1604: "Since 18-Jul-2026", served
         "era": canon["era"],
         "canon": canon["canon"],
         "retired_baskets": canon["retired_baskets"],

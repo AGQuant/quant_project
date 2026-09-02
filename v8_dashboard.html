@@ -4332,7 +4332,7 @@ function renderTradeLog(){
   const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
   // cc#1156 scope 3: the era switch. Two states, default 'Since cutover', never remembered.
   // cc#1604: no era buttons. One caption, served by the API from app_config, never typed here.
-  const eraBtns=`<span style="font-size:11px;font-weight:700;color:var(--txt)" title="V8 performance is reported for the post-cutover era only (V8_ERA_CUTOVER_ONLY_V1). The full ledger since inception is suspended.">${eraLabel}${TLOG_BASKET!=='all'?' &middot; '+basketLabel(TLOG_BASKET):''}</span>`;
+  const eraBtns=`<span style="font-size:11px;font-weight:700;color:var(--txt)" title="V8 performance is reported for the post-cutover era only (V8_ERA_CUTOVER_ONLY_V1). The full ledger is suspended.">${eraLabel}${TLOG_BASKET!=='all'?' &middot; '+basketLabel(TLOG_BASKET):''}</span>`;
   // cc#751: DYNAMIC basket row — derived from the baskets actually present in the trade ledger (union
   // any currently-qualifying basket), so it always reflects what has run/is running instead of a stale
   // hardcoded 6. Canonical display order; unknown baskets sort last.
@@ -4375,7 +4375,7 @@ function renderTradeLog(){
   // fully reachable; it just no longer speaks first.
   // cc#1604: one era, one note. The full-ledger wording is gone with the ledger.
   const _eraNote = _eraOk
-        ? `${eraLabel} &mdash; the post&#8209;cutover book, the same one the Day Log counts, so the two tabs agree to the rupee. The full ledger since inception is suspended.`
+        ? `${eraLabel} &mdash; the post&#8209;cutover book, the same one the Day Log counts, so the two tabs agree to the rupee. The full ledger is suspended.`
         : 'Cutover not served by the API this load, so no era split could be applied &mdash; the rows below are unfiltered and are labelled so rather than shown as post&#8209;cutover.';
   const scopeNote = isAll ? _eraNote
     : (_eraNote+'<br>Counting a FILTERED subset &mdash; '+[TLOG_DUR==='all'?null:(TLOG_DUR==='1w'?'last 1 week':'last 1 month'),
