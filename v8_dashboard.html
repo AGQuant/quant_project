@@ -1369,7 +1369,7 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
         <button id="v10tg-BANKNIFTY" onclick="setV10Sym('BANKNIFTY')" style="border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--mut);font-family:inherit">BANKNIFTY</button>
       </div>
       <div style="flex:1;min-width:10px"></div>
-      <div style="font-size:10px;color:var(--mut)">&#9650; entry · &#9660; exit · green win / red loss · pins on spot bar</div>
+      <div style="font-size:10px;color:var(--mut)">B / S entry at the index level · T target · SL stop · FLIP B / S = same-bar exit + entry · exit label = option P&amp;L · ○ open leg · pins on the spot bar</div>
       <button onclick="closeV10Chart()" title="Close (Esc)" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--line2);background:var(--surface2);color:var(--mut);cursor:pointer;font-size:14px;flex:none">&#10005;</button>
     </div>
     <div id="v10ChartBox" style="flex:1;min-height:0;position:relative"></div>
@@ -6592,28 +6592,72 @@ function _v10SnapBar(candles, iso){
   while(lo<=hi){const m=(lo+hi)>>1; if(candles[m].time<=target){idx=m;lo=m+1;}else{hi=m-1;}}
   return idx<0?null:candles[idx];   // before first bar (older than window) -> skip marker
 }
+function _v10OptLong(r){
+  // cc#1573 (36703): markers come from the OPTION leg, whose side is not the trade's direction —
+  // the ATM write is SELL PE when the signal is long and SELL CE when it is short; a bought option
+  // reads the other way round. BUY CE / SELL PE = long, BUY PE / SELL CE = short.
+  const side=String(r.side||'').toUpperCase(), ot=String(r.opt_type||'').toUpperCase();
+  return (side==='BUY')===(ot==='CE');
+}
+function _v10Reason(raw){
+  // same cut as v10_endpoints.reason_kw: the leading keyword, before any audit annotation
+  const s=String(raw||'EXIT').trim(); const cut=s.search(/[\s\[]/);
+  return (cut<0?s:s.slice(0,cut)).toUpperCase()||'EXIT';
+}
 function buildV10Markers(candles, open, closed){
-  const sym=_v10sym, out=[];
-  const isFut=r=>(((r.leg||r.type||'')+'').toUpperCase()==='FUT');
+  /* cc#1573: the app chart's vocabulary (mobile/home.html pinCode/pinCol): B / S entry at the
+     index level, T = TARGET (green), SL (red), any other reason printed as its keyword (grey),
+     a same-bar exit + entry folded into FLIP B / FLIP S (cc#1397), an open leg ringed. Per
+     V10_DISPLAY_OPTIONS_ONLY_V1 (36703) the rows are the OPT legs and the exit label carries the
+     OPTION P&L; the pin sits on the spot bar the leg's timestamp snaps to, so the level printed
+     is the index level, never the premium. ONE builder — no second marker path. */
+  const sym=_v10sym, ev=[];
+  const isOpt=r=>(((r.leg||r.type||'')+'').toUpperCase()==='OPT');
   const symMatch=r=>(((r.symbol||r.sym||'')+'').toUpperCase()===sym);
-  const isLongSide=s=>{s=(s||'').toUpperCase();return s==='BUY'||s==='LONG';};
-  (closed||[]).filter(r=>symMatch(r)&&isFut(r)).forEach(r=>{
-    const isLong=isLongSide(r.side);
+  const pnlTxt=p=>(p==null||isNaN(p))?'':' '+(p>=0?'+':'−')+num(Math.abs(p),0);
+  (closed||[]).filter(r=>symMatch(r)&&isOpt(r)).forEach(r=>{
+    const long=_v10OptLong(r);
     const eBar=_v10SnapBar(candles,r.entry_ts);
-    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?UP:DN,
-      shape:isLong?'arrowUp':'arrowDown',text:(isLong?'BUY ':'SELL ')+num(eBar.close,0)});
+    if(eBar) ev.push({time:eBar.time,kind:'entry',long,level:eBar.close});
     const xBar=_v10SnapBar(candles,r.exit_ts);
-    if(xBar){ const p=Number(r.pnl), win=!isNaN(p)&&p>=0, rsn=r.exit_reason||'EXIT';
-      out.push({time:xBar.time,position:isLong?'aboveBar':'belowBar',color:win?UP:DN,
-        shape:isLong?'arrowDown':'arrowUp',text:rsn+(isNaN(p)?'':' '+(p>=0?'+':'')+num(p,0))}); }
+    if(xBar) ev.push({time:xBar.time,kind:'exit',long,pnl:Number(r.pnl),reason:_v10Reason(r.exit_reason)});
   });
-  (open||[]).filter(r=>symMatch(r)&&isFut(r)).forEach(r=>{
-    const isLong=isLongSide(r.side);
+  (open||[]).filter(r=>symMatch(r)&&isOpt(r)).forEach(r=>{
+    const long=_v10OptLong(r);
     const eBar=_v10SnapBar(candles,r.entry_ts);
-    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?UP:DN,
-      shape:isLong?'arrowUp':'arrowDown',text:(isLong?'BUY ':'SELL ')+num(eBar.close,0)+' •open'});
+    if(eBar) ev.push({time:eBar.time,kind:'open',long,level:eBar.close});
+  });
+  const one=e=>{
+    if(e.kind==='exit'){
+      const code=e.reason==='TARGET'?'T':e.reason;
+      const col=e.reason==='TARGET'?UP:(e.reason==='SL'?DN:C.mut);
+      return {time:e.time,position:e.long?'aboveBar':'belowBar',color:col,shape:e.long?'arrowDown':'arrowUp',text:code+pnlTxt(e.pnl)};
+    }
+    return {time:e.time,position:e.long?'belowBar':'aboveBar',color:e.long?UP:DN,
+      shape:e.kind==='open'?'circle':(e.long?'arrowUp':'arrowDown'),
+      text:(e.long?'B ':'S ')+num(e.level,0)+(e.kind==='open'?' · OPEN':'')};
+  };
+  const byBar={}; ev.forEach(e=>{ (byBar[e.time]=byBar[e.time]||[]).push(e); });
+  const out=[];
+  Object.keys(byBar).forEach(k=>{
+    const g=byBar[k]; let ent=null, ex=null; const rest=[];
+    g.forEach(e=>{ if(!ex&&e.kind==='exit') ex=e; else if(!ent&&e.kind==='entry') ent=e; else rest.push(e); });
+    if(ent&&ex){
+      // the flip: one glyph, the entry's direction and colour, the exit's option P&L on the label
+      out.push({time:ent.time,position:ent.long?'belowBar':'aboveBar',color:ent.long?UP:DN,
+        shape:ent.long?'arrowUp':'arrowDown',text:'FLIP '+(ent.long?'B':'S')+' '+num(ent.level,0)+pnlTxt(ex.pnl)});
+      rest.forEach(e=>out.push(one(e)));
+    } else g.forEach(e=>out.push(one(e)));
   });
   return out.sort((a,b)=>a.time-b.time);   // LWC requires ascending-by-time markers
+}
+function _v10IstKey(iso){
+  // a trade's entry as 'DD-Mon HH:MI' IST — the exact string /api/v10/trades/legs prints as
+  // entry_ist, so a log row can find its own trade in the chart's closed list without an id.
+  if(!iso) return '';
+  const ms=Date.parse(String(iso).replace(' ','T')); if(isNaN(ms)) return '';
+  const d=new Date(ms+19800000), M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], p=n=>(n<10?'0':'')+n;
+  return p(d.getUTCDate())+'-'+M[d.getUTCMonth()]+' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes());
 }
 async function loadV10Chart(){
   const box=document.getElementById('v10ChartBox'); if(!box) return;
@@ -6659,6 +6703,12 @@ async function loadV10Chart(){
     catch(me){ console.warn('[v10chart] markers',me&&me.message); }   // a bad trade row must not cost the whole chart
     if(markers.length) series.setMarkers(markers);
     chart.timeScale().fitContent();
+    if(_v10pendingTrade){
+      // cc#1573: the log row's glyph — find that OPT leg by symbol + entry minute, scroll to its entry bar
+      const want=_v10pendingTrade; _v10pendingTrade=null;
+      const hit=(closed||[]).find(r=>String(r.symbol||'').toUpperCase()===_v10sym&&String(r.leg||'').toUpperCase()==='OPT'&&_v10IstKey(r.entry_ts)===want);
+      if(hit) _v10pendingScroll=hit.entry_ts;
+    }
     if(_v10pendingScroll){var _sb=_v10SnapBar(candles,_v10pendingScroll);if(_sb){try{chart.timeScale().setVisibleRange({from:_sb.time-5400,to:_sb.time+5400});}catch(e){}}_v10pendingScroll=null;}
     _v10ro=new ResizeObserver(()=>{ if(_v10chart) _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); });
     _v10ro.observe(box);
@@ -6698,6 +6748,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document
 
 /* ── cc#542 additions: pivots ladder, strike-wise OI histograms, index-positions in gate ── */
 var _v10pendingScroll=null;
+var _v10pendingTrade=null;   /* cc#1573: 'DD-Mon HH:MI' entry key of the log row whose glyph opened the chart */
 function v10RowIcon(sym,ts){var s=(sym||'NIFTY50');return `<span onclick="openV10ChartAt('${s}','${ts||''}')" title="Open 5-min chart at this trade" style="cursor:pointer;color:var(--mut);margin-right:5px;display:inline-block" onmouseover="this.style.color='var(--blu)'" onmouseout="this.style.color='var(--mut)'">&#128200;</span>`;}
 
 /* pivots: fed from /api/paper/pivots (pp,r1,r2,s1,s2) + live CMP from D.idx */
@@ -7223,13 +7274,14 @@ function rRecord(){
       + '<td class="' + (t.pnl != null ? (t.pnl >= 0 ? 'pos' : 'neg') : '') + '" style="font-weight:700">' + (t.pnl != null ? (t.pnl < 0 ? '−' : '+') + '₹' + num(Math.abs(Math.round(t.pnl))) : '—')
       + (t.points != null ? ' <span style="font-weight:500;color:var(--tx3)">' + sgn(t.points, 1) + ' pts</span>' : '') + '</td>'
       + '<td><span class="' + tagCls(t.reason) + '" style="font:600 9.5px var(--f-m);letter-spacing:.08em">' + esc(String(t.reason || 'EXIT').toUpperCase()) + '</span></td>'
-      + '<td><button type="button" class="ib" title="View ' + esc(t.symbol) + ' on the V10 chart" aria-label="View on chart" onclick="iiRecChart(\'' + esc(t.symbol) + '\')" style="width:24px;height:24px;font-size:12px">📈</button></td></tr>';
+      + '<td><button type="button" class="ib" title="View ' + esc(t.symbol) + ' on the V10 chart" aria-label="View on chart" onclick="iiRecChart(\'' + esc(t.symbol) + '\',\'' + esc(t.entry_ist || '') + '\')" style="width:24px;height:24px;font-size:12px">📈</button></td></tr>';
   }).join('');
   // the honest futures-only count (the app's own derivation): paired trades with no option leg
   var futOnly = (D.closed || []).filter(function(t){ return !t.hedge; }).length;
   var lastExit = all.length ? (all[0].exit_ist || '') : '';
   return '<section class="iisec" id="sec-record"><div class="sh"><span class="st">The Record</span>'
     + '<span class="badge b-static">' + all.length + ' CLOSED · OPTIONS</span>'
+    + '<button type="button" class="ib" title="Closed trades on the V10 chart (B / S · T · SL · FLIP)" aria-label="View closed trades on chart" onclick="iiRecChart(\'' + (REC.sym === 'BANKNIFTY' ? 'BANKNIFTY' : 'NIFTY50') + '\')" style="width:26px;height:26px;font-size:13px">📈</button>'
     + '<span class="asof">V10 · option legs only · WR + P&amp;L + PF from /api/v10/performance?leg=OPT · rows from /api/v10/trades/legs</span></div>'
     + '<div class="card rec" style="grid-template-columns:auto auto auto 1fr">'
     + '<div><div class="k">Win rate</div><div class="v">' + wr + '</div></div>'
@@ -7248,10 +7300,14 @@ function rRecord(){
     + (rows.length > shown.length ? '<button type="button" class="btn" onclick="iiRecMore()">load more ↓</button>' : '')
     + '</div></section>';
 }
-function iiRecChart(sym){
-  /* cc#1573 (the trade-scrolled overlay with BUY/TGT/FLIP/SL markers) has not landed: the glyph
-     opens the shared V10 chart for the symbol — the same "View on chart" the pane already has. */
-  try{ openV10Chart(sym === 'NIFTY' ? 'NIFTY50' : sym); }catch(e){ console.warn('[rec chart]', e && e.message); }
+function iiRecChart(sym, entryIst){
+  /* cc#1573: the shared V10 overlay (B / S · T · SL · FLIP markers on the OPT legs). From a log
+     row the chart scrolls to that trade's entry bar; from the header it opens on the selected
+     index at the latest bars. */
+  try{
+    if (window.openV10ChartTrade) window.openV10ChartTrade(sym === 'NIFTY' ? 'NIFTY50' : sym, entryIst || null);
+    else openV10Chart(sym === 'NIFTY' ? 'NIFTY50' : sym);
+  }catch(e){ console.warn('[rec chart]', e && e.message); }
 }
 
 /* ── OI BUILD UPS - the app's buCard family (cc#1431/1454/1460), four cards in one row ── */
@@ -7807,6 +7863,7 @@ window.v10ChartIcon=v10ChartIcon;
 window.setV10Sym=setV10Sym;
 window.closeV10Chart=closeV10Chart;
 window.openV10ChartAt=function(sym,ts){ _v10pendingScroll=(ts||null); openV10Chart(sym); };
+window.openV10ChartTrade=function(sym,entryIst){ _v10pendingTrade=(entryIst||null); _v10pendingScroll=null; openV10Chart(sym); };   /* cc#1573 */
 /* cc#1522: idxToggleClosed removed with the Closed Trades table */
 
 /* lazy boot on first Index-Intel tab activation */
