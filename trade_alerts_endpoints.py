@@ -238,6 +238,25 @@ def list_alerts(status: str = "all", limit: int = 200):
             cur.execute(f"""SELECT {_COLS} FROM trade_alerts WHERE status = %s
                             ORDER BY created_at DESC, id DESC LIMIT %s""", (status, limit))
         rows = [_row(r) for r in cur.fetchall()]
+        # cc#1586 scope 2: pending / triggered rows carry the SAME resolver price the trigger sweep
+        # uses (cmp_resolver.resolve_cmp_many, see check_triggers), so the page can print
+        # "waits for cross <= 1,150 (live 1,306)" beside a disabled Approve instead of an empty
+        # cell. Read-only, batched, never a fabricated number: a symbol the resolver cannot see
+        # gets cmp None and the page says so.
+        open_syms = sorted({r["symbol"] for r in rows if r["status"] in ("pending", "triggered")})
+        if open_syms:
+            try:
+                import cmp_resolver
+                live = cmp_resolver.resolve_cmp_many(cur, open_syms) or {}
+            except Exception as e:                     # a price outage must not blank the list
+                live = {}
+                log.warning("list_alerts: resolve_cmp_many failed (%s) — rows ship without cmp", e)
+            for r in rows:
+                if r["status"] in ("pending", "triggered"):
+                    hit = live.get(r["symbol"]) or {}
+                    r["cmp"] = hit.get("cmp")
+                    r["cmp_live"] = bool(hit.get("live")) if hit else None
+                    r["cmp_source"] = hit.get("source")
     return {"status_filter": status, "count": len(rows), "alerts": rows}
 
 
