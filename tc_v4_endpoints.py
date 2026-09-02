@@ -696,6 +696,55 @@ def trade_check_v4_health():
     }
 
 
+@router.get("/api/trade-check/position-stars/history")
+def trade_check_position_stars_history(symbol: str, days: int = 30):
+    """cc#1603 (founder amend 02-Sep 15:45): the rolling TC trend behind the Open Positions TC
+    number. READ-ONLY over tc_position_stars_v2 (the hourly batch, cc#1172 push 7): every row for
+    the symbol in the last `days` calendar days, ORDER BY computed_at, as
+    {ts, side_bucket, side_score100, best_bucket, best_score100} — both the position-side card and
+    the best-of-four card, /100 (29138). Never padded: the window is whatever the batch has (history
+    starts 21-Aug-2026), and `sessions` says how many days that is so a title can read
+    "N of 30 days available". No rows -> empty list with the note, not an error."""
+    sym = (symbol or "").strip().upper()
+    days = max(1, min(int(days or 30), 120))
+    if not sym:
+        return {"error": "symbol required", "rows": []}
+    try:
+        from tc_resolver import get_primary_style_bands
+        cuts = get_primary_style_bands()
+        cuts100 = {k: round(v * 10.0, 1) for k, v in cuts.items()}
+    except Exception:
+        cuts100 = None
+    try:
+        with psycopg.connect(_DB) as conn, conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('tc_position_stars_v2')")
+            if cur.fetchone()[0] is None:
+                return {"symbol": sym, "days": days, "rows": [], "sessions": 0,
+                        "note": "no batch table yet — absent, not empty", "cuts100": cuts100}
+            cur.execute("""
+                SELECT computed_at, side, bucket, score10, best_any_bucket, best_any_score10,
+                       best_any_weighted
+                FROM tc_position_stars_v2
+                WHERE symbol = %s AND computed_at >= NOW() - (%s || ' days')::interval
+                ORDER BY computed_at""", (sym, str(days)))
+            rows = cur.fetchall()
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "symbol": sym, "rows": []}
+    out = []
+    for cat, side, bucket, s10, any_b, any_s10, any_w in rows:
+        out.append({"ts": cat.strftime("%Y-%m-%d %H:%M:%S") if cat else None,
+                    "side": side, "side_bucket": bucket,
+                    "side_score100": (round(float(s10) * 10.0, 1) if s10 is not None else None),
+                    "best_bucket": any_b,
+                    "best_score100": (round(float(any_s10) * 10.0, 1) if any_s10 is not None else None),
+                    "best_weighted": (bool(any_w) if any_w is not None else None)})
+    sessions = len({r["ts"][:10] for r in out if r["ts"]})
+    return {"symbol": sym, "days": days, "rows": out, "sessions": sessions,
+            "first_ts": out[0]["ts"] if out else None, "last_ts": out[-1]["ts"] if out else None,
+            "note": None if out else "No TC history yet", "cuts100": cuts100,
+            "source": "tc_position_stars_v2 (hourly batch, 09:30-15:30 IST)"}
+
+
 @router.get("/api/trade-check/position-stars")
 def trade_check_position_stars():
     """cc#728: latest HOURLY TC star per open paper position (symbol|side). The V8 dashboard reads
