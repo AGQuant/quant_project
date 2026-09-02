@@ -178,7 +178,6 @@ function adrBar(hero){
 #heroTrack > .c:first-child > .hchips{margin-bottom:var(--space-7)}
 #heroTrack > .c:first-child > .hchips,
 #heroTrack > .c:first-child > .ixrow{margin-top:0}
-#heroTrack > .c:first-child > .ixrow{margin-top:0}
 #heroTrack > .c:first-child > .ixgrp{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-around;row-gap:var(--space-9)}
 #heroTrack > .c:first-child > .ixgrp > .ixrow,
 #heroTrack > .c:first-child > .ixgrp > .adrwrap{margin-top:0;margin-bottom:0}
@@ -193,7 +192,9 @@ function adrBar(hero){
 #heroTrack > .c:first-child > .ixgrp .adrempty{line-height:var(--space-15);font-size:var(--type-95)}
 #heroTrack > .c:first-child > .hchips{gap:var(--space-4)}
 #heroTrack > .c:first-child > .hchips .hc.slab.dense{position:relative;padding:var(--space-6) var(--space-10);
+  min-height:0;border-radius:var(--radius-2);clip-path:none;box-shadow:none;font-size:var(--type-12)}
 #heroTrack > .c:first-child > .hchips .hc.slab.dense::after{content:'';position:absolute;
+  left:0;right:0;top:50%;height:44px;transform:translateY(-50%)}
 </style>
 
 <!-- ═══ 4. SHARED .ix* / .adr* RULES the card-1 rules override (unchanged by cc#1567) ═══ -->
