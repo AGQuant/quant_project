@@ -467,6 +467,11 @@ def _shape(r):
         "pnl_pct": f(r["pnl_pct"]),
         "result": r["result"],
         "note": r["note"],
+        # cc#1587: where an approved alert came from. The union already files an approved ENGINE
+        # signal under its engine label (cc#1524) and a hand-made one under "Manual Alert"; the
+        # renderers show that as an Origin column, so it is named once here, not derived twice.
+        "origin": (("manual" if r["engine"] == "Manual Alert" else r["engine"])
+                   if r["src"] == "alert" else None),
         "entry": entry,
         "exit": exitd,
         # `ts`/`when*` kept at top level too, mirroring the entry/exit block for whichever anchor
@@ -528,6 +533,7 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         counts = {}
         status_counts = {}
         totals = {}
+        approved_as_of = None
         if not cursor:
             # Head-of-feed only: the totals are what the chips need, and re-running them on every
             # page would cost a full union scan per scroll for a number that has not changed.
@@ -541,6 +547,12 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             cur.execute("SELECT engine, status, COUNT(*) n FROM (" + wall_sql + ") w GROUP BY 1,2")
             for r in _rows(cur):
                 totals.setdefault(r["engine"], {})[r["status"]] = r["n"]
+            # cc#1587 scope 5: the header says "as of <latest approved_at> IST" — the newest
+            # approval, read from trade_alerts itself, never the page clock.
+            cur.execute("SELECT MAX(approved_at AT TIME ZONE 'Asia/Kolkata') FROM trade_alerts "
+                        "WHERE status = 'approved' AND approved_at IS NOT NULL")
+            _m = cur.fetchone()
+            approved_as_of = _m[0].strftime("%d %b %Y %H:%M") if (_m and _m[0]) else None
 
     events = [_shape(r) for r in rows]
     last = rows[-1] if rows else None
@@ -569,6 +581,7 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         "buckets_enabled": buckets,
         "buckets_known": list(WOT_BUCKETS),
         "buckets_source": "default" if buckets_missing else "app_config",
+        "approved_as_of": approved_as_of,
     }
 
 
