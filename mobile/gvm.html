@@ -22,9 +22,11 @@
 <style>
 /* tokens: GOLD NIGHT with page-local fallbacks (theme sheets win when present) */
 #gvp{
-  --field:var(--field,#0A0A0C); --panel:var(--panel,#17171B); --well:var(--well,#131316); --sunk:var(--sunk,#0C0C0F);
-  --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
-  --gold:var(--gold,#D4AF37); --gold-lo:var(--gold-lo,#7A6320); --gold-hi:var(--gold-hi,#F0D070); --gold-d:rgba(212,175,55,.12);
+  /* theme tokens are read through g- aliases: a token that referenced itself (--gold:var(--gold,…))
+     is a cycle and computes to invalid for every descendant, which blanked the capsule (P4). */
+  --g-field:var(--field,#0A0A0C); --g-panel:var(--panel,#17171B); --g-sunk:var(--sunk,#0C0C0F); --g-gold-lo:var(--gold-lo,#7A6320); --g-gold-hi:var(--gold-hi,#F0D070);
+  --well:#131316; --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
+  --gold:#D4AF37; --gold-d:rgba(212,175,55,.12);
   --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45; --aqua:#35E0FF;
   --up-d:rgba(47,212,139,.14); --down-d:rgba(255,92,108,.14); --amber-d:rgba(255,159,69,.14);
   --display:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;
@@ -43,7 +45,7 @@
 #gvp .g-sbox input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--chalk);font-family:var(--mono);font-size:14px;min-height:24px;padding:0}
 #gvp .g-sbox input::placeholder{color:var(--dim)}
 #gvp .g-sbox .g-k{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--line);padding:2px 6px;white-space:nowrap}
-#gvp .g-drop{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:40;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.6);overflow:hidden}
+#gvp .g-drop{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:40;background:var(--g-panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.6);overflow:hidden}
 #gvp .g-drop[hidden]{display:none}
 #gvp .g-drow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
 #gvp .g-drow:last-child{border-bottom:0}
@@ -53,14 +55,14 @@
 #gvp .g-drow .g-dg{grid-column:2;grid-row:1 / span 2;font-family:var(--mono);font-weight:800;font-size:15px;align-self:center;text-align:right}
 #gvp .g-drow .g-dg small{display:block;font-size:9.5px;font-weight:700;letter-spacing:.5px;color:var(--mute)}
 /* shells (ref) */
-#gvp .pressed{background:var(--sunk);border:1px solid #000;border-radius:12px;padding:16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
-#gvp .slab{background:var(--panel);border:1.5px solid var(--line);border-radius:13px;padding:14px 15px;box-shadow:0 5px 0 0 var(--gold-lo),0 5px 0 1.5px var(--line)}
+#gvp .pressed{background:var(--g-sunk);border:1px solid #000;border-radius:12px;padding:16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
+#gvp .slab{background:var(--g-panel);border:1.5px solid var(--line);border-radius:13px;padding:14px 15px;box-shadow:0 5px 0 0 var(--g-gold-lo),0 5px 0 1.5px var(--line)}
 #gvp .well-up{background:var(--well);border-radius:7px;box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000}
-#gvp .well{background:var(--sunk);border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 0 0 #000}
+#gvp .well{background:var(--g-sunk);border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 0 0 #000}
 #gvp .tag{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;border-radius:0;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
 #gvp .tag.gd{background:var(--gold-d);color:var(--gold)} #gvp .tag.up{background:var(--up-d);color:var(--up)} #gvp .tag.dn{background:var(--down-d);color:var(--down)} #gvp .tag.am{background:var(--amber-d);color:var(--amber)} #gvp .tag.mu{background:var(--well);color:var(--mute);border:1px solid var(--line)}
 #gvp .sect{display:flex;align-items:center;gap:10px;margin:22px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center;scroll-margin-top:12px}
-#gvp .sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
+#gvp .sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--g-gold-lo),transparent)}
 #gvp .sect .g-r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;text-transform:none;transform:skewX(6deg);white-space:nowrap}
 /* landing list (no symbol yet) */
 #gvp .g-row{display:grid;grid-template-columns:22px 1fr auto;gap:4px 10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer}
@@ -88,7 +90,7 @@
 #gvp .g-pl .g-pll{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute)}
 #gvp .g-pl .g-pll b{color:var(--chalk);letter-spacing:0;font-size:13px}
 #gvp .g-pl .g-pbar{height:7px;margin-top:4px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
-#gvp .g-pl .g-pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-lo),var(--gold))}
+#gvp .g-pl .g-pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--g-gold-lo),var(--gold))}
 #gvp .g-pl.pg .g-pbar i{background:linear-gradient(90deg,#3d6b3f,var(--up))}
 #gvp .g-pl.pv .g-pbar i{background:linear-gradient(90deg,#6b4a1e,var(--amber))}
 #gvp .g-pl.pm .g-pbar i{background:linear-gradient(90deg,#1f5a6b,var(--aqua))}
@@ -120,15 +122,30 @@
 #gvp .g-lg{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:6px}
 #gvp .g-lg i{display:inline-block;width:10px;height:3px;margin-right:4px;vertical-align:middle;background:var(--gold)}
 /* capsule: fixed 8-pill section nav above the bottom nav (ref .capsule/.cap, page-local names) */
-#gvp .g-capsule{position:fixed;left:12px;right:12px;bottom:72px;z-index:60;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:6px;background:rgba(19,19,22,.92);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:22px;box-shadow:0 6px 0 0 var(--gold-lo),0 6px 0 1.5px var(--line),0 -8px 30px rgba(0,0,0,.6)}
+#gvp .g-capsule{position:fixed;left:12px;right:12px;bottom:72px;z-index:60;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:6px;background:rgba(19,19,22,.92);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:22px;box-shadow:0 6px 0 0 var(--g-gold-lo),0 6px 0 1.5px var(--line),0 -8px 30px rgba(0,0,0,.6)}
 #gvp .g-capsule[hidden]{display:none}
 #gvp .g-cap{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0 5px;border-radius:16px;color:var(--mute);text-decoration:none;font-family:var(--mono);font-size:8.5px;letter-spacing:.4px;font-weight:700;text-transform:uppercase;min-width:0}
 #gvp .g-cap .g-ci{font-size:16px;line-height:1}
-#gvp .g-cap.g-on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--gold-lo)}
+#gvp .g-cap.g-on{background:var(--gold);color:#141005;box-shadow:0 2px 0 var(--g-gold-lo)}
 #gvp .g-cap:active{transform:translateY(1px)}
 /* section summary line (each card body arrives in its own push; until then the line is the payload's own number) */
 #gvp .g-sum{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--mute)}
 #gvp .g-sum b{color:var(--chalk);font-weight:700}
+/* benchmark rows (ref .bm): label, peer line, value + rating chip, peer-range track */
+#gvp .g-bm{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-bottom:1px solid var(--line)}
+#gvp .g-bm:last-child{border-bottom:0;padding-bottom:0}
+#gvp .g-bm .g-bk{grid-column:1;grid-row:1;font-size:12.5px;font-weight:600}
+#gvp .g-bm .g-bsub{grid-column:1;grid-row:2;font-family:var(--mono);font-size:10.5px;color:var(--mute)}
+#gvp .g-bm .g-bval{grid-column:2;grid-row:1 / span 2;text-align:right;display:flex;flex-direction:column;align-items:flex-end;justify-content:center}
+#gvp .g-bm .g-bval b{font-family:var(--mono);font-size:15px;font-weight:800}
+#gvp .g-rt{font-family:var(--mono);font-size:10px;letter-spacing:.5px;padding:1px 6px;margin-top:2px;clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px)}
+#gvp .g-rt.hi{background:var(--up-d);color:var(--up)} #gvp .g-rt.mid{background:var(--amber-d);color:var(--amber)} #gvp .g-rt.lo{background:var(--down-d);color:var(--down)} #gvp .g-rt.na{background:var(--well);color:var(--dim);border:1px solid var(--line)}
+#gvp .g-bm .g-peer{grid-column:1 / span 2;grid-row:3;position:relative;height:6px;margin-top:6px;background:var(--well);border:1px solid var(--line)}
+#gvp .g-bm .g-peer .g-rng{position:absolute;top:0;bottom:0;background:rgba(138,138,147,.25)}
+#gvp .g-bm .g-peer .g-me{position:absolute;top:-4px;width:2px;height:12px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
+#gvp .g-bm .g-peer .g-med{position:absolute;top:-3px;width:1px;height:10px;background:var(--mute)}
+#gvp .g-legend{display:flex;gap:14px;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:10px}
+#gvp .g-legend i{display:inline-block;width:8px;height:8px;margin-right:4px;vertical-align:-1px}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -327,7 +344,57 @@ function finRow(tbl, label){ if(!tbl || !tbl.rows) return null; for(var i=0;i<tb
 function lastVal(row){ if(!row || !row.values) return null; for(var i=row.values.length-1;i>=0;i--) if(num(row.values[i])) return row.values[i]; return null; }
 function sectHead(id, title, right){ return '<div class="sect" id="'+id+'">'+title+' <span class="g-r">'+esc(right||'')+'</span></div>'; }
 function sumLine(parts){ return '<section class="slab"><div class="g-sum">'+parts.map(function(x){ return '<span>'+x+'</span>'; }).join('')+'</div></section>'; }
-function secGrowth(d){ var g=(d.benchmark||[]).filter(function(b){return b.pillar==='G'&&b.group==='Trackrecord';}); var above=g.filter(function(b){return num(b.company)&&num(b.peer_median)&&b.company>b.peer_median;}).length;
+/* rating chip: hi >= 7.5 / lo <= 3.75 / mid between (36513 growth card); NULL → em dash chip */
+function rtChip(r){ if(!num(r)) return '<span class="g-rt na">—</span>'; var c = r >= 7.5 ? 'hi' : r <= 3.75 ? 'lo' : 'mid'; return '<span class="g-rt '+c+'">'+(Number.isInteger(r)?r:r.toFixed(1).replace(/\.0$/,''))+'</span>'; }
+/* value text for a benchmark row in its own unit (no peer suffix here; the sub line carries peers) */
+function bmSelf(b){
+  var v = b.company, u = b.unit || ''; if(!num(v)) return '—';
+  if(u === 'x') return v.toFixed(1)+'×';
+  if(u === 'bps') return (v>0?'+':v<0?'−':'')+Math.abs(Math.round(v))+' bps';
+  if(u === '%') return (v<0?'−':(/^(ret_|inst_chg|dma_|qoq_|opm_exp|annual)/.test(b.key||'')&&v>0?'+':''))+Math.abs(v).toFixed(1)+'%';
+  return v.toFixed(1);
+}
+function bmPeerTxt(b){
+  var u = b.unit || '', m = b.peer_median;
+  if(!num(m)) return '';
+  if(u === 'x') return m.toFixed(1)+'×'; if(u === 'bps') return (m>0?'+':m<0?'−':'')+Math.abs(Math.round(m))+' bps';
+  if(u === '%') return (m<0?'−':'')+Math.abs(m).toFixed(1)+'%'; return m.toFixed(1);
+}
+/* peer-range track: rng spans peers min..max, med tick at peer_median, me marker at company, all
+   normalised to the row's own range (card rule 6). Missing peers → no track. */
+function peerTrack(b){
+  var ps = (b.peers||[]).map(function(x){ return x.value; }).filter(num);
+  if(ps.length < 2 || !num(b.company)) return '';
+  var lo = Math.min.apply(null, ps.concat([b.company])), hi = Math.max.apply(null, ps.concat([b.company]));
+  if(hi === lo) return '';
+  var pct = function(v){ return Math.max(0, Math.min(100, (v-lo)/(hi-lo)*100)).toFixed(0); };
+  var plo = Math.min.apply(null, ps), phi = Math.max.apply(null, ps);
+  return '<div class="g-peer"><i class="g-rng" style="left:'+pct(plo)+'%;width:'+(pct(phi)-pct(plo))+'%"></i>'+
+         (num(b.peer_median)?'<i class="g-med" style="left:'+pct(b.peer_median)+'%"></i>':'')+'<i class="g-me" style="left:'+pct(b.company)+'%"></i></div>';
+}
+function bmRowHtml(b, opts){
+  var sub = [];
+  if(num(b.peer_median)) sub.push('peers '+bmPeerTxt(b));
+  if(num(b.rank) && num(b.peer_n)) sub.push('rank '+b.rank+' of '+b.peer_n);
+  if(opts && opts.sub) sub = [opts.sub].concat(sub.slice(0,1));
+  var cls = (opts && opts.signed && num(b.company)) ? (b.company > 0 ? ' up' : b.company < 0 ? ' dn' : '') : '';
+  return '<div class="g-bm"><div class="g-bk">'+esc((opts && opts.label) || plainLabel(b))+'</div><div class="g-bsub">'+esc(sub.join(' · ')||'no peer read')+'</div>'+
+         '<div class="g-bval"><b class="'+cls+'">'+esc(bmSelf(b))+'</b>'+rtChip(b.rating)+'</div>'+(opts && opts.track===false ? '' : peerTrack(b))+'</div>';
+}
+var LEGEND = '<div class="g-legend"><span><i style="background:var(--gold)"></i>this company</span><span><i style="background:var(--mute)"></i>peer median</span><span><i style="background:rgba(138,138,147,.25)"></i>peer range</span></div>';
+function secGrowth(d){
+  /* ref order first (8 rows), then any other G row except the holding rows (those live on Holders) */
+  var ORDER = ['sales_5y','profit_5y','profit_3y','qoq_sales','qoq_profit','opm','opm_exp','roce'];
+  var all = (d.benchmark||[]).filter(function(b){ return b.pillar==='G' && !/^inst_/.test(b.key||''); });
+  var g = ORDER.map(function(k){ return all.filter(function(b){ return b.key===k; })[0]; }).filter(Boolean)
+            .concat(all.filter(function(b){ return ORDER.indexOf(b.key) < 0; }));
+  var cov = (d.pillar_coverage||{}).track_score, scored = cov && num(cov.scored) ? cov.scored+' of '+cov.total+' scored' : g.filter(function(b){ return num(b.rating); }).length+' of '+g.length+' scored';
+  var head = sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+scored);
+  if(!g.length) return head+'<section class="slab"><div class="g-empty">No growth checks in this report. The nightly run scores growth only where five years of accounts exist.</div></section>';
+  var rows = g.map(function(b){ return bmRowHtml(b, {signed:/^(qoq_|opm_exp)/.test(b.key||''), label:(b.key==='opm_exp'?'Margin change':null)}); }).join('');
+  return head+'<section class="slab">'+rows+LEGEND+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
+}
+function secGrowth_old(d){ var g=(d.benchmark||[]).filter(function(b){return b.pillar==='G'&&b.group==='Trackrecord';}); var above=g.filter(function(b){return num(b.company)&&num(b.peer_median)&&b.company>b.peer_median;}).length;
   return sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+g.filter(function(b){return num(b.rating);}).length+' of '+g.length+' scored')+sumLine(['<b>'+g.length+'</b> growth checks','<b>'+above+'</b> above the peer median']); }
 function secValue(d){ var pe=bmRow(d,'pe'), sp=bmRow(d,'sector_pe'); return sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict?' · '+String(sp.verdict.label||'').toLowerCase()+' on PE':''))+
   sumLine(['PE <b>'+(pe?fx(pe.company,1)+'×':'—')+'</b>','sector <b>'+(pe&&num(pe.peer_median)?fx(pe.peer_median,0)+'×':'—')+'</b>']); }
