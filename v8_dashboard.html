@@ -6433,8 +6433,11 @@ function rPCR(){
     const meta = vals.length
       ? `7-day ${Math.min(...vals).toFixed(2)}–${Math.max(...vals).toFixed(2)}`
       : 'no readings in window';
+    /* cc#1576: the (i) opens the PCR read popover — words from the ONE composer's `interpret`
+       block (pcr_mood.compose_read), never worded here. */
+    const ib = `<button type="button" class="ib" onclick="iiPcrGuide('${key}')" aria-label="How to read PCR ${name}" style="width:22px;height:22px;min-width:22px;min-height:22px;font-size:10px;margin-left:6px">i</button>`;
     return `<div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-        <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(lbl,col,true)}</div>
+        <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span><span style="display:inline-flex;align-items:center">${bdg(lbl,col,true)}${ib}</span></div>
       <div class="pcr-top">
         <span class="pcr-big" style="color:${col}">${cur==null?'—':cur.toFixed(2)}</span>
         <span class="td-mono" style="font-size:10px;color:${d&&d.chg!=null?cx(d.chg):C.mut}">${d&&d.chg!=null?sgn(d.chg,2):''}</span></div>
@@ -6446,6 +6449,42 @@ function rPCR(){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${one('NIFTY','NIFTY',D.pcr&&D.pcr.NIFTY)}${one('BANKNIFTY','BANKNIFTY',D.pcr&&D.pcr.BANKNIFTY)}</div>
   </div>`;
 }
+
+/* cc#1576 (PCR_READ_INTERPRET_V1, 36294): the PCR (i) popover. Everything printed comes from
+   /api/pcr/mood's `interpret` block — state read, band read, change / hour / range lines, the
+   evidence line, the option-price line — plus the two evidence tables (by state, by read band)
+   so the user sees the counts behind the line. Nothing is worded or re-banded here. */
+function pcrGuide(key){
+  const m=(D.pcrMood&&D.pcrMood[key])||null, it=m&&m.interpret;
+  const tok=t=>t==='red'?DN:t==='amber'?C.amber:t==='grn'?UP:C.mut;
+  if(!it){ iiSheet('<div class="iish">PCR · '+esc(key)+'</div><div class="vfg"><p>The read is not available this tick.</p></div>'); return; }
+  const row=(k,b)=>'<tr><td class="sym">'+esc(k)+'</td><td>'+b.n+'</td><td class="pos">'+b.up+'</td><td class="neg">'+b.down+'</td><td>'+(b.avg_next_pct==null?'—':sgn(b.avg_next_pct,2)+'%')+'</td><td>'+(b.scored?'yes':'too few')+'</td></tr>';
+  const table=(title,obj,order)=>{
+    const keys=(order||Object.keys(obj||{})).filter(k=>obj&&obj[k]);
+    if(!keys.length) return '<div class="unavail">'+esc(title)+': no scored sessions yet.</div>';
+    return '<div style="font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);margin:10px 0 4px">'+esc(title)+'</div>'
+      +'<table class="tb"><thead><tr><th>SETUP</th><th>N</th><th>UP</th><th>DOWN</th><th>AVG NEXT</th><th>SCORED</th></tr></thead><tbody>'
+      +keys.map(k=>row(k,obj[k])).join('')+'</tbody></table>';
+  };
+  const op=it.option_price, opHtml=(op&&!op.error&&(op.ce||op.pe))
+    ? '<p><b>ATM option price.</b> '+esc((op.ce&&op.ce.line)||'')+' '+esc((op.pe&&op.pe.line)||'')+'</p>'
+      +'<p style="color:var(--tx3)">'+esc(op.header||'')+' · '+esc(op.footer||'')+' '+esc(op.cuts||'')+(op.source?' · source '+esc(op.source):'')+'</p>'
+    : '<p style="color:var(--tx3)">ATM option price: '+esc((op&&op.error)?'not available this tick':'no ATM row this tick')+'.</p>';
+  const win=it.evidence_window||{};
+  iiSheet('<div class="iish">PCR · '+esc(key)+(m.label?' · '+esc(m.label):'')+'</div><div class="vfg">'
+    +'<p><b style="color:'+tok(it.state_colour)+'">'+esc(it.headline||'')+'</b></p>'
+    +'<p>'+esc(it.read_text||'')+'</p>'
+    +'<p>'+[it.change_line,it.hour_line,it.range_line].filter(Boolean).map(esc).join(' ')+'</p>'
+    +(m.reason?'<p>'+esc(m.reason)+'</p>':'')
+    +'<p><b>'+esc(it.evidence_line||'')+'</b>'+(it.state?' <span style="color:var(--tx3)">(setup: '+esc(it.state)+', band '+esc(it.band||'')+')</span>':'')+'</p>'
+    +((it.caveats||[]).length?'<p style="color:var(--tx3)">'+it.caveats.map(esc).join(' ')+'</p>':'')
+    +opHtml
+    +table('EVIDENCE BY SETUP · last '+(it.evidence_sessions||0)+' sessions'+(win.from?' · '+esc(win.from)+' to '+esc(win.to):''), it.evidence_by_state, ['STRENGTH','CAUTION','COMPLACENCY','WEAK_SUPPORT','NEUTRAL'])
+    +table('EVIDENCE BY PCR BAND', it.evidence_by_band, ['<0.70','0.70-0.90','0.90-1.00','1.00-1.20','1.20-1.50','>1.50'])
+    +'<p style="color:var(--tx3);margin-top:10px">'+esc(it.note||'Descriptive read only. Not a trading signal.')+' Next day = the next session close vs that day\'s close.</p>'
+    +'</div>');
+}
+window.iiPcrGuide = pcrGuide;
 
 // cc#549: rMaxPain (compact Nifty Max Pain card) removed — the strike-wise OI card (rStrikeOI)
 // now carries both indices with full histogram + MP/spot/ATM readout; expiry moved into that card.
