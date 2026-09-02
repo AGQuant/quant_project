@@ -269,7 +269,7 @@ function asofSession(asof, extra){
   if(!st.txt && !extra) return '';
   return '<div class="asof'+(st.amber?' stale':'')+'">'+(extra?esc(extra)+(st.txt?' · ':''):'')+esc(st.txt)+'</div>';
 }
-var MOOD_CARD = 'flex:0 0 100%;scroll-snap-align:start;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;padding:0';
+var MOOD_CARD = 'flex:0 0 100%;width:100%;scroll-snap-align:start;min-width:0;display:flex;flex-direction:column;box-sizing:border-box;padding:0 1px';
 function renderMood(){
   var m = STATE.mood, el = document.getElementById('sec-mood'), r = document.getElementById('mood-r');
   if(!m || !m.checks){ emptyBox('sec-mood', 'Market gate is not available right now.'); return; }
@@ -316,7 +316,7 @@ function renderMood(){
     + asofSession(STATE.fetchedAt, 'gate '+String(m.checked_at||'')+' · Nifty D/W/M vs prev close')
     + '</div>';
   el.innerHTML =
-    '<div data-mood-car="1" style="display:flex;align-items:stretch;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px">'+card1+card2+'</div>'
+    '<div data-mood-car="1" style="display:flex;align-items:stretch;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;width:100%">'+card1+card2+'</div>'
     + '<div data-mood-dots="1" style="display:flex;justify-content:center;gap:6px;padding-top:8px"><span style="width:6px;height:6px;border-radius:50%;background:var(--gold)"></span><span style="width:6px;height:6px;border-radius:50%;background:var(--line)"></span></div>';
   if(r) r.textContent = String(m.checked_at||'');
 }
