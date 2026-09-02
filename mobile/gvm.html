@@ -290,7 +290,7 @@ function loadCompany(sym){
   main.innerHTML = '<div class="slab g-empty">Loading '+esc(sym)+'…</div>'; foot.textContent = '';
   getJ(URLS.company+encodeURIComponent(sym)).then(function(d){
     if(STATE.sym !== sym) return;
-    if(!d || d.error || !d.symbol){ fail((d && d.error) ? String(d.error) : 'No GVM report for '+sym+'. Scores exist only for companies the nightly run covers.', sym); return; }
+    if(!d || d.error || !d.symbol){ fail('No GVM report for '+sym+'. Scores exist only for companies the nightly run covers'+((d && d.error) ? ' ('+String(d.error)+')' : '')+'.', sym); return; }
     STATE.co = d; STATE.hist = null; STATE.fetchedAt = istNow(); renderCompany();
     getJ(URLS.history+encodeURIComponent(sym)+'?days=60').then(function(h){ if(STATE.sym !== sym) return; STATE.hist = (h && h.points) ? h.points : []; renderTrend(); },
                                                                    function(){ if(STATE.sym === sym){ STATE.hist = false; renderTrend(); } });
@@ -393,7 +393,7 @@ function renderTrend(){
     '<div class="g-asof">'+esc(first)+' → '+esc(last)+'</div>';
 }
 function openChart(){
-  if(window.ScorrChartCard && STATE.sym){ window.ScorrChartCard.open(STATE.sym, {theme:'dark'}); watchModal(); return true; }
+  if(window.ScorrChartCard && STATE.sym){ window.ScorrChartCard.open(STATE.sym, {theme:'dark', gvm:true}); watchModal(); return true; }
   return false;
 }
 /* ── SECTIONS: eight cards in the ref order. Each card body lands in its own push; until then a
@@ -453,8 +453,6 @@ function secGrowth(d){
   var rows = g.map(function(b){ return bmRowHtml(b, {signed:/^(qoq_|opm_exp)/.test(b.key||''), label:(b.key==='opm_exp'?'Margin change':null)}); }).join('');
   return head+'<section class="slab">'+rows+LEGEND+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
 }
-function secGrowth_old(d){ var g=(d.benchmark||[]).filter(function(b){return b.pillar==='G'&&b.group==='Trackrecord';}); var above=g.filter(function(b){return num(b.company)&&num(b.peer_median)&&b.company>b.peer_median;}).length;
-  return sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+g.filter(function(b){return num(b.rating);}).length+' of '+g.length+' scored')+sumLine(['<b>'+g.length+'</b> growth checks','<b>'+above+'</b> above the peer median']); }
 /* Value card (36513 cards.value): pe / fwd_pe / pb / annual_upside rows, PE trend from
    hist_pe.pe_trend with the own-5y-average dashed, one plain-words line from hist_pe.verdict +
    rerating_pct. All from the payload; nothing computed here beyond drawing. */
@@ -505,8 +503,6 @@ function secValue(d){
   var words = peWords(hp, pe, sp);
   return head+'<section class="slab">'+rows+peTrendSvg(hp)+(words?'<div class="g-note">'+esc(words)+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
 }
-function secValue_old(d){ var pe=bmRow(d,'pe'), sp=bmRow(d,'sector_pe'); return sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict?' · '+String(sp.verdict.label||'').toLowerCase()+' on PE':''))+
-  sumLine(['PE <b>'+(pe?fx(pe.company,1)+'×':'—')+'</b>','sector <b>'+(pe&&num(pe.peer_median)?fx(pe.peer_median,0)+'×':'—')+'</b>']); }
 /* Momentum card (36513 cards.momentum): 4 tiles ret_1y / ret_3y / ret_52w_idx / ret_1m, then
    rows dma_50, dma_200, rsi_month, vol_trend. Values and peers straight off benchmark[]. */
 function tile(label, b, opts){
@@ -542,7 +538,6 @@ function secMomentum(d){
   });
   return head+'<section class="slab">'+tiles+(rows?'<div style="margin-top:12px">'+rows+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
 }
-function secMomentum_old(d){ var y=bmRow(d,'ret_1y'), m=bmRow(d,'ret_1m'); return sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1))+sumLine(['1 year <b class="'+(y&&num(y.company)?(y.company>=0?'up':'dn'):'')+'">'+(y?bmVal(y):'—')+'</b>','1 month <b class="'+(m&&num(m.company)?(m.company>=0?'up':'dn'):'')+'">'+(m?bmVal(m):'—')+'</b>']); }
 /* Peers card (36513 cards.peers): ladder top 4, collapsed middle, self highlighted gold, next
    1-2, collapsed tail; header sector GVM + sector rank; expand to the full ladder with PE / ROE / 1Y. */
 var peersFull = false;
@@ -581,7 +576,6 @@ function secPeers(d){
   var more = lad.length > 8 ? '<div class="g-more"><span class="tag mu" data-peers-toggle="1">'+(peersFull ? 'Compact ladder ▴' : 'Full ladder with PE · ROE · 1Y ▾')+'</span></div>' : '';
   return head+'<section class="slab">'+top+body+more+'<div class="g-asof">score as of '+esc(sg.score_date||d.score_date||'—')+'</div></section>';
 }
-function secPeers_old(d){ var sg=(d.extras||{}).segment_ctx||{}; return sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''))+sumLine(['Sector GVM <b>'+fx(sg.mcap_wtd_gvm,2)+'</b>',(num(sg.sector_rank)&&num(sg.sector_total)?'rank <b>'+sg.sector_rank+' of '+sg.sector_total+'</b>':'')]); }
 /* Results card (36513 cards.results): content.result_analysis parsed into Sales / PAT / Margins /
    PE rows with the traffic-light dot the text carries, the remaining lines as the plain-words
    read, and net profit bars from financials.quarterly. Absent text → the honest sentence. */
@@ -639,7 +633,6 @@ function secResults(d){
   var upd = (d.content||{}).last_result_analysis_updated;
   return head+'<section class="slab">'+body+profitBars(q)+'<div class="g-asof">'+(upd ? 'analysis updated '+esc(upd) : 'no analysis date')+'</div></section>';
 }
-function secResults_old(d){ var ra=(d.content||{}).result_analysis||'', first=ra.split('\n')[0]||''; return sectHead('results','Results',first.split('·')[0].trim())+sumLine([first?esc(first):'No result analysis yet for this quarter.',(d.content&&d.content.last_result_analysis_updated?'updated <b>'+esc(d.content.last_result_analysis_updated)+'</b>':'')]); }
 /* Financials card (36513 cards.financials): seg P&L | Balance | Cash | Ratios, each a compact
    table of the last FYs (+ TTM where the block carries one) from the matching payload block, rows
    marked display=true only; footer debt/equity, interest cover, ROCE from ratios_v2. */
@@ -691,7 +684,6 @@ function secFinancials(d){
   var foot = '<div class="g-ffoot"><span>Debt / equity '+(num(de)?de.toFixed(2):'—')+' · interest cover '+(num(ic)?ic.toFixed(1)+'×':'—')+'</span><span>ROCE '+(num(roce)?Math.round(roce)+'%':'—')+'</span></div>';
   return head+'<section class="slab">'+seg+body+foot+'<div class="g-asof">'+(f.profit_loss && f.profit_loss.periods ? 'statements to '+esc(fyLabel(f.profit_loss.periods.filter(function(x){ return x!=='TTM'; }).slice(-1)[0]||''))+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : '')+'</div></section>';
 }
-function secFinancials_old(d){ var pl=(d.financials||{}).profit_loss, sales=lastVal(finRow(pl,'Sales')), np=lastVal(finRow(pl,'Net Profit')); return sectHead('financials','Financials',(d.financials&&d.financials.basis?String(d.financials.basis).toLowerCase():'')+' · ₹ Cr')+sumLine(['TTM sales <b>'+(num(sales)?Math.round(sales).toLocaleString('en-IN'):'—')+'</b>','profit <b>'+(num(np)?Math.round(np).toLocaleString('en-IN'):'—')+'</b>']); }
 /* Holders card (36513 cards.holders): 4 tiles from financials.shareholding (Promoters, FIIs + DIIs,
    Public, No. of Shareholders) with plain subs, FII vs DII 12-quarter lines, one plain-words line
    from the inst_chg benchmark rank. */
@@ -745,8 +737,6 @@ function secHolders(d){
   }
   return head+'<section class="slab">'+tiles+fiiDiiSvg(sh, fii, dii)+(words?'<div class="g-note">'+esc(words)+'</div>':'')+'<div class="g-asof">'+(per?'quarter '+esc(per):'')+'</div></section>';
 }
-function secHolders_old(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
-  return sectHead('holders','Holders',per)+sumLine(['Promoters <b>'+fx(pr,1)+'%</b>','FII <b>'+fx(fii,1)+'</b> · DII <b>'+fx(dii,1)+'</b>']); }
 /* Tape card (36513 cards.tape): 4 tiles from extras.volume / delivery / vol_canon, pivot strip from
    extras.pivot, the tier1 7 checks, CTAs to the Trade Check flow and the shared chart card. */
 var TC_URL = '/check?symbol=';   /* the web Trade Check flow reads ?symbol= (scorr_check.html); /m/check has no symbol parameter yet */
@@ -786,8 +776,6 @@ function secTape(d){
   var ctas = '<div class="g-ctas"><a class="tag gd" href="'+TC_URL+(TC_URL.indexOf('=')>-1?encodeURIComponent(d.symbol):'')+'">Run Trade Check →</a><span class="tag mu" data-trend="1">Open chart</span></div>';
   return head+'<section class="slab">'+tiles+pivots+checks+ctas+'<div class="g-asof">'+(vc.vol_p_asof?'volume canon as of '+esc(vc.vol_p_asof)+' · ':'')+(pv.pivot_date?'pivots '+esc(pv.pivot_date):'')+'</div></section>';
 }
-function secTape_old(d){ var ex=d.extras||{}, t1=ex.tier1||{}, vc=ex.vol_canon||{}; return sectHead('tape','Tape',(d.price_is_live?'live':'last close')+(ex.pivot&&ex.pivot.pivot_date?' · '+ex.pivot.pivot_date:''))+
-  sumLine(['entry checks <b>'+(num(t1.passed)?t1.passed:'—')+' of '+(num(t1.total)?t1.total:'—')+'</b>','volume <b>'+esc(vc.vol_ad_label||'—')+'</b>']); }
 function renderSections(d){ return secGrowth(d)+secValue(d)+secMomentum(d)+secPeers(d)+secResults(d)+secFinancials(d)+secHolders(d)+secTape(d); }
 /* ── CAPSULE: active pill follows the scroll (IntersectionObserver), hash deep-links, hidden
    while a modal is open (the shared chart overlay #scorrChartOv). ───────────────────────── */
