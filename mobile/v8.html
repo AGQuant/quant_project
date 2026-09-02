@@ -106,6 +106,19 @@
 #v8p .trk.none{border-style:dashed;background:transparent}
 #v8p .vmore{display:flex;justify-content:center;margin-top:10px}
 #v8p .vmore .chip{padding:8px 14px}
+/* sectors: the table lives under #v8p with a page-local class so mobile_app.css bare rules stay clear */
+#v8p .stbl-wrap{overflow-x:auto}
+#v8p table.stbl{width:100%;border-collapse:collapse;font-size:12.5px}
+#v8p .stbl thead th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute);text-align:right;padding:8px 6px 8px;border-bottom:1px solid var(--line);border-top:1px solid var(--line);font-weight:700;text-transform:uppercase}
+#v8p .stbl thead th:first-child{text-align:left}
+#v8p .stbl tbody td{padding:9px 6px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);font-size:12.5px;color:var(--chalk)}
+#v8p .stbl tbody td:first-child{text-align:left;font-family:var(--body);font-weight:600;color:var(--chalk);font-size:12.5px;line-height:1.25}
+#v8p .stbl tbody tr:last-child td{border-bottom:0}
+#v8p .stbl td.h span{display:inline-block;min-width:54px;padding:2px 6px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+#v8p .stbl td.h.u span{background:var(--up-d);color:var(--up)} #v8p .stbl td.h.d span{background:var(--down-d);color:var(--down)}
+#v8p .stbl td.h.nil span{color:var(--mute)}
+#v8p .stbl td.pass{color:var(--gold);font-weight:800}
+#v8p .stbl td.pass.nil{color:var(--mute);font-weight:600}
 /* foot note */
 #v8p .tbl-note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
 /* bottom nav: markup is the app's own (do_not_touch); the active tab takes the ref's gold */
@@ -123,6 +136,11 @@
   <div class="filters" id="open-filters"></div>
   <div class="plist" id="sec-open"><div class="slab dense empty">Loading the open book…</div></div>
   <div class="vmore" id="open-more"></div>
+  <div class="sect">Sectors <span class="n" id="sec-n"></span><span class="r" id="sec-r"></span></div>
+  <div class="seg" id="sec-seg" style="margin-bottom:10px" role="tablist"><button class="on" data-sec-view="all">All futures</button><button data-sec-view="n50">Nifty 50</button></div>
+  <div class="stbl-wrap" id="sec-sectors"><div class="slab dense empty">Loading the sector table…</div></div>
+  <div class="vmore" id="sec-more"></div>
+  <div class="tbl-note" id="sec-note"></div>
   <div style="height:18px"></div>
   <div class="tbl-note" style="text-align:center" id="foot-note">Numbers are the paper book.</div>
 </div>
@@ -141,9 +159,11 @@
    computed on the page: the book numbers are the canon's (rule 13 V8_PNL_CANON_V1). */
 var URLS = {
   mood:   '/api/v8/market_mood',
-  book:   '/api/mobile/v8book'
+  book:   '/api/mobile/v8book',
+  sectors:'/api/v8/theme_sectors',
+  n50:    '/api/v8/nifty50_sectors'
 };
-var STATE = { mood:null, book:null, fetchedAt:null };
+var STATE = { mood:null, book:null, sectors:null, n50:null, fetchedAt:null };
 function getJ(url){
   return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); });
 }
@@ -278,7 +298,7 @@ function heldLabel(p){
 function bkTag(p){ var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'); return l ? '<span class="tag bk">'+esc(l.toUpperCase())+'</span>' : ''; }
 function posRow(p){
   var side = (p.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
-  var fz = trkFrac(p.entry_price, p), fc = num(p.progress) ? p.progress : trkFrac(p.cmp, p);
+  var fz = trkFrac(p.entry_price, p), fc = num(p.progress) ? Math.max(0, Math.min(1, p.progress)) : trkFrac(p.cmp, p);
   var trk = (fc==null)
     ? '<div class="trk none" title="no target or stop on this position"></div>'
     : '<div class="trk '+sl+'"><i class="tfill" style="width:'+Math.round(fc*100)+'%"></i>'+(fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')+'<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i></div>';
@@ -308,6 +328,63 @@ function renderOpen(){
   if(rows.length > OPEN_LIMIT) more.innerHTML = '<span class="chip" data-open-toggle="1">'+(openAll ? 'Show fewer ▴' : 'Show all '+rows.length+' ▾')+'</span>';
 }
 /* ── top bar ──────────────────────────────────────────────────────────────────────────── */
+/* ── 3 · SECTORS ─────────────────────────────────────────────────────────────────────── */
+var SEC_LIMIT = 8, secAll = false, secView = 'all';
+function pctCell(v, dp){
+  if(!num(v)) return '<td class="h nil"><span>—</span></td>';
+  return '<td class="h '+(v>0?'u':v<0?'d':'nil')+'"><span>'+pct(v, dp==null?2:dp)+'</span></td>';
+}
+function secRows(){
+  if(secView === 'n50'){
+    var n = STATE.n50 && STATE.n50.sectors; if(!n) return null;
+    return n.slice().sort(function(a,b){ return (num(b.avg_day_1d)?b.avg_day_1d:-1e9) - (num(a.avg_day_1d)?a.avg_day_1d:-1e9); })
+      .map(function(r){ return {name:r.segment, d:r.avg_day_1d, w:r.sector_week, m:r.sector_month, pass:null, n:r.count}; });
+  }
+  var t = STATE.sectors && STATE.sectors.sectors; if(!t) return null;
+  return t.slice().sort(function(a,b){
+    var pa = num(a.pass_count)?a.pass_count:-1, pb = num(b.pass_count)?b.pass_count:-1;
+    if(pb !== pa) return pb - pa;
+    return (num(b.avg_day_1d)?b.avg_day_1d:-1e9) - (num(a.avg_day_1d)?a.avg_day_1d:-1e9);
+  }).map(function(r){ return {name:r.segment, d:r.avg_day_1d, w:r.sector_week, m:r.sector_month, pass:r.pass_count, n:r.members_total, sup:r.suppressed}; });
+}
+function renderSectors(){
+  var el = document.getElementById('sec-sectors'), nEl = document.getElementById('sec-n'), rEl = document.getElementById('sec-r'),
+      more = document.getElementById('sec-more'), note = document.getElementById('sec-note');
+  var segBtns = document.querySelectorAll('#sec-seg button');
+  for(var i=0;i<segBtns.length;i++) segBtns[i].className = segBtns[i].getAttribute('data-sec-view')===secView ? 'on' : '';
+  var ts = STATE.sectors, nf = ts && ts.nifty;
+  rEl.textContent = nf ? 'vs Nifty '+pct(nf.day,1)+' / '+pct(nf.week,1)+' / '+pct(nf.month,1) : '';
+  var rows = secRows();
+  if(!rows){
+    nEl.textContent = ''; more.innerHTML = ''; note.textContent = '';
+    el.innerHTML = '<div class="slab dense" id="sec-empty"></div>';
+    emptyBox('sec-empty', secView==='n50' ? 'Nifty 50 sector moves are not available right now.' : 'Sector checks are not available right now.');
+    return;
+  }
+  nEl.textContent = rows.length + (rows.length===1?' group':' groups');
+  if(!rows.length){
+    more.innerHTML = ''; note.textContent = '';
+    el.innerHTML = '<div class="slab dense empty">No sector rows yet today. The table fills once the live sector averages have a first tick.</div>' + asofLine(STATE.fetchedAt);
+    return;
+  }
+  var show = secAll ? rows : rows.slice(0, SEC_LIMIT);
+  var h = '<table class="stbl"><thead><tr><th>Sector</th><th>1D</th><th>1W</th><th>1M</th><th>Pass</th></tr></thead><tbody>';
+  for(var k=0;k<show.length;k++){
+    var r = show[k];
+    h += '<tr><td>'+esc(r.name||'')+'</td>'+pctCell(r.d)+pctCell(r.w)+pctCell(r.m)+
+         (num(r.pass) ? '<td class="pass">'+r.pass+'</td>' : '<td class="pass nil">—</td>')+'</tr>';
+  }
+  h += '</tbody></table>';
+  var asof = secView==='n50' ? asofLine(STATE.fetchedAt, 'live averages')
+           : asofLine(STATE.fetchedAt, (nf && nf.score_date) ? 'EOD checks as of '+nf.score_date : '');
+  el.innerHTML = h + asof;
+  more.innerHTML = rows.length > SEC_LIMIT
+    ? '<span class="chip" data-sec-toggle="1">'+(secAll ? 'Fewer sectors ▴' : 'All '+rows.length+' sectors ▾')+'</span>' : '';
+  note.textContent = secView==='n50'
+    ? 'Nifty 50 members grouped by sector, sorted by 1D. Pass is only computed for the futures universe.'
+    : 'Pass = how many of 6 checks the sector clears (1D / 1W / 1M and 52W index, live; GVM and momentum EOD as of last close). Sorted by Pass, then 1D.'
+      + (num(ts.suppressed_count) && ts.suppressed_count>0 ? ' '+ts.suppressed_count+' thin sector'+(ts.suppressed_count===1?'':'s')+' shown but not scored (under '+(ts.min_members||'')+' priced members).' : '');
+}
 function renderTop(){
   var d = istNow(), open = marketOpen();
   document.getElementById('tdot').className = 'dot' + (open?'':' off');
@@ -322,13 +399,15 @@ function renderTop(){
   if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book. ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
 }
 /* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
-function renderAll(){ renderTop(); renderMood(); renderOpen(); }
+function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); }
 function load(){
   return Promise.all([
     getJ(URLS.mood).catch(function(){ return null; }),
-    getJ(URLS.book).catch(function(){ return null; })
+    getJ(URLS.book).catch(function(){ return null; }),
+    getJ(URLS.sectors).catch(function(){ return null; }),
+    getJ(URLS.n50).catch(function(){ return null; })
   ]).then(function(res){
-    STATE.mood = res[0]; STATE.book = res[1];
+    STATE.mood = res[0]; STATE.book = res[1]; STATE.sectors = res[2]; STATE.n50 = res[3];
     var d = istNow();
     STATE.fetchedAt = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+hhmm(d);
     renderAll();
@@ -337,7 +416,9 @@ function load(){
 document.getElementById('v8p').addEventListener('click', function(e){
   var t = e.target.closest('[data-retry]'); if(t){ load(); return; }
   var o = e.target.closest('[data-open-toggle]'); if(o){ openAll = !openAll; renderOpen(); return; }
-  var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); }
+  var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); return; }
+  var sv = e.target.closest('[data-sec-view]'); if(sv){ secView = sv.getAttribute('data-sec-view'); secAll = false; renderSectors(); return; }
+  var st = e.target.closest('[data-sec-toggle]'); if(st){ secAll = !secAll; renderSectors(); }
 });
 load();
 setInterval(function(){ if(document.visibilityState === 'visible') load(); }, 300000);
