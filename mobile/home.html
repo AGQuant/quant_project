@@ -1035,6 +1035,14 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 #heroTrack > .c:first-child > .ixgrp .ixlv{font-size:var(--type-20)}
 #heroTrack > .c:first-child > .ixgrp .ixch{font-size:var(--type-12)}
 #heroTrack > .c:first-child > .ixgrp .ixpv{font-size:var(--type-105)}
+/* cc#1567 P4 · SCALE THE A/D BLOCK — same Card-1-only scoping. Label +15% (type-9 -> type-105),
+   counts +20% (type-9 -> type-11), pipe 1.5x thick (10px -> 15px, the --space-15 token so no raw
+   px enters the file; .adrempty's line-height follows it so the "no data" text stays centred in
+   the taller pipe). The gap between the header line and the pipe steps up one token too. */
+#heroTrack > .c:first-child > .ixgrp .adrhd{font-size:var(--type-105)}
+#heroTrack > .c:first-child > .ixgrp .adrn{font-size:var(--type-11)}
+#heroTrack > .c:first-child > .ixgrp .adrpipe{height:var(--space-15);margin-top:var(--space-5)}
+#heroTrack > .c:first-child > .ixgrp .adrempty{line-height:var(--space-15);font-size:var(--type-95)}
 /* The chip grid's own breathing room. .hchips lives in mobile_app.css and is shared by other
    surfaces, so the gap is raised HERE, scoped to this card, and the shared file is not touched —
    SHARED_CSS_RULE_V1, and the cc#1108 lesson about a look shipped through a shared selector. */
