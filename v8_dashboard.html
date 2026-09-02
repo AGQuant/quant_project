@@ -2788,6 +2788,29 @@ let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task 
 // combines with MASTER_SIDE (Sell Reversal + SHORT applies both). Session-scoped like MASTER_SIDE —
 // a filter that outlives the visit is a filter the founder forgets he set.
 let MASTER_BASKET='all';
+// cc#1602 (founder 02-Sep 15:22): marker-flag quick filters on the right of the basket-chip row.
+// A Set of marker family keys — tcs (amber star), s1 (blue star), r1 (red star), act (bolt),
+// dma (5DMA cross square). OR among the chosen markers, AND with the side/basket chips. In memory
+// only for the visit (no localStorage). Empty set = no marker filter.
+let MASTER_MARKERS=new Set();
+function setMasterMarker(k){ if(MASTER_MARKERS.has(k))MASTER_MARKERS.delete(k); else MASTER_MARKERS.add(k); const el=document.getElementById('panel0'); if(el)el.innerHTML=renderMaster(); }
+// The row's OWN filtered fired object — the same pipeline markerFlag() renders the glyph from
+// (cc#1547 maps + cc#1558 ScorrMarkerFlagFilter against the row's side), so a chip count can never
+// disagree with the flags in the rows. Marker computation itself is untouched.
+function markerFiredFor(x){
+  const sym=x.symbol, side=String(x.side||'').toUpperCase();
+  const f0={stars:PIVOT_STARS[sym]||null, act:PIVOT_ACT[sym]||null, dma:PIVOT_DMA[sym]||null, tcs:PIVOT_TCS[sym]||null};
+  return window.ScorrMarkerFlagFilter?window.ScorrMarkerFlagFilter(f0,side):f0;
+}
+function markerKeysFor(x){
+  const f=markerFiredFor(x), ks=new Set();
+  if(f.tcs)ks.add('tcs');
+  if(f.stars)ks.add(f.stars.star_color==='BLUE'?'s1':'r1');
+  if(f.act)ks.add('act');
+  if(f.dma)ks.add('dma');
+  return ks;
+}
+function rowHasMarkerFilter(x){ if(!MASTER_MARKERS.size)return true; const ks=markerKeysFor(x); for(const k of MASTER_MARKERS){ if(ks.has(k))return true; } return false; }
 function setMasterSide(s){
   MASTER_SIDE=s;
   // cc#880: the chip LIST is faceted by direction, so switching direction can strand the selected
@@ -3478,11 +3501,36 @@ function renderMaster(){
   };
   // The row is omitted entirely when there is at most one basket in view — a filter offering a
   // single choice is not a filter, it is furniture.
-  const basketRow=_bkFacets.length>1
-    ? `<div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px">`
-      + bchip('all','All',_bySide.length)
-      + _bkFacets.map(f=>bchip(f.slug,f.label,f.n)).join('')
-      + `</div>` : '';
+  // cc#1602: marker quick-filter chips, counted over `open` (the side + basket filtered rows, before
+  // the marker filter itself) so the count says how many rows the chip would give you.
+  const _mkCounts={tcs:0,s1:0,r1:0,act:0,dma:0,dmaUp:0,dmaDn:0};
+  open.forEach(x=>{ const f=markerFiredFor(x);
+    if(f.tcs)_mkCounts.tcs++; if(f.stars){ if(f.stars.star_color==='BLUE')_mkCounts.s1++; else _mkCounts.r1++; }
+    if(f.act)_mkCounts.act++; if(f.dma){ _mkCounts.dma++; if(f.dma.star_color==='GREEN')_mkCounts.dmaUp++; else _mkCounts.dmaDn++; } });
+  // Tooltip = the legend line served by the engine (MK_LEGEND, the same strings the (i) popover
+  // prints) matched by its family word — never retyped here; no legend yet -> the title alone.
+  const _legLine=(...words)=>{ const L=Array.isArray(MK_LEGEND)?MK_LEGEND:[]; return L.find(t=>words.some(w=>String(t).toLowerCase().indexOf(w)>=0))||''; };
+  const mchip=(key,icon,iconCol,title,cnt,tip,onTint)=>{
+    const on=MASTER_MARKERS.has(key);
+    const st=on?`background:${onTint};color:var(--txt);border:1px solid ${iconCol}`:'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
+    return `<button type="button" class="mkq" onclick="setMasterMarker('${key}')" title="${tip.replace(/"/g,'&quot;')}" aria-pressed="${on}" style="${st};font:inherit;font-size:11px;font-weight:600;cursor:pointer;padding:5px 7px;border-radius:8px;transition:.15s;white-space:nowrap;min-height:34px;display:inline-flex;align-items:center;gap:4px"><span style="color:${iconCol};font-size:13px;line-height:1">${icon}</span>${title} <b style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-weight:800">${cnt}</b></button>`;
+  };
+  const _dmaCol=(_mkCounts.dmaDn>_mkCounts.dmaUp)?'#f87171':'#0a9e63';
+  const _dmaTip=(_legLine('square','dma')||'5DMA cross')+' · up '+_mkCounts.dmaUp+' · down '+_mkCounts.dmaDn;
+  const markerGroup=`<div class="mkq-grp" style="display:flex;gap:4px;margin-left:auto;flex:0 1 auto;justify-content:flex-end">`
+    + mchip('tcs','\u2605','#F5B94A','TC strong',_mkCounts.tcs,_legLine('amber','strong')||'TC strong','rgba(245,185,74,.16)')
+    + mchip('s1','\u2605','#4d7cfe','S1 reversal',_mkCounts.s1,_legLine('blue')||'S1 reversal','rgba(77,124,254,.16)')
+    + mchip('r1','\u2605','#f87171','R1 mirror',_mkCounts.r1,_legLine('red star')||'R1 mirror','rgba(248,113,113,.16)')
+    + mchip('act','\u26a1','var(--txt)','Vol/OI spurt',_mkCounts.act,_legLine('\u26a1','volume')||'Volume/OI spurt','rgba(77,124,254,.12)')
+    + mchip('dma','\u25a0',_dmaCol,'5DMA cross',_mkCounts.dma,_dmaTip,(_dmaCol==='#f87171')?'rgba(248,113,113,.16)':'rgba(10,158,99,.16)')
+    + `</div>`;
+  // The basket chips and the marker group share ONE wrapping flex row; the group's flex-basis makes
+  // it drop to its own line below ~1000px (inline, so the theme counter sees no new rule). With a single basket in view
+  // the basket chips are omitted as before and the marker group takes the row alone.
+  const basketRow=`<div class="mkq-row" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center">`
+      + (_bkFacets.length>1 ? bchip('all','All',_bySide.length) + _bkFacets.map(f=>bchip(f.slug,f.label,f.n)).join('') : '')
+      + markerGroup
+      + `</div>`;
   // cc#885: PRICE BASIS pill, on the same row as the direction chips. Deliberately separated by a
   // divider — direction and basket FILTER the rows, this changes what every price MEANS. Putting
   // it in the same visual group as a filter would suggest it were one.
@@ -3516,7 +3564,7 @@ function renderMaster(){
         + `</div>`;
     }
   }
-  const toggle=`<div style="display:flex;gap:6px;margin-bottom:${_bkFacets.length>1?'8px':'12px'};flex-wrap:wrap">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}${basisRow}</div>`+basketRow+futNote;
+  const toggle=`<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}${basisRow}</div>`+basketRow+futNote;
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
@@ -3530,7 +3578,7 @@ function renderMaster(){
   // on something else entirely; two sector figures for one book. Do not restore that.
   const _segBySym={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySym[m.symbol]=m.theme;});
   const _segDay=(cache.segmentDay&&cache.segmentDay.segments)||{};
-  const openRows=open.map(x=>{
+  const openRows=open.filter(rowHasMarkerFilter).map(x=>{
     const isShort=(x.side||'').toUpperCase()==='SHORT';
     const cmp=Number(x.cmp),tgt=Number(x.target),qty=Number(x.qty||0);
     const net_pnl=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;
@@ -3683,7 +3731,7 @@ function renderMaster(){
   const posBody=(!_fut&&OPENPOS_VIEW==='ladder')?openPosLadder:(openPosTable+openPosMobile);
     // cc#1010: marker legend is now an (i) popover in the header (was the cc#1008 always-on grey text
     // block) — rendered coloured glyphs, identical to the row glyphs, parity with the mobile pattern.
-  return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span>${markerLegendPopover()}</div>
+  return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${openRows.length}${MASTER_MARKERS.size?` of ${open.length}`:''}</span>${markerLegendPopover()}</div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · sorted by Net P&L</div>`+
     viewToggle+posBody+
     // cc#1009: the two sector CARD grids (All Futures = 22 Scorr themes via /api/v8/theme_sectors;
