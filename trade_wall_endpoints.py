@@ -73,6 +73,7 @@ the union: one more V8 trade closed between the two counts, which is exactly wha
 should do. The reclassification moved 216 events from EQUITY to FUTURES and changed no total.
 """
 
+import json
 import logging
 import os
 
@@ -322,6 +323,75 @@ _WALL_SQL = "SELECT * FROM (" + _EVENTS_SQL + """) w
 WHERE w.ts >= '""" + WALL_EPOCH + """'::timestamp
 """
 
+# ── cc#1587 WOT_APPROVED_ONLY_V1 (founder 02-Sep, session_log 36394) ─────────────────────────
+# The wall shows ONLY the buckets named in app_config key `wot_buckets_enabled` (a JSON list).
+# Default after this card: ["approved_alerts"] — the founder's approved trade_alerts and nothing
+# else. The union above is UNCHANGED; a bucket not in the list is filtered out here, at the same
+# composition point as WALL_EPOCH, so every consumer (page, chip counts, by_engine) inherits it.
+# Reversible by editing the app_config row — no redeploy. Nothing is deleted anywhere: the raw
+# engine signals that leave the wall are still in their own engine tables.
+#
+# Bucket name -> the union's `src` keys it covers. Names are what a founder edits, so they are
+# spelled for a human; src keys are what the SQL matches. An unknown name in the config is
+# IGNORED (logged), never a crash and never a silent "show everything".
+WOT_BUCKETS = {
+    "approved_alerts":    ("alert",),
+    "v8":                 ("v8", "v8open"),
+    "index_intel":        ("v10",),
+    "tc_scanner":         ("tc",),
+    "qb_basket":          ("quant",),
+    "investment_scanner": ("invscan",),
+}
+WOT_BUCKETS_KEY = "wot_buckets_enabled"
+WOT_BUCKETS_DEFAULT = ["approved_alerts"]
+
+
+def wot_buckets_enabled(cur):
+    """The enabled bucket names from app_config. Returns (names, missing_flag).
+
+    Same parsing doctrine as v8_book_canon.retired_baskets: a JSON array is the intended shape; a
+    comma-separated string is accepted so a hand edit still works; a JSON array that does not
+    parse is treated as MISSING (falls to the default) rather than being read as a bucket literally
+    named "[oops" — that would match nothing and blank the wall while looking healthy.
+    """
+    cur.execute("SELECT value FROM app_config WHERE key=%s", (WOT_BUCKETS_KEY,))
+    row = cur.fetchone()
+    raw = row[0] if row and row[0] else None
+    if not raw:
+        return list(WOT_BUCKETS_DEFAULT), True
+    raw = str(raw).strip()
+    names = None
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                names = [str(x).strip().lower() for x in parsed if str(x).strip()]
+        except Exception:
+            names = None
+        if names is None:
+            return list(WOT_BUCKETS_DEFAULT), True
+    else:
+        names = [p.strip().lower() for p in raw.replace("\n", ",").split(",") if p.strip()]
+    unknown = [n for n in names if n not in WOT_BUCKETS]
+    if unknown:
+        log.warning("wot_buckets_enabled: ignoring unknown bucket names %s", unknown)
+    return [n for n in names if n in WOT_BUCKETS], False
+
+
+def _wall_sql(names):
+    """_WALL_SQL narrowed to the enabled buckets.
+
+    The src keys are literals from WOT_BUCKETS above — never config text — so quoting them into
+    the SQL is safe, and it has to be literal: the chip-count queries in tradewall() call execute()
+    with NO parameters, and psycopg leaves a bare placeholder verbatim on that path (see
+    PERCENT_SIGNS_IN_SQL). An empty list yields a wall with no rows, stated as such, not the full
+    union.
+    """
+    srcs = sorted({s for n in names for s in WOT_BUCKETS.get(n, ())})
+    if not srcs:
+        return _WALL_SQL + " AND false\n"
+    return _WALL_SQL + " AND w.src IN (" + ", ".join("'" + s + "'" for s in srcs) + ")\n"
+
 
 # The guard that makes PERCENT_SIGNS_IN_SQL enforceable instead of merely written down. This
 # raises at IMPORT — so a bad edit fails the deploy loudly, at boot, instead of answering 500 to a
@@ -332,7 +402,7 @@ assert chr(37) not in _EVENTS_SQL, (
     "chr(37) instead, and keep it out of SQL comments too — the scanner does not skip them.")
 
 
-def _fetch(cur, limit, cur_ts, cur_sk, instrument, status):
+def _fetch(cur, limit, cur_ts, cur_sk, instrument, status, wall_sql):
     """One page of the wall, newest first, keyset-paged. Returns limit+1 rows when more exist."""
     where, args = [], []
     if instrument:
@@ -346,7 +416,7 @@ def _fetch(cur, limit, cur_ts, cur_sk, instrument, status):
         # column's exact timestamp type — the same shape cc#983 used on the intel feed.
         where.append("(ts < %s::timestamp OR (ts = %s::timestamp AND sk < %s))")
         args += [cur_ts, cur_ts, cur_sk]
-    sql = "SELECT * FROM (" + _WALL_SQL + ") w"
+    sql = "SELECT * FROM (" + wall_sql + ") w"
     if where:
         sql += " WHERE " + " AND ".join(where)
     # +1 row answers has_more without a second COUNT.
@@ -448,7 +518,11 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             return {"error": "bad cursor", "events": [], "has_more": False}
 
     with _conn() as conn, conn.cursor() as cur:
-        rows = _fetch(cur, limit, cur_ts, cur_sk, inst, st)
+        # cc#1587: the enabled-bucket list is read per request so an app_config edit takes effect
+        # on the next load, no redeploy.
+        buckets, buckets_missing = wot_buckets_enabled(cur)
+        wall_sql = _wall_sql(buckets)
+        rows = _fetch(cur, limit, cur_ts, cur_sk, inst, st, wall_sql)
         has_more = len(rows) > limit
         rows = rows[:limit]
         counts = {}
@@ -460,11 +534,11 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             # Instrument/status counts are over the WHOLE wall (both statuses / all instruments),
             # never just what happens to be loaded — by_engine is the one broken down BY status,
             # since that is what each bucket tab needs to show a live count under the active tab.
-            cur.execute("SELECT instrument, COUNT(*) n FROM (" + _WALL_SQL + ") w GROUP BY 1")
+            cur.execute("SELECT instrument, COUNT(*) n FROM (" + wall_sql + ") w GROUP BY 1")
             counts = {r["instrument"]: r["n"] for r in _rows(cur)}
-            cur.execute("SELECT status, COUNT(*) n FROM (" + _WALL_SQL + ") w GROUP BY 1")
+            cur.execute("SELECT status, COUNT(*) n FROM (" + wall_sql + ") w GROUP BY 1")
             status_counts = {r["status"]: r["n"] for r in _rows(cur)}
-            cur.execute("SELECT engine, status, COUNT(*) n FROM (" + _WALL_SQL + ") w GROUP BY 1,2")
+            cur.execute("SELECT engine, status, COUNT(*) n FROM (" + wall_sql + ") w GROUP BY 1,2")
             for r in _rows(cur):
                 totals.setdefault(r["engine"], {})[r["status"]] = r["n"]
 
@@ -490,6 +564,11 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         # the count is never mistaken for the all-time book. `count`/`counts` already reflect the epoch.
         "epoch": WALL_EPOCH,
         "scope": "since 10 Aug 2026",
+        # cc#1587: which buckets this response was narrowed to, and whether that came from the
+        # app_config row or the in-code default (row absent/unparseable).
+        "buckets_enabled": buckets,
+        "buckets_known": list(WOT_BUCKETS),
+        "buckets_source": "default" if buckets_missing else "app_config",
     }
 
 
