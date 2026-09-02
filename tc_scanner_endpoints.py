@@ -412,7 +412,9 @@ def tc_scanner_holds(date_: Optional[str] = None):
 
     def _stats(rows_side):
         closed = [x for x in rows_side if x["exit_reason"] != "OPEN"]
-        wins = [x for x in closed if x["exit_reason"] == "TARGET"]
+        # cc#1599 P3: a reconciled exit carries its evidence basis in exit_reason
+        # ("TARGET (cash-daily)" / "SL (cash-daily)"), so wins are classified by prefix.
+        wins = [x for x in closed if str(x["exit_reason"] or "").startswith("TARGET")]
         net_pts = round(sum((x["pnl_pct"] or 0) for x in closed), 2)
         wr = round(len(wins) / len(closed) * 100, 1) if closed else None
         return {"open": len(rows_side) - len(closed), "closed": len(closed),
