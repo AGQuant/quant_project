@@ -590,8 +590,10 @@ function renderTop(){
     pill.textContent = st.txt ? 'Book ' + st.txt : 'Book';
     pill.className = 'pill' + (st.amber ? ' stale' : '');
   } else { pill.textContent = 'Book not loaded'; pill.className = 'pill stale'; }
-  var fn = document.getElementById('foot-note');
-  if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book. ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
+  var fn = document.getElementById('foot-note'), dl = STATE.daylog;
+  var capTxt = (dl && num(dl.capital_base)) ? ' Capital '+inr(dl.capital_base)+'.' : '';
+  if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book.'+capTxt+' ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
+  else if(capTxt) fn.textContent = 'Numbers are the paper book.'+capTxt;
 }
 /* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
 function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); renderClosed(); renderFunnel(); }
