@@ -1,0 +1,97 @@
+DESIGN REF scorr_adv_decl_sectorcaps_R1 @ (repo sha pending: save as design_refs/scorr_adv_decl_sectorcaps_R1.html) - Advance/Decline gets a horizontal sector-day-change capsule strip between the header and the symbol table. session_log 36539 (ADV_DECL_SECTOR_CAPS_V1) is the spec.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Advance / Decline</title>
+<!--
+  DESIGN REF scorr_adv_decl_sectorcaps_R1 - founder 02-Sep-2026 13:40. "Give sector day change in
+  capsule in middle, intuitively red green amber."
+  Placement: ONE new strip between the header and the SYMBOL table, horizontally scrollable, existing
+  list untouched (no row removed, parity guard).
+  Five colour bands (not three), so a flat sector doesn't read as a strong move:
+    up2  >= +1.0%    solid green   |  up1  +0.15..1.0%  tinted green
+    am   -0.15..0.15% amber         |  dn1  -1.0..-0.15% tinted red
+    dn2  <= -1.0%    solid red
+  Data: mcap-weighted sector day% (SUM(mcap*day_pct)/SUM(mcap) per segment) - not a simple average, so
+  one giant stock cannot be outvoted by nine small ones. Sorted by |day%| desc. Tap -> /sector?seg=X.
+-->
+<style>
+:root{
+  --field:#0A0A0C; --panel:#161F33; --well:#131316; --sunk:#0C0C0F;
+  --chalk:#EAF0FA; --mute:#8A97B0; --dim:#5E5E66; --line:#26334F;
+  --gold:#D4AF37;
+  --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45;
+  --up-d:rgba(47,212,139,.16); --down-d:rgba(255,92,108,.16); --amber-d:rgba(255,159,69,.14);
+  --display:'Archivo Black','Space Grotesk',system-ui,sans-serif;
+  --body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;
+  --mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--field);color:var(--chalk);font-family:var(--body);font-size:15px}
+body{background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
+.top{display:flex;align-items:center;justify-content:space-between;padding:18px 18px 14px}
+.top h1{font-family:var(--display);font-size:24px;letter-spacing:.5px;text-transform:uppercase;transform:skewX(-6deg);transform-origin:left center}
+.x{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--mute);font-size:16px;display:flex;align-items:center;justify-content:center}
+.rule{height:1px;background:var(--line);margin:0 0 2px}
+.secwrap{padding:12px 16px 14px;border-bottom:1px solid var(--line)}
+.sechd{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--mute);margin-bottom:9px;text-transform:uppercase}
+.sechd .r{color:var(--dim);letter-spacing:.3px;text-transform:none;font-size:10px}
+.secrow{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;scroll-snap-type:x proximity}
+.secrow::-webkit-scrollbar{display:none}
+.sc{flex:none;scroll-snap-align:start;display:flex;flex-direction:column;gap:3px;min-width:108px;padding:9px 12px;border-radius:10px;text-decoration:none;border:1px solid transparent}
+.sc .n{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:108px}
+.sc .v{font-family:var(--mono);font-size:15px;font-weight:800;letter-spacing:-.2px}
+.sc.up2{background:var(--up-d);border-color:rgba(47,212,139,.4)} .sc.up2 .n{color:#9be8c6} .sc.up2 .v{color:var(--up)}
+.sc.up1{background:rgba(47,212,139,.08);border-color:rgba(47,212,139,.22)} .sc.up1 .n{color:#8fc9a9} .sc.up1 .v{color:#5fdba0}
+.sc.am{background:var(--amber-d);border-color:rgba(255,159,69,.3)} .sc.am .n{color:#e0b98c} .sc.am .v{color:var(--amber)}
+.sc.dn1{background:rgba(255,92,108,.08);border-color:rgba(255,92,108,.22)} .sc.dn1 .n{color:#d99aa1} .sc.dn1 .v{color:#ff8994}
+.sc.dn2{background:var(--down-d);border-color:rgba(255,92,108,.4)} .sc.dn2 .n{color:#ffb0b8} .sc.dn2 .v{color:var(--down)}
+.secfoot{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:8px}
+.dots{display:flex;gap:5px;align-items:center}
+.dots i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dots .u{background:var(--up)} .dots .a{background:var(--amber)} .dots .d{background:var(--down)}
+.thead{display:flex;justify-content:space-between;padding:14px 20px 10px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--chalk)}
+.thead .s{color:var(--mute)}
+.row{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-top:1px solid rgba(255,255,255,.05)}
+.row .sym{font-family:var(--mono);font-size:16px;font-weight:800;letter-spacing:.3px}
+.row .pct{font-family:var(--mono);font-size:16px;font-weight:800;color:var(--up)}
+</style>
+</head>
+<body>
+<div class="top"><h1>Advance / Decline</h1><div class="x">✕</div></div>
+<div class="rule"></div>
+<div class="secwrap">
+  <div class="sechd"><span>Sectors · Day %</span><span class="r">mcap-weighted · biggest movers first</span></div>
+  <div class="secrow" id="secRow">
+    <a class="sc up2" href="/sector?seg=Petrochemicals"><span class="n">PETROCHEM</span><span class="v">+2.47%</span></a>
+    <a class="sc up2" href="/sector?seg=Internet"><span class="n">INTERNET SM</span><span class="v">+1.41%</span></a>
+    <a class="sc up1" href="/sector?seg=AgroChem"><span class="n">AGRO CHEM</span><span class="v">+0.99%</span></a>
+    <a class="sc up1" href="/sector?seg=Gems"><span class="n">GEMS &amp; JWL</span><span class="v">+0.97%</span></a>
+    <a class="sc up1" href="/sector?seg=Paper"><span class="n">PAPER &amp; PKG</span><span class="v">+0.78%</span></a>
+    <a class="sc up1" href="/sector?seg=IT"><span class="n">IT LARGE</span><span class="v">+0.76%</span></a>
+    <a class="sc am" href="/sector?seg=FMCG"><span class="n">FMCG</span><span class="v">+0.05%</span></a>
+    <a class="sc am" href="/sector?seg=Realty"><span class="n">REALTY</span><span class="v">−0.31%</span></a>
+    <a class="sc dn1" href="/sector?seg=Cement"><span class="n">CEMENT</span><span class="v">−0.58%</span></a>
+    <a class="sc dn1" href="/sector?seg=MetalsSmall"><span class="n">METALS SM</span><span class="v">−0.94%</span></a>
+    <a class="sc dn2" href="/sector?seg=PSUBanks"><span class="n">PSU BANKS</span><span class="v">−1.12%</span></a>
+    <a class="sc dn2" href="/sector?seg=AutoOEM"><span class="n">AUTO OEM</span><span class="v">−1.54%</span></a>
+    <a class="sc dn2" href="/sector?seg=CapGoods"><span class="n">CAP GOODS</span><span class="v">−2.66%</span></a>
+  </div>
+  <div class="secfoot">
+    <div class="dots"><i class="u"></i><span>8 up</span><i class="a"></i><span>2 flat</span><i class="d"></i><span>19 down</span></div>
+    <span>as of 13:05 IST</span>
+  </div>
+</div>
+<div class="thead"><span>Symbol</span><span class="s">Day % ▾</span></div>
+<div class="row"><span class="sym">JSWENERGY</span><span class="pct">+3.88%</span></div>
+<div class="row"><span class="sym">COALINDIA</span><span class="pct">+3.59%</span></div>
+<div class="row"><span class="sym">IDEA</span><span class="pct">+3.41%</span></div>
+<div class="row"><span class="sym">TATAPOWER</span><span class="pct">+2.91%</span></div>
+<div class="row"><span class="sym">RBLBANK</span><span class="pct">+2.27%</span></div>
+<div class="row"><span class="sym">ADANIGREEN</span><span class="pct">+2.15%</span></div>
+<div class="row"><span class="sym">VMM</span><span class="pct">+1.91%</span></div>
+</body>
+</html>
