@@ -1150,6 +1150,7 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
 #panel13 .hs-row{cursor:pointer}
 #panel13 .hs-row:hover td{background:var(--panel,#111A33)}
 #panel13 .hs-row td.emph{font-weight:800}
+#panel13 .hs-tbl th.emph{color:var(--txt,#E9EEFB)}
 #panel13 .hs-row td.asof{font-size:10.5px;color:var(--dim,#5E6B8F);white-space:nowrap}
 #panel13 .hs-row .hs-sym{font-size:10px;color:var(--dim,#5E6B8F);margin-left:6px}
 @media (max-width:700px){
@@ -5031,7 +5032,14 @@ function hsTableBlock(d){
   const emphDay=HS_EMPH!=='week';
   let body='';
   order.forEach(cat=>{
-    const g=tiles.filter(t=>t.category===cat);
+    // cc#1580 P4: the emphasis level (Day | Week) is the bold column AND the sort key — biggest
+    // move first WITHIN the category, by absolute change. Cross-category sort is out of scope.
+    // A null change (insufficient history) sorts last so it never masquerades as a zero move.
+    const key=emphDay?'day_chg_pct':'week_chg_pct';
+    const g=tiles.filter(t=>t.category===cat).slice().sort((a,b)=>{
+      const av=a[key]==null?-1:Math.abs(a[key]), bv=b[key]==null?-1:Math.abs(b[key]);
+      return bv-av;
+    });
     if(!g.length)return;
     body+=`<tr class="hs-cat"><td colspan="5">${escHtml(label[cat]||cat)}</td></tr>`;
     g.forEach(t=>{
@@ -5045,7 +5053,8 @@ function hsTableBlock(d){
     });
   });
   return '<div class="hs-tbl-wrap"><table class="hs-tbl"><thead><tr>'
-    +'<th>Symbol</th><th class="num">Price</th><th class="num">Day %</th><th class="num">Week %</th><th>As of</th>'
+    +`<th>Symbol</th><th class="num">Price</th><th class="num${emphDay?' emph':''}">Day %</th>`
+    +`<th class="num${emphDay?'':' emph'}">Week %</th><th>As of</th>`
     +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
