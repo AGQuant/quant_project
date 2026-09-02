@@ -43,6 +43,9 @@
   .al-st.approved{color:var(--grn);border-color:var(--grn)}
   .al-st.triggered{color:var(--amber);border-color:var(--amber)}
   .al-st.dismissed{color:var(--red);border-color:var(--red)}
+  .al-pend{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+  .al-why{font-size:10.5px;color:var(--mut,#8A8A93)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
   .al-eng{font:600 10px ui-monospace,monospace;color:var(--mut);border:1px solid var(--line2);
           border-radius:5px;padding:2px 6px;white-space:nowrap}
   .al-notes{white-space:normal;max-width:260px;font-size:12px;color:var(--mut);line-height:1.45}
@@ -206,11 +209,20 @@ function rowHtml(a){
     + (a.approved_via ? ' · via ' + a.approved_via : '');
   else if (st === 'triggered' && a.triggered_at) when = 'triggered ' + istStamp(a.triggered_at);
   else when = 'set ' + istStamp(a.created_at);
-  /* Approve renders ONLY on a triggered card — the server enforces the same rule (409 from any
-     other status); the button just does not offer what cannot happen. */
-  var act = st === 'triggered'
-    ? '<div class="twa"><button type="button" class="btn pri" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve</button></div>'
-    : '';
+  /* cc#1586 (founder 02-Sep: "I could not see approve switch here"): the control is ALWAYS
+     visible. TRIGGERED -> Approve enabled (server rule unchanged). PENDING -> Approve disabled with
+     the reason in words, using the resolver price the list ships (the same price the trigger
+     sweep compares). APPROVED / DISMISSED -> the decision, no button. */
+  var act = '';
+  if (st === 'triggered') {
+    act = '<div class="twa"><button type="button" class="btn pri" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve</button></div>';
+  } else if (st === 'pending') {
+    var cond = a.trigger_condition === 'ABOVE' ? '≥' : '≤';
+    var liveTxt = a.cmp == null ? 'no live price right now'
+                : 'live ' + fmtPx(a.cmp) + (a.cmp_live === false ? ' (last close)' : '');
+    act = '<div class="twa al-pend"><button type="button" class="btn pri" disabled title="Approve becomes active when the trigger crosses">Approve</button>'
+        + '<span class="al-why">waits for cross ' + cond + ' ' + fmtPx(a.trigger_price) + ' (' + esc(liveTxt) + ')</span></div>';
+  }
   return '<tr id="al-' + a.id + '">'
     + '<td class="sym">' + esc(a.symbol) + '</td>'
     + '<td class="' + dirCls + '">' + esc(a.direction) + '</td>'
