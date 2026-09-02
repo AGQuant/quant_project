@@ -357,6 +357,61 @@ async def approve_signal(req: Request):
             "live": live, "price_source": (res or {}).get("source")}
 
 
+@router.post("/api/alerts/dismiss_signal")
+async def dismiss_signal(req: Request):
+    """cc#1609 (WOT_APPROVAL_SURFACE_V1, session_log 36394): DISMISS an engine signal from the wall.
+    Mirror of approve_signal on the same idempotency key (source_engine, source_ref, kind): writes
+    a trade_alerts row straight into status=dismissed so the wall shows the decision and the row
+    can never be approved by a later tap without a deliberate change of the record. No price is
+    recorded — a dismissal is not a trade. A second tap returns the existing row (already=true).
+    If the key already carries an APPROVED row the call refuses (409): a taken position is not
+    dismissed from a wall button. /api/alerts/dismiss (pending/triggered manual alerts) untouched."""
+    body = await req.json()
+    source_engine = str(body.get("source_engine") or "").strip()
+    source_ref = str(body.get("source_ref") or "").strip()
+    sym = str(body.get("symbol") or "").strip().upper()
+    direction = str(body.get("direction") or "").strip().upper()
+    kind = str(body.get("kind") or "entry").strip().lower()
+    via = (str(body.get("dismissed_via")).strip() or None) if body.get("dismissed_via") else None
+    if not source_engine or not source_ref:
+        raise HTTPException(400, "source_engine and source_ref required")
+    if not sym:
+        raise HTTPException(400, "symbol required")
+    if direction not in DIRECTIONS:
+        raise HTTPException(400, f"direction must be one of {DIRECTIONS}")
+    if kind not in KINDS:
+        raise HTTPException(400, f"kind must be one of {KINDS}")
+    note = "dismissed via " + (via or "wall")
+    with _conn() as conn, conn.cursor() as cur:
+        _ensure_schema(conn)
+        cur.execute(
+            f"""INSERT INTO trade_alerts
+                    (symbol, direction, trigger_price, trigger_condition, status,
+                     source_engine, source_ref, kind, approved_via, notes)
+                VALUES (%s, %s, 0, 'N/A', 'dismissed', %s, %s, %s, %s, %s)
+                ON CONFLICT (source_engine, source_ref, kind) WHERE source_engine IS NOT NULL
+                DO NOTHING
+                RETURNING {_COLS}""",
+            (sym, direction, source_engine, source_ref, kind, via, note))
+        r = cur.fetchone()
+        if r:
+            out, already = _row(r), False
+        else:
+            cur.execute(f"""SELECT {_COLS} FROM trade_alerts
+                            WHERE source_engine = %s AND source_ref = %s AND kind = %s""",
+                        (source_engine, source_ref, kind))
+            r2 = cur.fetchone()
+            if not r2:
+                conn.commit()
+                raise HTTPException(409, "dismissal raced a concurrent change — re-read the row")
+            out, already = _row(r2), True
+            if out.get("status") == "approved":
+                conn.commit()
+                raise HTTPException(409, "this signal is already APPROVED — a taken position is not dismissed from the wall")
+        conn.commit()
+    return {"status": "ok", "alert": out, "already": already}
+
+
 @router.get("/api/alerts/approved_map")
 def approved_map(engine: str):
     """cc#1524 (lock 5's cheap paint call) — {source_ref: {id, approved_at, approved_price}}
