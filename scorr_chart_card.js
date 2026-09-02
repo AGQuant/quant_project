@@ -444,6 +444,10 @@ var _full = false;                // cc#779: fullscreen state
     _getJSON("/api/gvm/trend_verdict/" + encodeURIComponent(sym) + "?tf=" + encodeURIComponent(tf))
       .then(function (d) {
         if (_sym !== sym || _tf !== tf) return;          // user switched mid-flight
+        /* cc#1566: the endpoint echoes the window it ACTUALLY used and coerces an unknown tf to 1Y.
+           A 1Y verdict wearing a 3Y (or 1W) badge is a mislabelled number, so it is not shown —
+           the badge follows the data. Follow-up card adds those windows server-side. */
+        if (d && d.timeframe && String(d.timeframe) !== tf) return;
         var v = d && d.verdict;
         if (!v) return;                                   // no verdict -> no badge, never a guess
         _verdict = v;
