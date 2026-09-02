@@ -753,6 +753,116 @@ function secNews(n,title,s,tier){
   return '<section>'+h+'</section>';
 }
 
+/* ── cc#1608 · WHAT MOVED as the app news UX (founder 02-Sep 15:31) ─────────────────────────
+   ONE feed (sections.news_feed: every polished category of the last 7 days, Global folded in as
+   category=Global), category chips + stance chips built from the payload's own counts (never a
+   typed list), clickable rows that open the story sheet ported from the app digest (nwOpen in
+   scorr_digest_mobile.html: headline · time · stance/impact chips · polished paragraphs), symbol
+   chips in the sheet, newest first, 12 rows then "load more". Filters + depth are in memory only.
+   The section pill is LIVE only when newest_polished_at is under 2 h old inside market hours;
+   otherwise a muted "as of DD Mon, HH:MM IST" — never LIVE on a stale desk. */
+var FEED={cat:'All',stance:'All',shown:12};
+var FEED_PAGE=12;
+function feedFresh(newest){
+  if(!newest) return false;
+  var d=new Date(String(newest).replace(' ','T')); if(isNaN(d)) return false;
+  var ageMs=Date.now()-d.getTime();
+  // market hours = the IST wall clock, Mon-Fri 09:15-15:30 (same test the shell uses)
+  var ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
+  var mins=ist.getHours()*60+ist.getMinutes(), wd=ist.getDay();
+  var inMkt=(wd>=1&&wd<=5&&mins>=555&&mins<=930);
+  return inMkt && ageMs < 2*3600*1000;
+}
+function feedRows(s){
+  var items=s.items||[];
+  return items.filter(function(i){
+    if(FEED.cat!=='All' && (i.category||'Uncategorised')!==FEED.cat) return false;
+    if(FEED.stance!=='All' && sentBucket(i.sentiment).l!==FEED.stance) return false;
+    return true;
+  });
+}
+function feedChip(kind,key,label,cnt){
+  var on=(FEED[kind]===key);
+  var st=on?'background:rgba(var(--cy-rgb),.14);color:var(--cy);border:1px solid rgba(var(--cy-rgb),.45)':'background:var(--panel);color:var(--tx3);border:1px solid var(--line2)';
+  return '<button type="button" class="fchip" data-kind="'+kind+'" data-key="'+esc(key)+'" aria-pressed="'+on+'" style="'+st+';font:600 10.5px var(--f-m);letter-spacing:.06em;padding:5px 10px;border-radius:999px;cursor:pointer;white-space:nowrap">'+esc(label)+(cnt!=null?' <b style="font-weight:700">'+cnt+'</b>':'')+'</button>';
+}
+function secFeed(s){
+  if(!s) return '';
+  var items=s.items||[], newest=s.newest_polished_at;
+  var live=feedFresh(newest);
+  var pill=live?badge('LIVE'):'<span class="asof" style="margin-left:0">as of <b>'+esc(newest?tIST(newest)+' IST':'—')+'</b></span>';
+  var h='<div class="sh"><span class="snum">05</span><span class="st">What Moved</span>'+pill+
+        '<span class="asof">polished desk · last '+(s.days||7)+' days · '+items.length+' stories</span></div>';
+  // chips: categories from category_counts (busiest first) + stance buckets counted from the rows
+  var cc=s.category_counts||{}; var cats=Object.keys(cc).sort(function(a,b){return cc[b]-cc[a]||a.localeCompare(b);});
+  var sc={}; items.forEach(function(i){ var l=sentBucket(i.sentiment).l; sc[l]=(sc[l]||0)+1; });
+  var stances=['BULLISH','CAUTIOUS','NEUTRAL','BEARISH'].filter(function(k){return sc[k];});
+  h+='<div class="card">';
+  h+='<div class="fchips" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:12px 16px 0">'
+     +feedChip('cat','All','All',items.length)+cats.map(function(c){return feedChip('cat',c,c,cc[c]);}).join('')
+     +'<span style="width:1px;height:16px;background:var(--line2);margin:0 4px"></span>'
+     +feedChip('stance','All','Any stance',null)+stances.map(function(k){return feedChip('stance',k,k.charAt(0)+k.slice(1).toLowerCase(),sc[k]);}).join('')
+     +'</div>';
+  var rows=feedRows(s), shown=rows.slice(0,FEED.shown);
+  h+='<div id="feedRows" style="margin-top:8px">'+(shown.length?shown.map(function(i){
+        var b=sentBucket(i.sentiment), idx=items.indexOf(i);
+        return '<div class="nrow frow" data-i="'+idx+'" role="button" tabindex="0" style="cursor:pointer"><span class="sdot '+b.c+'"></span>'+
+               '<div style="min-width:0"><div class="nh">'+esc(i.headline)+'</div>'+
+               '<div class="ns">'+esc((i.summary||'').slice(0,180))+
+               ' <span style="opacity:.7">· '+esc(i.category||'')+(i.published?' · '+esc(tIST(i.published))+' IST':'')+'</span></div></div>'+
+               '<span class="nsent">'+b.l+'</span></div>'; }).join('')
+      :'<div class="pend">'+esc(items.length?'Nothing on the desk for this filter.':(s.note||'Nothing on the desk.'))+'</div>')+'</div>';
+  h+='<div class="rfoot"><span>'+shown.length+' of '+rows.length+(rows.length!==items.length?' (filtered)':'')+'</span>'
+     +(rows.length>shown.length?'<button type="button" class="rlink" id="feedMore" style="background:none;border:0;cursor:pointer;font:inherit;color:var(--cy)">load more ↓</button>':'')+'</div>';
+  h+='</div>';
+  return '<section id="sec-feed">'+h+'</section>';
+}
+function feedRepaint(){
+  var s=((D||{}).sections||{}).news_feed, host=document.getElementById('sec-feed');
+  if(!s||!host) return;
+  host.outerHTML=secFeed(s);
+}
+function feedMd(txt){   // the app's nwMd, ported: blank-line paragraphs, **bold**, line breaks
+  var safe=esc(String(txt==null?'':txt));
+  return safe.split(/\n\s*\n/).map(function(para){ var t=para.trim(); if(!t) return ''; return '<p style="margin:0 0 10px">'+t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>')+'</p>'; }).join('');
+}
+function feedOpen(idx){
+  var s=((D||{}).sections||{}).news_feed; var n=s&&(s.items||[])[idx]; if(!n) return;
+  feedClose();
+  var b=sentBucket(n.sentiment);
+  var meta=[];
+  if(n.published) meta.push('<span>'+esc(tIST(n.published))+' IST</span>');
+  if(n.source) meta.push('<span>'+esc(n.source)+'</span>');
+  if(n.polished_at) meta.push('<span>polished '+esc(tIST(n.polished_at))+' IST</span>');
+  var chips='<span class="pill '+(b.l==='BULLISH'?'p-bull':(b.l==='CAUTIOUS'?'p-cau':(b.l==='BEARISH'?'p-bear':'p-neu')))+'">'+b.l+'</span>'
+           +(n.impact?' <span class="pill p-neu">'+esc(String(n.impact).toUpperCase())+' IMPACT</span>':'')
+           +(n.category?' <span class="pill p-neu">'+esc(n.category)+'</span>':'');
+  var body=String(n.full_summary||n.summary||'').trim()?feedMd(n.full_summary||n.summary):'<div class="pend">polished version not on the desk yet.</div>';
+  var syms=(n.symbols||[]).map(function(x){ return '<a class="chip" href="/check?symbol='+encodeURIComponent(x)+'" style="text-decoration:none"><b>'+esc(x)+'</b></a>'; }).join('');
+  var veil=document.createElement('div'); veil.id='feedVeil';
+  veil.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:11600;display:flex;align-items:flex-end;justify-content:center';
+  var sheet=document.createElement('div'); sheet.id='feedSheet'; sheet.setAttribute('role','dialog'); sheet.setAttribute('aria-modal','true');
+  sheet.style.cssText='background:var(--panel);color:var(--tx);border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;width:min(96vw,760px);max-height:82vh;overflow:auto;padding:12px 20px 24px;box-shadow:0 -12px 40px rgba(0,0,0,.45);position:relative';
+  sheet.innerHTML='<div style="width:38px;height:4px;border-radius:2px;background:var(--line2);margin:0 auto 12px"></div>'
+    +'<button type="button" id="feedX" aria-label="Close" style="position:absolute;top:10px;right:12px;border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--tx3)">&times;</button>'
+    +'<div class="nh" style="font-size:16px;line-height:1.4;padding-right:28px">'+esc(n.headline)+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px;font-family:var(--f-m);font-size:10.5px;color:var(--tx3)">'+meta.join('<span>·</span>')+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+chips+'</div>'
+    +'<div style="font-size:13.5px;line-height:1.6;color:var(--tx2)">'+body+'</div>'
+    +(syms?'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-family:var(--f-m);font-size:10px;color:var(--tx3);letter-spacing:.1em">TAGGED</div><div class="chips" style="padding:8px 0 0">'+syms+'</div>':'');
+  veil.appendChild(sheet); document.body.appendChild(veil); document.body.style.overflow='hidden';
+  requestAnimationFrame(function(){ veil.addEventListener('click',function(e){ if(e.target===veil) feedClose(); }); var x=document.getElementById('feedX'); if(x) x.onclick=feedClose; });
+  document.addEventListener('keydown',feedEsc);
+}
+function feedEsc(e){ if(e.key==='Escape') feedClose(); }
+function feedClose(){ var v=document.getElementById('feedVeil'); if(v) v.remove(); document.body.style.overflow=''; document.removeEventListener('keydown',feedEsc); }
+document.addEventListener('click',function(e){
+  var c=e.target.closest&&e.target.closest('.fchip'); if(c){ FEED[c.getAttribute('data-kind')]=c.getAttribute('data-key'); FEED.shown=FEED_PAGE; feedRepaint(); return; }
+  if(e.target.closest&&e.target.closest('#feedMore')){ FEED.shown+=FEED_PAGE; feedRepaint(); return; }
+  var r=e.target.closest&&e.target.closest('.frow'); if(r){ feedOpen(Number(r.getAttribute('data-i'))); }
+});
+document.addEventListener('keydown',function(e){ if(e.key==='Enter'&&e.target&&e.target.classList&&e.target.classList.contains('frow')) feedOpen(Number(e.target.getAttribute('data-i'))); });
+
 function secResults(s){
   if(!s) return '';
   var h = sh('07',"Yesterday's Results · Scored",s.tier||'STATIC',
@@ -985,8 +1095,9 @@ function render(d){
   document.getElementById('digest').innerHTML =
     secHero(d) +
     secTape(s.global_tape) + secLadders(s.ladders) + secInternals(s.internals) +
-    secReporting(s.reporting_today) + secNews('05','What Moved',s.what_moved) +
-    secNews('06','Global Events',s.global_events) + secResults(s.yesterday_results);
+    secReporting(s.reporting_today) +
+    (s.news_feed ? secFeed(s.news_feed) : secNews('05','What Moved',s.what_moved) + secNews('06','Global Events',s.global_events)) +   // cc#1608: one merged, filterable feed; the old pair only if the payload predates it
+    secResults(s.yesterday_results);
   /* cc#1527: pill + clock live in the just-painted hero — stamp them now */
   var pill=document.getElementById('mktPill');
   if(pill){
