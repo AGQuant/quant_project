@@ -5718,7 +5718,7 @@ async function loadPerf(){
 }
 
 async function loadLive(){
-  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf];
+  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadPerf];   /* cc#1574: loadDivergence removed (card hidden) */
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[v10]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
@@ -7214,7 +7214,9 @@ function render(){
        Settings, Performance and Divergence stay below: the R1 mock and the card are silent on
        them, and removing content unasked is a scope guess (choice logged in the forum). */
     rIndexPos() + rRecord() + rMaxPainSec() + rBuildUps() + rFlowBasis() +
-    `<div class="stack">` + rSettings() + rPerf() + rDivergence() + `</div>` +
+    /* cc#1574 (founder comment 5, 02-Sep-2026): the Futures ⇄ Equity Divergence card is HIDDEN -
+       rDivergence() and /api/v10/divergence stay intact, only this call and its loader are out. */
+    `<div class="stack">` + rSettings() + rPerf() + `</div>` +
     /* cc#1150 verify D: the company name was rendered here. The ref's own foot does not carry it,
        and the product_name_rule says this pane says INDEX INTEL. Dropped to match the ref exactly. */
     `<div class="foot">Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
@@ -7267,7 +7269,7 @@ function idxMarkScroll(host){
 /* extend loaders with pivots + strike OI */
 var _origLoadLive=loadLive;
 loadLive=async function(){
-  const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI,loadQbb];   /* cc#1522: + quality-bullish */
+  const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI,loadQbb];   /* cc#1522: + quality-bullish · cc#1574: loadDivergence removed (card hidden) */
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[idx]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 };
