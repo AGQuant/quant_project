@@ -60,9 +60,16 @@ def performance_qb():
         positions = _rows(cur)
         cur.execute("SELECT ROUND(SUM(pnl)::numeric,0) AS pnl, COUNT(*) AS n FROM quant_paper_positions WHERE status='open'")
         tot = cur.fetchone()
+        # cc#1584: the latest mark on the open book, as IST wall-clock. updated_at is a naive
+        # timestamp written by NOW() on a UTC server (qb_eod_checker), so it is read as UTC and
+        # shifted; the Model Portfolio strip prints THIS, never the page clock. Additive only.
+        cur.execute("SELECT to_char(MAX(updated_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', "
+                    "'DD-Mon-YYYY HH24:MI') FROM quant_paper_positions WHERE status='open'")
+        asof = cur.fetchone()
     return {"tab": "quant_baskets",
             "total_pnl": _num(tot[0]) if tot and tot[0] is not None else 0.0,
             "total_positions": (tot[1] if tot else 0),
+            "as_of_ist": (asof[0] if asof else None),
             "baskets": baskets, "positions": positions}
 
 

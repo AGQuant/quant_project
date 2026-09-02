@@ -1418,6 +1418,7 @@ NAV_REGISTRY = {
     # placement). Route unchanged, still PROTECTED + injected; /m/intel app entry untouched.
     "/news":         ("Intel · V8 tab row (after Wall of Trades)", "v8-tab"),
     "/dashboard#intel": ("Intel (V8 tab)", "tab"),   # cc#1523 rule id=2987
+    "/dashboard#model": ("Model Portfolio (V8 tab · /quant-basket folded in)", "tab"),   # cc#1584 rule id=2987
     "/v10":          ("(-> /dashboard#index · Index Intel tab; standalone retired)", "typed-url"),   # cc#542
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
     "/v14":          ("(-> /dashboard#v14 · V14 Intraday tab; standalone retired)", "typed-url"),   # cc#543
