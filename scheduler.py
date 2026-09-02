@@ -4501,12 +4501,26 @@ def _bg_tc_scanner():
         _tc_scanner_running = False
 
 
+_tc_scanner_eod_ran = None    # cc#1599 P5: the IST date the EOD sweep last completed (restart resets it)
+
+
 def _bg_tc_scanner_eod():
-    """cc#464: EOD sweep — one final check against the last available price so a target/SL
-    touch between 15-min polls is not missed. Still-open positions stay OPEN (screener-only)."""
+    """cc#464: EOD sweep — one final check so a target/SL touch between 15-min polls is not
+    missed (bar-based since cc#1599 P2). Still-open positions stay OPEN (screener-only).
+
+    cc#1599 P5 (Fable 4541): the dispatch used to fire on h==15 and m==32 only, so a deploy that
+    restarted the app on that minute lost the day's sweep (02-Sep). It now fires on every 5-min
+    tick after 15:32 on a trading day and this guard makes it run ONCE per day: the sweep is
+    idempotent (check_exits only touches OPEN rows), so a restart that resets the guard costs one
+    harmless repeat, never a missed day."""
+    global _tc_scanner_eod_ran
+    today = _ist_now().date()
+    if _tc_scanner_eod_ran == today:
+        return _Skip.already_ran()
     try:
         import tc_scanner_endpoints as tcs
         res = tcs.eod_sweep()
+        _tc_scanner_eod_ran = today
         log.info(f"tc_scanner EOD sweep: {res}")
     except Exception as e:
         log.error(f"_bg_tc_scanner_eod: {e}")
@@ -4732,7 +4746,9 @@ async def _scheduler_loop():
             log.error(f"tc_sim dispatch: {_e}")
         if now.weekday() < 5 and h == 15 and m == 20: _spawn(_bg_gate_rebalance)  # cc#190: auto-close over-slot paper positions
         if now.weekday() < 5 and h == 15 and m == 35: _spawn(_bg_yahoo_daily_sync)
-        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 32:
+        # cc#1599 P5: after 15:32 on a trading day, every 5-min tick until 20:00 — the job itself
+        # runs once per day (already_ran otherwise), so a 15:32 restart can no longer erase the sweep.
+        if now.weekday() < 5 and _is_trading_day(now.date()) and (h > 15 or (h == 15 and m >= 32)) and h < 20 and m % 5 == 2:
             _spawn(_bg_tc_scanner_eod)   # cc#464: EOD sweep, just before close-of-session jobs
         if now.weekday() < 5 and h == 15 and m == 40: _spawn(_bg_heal_intraday)  # cc#238 Branch B: heal session gaps before EOD
         # cc#1093 P1: gated on a TRADING day, not just a clock. Without this the job's expected
