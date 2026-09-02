@@ -3412,7 +3412,7 @@ function renderMaster(){
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div>${_posSub}</div>
     <div class="card"><div class="k">Unrealised P&L${_bTag('FUT')}</div><div class="v ${pnlCls(netUnreal)}">${inr(netUnreal)}</div><div class="v-sub">Gross ${inr(unreal)}</div>${_unrealSub}</div>
     <div class="card"><div class="k">Realised P&L${_reTag}</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
-    <div class="card"><div class="k">Net Total${_reTag}</div><div class="v ${pnlCls(netTotal)}">${inr(netTotal)}</div><div class="v-sub">Open ${inr(netUnreal)} + Closed ${inr(netClosed)}</div></div>
+    <div class="card" style="position:relative"><div class="k">Net Total${_reTag}</div><div class="v ${pnlCls(netTotal)}">${inr(netTotal)}</div><div class="v-sub">Open ${inr(netUnreal)} + Closed ${inr(netClosed)}</div>${dlGlyph('net',{key:'dash',title:'Realised P&L',note:'Open positions ('+inr(netUnreal)+' unrealised, net) are not in this line.'})}</div>
     <div class="card"><div class="k">Win / Loss${_reTag}</div><div class="v">${winsTxt} / ${lossTxt}</div><div class="v-sub">Accuracy ${_acc}</div></div>
   </div>`;
   // [ All ] [ Long ] [ Short ] toggle — active tints per spec, count badge per side.
@@ -4738,9 +4738,18 @@ function renderDayLog(data){
 // recomputed on the page. cc#1579: the chart is a centred popup modal (the cc#1561 slide-down
 // panel is gone); both chart glyphs open the same modal and only change which series is emphasised.
 let DL_SERIES=null, DL_SERIES_KEY=null, DL_CHART=null, DL_FOCUS='net';
-function dlGlyph(which){
+// cc#1578: the Dashboard tab's NET TOTAL box opens the SAME modal with its own title and a note that
+// open positions are not in the line (unrealised is never stored as history, so it is never
+// plotted). The context object is parked in DL_CTXS under a key and the glyph passes only the key;
+// a Day Log glyph passes null so it always opens plain. The in-modal Net/Gross chips pass nothing,
+// which keeps whichever context opened the modal.
+const DL_CTXS={};
+let DL_CTX=null;
+function dlGlyph(which,ctx){
   const t=which==='net'?'Net P&L chart':'Gross P&L chart';
-  return `<span class="info-btn" onclick="dlOpenChart('${which}')" title="${t}" style="position:absolute;top:10px;right:10px">&#128200;</span>`;
+  let key='null';
+  if(ctx&&ctx.key){ DL_CTXS[ctx.key]=ctx; key=`'${ctx.key}'`; }
+  return `<span class="info-btn" onclick="dlOpenChart('${which}',${key})" title="${t}" style="position:absolute;top:10px;right:10px">&#128200;</span>`;
 }
 // cc#1579: the chart opens in a centred popup modal, not a slide-down under the KPI row (founder,
 // 02-Sep: "this should popout"). Same shell as the page's own chart popup (qaChartOv / the shared
@@ -4777,18 +4786,20 @@ function _dlEnsureChart(){
     document.head.appendChild(s);
   });
 }
-async function dlOpenChart(which){
+async function dlOpenChart(which,ctxKey){
   DL_FOCUS=which==='gross'?'gross':'net';
+  if(ctxKey!==undefined) DL_CTX=(ctxKey&&DL_CTXS[ctxKey])||null;   // cc#1578: undefined = keep (chips)
+  const _title=(DL_CTX&&DL_CTX.title)||'P&L performance';
   const ov=_dlModal();
   ov.style.display='flex';
   document.addEventListener('keydown',_dlChartEsc);
   const body=document.getElementById('dlChartBody'),msg=document.getElementById('dlChartMsg');
-  msg.textContent='';
-  document.getElementById('dlChartTitle').textContent='P&L performance';
+  msg.textContent=(DL_CTX&&DL_CTX.note)||'';
+  document.getElementById('dlChartTitle').textContent=_title;
   body.innerHTML='<div class="loading">Loading P&L series...</div>';
   try{
     const [d]=await Promise.all([dlLoadSeries(),_dlEnsureChart()]);
-    document.getElementById('dlChartTitle').textContent=`P&L performance - since ${dlFmtD(d.window_start)} (${d.trading_days??0} trading days)`;
+    document.getElementById('dlChartTitle').textContent=`${_title} - since ${dlFmtD(d.window_start)} (${d.trading_days??0} trading days)`;
     // Series switch inside the modal: the two chips re-emphasise without a refetch (cached series).
     const chip=k=>`<span onclick="dlOpenChart('${k}')" style="cursor:pointer;padding:1px 7px;border-radius:999px;border:1px solid var(--line);${DL_FOCUS===k?'color:var(--txt);font-weight:700;background:var(--line)':'color:var(--dim)'}">${k==='net'?'Net':'Gross'}</span>`;
     document.getElementById('dlChartSub').innerHTML=`Cumulative by exit date · ${chip('net')} ${chip('gross')} · clicked series emphasised, other faint · Net is after Rs.500/closed trade brokerage`;
@@ -4801,6 +4812,7 @@ function dlCloseModal(){
   const ov=document.getElementById('dlChartOv');if(ov)ov.style.display='none';
   document.removeEventListener('keydown',_dlChartEsc);
   if(DL_CHART){try{DL_CHART.destroy();}catch(e){}DL_CHART=null;}
+  DL_CTX=null;   // cc#1578: the next open states its own context or none
 }
 function dlInfoGlyph(){
   return `<span class="info-btn" onclick="dlToggleInfo(event)" title="How this return is worked out" style="position:absolute;top:10px;right:10px">i</span>`;
