@@ -109,6 +109,16 @@
 #gvp .g-pn .g-pr:last-child{border-bottom:0}
 #gvp .g-pn .g-pr span{font-family:var(--mono);font-weight:700;white-space:nowrap}
 #gvp .g-hfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:12px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+/* C·A·R·D strip on the hero (shared scorr_card_strip.js component; page only positions it) */
+#gvp .g-strip{display:flex;justify-content:center;margin-top:12px;min-height:32px}
+#gvp .g-strip .scorr-card-strip{gap:8px}
+/* GVM 60-day mini trend (R3: one line); tap opens the price chart */
+#gvp .g-trend{margin-top:14px;padding:10px 10px 8px;cursor:pointer}
+#gvp .g-trend .g-thd{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute);margin-bottom:6px}
+#gvp .g-trend .g-thd .g-exp{color:var(--gold);letter-spacing:.3px}
+#gvp svg.g-ch{display:block;width:100%;height:auto}
+#gvp .g-lg{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:6px}
+#gvp .g-lg i{display:inline-block;width:10px;height:3px;margin-right:4px;vertical-align:middle;background:var(--gold)}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -140,8 +150,8 @@
 (function(){
 'use strict';
 /* ── fetch layer: the three GVM endpoints the card allows, nothing else ─────────────── */
-var URLS = { company:'/api/gvm/company/', search:'/api/gvm/search', list:'/api/mobile/gvm?limit=25' };
-var STATE = { sym:null, co:null, list:null, fetchedAt:null };
+var URLS = { company:'/api/gvm/company/', search:'/api/gvm/search', list:'/api/mobile/gvm?limit=25', history:'/api/gvm/history/' };
+var STATE = { sym:null, co:null, list:null, hist:null, fetchedAt:null };
 function getJ(url){ return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); }); }
 /* ── helpers ─────────────────────────────────────────────────────────────────────────── */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -192,7 +202,9 @@ function loadCompany(sym){
   getJ(URLS.company+encodeURIComponent(sym)).then(function(d){
     if(STATE.sym !== sym) return;
     if(!d || d.error || !d.symbol){ fail((d && d.error) ? String(d.error) : 'No GVM report for '+sym+'. Scores exist only for companies the nightly run covers.', sym); return; }
-    STATE.co = d; STATE.fetchedAt = istNow(); renderCompany();
+    STATE.co = d; STATE.hist = null; STATE.fetchedAt = istNow(); renderCompany();
+    getJ(URLS.history+encodeURIComponent(sym)+'?days=60').then(function(h){ if(STATE.sym !== sym) return; STATE.hist = (h && h.points) ? h.points : []; renderTrend(); },
+                                                                   function(){ if(STATE.sym === sym){ STATE.hist = false; renderTrend(); } });
   }).catch(function(){ if(STATE.sym === sym) fail('Could not load the GVM report for '+sym+'.', sym); });
 }
 /* ── HERO (ref hero; session_log 36513 hero + rule 4 of the card) ─────────────────────── */
@@ -266,9 +278,34 @@ function renderHero(d){
       '<div class="g-f well-up"><div class="g-fl">SECTOR GVM</div><div class="g-fv">'+(sg?fx(sg.mcap_wtd_gvm,2):'—')+'</div><div class="g-fs">'+(sg && num(sg.stock_vs_sector) ? 'you are '+(sg.stock_vs_sector>0?'+':sg.stock_vs_sector<0?'−':'')+Math.abs(sg.stock_vs_sector).toFixed(2) : 'no sector read')+'</div></div>'+
       '<div class="g-f well-up"><div class="g-fl">SCORE TREND</div><div class="g-fv '+(tw?tw.cls:'mu')+'">'+(tw?tw.word:'—')+'</div><div class="g-fs">'+(tw?tw.days+' days · '+fx(tw.now,1):'no trend yet')+'</div></div>'+
     '</div>'+
+    '<div class="g-strip">'+(window.ScorrCardStripHtml ? window.ScorrCardStripHtml(d.symbol, '') : '')+'</div>'+
+    '<div class="g-trend well" id="g-trend" role="button" data-trend="1" aria-label="Open the price chart with the GVM overlay"><div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for price chart ⤢</span></div><div class="g-empty" style="padding:10px">Loading the score history…</div></div>'+
     '<div class="g-pn">'+pnCol('STRONG','up',d.positives)+pnCol('WEAK','dn',d.negatives)+'</div>'+
     '<div class="g-hfoot"><span>score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</span><span>Pick a capsule below ↓</span></div>'+
     '</section>';
+}
+/* GVM mini trend: /api/gvm/history points (oldest first), 0-10 axis, ref geometry (viewBox 360x90,
+   grid at 2.5 / 5 / 7.5 → y 79.1 / 54.8 / 30.4), ONE polyline (R3). */
+function yOf(v){ return 103.45 - 9.74*v; }
+function renderTrend(){
+  var el = document.getElementById('g-trend'); if(!el) return;
+  var hd = '<div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for price chart ⤢</span></div>';
+  var pts = STATE.hist;
+  if(pts === null){ el.innerHTML = hd+'<div class="g-empty" style="padding:10px">Loading the score history…</div>'; return; }
+  if(pts === false){ el.innerHTML = hd+'<div class="g-empty" style="padding:10px">Score history is not available right now.</div>'; return; }
+  var rows = pts.filter(function(x){ return num(x.gvm_score); }).slice().sort(function(a,b){ return a.score_date < b.score_date ? -1 : 1; });
+  if(rows.length < 2){ el.innerHTML = hd+'<div class="g-empty" style="padding:10px">Not enough nightly scores yet to draw a trend ('+rows.length+' so far).</div>'; return; }
+  var n = rows.length, hi = -1, lo = 11, poly = [];
+  for(var i=0;i<n;i++){ var v = Math.max(0, Math.min(10, rows[i].gvm_score)); if(v>hi) hi=v; if(v<lo) lo=v; poly.push((6+348*i/(n-1)).toFixed(1)+','+yOf(v).toFixed(1)); }
+  var now = rows[n-1].gvm_score, first = rows[0].score_date, last = rows[n-1].score_date;
+  var grid = [2.5,5,7.5].map(function(g){ return '<line x1="6" y1="'+yOf(g).toFixed(1)+'" x2="354" y2="'+yOf(g).toFixed(1)+'" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 4"/>'; }).join('');
+  el.innerHTML = hd+'<svg class="g-ch" viewBox="0 0 360 90" aria-hidden="true">'+grid+'<polyline fill="none" stroke="var(--gold)" stroke-width="2.4" stroke-linejoin="round" points="'+poly.join(' ')+'"/></svg>'+
+    '<div class="g-lg"><span><i></i>GVM 0–10 · nightly score · '+n+' sessions</span><span>now <b class="gd mono">'+fx(now,2)+'</b> · high '+fx(hi,2)+' · low '+fx(lo,2)+'</span></div>'+
+    '<div class="g-asof">'+esc(first)+' → '+esc(last)+'</div>';
+}
+function openChart(){
+  if(window.ScorrChartCard && STATE.sym){ window.ScorrChartCard.open(STATE.sym, {theme:'dark'}); return true; }
+  return false;
 }
 function renderCompany(){
   var d = STATE.co;
@@ -297,7 +334,8 @@ function loadLanding(){
 /* ── clicks ──────────────────────────────────────────────────────────────────────────── */
 document.getElementById('gvp').addEventListener('click', function(e){
   var g = e.target.closest('[data-go]'); if(g){ go(g.getAttribute('data-go')); return; }
-  var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); }
+  var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); return; }
+  var t = e.target.closest('[data-trend]'); if(t){ openChart(); }
 });
 /* ── boot ────────────────────────────────────────────────────────────────────────────── */
 var s0 = symFromUrl();
