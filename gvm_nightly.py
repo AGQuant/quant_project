@@ -1038,9 +1038,21 @@ def gvm_trend_verdict(symbol: str, tf: str = "1Y"):
 
 @router.get("/api/gvm/history/{symbol}")
 def gvm_history(symbol: str, days: int = 180):
+    """Nightly score points, newest first. cc#1615: each point also carries `price` — the
+    raw_prices close on the score date (or the last close before it) — so the app's score-trend
+    chart can draw PRICE beside GVM / G / V / M without a second call. Read-only; `days` is the
+    row cap (up to 2500 so ALL / 3Y ranges reach the 2021 start of gvm_history)."""
+    days = max(1, min(int(days or 180), 2500))
     with _conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute("""
-            SELECT score_date, g_score, v_score, m_score, gvm_score, verdict
-            FROM gvm_history WHERE symbol = %s ORDER BY score_date DESC LIMIT %s
+            SELECT h.score_date, h.g_score, h.v_score, h.m_score, h.gvm_score, h.verdict,
+                   p.close AS price, p.price_date
+            FROM gvm_history h
+            LEFT JOIN LATERAL (
+                SELECT close, price_date FROM raw_prices
+                WHERE symbol = h.symbol AND close IS NOT NULL AND price_date <= h.score_date
+                ORDER BY price_date DESC LIMIT 1
+            ) p ON TRUE
+            WHERE h.symbol = %s ORDER BY h.score_date DESC LIMIT %s
         """, (symbol.upper(), days))
         return {"symbol": symbol.upper(), "points": cur.fetchall()}

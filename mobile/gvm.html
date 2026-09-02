@@ -177,7 +177,7 @@ function renderHero(d){
       '<div class="g-f well-up"><div class="g-fl">SCORE TREND</div><div class="g-fv '+(tw?tw.cls:'mu')+'">'+(tw?tw.word:'—')+'</div><div class="g-fs">'+(tw?tw.days+' days · '+fx(tw.now,1):'no trend yet')+'</div></div>'+
     '</div>'+
     '<div class="g-strip"></div>'+
-    '<div class="g-trend well" id="g-trend" role="button" data-trend="1" aria-label="Open the price chart with the GVM overlay"><div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for price chart ⤢</span></div><div class="g-empty" style="padding:10px">Loading the score history…</div></div>'+
+    '<div class="g-trend well" id="g-trend" role="button" data-trend="1" aria-label="Open the score trend chart"><div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for score chart ⤢</span></div><div class="g-empty" style="padding:10px">Loading the score history…</div></div>'+
     '<div class="g-pn">'+pnCol('STRONG','up',d.positives)+pnCol('WEAK','dn',d.negatives)+'</div>'+
     '<div class="g-hfoot"><span>score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</span><span>Pick a capsule below ↓</span></div>'+
     '</section>';
@@ -187,7 +187,7 @@ function renderHero(d){
 function yOf(v){ return 103.45 - 9.74*v; }
 function renderTrend(){
   var el = document.getElementById('g-trend'); if(!el) return;
-  var hd = '<div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for price chart ⤢</span></div>';
+  var hd = '<div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for score chart ⤢</span></div>';
   var pts = STATE.hist;
   if(pts === null){ el.innerHTML = hd+'<div class="g-empty" style="padding:10px">Loading the score history…</div>'; return; }
   if(pts === false){ el.innerHTML = hd+'<div class="g-empty" style="padding:10px">Score history is not available right now.</div>'; return; }
@@ -609,6 +609,141 @@ function watchModal(){
   sync();
   if(!modalObs){ modalObs = new MutationObserver(sync); modalObs.observe(ov, {attributes:true, attributeFilter:['style']}); }
 }
+/* ── cc#1615 · SCORE TREND OVERLAY (36513 r4 + the 02-Sep 20:15 range amendment) ──────────────
+   One clean score chart: GVM line (gold, always on) with G / V / M / PRICE toggles, left axis
+   fixed 0-10 (2.5 / 5 / 7.5 gridlines), PRICE as a plain chalk line on a right axis. The range
+   segment is the C-card chart set, READ from scorr_chart_card.js at runtime (TF_ORDER / TF /
+   TF_LABEL parsed out of the loaded script text - never retyped; the copy below is only the
+   fallback if that read fails), default 3M like the card. 1D = last 2 nightly points, 1W = last
+   5 sessions; a range the symbol's history cannot cover is disabled with a tooltip, never a
+   shorter series relabelled (cc#1566 rule). Pillar colours = the GVM page ChartExpandModal
+   constants (cc.g / cc.v / cc.m, 34463). Own component; scorr_chart_card.js is not called here. */
+var TREND = { open:false, sym:null, pts:null, tf:'3M', on:{g:false, v:false, m:false, price:false}, cfg:null };
+var TREND_COL = { gvm:'var(--gold,#D4AF37)', g:'var(--grn,#2FD48B)', v:'var(--amber,#F5B94A)', m:'var(--blu,#4D7CFE)', price:'var(--chalk,#E8ECF5)' };   /* cc.g / cc.v / cc.m = the --grn / --amber / --blu tokens (34463) */
+var TREND_CFG_FALLBACK = { order:['5m','1W','1M','3M','1Y','3Y','ALL'], days:{'5m':null,'1W':7,'1M':30,'3M':90,'1Y':365,'3Y':1095,'ALL':1825}, label:{'5m':'1D'}, def:'3M' };
+function trendCfg(){
+  if(TREND.cfg) return Promise.resolve(TREND.cfg);
+  return fetchWithTimeout('/scorr_chart_card.js').then(function(r){ return r.text(); }).then(function(src){
+    var mo = /TF_ORDER\s*=\s*(\[[^\]]*\])/.exec(src), mt = /var TF\s*=\s*(\{[^}]*\})/.exec(src), ml = /TF_LABEL\s*=\s*(\{[^}]*\})/.exec(src), md = /_tf\s*=\s*"([^"]+)"/.exec(src);
+    var cfg = { order: mo ? JSON.parse(mo[1].replace(/'/g,'"')) : TREND_CFG_FALLBACK.order,
+                days: mt ? JSON.parse(mt[1].replace(/(\w+)\s*:/g,'"$1":').replace(/'/g,'"')) : TREND_CFG_FALLBACK.days,
+                label: ml ? JSON.parse(ml[1].replace(/'/g,'"')) : TREND_CFG_FALLBACK.label,
+                def: md ? md[1] : TREND_CFG_FALLBACK.def, source: (mo && mt) ? 'chart card' : 'fallback' };
+    TREND.cfg = cfg; return cfg;
+  }).catch(function(){ TREND.cfg = Object.assign({source:'fallback'}, TREND_CFG_FALLBACK); return TREND.cfg; });
+}
+function trendPoints(){ return (TREND.pts || []).filter(function(x){ return num(x.gvm_score); }).slice().sort(function(a,b){ return a.score_date < b.score_date ? -1 : 1; }); }
+function trendCover(pts){ if(pts.length < 2) return 0; var a = new Date(pts[0].score_date), b = new Date(pts[pts.length-1].score_date); return Math.round((b - a) / 86400000); }
+function trendAvail(key, pts){
+  var d = TREND.cfg.days[key];
+  if(key === '5m') return pts.length >= 2;
+  if(key === '1W') return pts.length >= 5;
+  if(key === 'ALL') return pts.length >= 2;
+  return num(d) && trendCover(pts) >= d;
+}
+function trendWindow(key, pts){
+  if(key === '5m') return pts.slice(-2);
+  if(key === '1W') return pts.slice(-5);
+  if(key === 'ALL') return pts;
+  var d = TREND.cfg.days[key]; if(!num(d)) return pts;
+  var last = new Date(pts[pts.length-1].score_date), cut = new Date(last.getTime() - d*86400000);
+  return pts.filter(function(x){ return new Date(x.score_date) >= cut; });
+}
+function trendDate(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); if(!m) return String(iso||''); return (+m[3])+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1]+(TREND.tf==='ALL'||TREND.tf==='3Y'||TREND.tf==='1Y' ? ' '+m[1].slice(2) : ''); }
+function trendWords(win){
+  if(win.length < 2) return 'Not enough points for a read.';
+  var a = win[0], b = win[win.length-1], best = null;
+  [['g','Growth','g_score'],['v','Value','v_score'],['m','Momentum','m_score']].forEach(function(p){
+    if(!num(a[p[2]]) || !num(b[p[2]])) return; var d = b[p[2]] - a[p[2]];
+    if(!best || Math.abs(d) > Math.abs(best.d)) best = { name:p[1], d:d, from:a[p[2]], to:b[p[2]] };
+  });
+  if(!best) return 'Pillar scores are not available for this range.';
+  if(Math.abs(best.d) < 0.1) return 'The pillars barely moved over this range.';
+  return best.name + ' moved the most: ' + fx(best.from,1) + ' to ' + fx(best.to,1) + '.';
+}
+function renderTrendOverlay(){
+  var box = document.getElementById('g-tov-body'); if(!box) return;
+  var pts = trendPoints(), cfg = TREND.cfg;
+  if(!pts.length){ box.innerHTML = '<div class="g-empty" style="padding:16px">Not enough nightly scores yet to draw a trend.</div>'; return; }
+  if(!trendAvail(TREND.tf, pts)){ var firstOk = cfg.order.filter(function(k){ return trendAvail(k, pts); }); TREND.tf = firstOk.length ? firstOk[firstOk.length-1] : 'ALL'; }
+  var win = trendWindow(TREND.tf, pts), n = win.length, cover = trendCover(pts);
+  var seg = '<div style="display:flex;gap:4px;width:100%;margin:0 0 10px">' + cfg.order.map(function(k){
+    var ok = trendAvail(k, pts), on = k === TREND.tf, lbl = cfg.label[k] || k, need = cfg.days[k];
+    var tip = ok ? '' : (k === '5m' ? 'needs 2 nightly points' : k === '1W' ? 'needs 5 sessions' : 'needs ' + need + ' days of history; this symbol has ' + cover);
+    return '<button type="button" data-tf="'+k+'"'+(ok?'':' disabled')+' title="'+esc(tip)+'" style="flex:1;min-height:36px;border-radius:8px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:'+(ok?'pointer':'not-allowed')+';border:1px solid '+(on?'rgba(212,175,55,.6)':'var(--line)')+';background:'+(on?'var(--gold-d,rgba(212,175,55,.14))':'var(--well)')+';color:'+(on?'var(--gold,#D4AF37)':(ok?'var(--mute)':'var(--dim)'))+';opacity:'+(ok?1:.45)+'">'+esc(lbl)+'</button>';
+  }).join('') + '</div>';
+  var chip = function(key, label, col, locked){
+    var on = locked || TREND.on[key];
+    return '<button type="button" '+(locked?'aria-disabled="true"':'data-tog="'+key+'"')+' aria-pressed="'+on+'" style="display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;border-radius:999px;font-family:var(--mono);font-size:11px;font-weight:700;cursor:'+(locked?'default':'pointer')+';border:1px solid '+(on?col:'var(--line)')+';background:'+(on?'rgba(255,255,255,.04)':'transparent')+';color:'+(on?col:'var(--mute)')+'"><span style="width:14px;height:3px;border-radius:2px;background:'+col+';opacity:'+(on?1:.35)+'"></span>'+label+'</button>';
+  };
+  var togs = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' + chip('gvm','GVM',TREND_COL.gvm,true) + chip('g','G',TREND_COL.g) + chip('v','V',TREND_COL.v) + chip('m','M',TREND_COL.m) + chip('price','PRICE',TREND_COL.price) + '</div>';
+  var W = 360, H = 220, L = 26, R = TREND.on.price ? 44 : 10, T = 10, B = 24, iw = W - L - R, ih = H - T - B;
+  var xOf = function(i){ return n === 1 ? L + iw/2 : L + iw * i / (n-1); }, yS = function(v){ return T + ih * (1 - Math.max(0, Math.min(10, v))/10); };
+  var pr = win.map(function(x){ return num(x.price) ? x.price : null; }).filter(function(v){ return v != null; });
+  var pmin = pr.length ? Math.min.apply(null, pr) : null, pmax = pr.length ? Math.max.apply(null, pr) : null;
+  var yP = function(v){ if(pmin == null || pmax === pmin) return T + ih/2; return T + ih * (1 - (v - pmin)/(pmax - pmin)); };
+  var line = function(field, col, w, dash){ var d = []; for(var i=0;i<n;i++){ var v = win[i][field]; if(!num(v)){ continue; } d.push(xOf(i).toFixed(1)+','+yS(v).toFixed(1)); }
+    return d.length > 1 ? '<polyline fill="none" stroke="'+col+'" stroke-width="'+w+'" stroke-linejoin="round" stroke-linecap="round"'+(dash?' stroke-dasharray="'+dash+'"':'')+' points="'+d.join(' ')+'"/>' : ''; };
+  var svg = '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" aria-label="Score trend chart">';
+  [0,2.5,5,7.5,10].forEach(function(g){ svg += '<line x1="'+L+'" y1="'+yS(g).toFixed(1)+'" x2="'+(W-R)+'" y2="'+yS(g).toFixed(1)+'" stroke="var(--line)" stroke-width="1"'+(g===0||g===10?'':' stroke-dasharray="2 4"')+'/><text x="'+(L-4)+'" y="'+(yS(g)+3.5).toFixed(1)+'" text-anchor="end" font-family="var(--mono)" font-size="9" fill="var(--dim)">'+g+'</text>'; });
+  if(TREND.on.price && pmin != null){
+    var pd = []; for(var i=0;i<n;i++){ if(num(win[i].price)) pd.push(xOf(i).toFixed(1)+','+yP(win[i].price).toFixed(1)); }
+    if(pd.length > 1) svg += '<polyline fill="none" stroke="'+TREND_COL.price+'" stroke-width="1.6" opacity=".9" points="'+pd.join(' ')+'"/>';
+    svg += '<text x="'+(W-R+4)+'" y="'+(T+4)+'" font-family="var(--mono)" font-size="9" fill="var(--mute)">'+Math.round(pmax).toLocaleString('en-IN')+'</text><text x="'+(W-R+4)+'" y="'+(T+ih)+'" font-family="var(--mono)" font-size="9" fill="var(--mute)">'+Math.round(pmin).toLocaleString('en-IN')+'</text>';
+  }
+  if(TREND.on.g) svg += line('g_score', TREND_COL.g, 1.6);
+  if(TREND.on.v) svg += line('v_score', TREND_COL.v, 1.6);
+  if(TREND.on.m) svg += line('m_score', TREND_COL.m, 1.6);
+  svg += line('gvm_score', TREND_COL.gvm, 2.6);
+  var xl = [0, Math.floor((n-1)/2), n-1].filter(function(v,i,a){ return a.indexOf(v) === i; });
+  xl.forEach(function(i, k){ svg += '<text x="'+xOf(i).toFixed(1)+'" y="'+(H-8)+'" text-anchor="'+(k===0?'start':(k===xl.length-1?'end':'middle'))+'" font-family="var(--mono)" font-size="9" fill="var(--dim)">'+esc(trendDate(win[i].score_date))+'</text>'; });
+  svg += '</svg>';
+  var a = win[0], b = win[n-1], hi = -1, lo = 11; win.forEach(function(x){ if(x.gvm_score > hi) hi = x.gvm_score; if(x.gvm_score < lo) lo = x.gvm_score; });
+  var dg = b.gvm_score - a.gvm_score, dp = (num(a.price) && num(b.price) && a.price) ? (b.price/a.price - 1)*100 : null;
+  var tile = function(k, v, cls){ return '<div class="well-up" style="flex:1 1 30%;min-width:88px;padding:8px 10px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--dim)">'+k+'</div><div class="'+(cls||'')+'" style="font-family:var(--mono);font-size:14px;font-weight:800">'+v+'</div></div>'; };
+  var stats = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">' + tile('GVM NOW', fx(b.gvm_score,2), 'gd') + tile('PERIOD HIGH', fx(hi,2)) + tile('PERIOD LOW', fx(lo,2))
+    + tile('DELTA', (dg>=0?'+':'')+fx(dg,2), dg >= 0.1 ? 'up' : dg <= -0.1 ? 'dn' : 'mu')
+    + tile('PRICE DELTA', dp == null ? '—' : (dp>=0?'+':'')+fx(dp,1)+'%', dp == null ? 'mu' : (dp >= 0 ? 'up' : 'dn')) + '</div>';
+  var words = '<div style="font-size:12px;line-height:1.5;color:var(--txt)">'+esc(trendWords(win))+'</div>';
+  var foot = '<div class="g-asof" style="margin-top:8px">'+esc(trendDate(a.score_date))+' → '+esc(trendDate(b.score_date))+' · '+n+' nightly point'+(n===1?'':'s')+' · ranges = the chart card set ('+esc(cfg.source||'')+')'+(TREND.on.price ? ' · price = daily close' : '')+'</div>';
+  box.innerHTML = seg + togs + svg + stats + words + foot;
+}
+function openScoreTrend(){
+  if(!STATE.sym) return;
+  var ov = document.getElementById('g-tov');
+  if(!ov){
+    ov = document.createElement('div'); ov.id = 'g-tov';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:var(--bg,#0A0A0C);display:none;flex-direction:column;overflow:auto';
+    ov.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg,#0A0A0C);z-index:1">'
+      + '<div id="g-tov-title" style="font-family:var(--mono);font-size:12px;font-weight:800;letter-spacing:.1em;color:var(--gold,#D4AF37)"></div>'
+      + '<button type="button" data-tov-close="1" aria-label="Close" style="margin-left:auto;background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;min-width:32px;min-height:32px;font-size:14px;cursor:pointer">✕</button></div>'
+      + '<div id="g-tov-body" style="padding:12px 14px 24px"></div>';
+    ov.addEventListener('click', function(e){
+      if(e.target.closest('[data-tov-close]')){ closeScoreTrend(); return; }
+      var tf = e.target.closest('[data-tf]'); if(tf && !tf.disabled){ TREND.tf = tf.getAttribute('data-tf'); renderTrendOverlay(); return; }
+      var tg = e.target.closest('[data-tog]'); if(tg){ var k = tg.getAttribute('data-tog'); TREND.on[k] = !TREND.on[k]; renderTrendOverlay(); return; }
+    });
+    document.body.appendChild(ov);
+  }
+  TREND.open = true; TREND.sym = STATE.sym;
+  document.getElementById('g-tov-title').textContent = STATE.sym + ' · score trend';
+  document.getElementById('g-tov-body').innerHTML = '<div class="g-empty" style="padding:16px">Loading the score history…</div>';
+  ov.style.display = 'flex'; capsule.hidden = true; document.body.style.overflow = 'hidden';
+  var sym = STATE.sym;
+  Promise.all([trendCfg(), getJ(URLS.history+encodeURIComponent(sym)+'?days=2500').catch(function(){ return null; })]).then(function(r){
+    if(!TREND.open || TREND.sym !== sym) return;
+    var cfg = r[0], h = r[1];
+    if(TREND.tf == null || cfg.order.indexOf(TREND.tf) < 0) TREND.tf = cfg.def;
+    TREND.pts = (h && h.points) ? h.points : [];
+    renderTrendOverlay();
+  });
+}
+function closeScoreTrend(){
+  var ov = document.getElementById('g-tov'); if(ov) ov.style.display = 'none';
+  TREND.open = false; document.body.style.overflow = '';
+  if(STATE.co) capsule.hidden = false;
+}
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && TREND.open) closeScoreTrend(); });
 /* the strip component is a deferred site-wide script; fill it now if present, else once the window has loaded */
 function fillStrip(){ var el = document.querySelector('#gvp .g-strip'); if(!el || el.firstChild || !STATE.co) return; if(window.ScorrCardStripHtml) el.innerHTML = window.ScorrCardStripHtml(STATE.co.symbol, ''); }
 window.addEventListener('load', fillStrip);
@@ -642,7 +777,7 @@ function loadLanding(){
 document.getElementById('gvp').addEventListener('click', function(e){
   var g = e.target.closest('[data-go]'); if(g){ go(g.getAttribute('data-go')); return; }
   var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); return; }
-  var t = e.target.closest('[data-trend]'); if(t){ openChart(); return; }
+  var t = e.target.closest('[data-trend]'); if(t){ openScoreTrend(); return; }   /* cc#1615: the score chart, not the chart card */
   var fb = e.target.closest('[data-fin]'); if(fb){ finView = fb.getAttribute('data-fin'); var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling; if(fs){ var tmp2 = document.createElement('div'); tmp2.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp2.children[1], fs); } return; }
   var pt = e.target.closest('[data-peers-toggle]'); if(pt){ peersFull = !peersFull; var pe = document.getElementById('peers'); var sec = pe && pe.nextElementSibling; if(sec){ var tmp = document.createElement('div'); tmp.innerHTML = secPeers(STATE.co); pe.parentNode.replaceChild(tmp.children[1], sec); } }
 });
