@@ -6665,8 +6665,31 @@ function ipCard(key){
   } else {
     rail = '<div class="empty">Pivots pending for ' + esc(key) + ' — the rail needs the day\'s S/R levels.</div>';
   }
-  /* the open legs - side is the app's cc#1244 lesson: the payload field is side BUY/SELL, mapped
-     by normSide in loadOpen (SELL->SHORT, BUY->LONG), never a `direction` field it never had. */
+  /* cc#1571 P3 (founder comment 2, 02-Sep-2026): the open legs no longer render under the rail -
+     they moved to the OPEN POSITIONS section at the foot of the pane (rOpenPos / ipLegs). The
+     IN POSITION badge, the open total and View-on-chart stay here. */
+  /* footer: the shared chart card (cc#706/803 - never a second chart implementation), the open
+     total, and the engine state with the vs-PP read. */
+  var dir = (legs.find(function(l){ return l.type === 'FUT'; }) || {}).side || sig.dir || '—';
+  var tot = legs.reduce(function(a, l){ return a + (l.pnl || 0); }, 0);
+  var vsPp = (d.cmp && pvt && pvt.pp)
+    ? ' · <span style="color:' + (d.cmp >= pvt.pp ? 'var(--gr)' : 'var(--rd)') + '">'
+      + (d.cmp >= pvt.pp ? 'above' : 'below') + ' PP ' + Math.abs((d.cmp - pvt.pp) / pvt.pp * 100).toFixed(2) + '%</span>'
+    : '';
+  var since = sig.flipTs ? ' since ' + esc(String(sig.flipTs).slice(5, 16).replace('T', ' ')) : '';
+  var foot = '<div class="ipf"><button type="button" class="btn pri" onclick="iiIpChart(\'' + feed + '\')">View on chart</button>'
+    + (legs.length ? '<span class="' + (tot >= 0 ? 'pos' : 'neg') + '" style="font:600 13px var(--f-m)">'
+        + (tot < 0 ? '−' : '+') + '₹' + num(Math.abs(tot)) + ' open</span>' : '')
+    + '<span class="sig">V10 · ST+EMA <b>' + esc(dir) + '</b>' + since + vsPp + '</span></div>';
+  return '<div class="card ip">' + head + rail + foot + '</div>';
+}
+/* cc#1571 P3: the open legs of one index, as they rendered inside the ip card until 02-Sep-2026.
+   Side is the app's cc#1244 lesson: the payload field is side BUY/SELL, mapped by normSide in
+   loadOpen (SELL->SHORT, BUY->LONG), never a `direction` field it never had. */
+function ipLegs(key){
+  var feed = key === 'NIFTY' ? 'NIFTY50' : 'BANKNIFTY';
+  var sig = D.sig[key] || {};
+  var legs = D.open.filter(function(p){ return (p.sym || '').toUpperCase() === feed; });
   var legsHtml;
   if(legs.length){
     legsHtml = legs.map(function(l){
@@ -6689,20 +6712,24 @@ function ipCard(key){
   } else {
     legsHtml = '<div class="empty">Engine snapshot not available yet — first tick lands after the bell.</div>';
   }
-  /* footer: the shared chart card (cc#706/803 - never a second chart implementation), the open
-     total, and the engine state with the vs-PP read. */
-  var dir = (legs.find(function(l){ return l.type === 'FUT'; }) || {}).side || sig.dir || '—';
   var tot = legs.reduce(function(a, l){ return a + (l.pnl || 0); }, 0);
-  var vsPp = (d.cmp && pvt && pvt.pp)
-    ? ' · <span style="color:' + (d.cmp >= pvt.pp ? 'var(--gr)' : 'var(--rd)') + '">'
-      + (d.cmp >= pvt.pp ? 'above' : 'below') + ' PP ' + Math.abs((d.cmp - pvt.pp) / pvt.pp * 100).toFixed(2) + '%</span>'
-    : '';
-  var since = sig.flipTs ? ' since ' + esc(String(sig.flipTs).slice(5, 16).replace('T', ' ')) : '';
-  var foot = '<div class="ipf"><button type="button" class="btn pri" onclick="iiIpChart(\'' + feed + '\')">View on chart</button>'
-    + (legs.length ? '<span class="' + (tot >= 0 ? 'pos' : 'neg') + '" style="font:600 13px var(--f-m)">'
-        + (tot < 0 ? '−' : '+') + '₹' + num(Math.abs(tot)) + ' open</span>' : '')
-    + '<span class="sig">V10 · ST+EMA <b>' + esc(dir) + '</b>' + since + vsPp + '</span></div>';
-  return '<div class="card ip">' + head + rail + '<div class="legs">' + legsHtml + '</div>' + foot + '</div>';
+  var head = '<div class="iph"><span class="nm">' + key + '</span>'
+    + (legs.length
+        ? '<span class="' + (tot >= 0 ? 'pos' : 'neg') + '" style="font:600 13px var(--f-m)">'
+          + (tot < 0 ? '−' : '+') + '₹' + num(Math.abs(tot)) + ' open</span>'
+          + '<span class="badge b-live"><span class="dot"></span>' + legs.length + ' OPEN</span>'
+        : '<span class="badge b-static">NO POSITION</span>') + '</div>';
+  return { n: legs.length, html: '<div class="card ip">' + head + '<div class="legs">' + legsHtml + '</div></div>' };
+}
+/* ── OPEN POSITIONS - the V10 open legs, one card per index, at the foot of the pane (cc#1571) ── */
+function rOpenPos(){
+  var n = ipLegs('NIFTY'), b = ipLegs('BANKNIFTY');
+  var cnt = n.n + b.n;
+  return '<section class="iisec"><div class="sh"><span class="st">Open Positions</span>'
+    + (cnt ? '<span class="badge b-live"><span class="dot"></span>' + cnt + ' OPEN</span>'
+           : '<span class="badge b-static">NONE OPEN</span>')
+    + '<span class="asof">V10 paper book · entry / stop / target / live P&amp;L from /api/v10/positions</span></div>'
+    + '<div class="two">' + n.html + b.html + '</div></section>';
 }
 function ipGuide(){
   iiSheet('<div class="iish">How to read Index Position</div><div class="vfg">'
@@ -6712,8 +6739,9 @@ function ipGuide(){
     + '<p><b>The dot.</b> Where the index trades now. Its place between the levels is the '
     + 'position read — above PP with room to R1 is a very different day from sitting on S1.</p>'
     + '<p><b>The legs.</b> The V10 paper book\'s open legs on this index — entry, stop, target, '
-    + 'lot size and live P&amp;L. Each V10 signal fires a futures leg and an option write; they '
-    + 'are peers, not a hedge.</p>'
+    + 'lot size and live P&amp;L — sit in the Open Positions section at the foot of the page '
+    + '(cc#1571); this card shows the open total. Each V10 signal fires a futures leg and an '
+    + 'option write; they are peers, not a hedge.</p>'
     + '<p><b>View on chart.</b> Opens the same shared chart every symbol on Scorr opens — '
     + '5-minute candles with the V10 trade markers.</p>'
     + '</div>');
@@ -7217,6 +7245,9 @@ function render(){
     /* cc#1574 (founder comment 5, 02-Sep-2026): the Futures ⇄ Equity Divergence card is HIDDEN -
        rDivergence() and /api/v10/divergence stay intact, only this call and its loader are out. */
     `<div class="stack">` + rSettings() + rPerf() + `</div>` +
+    /* cc#1571 P3 (founder comment 2, 02-Sep-2026, "V10 Open and Closed shift to last on page"):
+       the open legs left the Index Position cards and render here, after every market card. */
+    rOpenPos() +
     /* cc#1150 verify D: the company name was rendered here. The ref's own foot does not carry it,
        and the product_name_rule says this pane says INDEX INTEL. Dropped to match the ref exactly. */
     `<div class="foot">Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
