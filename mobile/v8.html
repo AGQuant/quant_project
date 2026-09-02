@@ -520,7 +520,7 @@ function renderSectors(){
   nEl.textContent = rows.length + (rows.length===1?' group':' groups');
   if(!rows.length){
     more.innerHTML = ''; note.textContent = '';
-    el.innerHTML = '<div class="slab dense empty">No sector rows yet today. The table fills once the live sector averages have a first tick.</div>' + asofLine(STATE.fetchedAt);
+    el.innerHTML = '<div class="slab dense empty">No sector rows yet today. The table fills once the live sector averages have a first tick.</div>' + asofSession(STATE.fetchedAt);
     return;
   }
   var show = secAll ? rows : rows.slice(0, SEC_LIMIT);
@@ -531,8 +531,8 @@ function renderSectors(){
          (num(r.pass) ? '<td class="pass">'+r.pass+'</td>' : '<td class="pass nil">—</td>')+'</tr>';
   }
   h += '</tbody></table>';
-  var asof = secView==='n50' ? asofLine(STATE.fetchedAt, 'live averages')
-           : asofLine(STATE.fetchedAt, (nf && nf.score_date) ? 'EOD checks as of '+nf.score_date : '');
+  var asof = secView==='n50' ? asofSession(STATE.fetchedAt, marketOpen() ? 'live averages' : 'last averages')
+           : asofSession(STATE.fetchedAt, (nf && nf.score_date) ? 'EOD checks as of '+nf.score_date : '');   /* cc#1611: no LIVE after 15:30 */
   el.innerHTML = h + asof;
   more.innerHTML = rows.length > SEC_LIMIT
     ? '<span class="chip" data-sec-toggle="1">'+(secAll ? 'Fewer sectors ▴' : 'All '+rows.length+' sectors ▾')+'</span>' : '';
@@ -548,44 +548,117 @@ var DAY_N = 10;
 var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function istToday(){ var d = istNow(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
 function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m ? (+m[3])+' '+MON[+m[2]-1] : String(iso||''); }
+/* ── cc#1611 · DAY PERFORMANCE: the whole era as a horizontally scrollable strip (one bar per
+   session, 28px pitch, zero gridline, today gold, older bars fade left, snapped to the newest end
+   on load), a DAILY | WEEKLY | MONTHLY toggle (client-side sums of the SAME daily rows via
+   daylogRows - no second endpoint), headline tiles that follow the toggle, a tap tooltip per bar,
+   and the y-scale = max |net| of the VISIBLE window, recomputed when the scroll settles and stated
+   in the footer. Footer status after 15:30 IST reads close · HH:MM (asofSession, cc#1621). */
+var DAY_PITCH = 28, DAY_TIP = null;
+function dayRowsForView(){
+  var rows = daylogRows(DAY_VIEW).slice().reverse();   /* API is newest first; draw oldest -> newest */
+  return rows;
+}
+function dayBarLabel(r){
+  if(DAY_VIEW === 'weekly') return 'wk to ' + dmy(r.date);
+  if(DAY_VIEW === 'monthly'){ var m = /^(\d{4})-(\d{2})/.exec(r.date||''); return m ? MON[+m[2]-1] + ' ' + m[1].slice(2) : String(r.date); }
+  return dmy(r.date);
+}
+function dayIsCurrent(r){
+  var t = istToday();
+  if(DAY_VIEW === 'weekly') return isoWeekKey(t) === r.date;
+  if(DAY_VIEW === 'monthly') return t.slice(0, 7) === r.date;
+  return String(r.date).slice(0, 10) === t;
+}
+function dayTiles(rows){
+  var last = rows[rows.length-1], cur = last && dayIsCurrent(last) ? last.net_pnl : 0;
+  var sumN = function(n){ var s = 0; rows.slice(-n).forEach(function(r){ s += num(r.net_pnl) ? r.net_pnl : 0; }); return s; };
+  if(DAY_VIEW === 'weekly') return [['THIS WEEK · NET', cur, 'week to Friday'], ['4-WEEK NET', sumN(4), 'last 4 weeks']];
+  if(DAY_VIEW === 'monthly') return [['THIS MONTH · NET', cur, 'calendar month'], ['ERA NET', sumN(rows.length), 'since era start']];
+  return [['TODAY · NET', cur, 'this session'], [Math.min(10, rows.length)+'-SESSION NET', sumN(10), 'last '+Math.min(10, rows.length)+' sessions']];
+}
 function renderDay(){
   var el = document.getElementById('sec-day'), nEl = document.getElementById('day-n'), more = document.getElementById('day-more');
   var dl = STATE.daylog, days = dl && dl.days;
-  /* cc#1612: the chip used to link to /v8_dashboard.html, a path with no route (FastAPI 404 on the
-     phone). It now opens the in-app Day Log sheet; the web table is reachable from the sheet's
-     footer via /dashboard#daylog, which the web hash router opens directly (same card, P4). */
   more.innerHTML = '<span class="chip gd" data-daylog-open="1" role="button" title="Day Log, in the app">Open Day Log →</span>';
   if(!days){ nEl.textContent = ''; emptyBox('sec-day', 'Day log is not available right now.'); return; }
-  var rows = days.slice(0, DAY_N).reverse();
+  var rows = dayRowsForView();
+  var seg = '<div style="display:flex;gap:2px;padding:2px;background:var(--well);border:1px solid var(--line);border-radius:8px;margin-bottom:10px">'
+    + [['daily','DAILY'],['weekly','WEEKLY'],['monthly','MONTHLY']].map(function(t){ return '<button type="button" data-day-view="'+t[0]+'" style="flex:1;border:0;border-radius:6px;min-height:30px;font-family:var(--mono);font-size:10.5px;font-weight:800;letter-spacing:1px;cursor:pointer;'+(DAY_VIEW===t[0] ? 'background:var(--gold);color:var(--well)' : 'background:transparent;color:var(--mute)')+'">'+t[1]+'</button>'; }).join('')+'</div>';
   if(!rows.length){
     nEl.textContent = 'no sessions yet';
-    el.innerHTML = '<div class="empty">No closed trades in this era yet. The bars start with the first exit.</div>' + asofLine(STATE.fetchedAt, 'era '+(dl.era||'fresh'));
+    el.innerHTML = seg + '<div class="empty">No closed trades in this era yet. The bars start with the first exit.</div>' + asofSession(STATE.fetchedAt, 'era · '+daylogSince(dl).toLowerCase());
     return;
   }
-  var today = istToday(), last = rows[rows.length-1], lastIsToday = String(last.date).slice(0,10) === today;
-  var todayNet = lastIsToday ? last.net_pnl : 0;
-  var sum = 0, maxAbs = 0;
-  for(var i=0;i<rows.length;i++){ var v = num(rows[i].net_pnl)?rows[i].net_pnl:0; sum += v; if(Math.abs(v) > maxAbs) maxAbs = Math.abs(v); }
-  nEl.textContent = 'last '+rows.length+(rows.length===1?' session':' sessions');
-  var W = 360, H = 150, BASE = 75, MAXH = 60, slot = W/rows.length, bw = slot*0.62;
-  var svg = '<svg class="dbars" viewBox="0 0 '+W+' '+H+'" aria-hidden="true"><line x1="0" y1="'+BASE+'" x2="'+W+'" y2="'+BASE+'" stroke="var(--line)" stroke-width="1"/>';
+  nEl.textContent = rows.length + (DAY_VIEW === 'daily' ? (rows.length===1?' session':' sessions') : DAY_VIEW === 'weekly' ? (rows.length===1?' week':' weeks') : (rows.length===1?' month':' months'));
+  var tiles = dayTiles(rows);
+  var head = '<div class="dp-head"><div><div class="dlbl">'+esc(tiles[0][0])+'</div><div class="dbig '+sgn(tiles[0][1])+'">'+inr(tiles[0][1])+'</div><div class="dlbl" style="letter-spacing:.3px;text-transform:none">'+esc(tiles[0][2])+'</div></div>'
+    + '<div style="text-align:right"><div class="dlbl">'+esc(tiles[1][0])+'</div><div class="dbig '+sgn(tiles[1][1])+'">'+inr(tiles[1][1])+'</div><div class="dlbl" style="letter-spacing:.3px;text-transform:none">'+esc(tiles[1][2])+'</div></div></div>';
+  var pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64);
+  var W = Math.max(rows.length * pitch, 10), H = 150, BASE = 78, MAXH = 60, bw = pitch * 0.62;
+  var svg = '<svg data-dbars="1" viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" style="display:block;height:'+H+'px;width:'+W+'px;min-width:100%" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="'+BASE+'" x2="'+W+'" y2="'+BASE+'" stroke="var(--line)" stroke-width="1"/>';
+  var lastMonth = '';
   for(var k=0;k<rows.length;k++){
-    var v = num(rows[k].net_pnl)?rows[k].net_pnl:0, h = maxAbs ? Math.max(1, Math.abs(v)/maxAbs*MAXH) : 1;
-    var x = (k*slot + (slot-bw)/2).toFixed(1), y = (v>=0 ? BASE-h : BASE).toFixed(1), isToday = (k===rows.length-1 && lastIsToday);
-    var fill = isToday ? 'var(--gold)' : (v>=0 ? 'var(--up)' : 'var(--down)');
-    var op = isToday ? 1 : (0.55 + 0.40*(k/Math.max(1,rows.length-1))).toFixed(2);
-    svg += '<rect x="'+x+'" y="'+y+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="'+fill+'" opacity="'+op+'"/>';
-    if(isToday) svg += '<text x="'+(k*slot + slot/2).toFixed(1)+'" y="9" font-family="var(--mono)" font-size="9" fill="var(--gold)" text-anchor="middle">'+(marketOpen()?'live':'today')+'</text>';
+    var r = rows[k], v = num(r.net_pnl)?r.net_pnl:0, isCur = dayIsCurrent(r) && k === rows.length-1;
+    var x = (k*pitch + (pitch-bw)/2).toFixed(1);
+    var fill = isCur ? 'var(--gold)' : (v>=0 ? 'var(--up)' : 'var(--down)');
+    var op = isCur ? 1 : (0.45 + 0.50*(k/Math.max(1,rows.length-1))).toFixed(2);
+    svg += '<rect data-dbar="'+k+'" x="'+x+'" y="'+BASE+'" width="'+bw.toFixed(1)+'" height="1" fill="'+fill+'" opacity="'+op+'" style="cursor:pointer"/>';
+    var mo = String(r.date).slice(0, 7), lab = '';
+    if(DAY_VIEW === 'daily'){ if(mo !== lastMonth || k === rows.length-1){ lab = mo !== lastMonth ? dmy(r.date) : dmy(r.date); } }
+    else lab = DAY_VIEW === 'weekly' ? dmy(r.date) : dayBarLabel(r);
+    if(DAY_VIEW === 'daily' && mo === lastMonth && k !== rows.length-1 && k % 5 === 0) lab = (+String(r.date).slice(8,10))+'';
+    lastMonth = mo;
+    if(lab) svg += '<text x="'+(k*pitch + pitch/2).toFixed(1)+'" y="'+(H-4)+'" font-family="var(--mono)" font-size="9" fill="'+(isCur?'var(--gold)':'var(--dim)')+'" text-anchor="middle">'+esc(lab)+'</text>';
+    if(isCur) svg += '<text x="'+(k*pitch + pitch/2).toFixed(1)+'" y="9" font-family="var(--mono)" font-size="9" fill="var(--gold)" text-anchor="middle">'+(marketOpen()?'live':'now')+'</text>';
   }
   svg += '</svg>';
-  var mid = rows[Math.floor(rows.length/2)];
-  var foot = '<div class="dp-foot"><span>'+esc(dmy(rows[0].date))+'</span>'+(rows.length>2?'<span>'+esc(dmy(mid.date))+'</span>':'')+
-             '<span>'+(lastIsToday ? 'today '+esc(hhmm(istNow())) : esc(dmy(last.date)))+'</span></div>';
-  var head = '<div class="dp-head"><div><div class="dlbl">TODAY · NET</div><div class="dbig '+sgn(todayNet)+'">'+inr(todayNet)+'</div></div>'+
-             '<div style="text-align:right"><div class="dlbl">'+rows.length+'-SESSION NET</div><div class="dbig '+sgn(sum)+'">'+inr(sum)+'</div></div></div>';
-  var note = lastIsToday ? '' : '<div class="tbl-note">No exit booked today yet, so today reads ₹0. The last bar is '+esc(dmy(last.date))+'.</div>';
-  el.innerHTML = head + svg + foot + note + asofLine(STATE.fetchedAt, 'era '+(dl.era||'fresh')+' · '+(num(last.closed)?last.closed+' closed on last day':''));
+  var strip = '<div style="position:relative"><div data-day-scroll="1" style="overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;position:relative">'
+    + '<div style="position:relative;width:'+W+'px;min-width:100%">'+svg+'<div data-day-tip="1" style="display:none;position:absolute;top:8px;padding:5px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--chalk);white-space:nowrap;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.4)"></div></div></div>'
+    + '<div data-day-scale="1" style="position:absolute;left:0;top:0;padding:2px 6px;background:var(--panel);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:9px;color:var(--mute);pointer-events:none">scale ±—</div></div>';
+  var lastRow = rows[rows.length-1];
+  var note = (DAY_VIEW === 'daily' && !dayIsCurrent(lastRow)) ? '<div class="tbl-note">No exit booked today yet, so today reads ₹0. The last bar is '+esc(dmy(lastRow.date))+'.</div>' : '';
+  el.innerHTML = seg + head + strip + '<div class="dp-foot"><span>'+esc(dayBarLabel(rows[0]))+' → '+esc(dayBarLabel(lastRow))+'</span><span data-day-scaletxt="1"></span></div>' + note
+    + asofSession(STATE.fetchedAt, 'era · '+daylogSince(dl).toLowerCase()+(DAY_VIEW === 'daily' && num(lastRow.closed) ? ' · '+lastRow.closed+' closed on last day' : ''));
+  var sc = el.querySelector('[data-day-scroll]');
+  sc.scrollLeft = sc.scrollWidth;   /* snap to the newest end */
+  dayRescale();
+  var t = null;
+  sc.addEventListener('scroll', function(){ clearTimeout(t); t = setTimeout(dayRescale, 120); });
 }
+/* y-scale = max |net| among the bars inside the visible window (scroll end), stated in the footer */
+function dayRescale(){
+  var el = document.getElementById('sec-day'), sc = el && el.querySelector('[data-day-scroll]'), svg = el && el.querySelector('[data-dbars]'); if(!sc || !svg) return;
+  var rows = dayRowsForView(), pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64), BASE = 78, MAXH = 60;
+  var from = Math.max(0, Math.floor(sc.scrollLeft / pitch)), to = Math.min(rows.length-1, Math.ceil((sc.scrollLeft + sc.clientWidth) / pitch));
+  var maxAbs = 0; for(var i=from;i<=to;i++){ var v = num(rows[i] && rows[i].net_pnl) ? Math.abs(rows[i].net_pnl) : 0; if(v > maxAbs) maxAbs = v; }
+  var bars = svg.querySelectorAll('[data-dbar]');
+  Array.prototype.forEach.call(bars, function(b){
+    var k = +b.getAttribute('data-dbar'), v = num(rows[k] && rows[k].net_pnl) ? rows[k].net_pnl : 0, h = maxAbs ? Math.max(1, Math.abs(v)/maxAbs*MAXH) : 1;
+    b.setAttribute('height', h.toFixed(1)); b.setAttribute('y', (v>=0 ? BASE-h : BASE).toFixed(1));
+  });
+  var txt = maxAbs ? 'scale ±'+inr(maxAbs) : 'scale ±—';
+  var sl = el.querySelector('[data-day-scale]'); if(sl) sl.textContent = txt;
+  var st = el.querySelector('[data-day-scaletxt]'); if(st) st.textContent = txt+' · '+(to-from+1)+' of '+rows.length+' in view';
+}
+function dayTip(k){
+  var el = document.getElementById('sec-day'), tip = el && el.querySelector('[data-day-tip]'), svg = el && el.querySelector('[data-dbars]'); if(!tip || !svg) return;
+  var rows = dayRowsForView(), r = rows[k]; if(!r){ tip.style.display = 'none'; return; }
+  if(DAY_TIP === k){ DAY_TIP = null; tip.style.display = 'none'; Array.prototype.forEach.call(svg.querySelectorAll('[data-dbar]'), function(b){ b.removeAttribute('stroke'); }); return; }
+  DAY_TIP = k;
+  Array.prototype.forEach.call(svg.querySelectorAll('[data-dbar]'), function(b){ if(+b.getAttribute('data-dbar') === k) { b.setAttribute('stroke', 'var(--chalk)'); b.setAttribute('stroke-width', '1.5'); } else b.removeAttribute('stroke'); });
+  var pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64), x = k*pitch + pitch/2;
+  var when = DAY_VIEW === 'weekly' ? 'week to '+dmy(r.date) : DAY_VIEW === 'monthly' ? dayBarLabel(r) : dmy(r.date);
+  tip.innerHTML = esc(when)+' · '+(num(r.closed)?r.closed:0)+' closed · <b class="'+sgn(r.net_pnl)+'">'+inr(r.net_pnl)+'</b>'+(DAY_VIEW !== 'daily' && r.sessions ? ' · '+r.sessions+' sessions' : '');
+  tip.style.display = 'block';
+  var w = tip.offsetWidth, total = svg.getBoundingClientRect().width, left = Math.max(2, Math.min(total - w - 2, x - w/2));
+  tip.style.left = left+'px';
+}
+document.getElementById('v8p').addEventListener('click', function(e){
+  var tv = e.target.closest('[data-day-view]');
+  if(tv){ DAY_VIEW = tv.getAttribute('data-day-view'); DAY_TIP = null; renderDay(); var ov = document.getElementById('v8-daylog-ov'); if(ov && ov.style.display !== 'none') daylogOpen(); return; }
+  var b = e.target.closest('[data-dbar]'); if(b){ dayTip(+b.getAttribute('data-dbar')); return; }
+});
 /* cc#1612 · DAY LOG SHEET — the web Day Log tab's data (/api/v8/daylog era rows, already in
    STATE.daylog) as a full-height bottom sheet: sticky totals strip (the web KPI boxes, to the
    rupee), one .slab.dense row per day newest first, an empty / failed state with Retry, and a
