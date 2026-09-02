@@ -832,7 +832,7 @@ function clSeg(kind, cur, opts, counts){
 function renderClosed(){
   var bk = STATE.book, el = document.getElementById('sec-closed'), nEl = document.getElementById('cl-n'),
       rEl = document.getElementById('cl-r'), kpi = document.getElementById('cl-kpi'), more = document.getElementById('cl-more');
-  if(!bk || !bk.closed){ nEl.textContent = ''; rEl.textContent = ''; kpi.innerHTML = ''; more.innerHTML = '';
+  if(!bk || !bk.closed){ nEl.textContent = ''; rEl.textContent = ''; kpi.innerHTML = ''; kpi.className = ''; more.innerHTML = '';
     el.innerHTML = '<div class="slab dense" id="cl-empty"></div>'; emptyBox('cl-empty', 'Closed trades are not available right now.'); return; }
   var all = bk.closed, rows = clRows(all, CL_SIDE, CL_DUR), isAll = (CL_SIDE === 'all' && CL_DUR === 'all');
   var sideCounts = { all: clRows(all, 'all', CL_DUR).length, long: clRows(all, 'long', CL_DUR).length, short: clRows(all, 'short', CL_DUR).length };
@@ -849,6 +849,7 @@ function renderClosed(){
   var acc = isAll && num(bk.win_rate) && num(bk.decided) && bk.decided > 0 ? bk.win_rate : st.acc;
   var segs = clSeg('side', CL_SIDE, [['all','ALL'],['long','LONG'],['short','SHORT']], sideCounts)
            + clSeg('dur', CL_DUR, [['all','ALL'],['1w','1W'],['1m','1M']], durCounts);
+  kpi.className = '';   /* #cl-kpi was the 3-column grid itself; it now wraps the two seg rows + the grid */
   kpi.innerHTML = segs.replace(/class="filters"/g, 'class="filters" data-cl-seg="1"') + '<div class="kpi">'
     + kpiWell('REALISED', inr(realised), sgn(realised), 'gross '+inrShort(gross)+' · brk '+inrShort(brk)+'<br>'+esc(win))
     + kpiWell('WIN / LOSS', (num(wins)?wins:'—')+' / '+(num(losses)?losses:'—'), '', (num(acc) ? 'accuracy '+acc.toFixed(1)+'%' : 'no decided trade yet')+'<br>'+esc(win))
