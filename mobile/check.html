@@ -175,8 +175,66 @@ function actualText(v){
 /* the ONE plain-words line per rule. Until the per-rule templates pass Fable review (cc#1593 P5)
    this is the engine's own condition and reading, unedited: what the rule needs, what the stock
    shows. */
-function whyLine(r, st){
-  return 'Needs: ' + esc(r.required || '—') + '. Now: <b>' + esc(actualText(r.value)) + '</b>. ' + esc(st.word === 'N/A' ? 'Not applicable.' : (st.word === 'FULL' ? 'Full.' : (st.word === 'HALF' ? 'Half.' : 'None.')));
+/* cc#1593 P5 (Fable OK 4632): the ONE plain-words line per rule = a READING of the engine value
+   fields + the state word (form B). The rule CONDITION stays the engine's `required` string in
+   the sheet's REQUIRED tile, so no threshold is retyped here and a rule edit cannot leave a line
+   stale. Any rule id without a template, or a template whose field is missing, falls back to the
+   neutral form ("Needs: <required>. Now: <values>."). Booleans print as words, never true/false. */
+function tv(v, dp){ if (v == null || v === '') return null; if (typeof v === 'boolean') return v ? 'yes' : 'no'; if (typeof v === 'number') return num(v, dp == null ? (Math.abs(v) >= 100 ? 0 : 1) : dp); return String(v); }
+function pc(v){ var t = tv(v, 1); return t == null ? null : t + '%'; }
+function xs(v){ var t = tv(v, 2); return t == null ? null : t + 'x'; }
+function ab(v){ return v == null ? null : (v ? 'above' : 'below'); }
+function fill(parts){ for (var i = 0; i < parts.length; i++){ if (parts[i] == null) return null; } return parts.join(''); }
+var TPL = {
+  R1: function(v){ return typeof v === 'number' ? v + ' of 4 market checks against it.' : null; },
+  R2: function(v, c){ return (c && c.label === 'BUY-MOM') ? fill(['Sector W ', pc(v.wk), ' · M ', pc(v.mo), '.']) : fill(['Sector month ', pc(v.mo), '.']); },
+  R3: function(v){ return (typeof v.dir === 'number') ? fill([tv(v.dir, 0), ' of ', tv(v.n, 0), ' peers up today, ', tv(v.strong, 0), ' strongly.']) : null; },
+  R4: function(v){ return v.d50 != null ? fill(['20d ', pc(v.d20), ' · 50d ', pc(v.d50), ' · 200d ', pc(v.d200), ' vs price.']) : fill(['20d ', pc(v.d20), ' · 200d ', pc(v.d200), ' vs price.']); },
+  R5: function(v, c){ return (c && c.label === 'BUY-MOM') ? fill(['Today ', xs(v.today), ' · month ', xs(v.vol1M), '.']) : fill(['Today ', xs(v.today), ' pace · month up/down ', xs(v.vol1M), '.']); },
+  R7: function(v){ return v.trueWk != null ? fill(['Monthly RSI ', tv(v.mRSI, 1), ' · weekly ', tv(v.trueWk, 1), '.']) : fill(['Monthly RSI ', tv(v.mRSI, 1), '.']); },
+  R8: function(v){ return fill(['Month ', pc(v.mo), ', week ', pc(v.wk), '.']); },
+  R9: function(v){ return fill(['VWAP ', tv(v.vwap), ' · price ', (v.rangePos == null ? null : Math.round(Number(v.rangePos) * 100) + '%'), ' of today range.']); },
+  R10: function(v){ return v.mom_2d != null ? fill(['Two-day move ', pc(v.mom_2d), '.']) : fill(['5-day low ', tv(v.low_5d), ' vs S1 ', tv(v.s1), '.']); },
+  R11: function(v){ return v.abovePP != null ? fill([ab(v.abovePP), ' pivot · room to R1 ', pc(v.room), '.']) : fill(['Two-day ', pc(v.mom_2d), ' · week ', pc(v.week_return), '.']); },
+  R12: function(v){ return (v && v.oi_chg != null) ? fill(['OI change ', pc(v.oi_chg), ' on a ', pc(v.day), ' day · basis ', pc(v.basis_prev), ' to ', pc(v.basis_now), '.']) : 'Cash stock, no futures. Neutral half.'; },
+  R16: function(v){ return v.range_ok === false ? '3-month range under 5%, level means little. Neutral half.' : fill([pc(v.pos), ' up the 3-month swing, ', tv(v.zone), ' zone.']); },
+  R17: function(v){ return fill(['Value pillar ', tv(v.v_score, 1), '.']); },
+  R18: function(v){ return fill(['Stock M ', tv(v.m, 1), ' · sector M ', tv(v.sector_m, 1), '.']); },
+  R19: function(v){ return fill(['63-day ', pc(v.ret63_pct), ' · vs Nifty ', tv(v.rs_nifty_pct, 1), ' pts · vs sector ', tv(v.rs_sector_pct, 1), ' pts.']); },
+  R20: function(v){ return fill(['GVM moved ', tv(v.dgvm180, 2), ' over 180 days.']); },
+  R21: function(v){ return fill([pc(v.dma_50), ' from the 50-day average.']); },
+  R22: function(v){ return fill([tv(v.w52), ' of the 52-week range.']); },
+  R23: function(v){ return fill(['GVM ', tv(v.gvm, 1), '.']); },
+  R24: function(v){ return (v && v.ratio != null) ? fill(['Delivery 3-day ', pc(v.deliv_3d), ' vs own base ', pc(v.deliv_base), ' = ', xs(v.ratio), '.']) : 'No delivery history yet.'; },
+  LOCK_ENTRYDAY_FALL: function(v){ return fill(['Day ', pc(v.day), '.']); },
+  LOCK_5M_WEAK: function(v){ return fill(['Day ', pc(v.day), '.']); },
+  LOCK_WEEK_FALLING_BAND: function(v){ return fill(['Week ', pc(v.wk), '.']); },
+  LOCK_WEEK_FALLING: function(v){ return fill(['Week ', pc(v.wk), '.']); },
+  LOCK_VOLUME: function(v){ return fill(['Volume ', xs(v.ratio), ' normal.']); },
+  LOCK_MOM_2D: function(v){ return fill(['Two-day ', pc(v.mom2d), '.']); },
+  LOCK_TRIO_MOM2D: function(v){ return fill(['Two-day ', pc(v.mom2d), '.']); },
+  LOCK_ALT_IGNITION: function(v){ var st = String(v.state || '').toLowerCase();
+    if (st.indexOf('not') === 0 || st === 'n/a' || st === 'na') return 'Entry-day fall already scored, not used.';
+    if (st.indexOf('active') === 0) return fill(['Steep two-day slide ', pc(v.mom2d), ' stands in for the missing entry-day fall.']);
+    if (st) return fill(['Two-day ', pc(v.mom2d), ', not steep enough to stand in.']);
+    return null; },
+  LOCK_52W_INDEX: function(v){ return fill([tv(v.w52), ' of the 52-week range.']); },
+  LOCK_TRIO_52W: function(v){ return fill([tv(v.w52), ' of the 52-week range.']); },
+  LOCK_MA_NOT_DEEP: function(v){ return fill(['9-day vs 21-day average ', pc(v.ma9v21), '.']); },
+  LOCK_MA_SHALLOW: function(v){ return fill(['9-day vs 21-day average ', pc(v.ma9v21), '.']); },
+  LOCK_GVM: function(v){ return fill(['GVM ', tv(v.gvm, 1), '.']); },
+  LOCK_QUALITY_FADE: function(v){ return fill(['GVM ', tv(v.gvm, 1), '.']); },
+  LOCK_MOOD: function(v){ return typeof v === 'number' ? v + ' of 4 market checks bearish.' : null; },
+  LOCK_FALL_FRESHNESS: function(v){ return fill(['Month ', pc(v.mo), '.']); },
+  LOCK_TRIO_RSI: function(v){ return fill(['Weekly RSI ', tv(v.trueWk, 1), '.']); },
+  LOCK_SECTOR_WEAK: function(v){ return fill(['Sector month ', pc(v.mo), '.']); }
+};
+function stateWord(st){ return st.word === 'N/A' ? 'Not applicable.' : (st.word === 'FULL' ? 'Full.' : (st.word === 'HALF' ? 'Half.' : 'None.')); }
+function whyLine(r, st, c){
+  var line = null, f = TPL[r.rule];
+  if (f){ try { line = f(r.value, c); } catch(e){ line = null; } }
+  if (line) return '<b>' + esc(line) + '</b> ' + esc(stateWord(st));
+  return 'Needs: ' + esc(r.required || '—') + '. Now: <b>' + esc(actualText(r.value)) + '</b>. ' + esc(stateWord(st));
 }
 /* the hero read: band + distance to the next cut + the heaviest rules holding and failing, from
    the active card's own rows. Words are plain (36283 plain_words_v2). */
@@ -229,7 +287,7 @@ function renderTC(){
     + (c.rules || []).map(function(r, i){
         var st = ruleState(r);
         return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id' + (String(r.rule).indexOf('LOCK_') === 0 ? ' lk' : '') + '">' + esc(String(r.rule).replace('LOCK_', '')) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + st.word + ' · w' + wfmt(r.weight) + '</span>'
-          + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div><div class="c-why">' + whyLine(r, st) + '</div></div>';
+          + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div><div class="c-why">' + whyLine(r, st, c) + '</div></div>';
       }).join('') + '</section>';
   if (c.unmapped_rules && c.unmapped_rules.length) h += '<div class="c-note">Rules with no registry row (scored at weight 1): ' + esc(c.unmapped_rules.join(', ')) + '.</div>';
   h += '<div class="c-cover">Personal trade context · not a V8 signal · scored ' + esc(hhmm(d.computed_at) || '—') + ' IST</div>';
@@ -318,10 +376,27 @@ function icDetailText(det){
 }
 /* the ONE line per component — until the per-key templates pass review (P10) it is the engine
    detail, unedited, plus the credit word */
+/* cc#1593 P10 (Fable OK 4632): plain-words template per component key, {field} = detail value.
+   The credit rule lives in the engine (the sheet shows the detail dict as tiles); a key without a
+   template, or a missing field, falls back to the neutral detail line. Booleans print as words. */
+var ICTPL = {
+  gvm_level: function(d){ return fill(['Quality score ', tv(d.gvm, 1), ' = ', tv(d.verdict), '.']); },
+  fundamentals: function(d){ if (!d.checks) return null; var ok = d.checks.filter(function(x){ return x.pass === true; }).map(function(x){ return x.name; });
+    var no = d.checks.filter(function(x){ return x.pass !== true; }).map(function(x){ return x.name; });
+    return tv(d.passed, 0) + ' of ' + tv(d.of, 0) + ' pass' + (ok.length ? ': ' + ok.join(', ') : '') + (no.length ? '; ' + no.join(', ') + ' not' : '') + '.'; },
+  dgvm_90d: function(d){ var dir = tv(d.direction); return fill(['Score went ', tv(d.gvm_then, 2), ' → ', tv(d.gvm_now, 2), ' since ', tv(d.as_of), '. ', dir ? dir.charAt(0).toUpperCase() + dir.slice(1) : null, '.']); },
+  dma_stack: function(d){ return fill(['Wants 20 > 50 > 200. ', tv(d.legs, 0), ' of 2 legs true.']); },
+  accumulation: function(d){ return fill(['Up-day volume vs down-day ', tv(d.up_down_vol_ratio, 2), '.']); },
+  s1_reclaim: function(d){ return fill(['Touched S1 ', tv(d.touched_sessions_ago, 0), ' session(s) ago. CMP ', tv(d.cmp), ' vs pivot ', tv(d.pp), ', ', ab(d.above_pivot), ' pivot.']); },
+  rs_1y: function(d){ var e = d.excess_pp == null ? null : Number(d.excess_pp); return fill(['Stock ', pc(d.stock_1y), ', Nifty ', pc(d.benchmark_1y), '. ', e == null ? null : num(Math.abs(e), 1), ' points ', e == null ? null : (e >= 0 ? 'ahead' : 'behind'), '.']); },
+  segment_month: function(d){ return fill(['Sector ', pc(d.month_avg_pct), ' on the month (', tv(d.members_priced, 0), ' priced).']); },
+  rsi_monthly: function(d){ return fill(['Monthly RSI ', tv(d.rsi_monthly, 1), '. Band ', tv(d.band), '.']); }
+};
 function icWhy(c, noWord){
   if (!c.computable) return 'Not scored: ' + esc(c.excluded_reason || 'no data') + '. Left out of the denominator, not scored zero.';
-  var det = c.detail || {};
-  if (c.key === 'fundamentals' && det.checks) return '<b>' + det.passed + ' of ' + det.of + '</b> pass: ' + esc(det.checks.map(function(x){ return x.name + (x.pass === true ? ' ✓' : (x.pass === false ? ' ✗' : ' ?')); }).join(' · ')) + '.' + (noWord ? '' : ' ' + esc(icCreditWord(c)));
+  var det = c.detail || {}, line = null, f = ICTPL[c.key];
+  if (f){ try { line = f(det); } catch(e){ line = null; } }
+  if (line) return '<b>' + esc(line) + '</b>' + (noWord ? '' : ' ' + esc(icCreditWord(c)));
   return '<b>' + esc(icDetailText(det)) + '</b>.' + (noWord ? '' : ' ' + esc(icCreditWord(c)));
 }
 function icRead(d){
@@ -434,7 +509,7 @@ function ruleSheet(c, r){
     + '<div class="c-kv"><div class="wide"><div class="c-kk">REQUIRED</div><div class="c-kvv">' + esc(r.required || '—') + '</div></div>'
     + '<div class="wide"><div class="c-kk">COMPANY</div><div class="c-kvv ' + (st.cls === 'pass' ? 'ok' : (st.cls === 'watch' ? 'half' : (st.cls === 'fail' ? 'no' : ''))) + '">' + esc(actualText(r.value)) + '</div></div>' + tiles + '</div>'
     + '<div class="c-ladder"><div class="' + (tierCls === 'full' ? 'on full' : '') + '"><b>FULL</b>' + esc(lad.full) + '</div><div class="' + (tierCls === 'half' ? 'on' : '') + '"><b>HALF</b>' + esc(lad.half) + '</div><div class="' + (tierCls === 'none' ? 'on none' : '') + '"><b>NONE</b>' + esc(lad.none) + '</div></div>'
-    + '<div class="c-swhy"><b>' + (st.word === 'FULL' ? 'Full credit.' : (st.word === 'HALF' ? 'Half credit.' : (st.word === 'NONE' ? 'No credit.' : 'Not applicable.'))) + '</b> ' + whyLine(r, st) + (def.w ? '<br><span class="mu">Why it matters: ' + esc(def.w) + '</span>' : '') + '</div>'
+    + '<div class="c-swhy"><b>' + (st.word === 'FULL' ? 'Full credit.' : (st.word === 'HALF' ? 'Half credit.' : (st.word === 'NONE' ? 'No credit.' : 'Not applicable.'))) + '</b> ' + whyLine(r, st, c) + (def.w ? '<br><span class="mu">Why it matters: ' + esc(def.w) + '</span>' : '') + '</div>'
     + '<div class="c-sfoot"><span>' + esc(def.s ? 'source ' + def.s : 'source tc_v4_dual ' + r.rule) + '</span><span>scored ' + esc(hhmm(d.computed_at) || '—') + ' IST · spot</span></div>';
 }
 $('c-sheet-x').addEventListener('click', closeSheet);
