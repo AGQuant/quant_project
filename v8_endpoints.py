@@ -41,6 +41,7 @@ standard pool only, 20 total slots:
 """
 
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import JSONResponse
 from v8_book_canon import retired_baskets   # cc#970 V8_PNL_CANON_V1 (rule 13)
 from price_sources import not_fut, NOT_FUT_SQL   # cc#1053 convention + cc#1056 registry
 from datetime import date, datetime, timedelta
@@ -3382,6 +3383,12 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
     in here."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            # cc#1604 V8_ERA_CUTOVER_ONLY_V1: the full ledger is suspended. era=all is refused
+            # with 410 and the suspended payload — the pre-cutover aggregate is never computed.
+            from v8_era import full_ledger_allowed as _fla, suspended_payload as _sp, era_block as _eb
+            if era == "all" and not _fla(cur):
+                return JSONResponse(status_code=410, content=_sp(cur))
+            _era_block = _eb(cur)
             cutover_ts = None
             if era != "all":
                 cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
@@ -3500,6 +3507,7 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
             },
             "capital_base": 5_000_000,
             "era": "all" if era == "all" else "fresh",
+            "era_block": _era_block,            # cc#1604: caption "Since 18-Jul-2026", served
             "rebuild_cutover_ts": str(cutover_ts) if cutover_ts else None,
             "view": "futures" if view == "futures" else "equity",   # cc#994
             # cc#1019: both futures bounds, stated so the surface can label what it is showing.

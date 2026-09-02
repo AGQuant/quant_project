@@ -48,6 +48,8 @@ from zoneinfo import ZoneInfo
 
 import psycopg2
 import psycopg2.extras
+from fastapi.responses import JSONResponse
+from v8_era import guard_full_ledger, FullLedgerSuspended, era_block   # cc#1604 V8_ERA_CUTOVER_ONLY_V1
 from fastapi import APIRouter
 from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 
@@ -122,6 +124,7 @@ def book_canon(conn, era: str = "fresh") -> dict:
     """
     with conn.cursor() as cur:
         retired, missing = retired_baskets(cur)
+        guard_full_ledger(cur, era)          # cc#1604: era=all raises while the ledger is suspended
         cutover = None if era == "all" else _cutover(cur)
         p = {"cut": cutover, "retired": retired}
 
@@ -253,6 +256,7 @@ def basket_records(conn, era: str = "fresh") -> dict:
     """
     with conn.cursor() as cur:
         retired, missing = retired_baskets(cur)
+        guard_full_ledger(cur, era)          # cc#1604: era=all raises while the ledger is suspended
         cutover = None if era == "all" else _cutover(cur)
         cur.execute("""
             SELECT basket,
@@ -289,7 +293,14 @@ def api_book_canon(era: str = "fresh"):
     era = "all" if str(era).lower() == "all" else "fresh"
     try:
         with _conn() as conn:
-            return book_canon(conn, era=era)
+            try:
+                out = book_canon(conn, era=era)
+            except FullLedgerSuspended as fs:
+                # cc#1604: refused, not served. No aggregate in the body.
+                return JSONResponse(status_code=410, content=fs.payload)
+            with conn.cursor() as cur:
+                out["era_block"] = era_block(cur)       # cc#1604: the caption, served not typed
+            return out
     except Exception as e:
         log.exception("book_canon failed")
         return {"error": str(e)[:300], "canon": "V8_PNL_CANON_V1"}

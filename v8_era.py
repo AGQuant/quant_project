@@ -28,6 +28,14 @@ SUSPEND_KEY = "v8_full_ledger_suspended"
 router = APIRouter()
 
 
+class FullLedgerSuspended(Exception):
+    """Raised by any computation asked for the full ledger while it is suspended. Carries the
+    410 payload so the endpoint that catches it never has to build one."""
+    def __init__(self, payload):
+        super().__init__(payload.get("error", "full ledger suspended"))
+        self.payload = payload
+
+
 def _cfg(cur, key):
     cur.execute("SELECT value FROM app_config WHERE key=%s", (key,))
     row = cur.fetchone()
@@ -66,6 +74,13 @@ def full_ledger_allowed(cur):
     if v is None:
         return False
     return str(v).strip().lower() in ("false", "0", "no", "off")
+
+
+def guard_full_ledger(cur, era):
+    """Call at the top of any era-aware computation. era='all' while suspended raises
+    FullLedgerSuspended; every other era passes through unchanged."""
+    if str(era).lower() == "all" and not full_ledger_allowed(cur):
+        raise FullLedgerSuspended(suspended_payload(cur))
 
 
 def suspended_payload(cur):

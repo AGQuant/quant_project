@@ -2033,6 +2033,13 @@ def paper_status():
     # history shown rather than an empty dashboard. open_positions needs no filter in practice (every
     # pre-cutover OPEN row was closed by the cutover itself) but carries the same guard for safety.
     cutover = api_query("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'", single=True)
+    # cc#1604: era gate, read once per request from app_config (v8_era is the one place that reads it)
+    from v8_era import full_ledger_allowed as _fla, suspended_payload as _sp, era_block as _eb
+    from v8_book_canon import _conn as _era_conn
+    with _era_conn() as _ec, _ec.cursor() as _ecur:
+        _ledger_ok = _fla(_ecur)
+        _era_suspended = _sp(_ecur)
+        _era_block = _eb(_ecur)
     cutover_ts = (cutover or {}).get("value")
     era_clause = "entry_ts >= %s::timestamp" if cutover_ts else "TRUE"
     era_params = (cutover_ts,) if cutover_ts else ()
@@ -2074,18 +2081,26 @@ def paper_status():
         # all-era trade list is filtered too — buy_s1_bounce's 10 rows (+67,154) used to sit in here
         # and in all_summary below, which is why the Trade Log tab and the Master Dashboard
         # disagreed on 09-Aug.
-        "all_trades": api_query(
+        # cc#1604 V8_ERA_CUTOVER_ONLY_V1: while the full ledger is suspended, all_trades is the
+        # cutover-era list (no LIMIT window, cc#1583 finding) and all_summary is the suspended
+        # payload — the pre-cutover aggregate is never computed. Flip app_config
+        # v8_full_ledger_suspended=false to restore the old keys; no deploy.
+        "all_trades": (api_query(
             "SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts "
             "FROM v8_paper_trades WHERE NOT (basket = ANY(%s)) ORDER BY closed_at DESC LIMIT 500",
-            (_canon_retired(),)),
+            (_canon_retired(),)) if _ledger_ok else api_query(
+            f"SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts "
+            f"FROM v8_paper_trades WHERE {era_clause} AND NOT (basket = ANY(%s)) ORDER BY closed_at DESC",
+            era_params + (_canon_retired(),))),
         "missed": api_query("SELECT miss_date,symbol,side,basket,expected_entry,reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
         # cc#970: BOTH summaries are the canon now. They used to be two hand-written aggregates
         # here — the fresh one shipped total_pnl GROSS (no brokerage) and neither excluded a
         # retired basket. `summary` is the canonical fresh book; `all_summary` is history, still
         # with retired baskets removed, and carries era='all' so the tab can label it.
         "summary": _canon_summary("fresh"),
-        "all_summary": _canon_summary("all"),
+        "all_summary": (_canon_summary("all") if _ledger_ok else _era_suspended),
         "rebuild_cutover_ts": cutover_ts,
+        "era_block": _era_block,             # cc#1604: caption "Since 18-Jul-2026", served not typed
     }
 
 @app.get("/api/paper/pivots")
