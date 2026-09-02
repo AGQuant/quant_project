@@ -506,7 +506,10 @@ function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m ? 
 function renderDay(){
   var el = document.getElementById('sec-day'), nEl = document.getElementById('day-n'), more = document.getElementById('day-more');
   var dl = STATE.daylog, days = dl && dl.days;
-  more.innerHTML = '<a class="chip gd" href="/v8_dashboard.html" title="Day Log tab on the web dashboard">Open Day Log →</a>';
+  /* cc#1612: the chip used to link to /v8_dashboard.html, a path with no route (FastAPI 404 on the
+     phone). It now opens the in-app Day Log sheet; the web table is reachable from the sheet's
+     footer via /dashboard#daylog, which the web hash router opens directly (same card, P4). */
+  more.innerHTML = '<span class="chip gd" data-daylog-open="1" role="button" title="Day Log, in the app">Open Day Log →</span>';
   if(!days){ nEl.textContent = ''; emptyBox('sec-day', 'Day log is not available right now.'); return; }
   var rows = days.slice(0, DAY_N).reverse();
   if(!rows.length){
@@ -538,6 +541,105 @@ function renderDay(){
   var note = lastIsToday ? '' : '<div class="tbl-note">No exit booked today yet, so today reads ₹0. The last bar is '+esc(dmy(last.date))+'.</div>';
   el.innerHTML = head + svg + foot + note + asofLine(STATE.fetchedAt, 'era '+(dl.era||'fresh')+' · '+(num(last.closed)?last.closed+' closed on last day':''));
 }
+/* cc#1612 · DAY LOG SHEET — the web Day Log tab's data (/api/v8/daylog era rows, already in
+   STATE.daylog) as a full-height bottom sheet: sticky totals strip (the web KPI boxes, to the
+   rupee), one .slab.dense row per day newest first, an empty / failed state with Retry, and a
+   footer link to the full web table. DAY_VIEW is the hook cc#1611's DAILY | WEEKLY | MONTHLY
+   toggle drives; weekly / monthly rows are client-side sums of the SAME daily rows (no second
+   endpoint, same numbers). Body-level element, inline styles only, GOLD NIGHT tokens. */
+var DAY_VIEW = 'daily';
+function isoWeekKey(iso){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); if(!m) return iso;
+  var d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3])), day = d.getUTCDay() || 7;
+  var fri = new Date(d); fri.setUTCDate(d.getUTCDate() + (5 - day));   // week-ending Friday
+  return fri.toISOString().slice(0, 10);
+}
+function daylogRows(view){
+  var dl = STATE.daylog, days = (dl && dl.days) || [];
+  if(view === 'daily' || !view) return days.slice();
+  var buckets = {}, order = [];
+  days.forEach(function(r){
+    var key = view === 'weekly' ? isoWeekKey(r.date) : String(r.date).slice(0, 7);
+    if(!buckets[key]){ buckets[key] = { date: key, opened: 0, closed: 0, gross_pnl: 0, brokerage: 0, net_pnl: 0, net_open: null, sessions: 0, _first: r.date }; order.push(key); }
+    var b = buckets[key];
+    b.opened += num(r.opened) ? r.opened : 0; b.closed += num(r.closed) ? r.closed : 0;
+    b.gross_pnl += num(r.gross_pnl) ? r.gross_pnl : 0; b.brokerage += num(r.brokerage) ? r.brokerage : 0;
+    b.net_pnl += num(r.net_pnl) ? r.net_pnl : 0; b.sessions += 1;
+    if(b.net_open == null) b.net_open = r.net_open;   // rows arrive newest first: the bucket's last session
+  });
+  return order.map(function(k){ return buckets[k]; });
+}
+function daylogLabel(r, view){
+  if(view === 'weekly') return 'week to ' + dmy(r.date);
+  if(view === 'monthly'){ var m = /^(\d{4})-(\d{2})/.exec(r.date||''); return m ? MON[+m[2]-1] + ' ' + m[1] : String(r.date); }
+  return dmy(r.date) + (String(r.date).slice(0,10) === istToday() ? ' · today' : '');
+}
+function daylogSince(dl){
+  var eb = dl && dl.era_block;
+  if(typeof eb === 'string' && eb) return eb;
+  if(eb && typeof eb === 'object'){ var t = eb.caption || eb.label || eb.title || (eb.since ? 'Since ' + eb.since : ''); if(t) return t; }
+  var c = dl && dl.rebuild_cutover_ts; if(c){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(c)); if(m) return 'Since ' + (+m[3]) + '-' + MON[+m[2]-1] + '-' + m[1]; }
+  return 'Since 18-Jul-2026';
+}
+function daylogSheetHtml(){
+  var dl = STATE.daylog, s = (dl && dl.summary) || null, days = dl && dl.days;
+  var head = '<div class="pressed" style="position:sticky;top:0;z-index:2;padding:12px 14px 10px;border-radius:0">'
+    + '<div style="display:flex;align-items:center;gap:10px"><div style="font-family:var(--mono);font-size:12px;font-weight:800;letter-spacing:.12em;color:var(--gold,#D4AF37)">DAY LOG</div>'
+    + '<div style="font-family:var(--mono);font-size:10px;color:var(--mute)">' + esc(daylogSince(dl)) + '</div>'
+    + '<button type="button" data-daylog-close="1" aria-label="Close" style="margin-left:auto;background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;min-width:32px;min-height:32px;font-size:14px;cursor:pointer">\u2715</button></div>';
+  if(!days){
+    return head + '</div><div class="empty" style="margin:14px">Day log is not available right now.<br><span class="chip" data-daylog-retry="1">Retry</span></div>';
+  }
+  var tile = function(k, v, cls){ return '<div style="flex:1 1 30%;min-width:96px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--dim)">' + k + '</div><div class="' + (cls||'') + '" style="font-family:var(--mono);font-size:13px;font-weight:800">' + v + '</div></div>'; };
+  var totals = s ? '<div style="display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:10px">'
+      + tile('CLOSED', String(s.total_closed != null ? s.total_closed : '—'))
+      + tile('GROSS', inr(s.total_gross_pnl), sgn(s.total_gross_pnl))
+      + tile('BROKERAGE', inr(s.total_brokerage), 'dn')
+      + tile('NET', inr(s.total_net_pnl), sgn(s.total_net_pnl))
+      + tile('RETURN', (num(s.overall_return_pct) ? (s.overall_return_pct > 0 ? '+' : '') + Number(s.overall_return_pct).toFixed(2) + '%' : '—'), sgn(s.overall_return_pct))
+      + tile('OPEN NOW', String(s.net_open != null ? s.net_open : '—'))
+      + '</div>' : '';
+  var rows = daylogRows(DAY_VIEW);
+  var body;
+  if(!rows.length){
+    body = '<div class="empty" style="margin:14px">No closed trades in this era yet. The first exit lands here.</div>';
+  } else {
+    body = '<div class="plist" style="padding:10px 12px 18px">' + rows.map(function(r){
+      return '<div class="slab dense" style="display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center">'
+        + '<div style="font-weight:700">' + esc(daylogLabel(r, DAY_VIEW)) + (DAY_VIEW !== 'daily' && r.sessions ? ' <span class="mu" style="font-weight:400">· ' + r.sessions + ' session' + (r.sessions === 1 ? '' : 's') + '</span>' : '') + '</div>'
+        + '<div class="' + sgn(r.net_pnl) + '" style="font-family:var(--mono);font-weight:800;text-align:right">' + inr(r.net_pnl) + '</div>'
+        + '<div class="mu" style="font-family:var(--mono);font-size:10px">opened ' + (num(r.opened) ? r.opened : 0) + ' · closed ' + (num(r.closed) ? r.closed : 0) + ' · gross ' + inr(r.gross_pnl) + ' · brok ' + inr(r.brokerage) + '</div>'
+        + '<div class="mu" style="font-family:var(--mono);font-size:10px;text-align:right">open ' + (r.net_open != null ? r.net_open : '—') + '</div>'
+        + '</div>';
+    }).join('') + '</div>';
+  }
+  var foot = '<div style="padding:0 14px 22px;font-family:var(--mono);font-size:10px;color:var(--dim);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">'
+    + '<span>' + esc(DAY_VIEW) + ' · era ' + esc((dl && dl.era) || 'fresh') + ' · ' + rows.length + ' row' + (rows.length === 1 ? '' : 's') + '</span>'
+    + '<a href="/dashboard#daylog" style="color:var(--gold,#D4AF37)">Full table on web \u2192</a></div>';
+  return head + totals + '</div>' + body + foot;
+}
+function daylogOpen(){
+  var ov = document.getElementById('v8-daylog-ov');
+  if(!ov){
+    ov = document.createElement('div'); ov.id = 'v8-daylog-ov';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(4,8,18,.62);display:flex;align-items:flex-end';
+    ov.innerHTML = '<div id="v8-daylog-sheet" role="dialog" aria-modal="true" aria-label="Day Log" style="width:100%;max-height:92vh;overflow:auto;background:var(--panel,#0E1526);color:var(--txt,#fff);border-top:1px solid var(--line);border-radius:16px 16px 0 0"></div>';
+    ov.addEventListener('click', function(e){
+      if(e.target === ov || e.target.closest('[data-daylog-close]')){ daylogClose(); return; }
+      if(e.target.closest('[data-daylog-retry]')){ daylogRetry(); return; }
+    });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'flex';
+  document.getElementById('v8-daylog-sheet').innerHTML = daylogSheetHtml();
+  document.body.style.overflow = 'hidden';
+}
+function daylogClose(){ var ov = document.getElementById('v8-daylog-ov'); if(ov) ov.style.display = 'none'; document.body.style.overflow = ''; }
+function daylogRetry(){
+  var sh = document.getElementById('v8-daylog-sheet'); if(sh) sh.innerHTML = '<div class="empty" style="margin:14px">Loading the day log\u2026</div>';
+  getJ(URLS.daylog).then(function(d){ STATE.daylog = d; renderDay(); daylogOpen(); }).catch(function(){ STATE.daylog = null; daylogOpen(); });
+}
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') daylogClose(); });
 /* ── 5 · CLOSED ──────────────────────────────────────────────────────────────────────── */
 /* Wells read the canon keys straight off /api/mobile/v8book (rule 13): realised is NET of
    brokerage, wins = TARGET, losses = SL, win_rate on decided. Nothing is re-added on the page. */
@@ -711,6 +813,7 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var mk = e.target.closest('[data-mk-sym]'); if(mk){ e.stopPropagation(); mkOpen(mk.getAttribute('data-mk-sym'), mk.getAttribute('data-mk-side')); return; }
   var mc = e.target.closest('[data-open-marker]'); if(mc){ var k = mc.getAttribute('data-open-marker'); openMarkers[k] = !openMarkers[k]; openAll = false; renderOpen(); return; }
   var ml = e.target.closest('[data-mk-legend]'); if(ml){ mkLegendOpen(); return; }
+  var dlo = e.target.closest('[data-daylog-open]'); if(dlo){ daylogOpen(); return; }
   var sv = e.target.closest('[data-sec-view]'); if(sv){ secView = sv.getAttribute('data-sec-view'); secAll = false; renderSectors(); return; }
   var st = e.target.closest('[data-sec-toggle]'); if(st){ secAll = !secAll; renderSectors(); return; }
   var ct = e.target.closest('[data-cl-toggle]'); if(ct){ clAll = !clAll; renderClosed(); return; }
