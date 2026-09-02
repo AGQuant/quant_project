@@ -3943,3 +3943,66 @@ def v8_theme_sector_holdings(theme: str):
         return {"theme": theme, "holdings": holdings, "count": len(holdings)}
     except Exception as e:
         raise HTTPException(500, f"v8_theme_sector_holdings failed: {e}")
+
+
+# ---------------------------------------------------------------------------------------------
+# cc#1565: /api/v8/live_metrics — moved here from main.py (rule 4: main.py is wiring only) and
+# re-anchored. Until 02-Sep-2026 day_pct was cmp / today's OPEN - 1 and every surface printed it
+# under "Day Change": NIFTY50 read +0.22% on a day Fyers showed -0.72%, because the index gapped
+# down at the open. That number still ships, renamed honestly as open_pct. day_pct is now
+# cmp / previous-session close - 1 through prev_close.py — the ONE anchor the Market Gate
+# (nifty_dwm) reads too, so Index Intel "Day Change" and the gate's "NIFTY D" agree.
+# ---------------------------------------------------------------------------------------------
+from prev_close import prev_session_close_many, day_pct as _day_pct   # cc#1565
+
+
+@router.get("/live_metrics")
+def v8_live_metrics():
+    # cc#182: anchor to the last available 5m trading day instead of CURRENT_DATE so CMP / Day
+    # Change / Hourly keep serving Friday's values on weekends & holidays. Hourly is anchored to
+    # the latest bar (lc.ts) rather than NOW(): on a live day that IS "~65 min ago"; off-hours it
+    # becomes the last 65-min window of that day.
+    # cc#424: anchor to the last day that actually has fyers_eq bars. Without the source filter a
+    # stray phantom fyers_hist bar (e.g. a Sat backfill row) wins MAX(ts::date) while the LATERAL
+    # joins below read source='fyers_eq' only -> 0 rows -> blank funnels.
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT MAX(ts::date) FROM intraday_prices WHERE timeframe='5m' AND source='fyers_eq'")
+            r = cur.fetchone()
+            as_of_date = r[0] if r else None
+            cur.execute("""
+                WITH asof AS (SELECT %s::date AS d)
+                SELECT s.symbol, lc.close AS cmp, fc.open AS day_open, hc.close AS hour_ago_close
+                FROM (SELECT symbol FROM futures_universe WHERE is_active=TRUE) s
+                JOIN LATERAL (SELECT close, ts FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' ORDER BY ts DESC LIMIT 1) lc ON true
+                JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' ORDER BY ts ASC LIMIT 1) fc ON true
+                LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' AND ts <= lc.ts - INTERVAL '65 minutes' ORDER BY ts DESC LIMIT 1) hc ON true
+                ORDER BY s.symbol
+            """, (as_of_date,))
+            raw = cur.fetchall()
+            # cc#1565: the previous-session close is taken BEFORE as_of, not before today, so a
+            # weekend/evening read pairs Friday's last tick with Thursday's close rather than with
+            # Friday's own EOD row (which would print 0.00% for every symbol).
+            prev = prev_session_close_many(cur, [row[0] for row in raw], before=as_of_date)
+        rows = []
+        for sym, cmp_v, day_open, hour_ago in raw:
+            cmp_f = float(cmp_v) if cmp_v is not None else None
+            open_f = float(day_open) if day_open is not None else None
+            hour_f = float(hour_ago) if hour_ago is not None else None
+            pc, basis, _asof = prev.get(sym, (None, None, None))
+            rows.append({
+                "symbol": sym,
+                "cmp": cmp_f,
+                "day_open": open_f,
+                "prev_close": pc,                       # cc#1565
+                "prev_close_basis": basis,              # raw_eod | auction_bar | last_bar | None
+                "day_pct": _day_pct(cmp_f, pc),         # cc#1565: vs previous-session close. NULL when no anchor.
+                "open_pct": _day_pct(cmp_f, open_f),    # cc#1565: since today's open (the old day_pct, renamed)
+                "hour_ago_close": hour_f,
+                "hourly_pct": _day_pct(cmp_f, hour_f),
+            })
+        return {"as_of": str(as_of_date) if as_of_date else None, "rows": rows}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"v8_live_metrics failed: {e}")

@@ -1801,30 +1801,7 @@ def v8_metrics_single(symbol: str, score_date: Optional[str] = None):
     if not r: raise HTTPException(404, f"No metrics for {symbol}")
     return r
 
-@app.get("/api/v8/live_metrics")
-def v8_live_metrics():
-    # cc#182: anchor to the last available 5m trading day instead of CURRENT_DATE so
-    # CMP / Day Change / Hourly keep serving Friday's values on weekends & holidays.
-    # Hourly is anchored to the latest bar (lc.ts) rather than NOW(): on a live day
-    # that IS "~65 min ago"; off-hours it becomes the last 65-min window of that day.
-    # cc#424: anchor to the last day that actually has fyers_eq bars. Without the source
-    # filter, a stray phantom fyers_hist bar (e.g. a Sat backfill row) wins MAX(ts::date)
-    # while the LATERAL joins below read source='fyers_eq' only -> 0 rows -> blank funnels.
-    as_of = api_query("SELECT MAX(ts::date) AS d FROM intraday_prices WHERE timeframe='5m' AND source='fyers_eq'", single=True)
-    as_of_date = (as_of or {}).get("d")
-    rows = api_query("""
-        WITH asof AS (SELECT %s::date AS d)
-        SELECT s.symbol, lc.close AS cmp, fc.open AS day_open,
-            CASE WHEN fc.open>0 THEN ROUND(((lc.close/fc.open-1)*100)::numeric,2) END AS day_pct,
-            hc.close AS hour_ago_close,
-            CASE WHEN hc.close>0 THEN ROUND(((lc.close/hc.close-1)*100)::numeric,2) END AS hourly_pct
-        FROM (SELECT symbol FROM futures_universe WHERE is_active=TRUE) s
-        JOIN LATERAL (SELECT close, ts FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' ORDER BY ts DESC LIMIT 1) lc ON true
-        JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' ORDER BY ts ASC LIMIT 1) fc ON true
-        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' AND ts <= lc.ts - INTERVAL '65 minutes' ORDER BY ts DESC LIMIT 1) hc ON true
-        ORDER BY s.symbol
-    """, (str(as_of_date) if as_of_date else None,))
-    return {"as_of": str(as_of_date) if as_of_date else None, "rows": rows}
+# /api/v8/live_metrics moved to v8_endpoints.py (cc#1565) — rule 4, main.py is wiring only.
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
