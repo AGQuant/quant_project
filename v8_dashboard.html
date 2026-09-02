@@ -8293,9 +8293,14 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     var box=document.getElementById('tc13Box'); if(!box)return;
     var allRows=(d.buy||[]).concat(d.sell||[]);
     var openRows=allRows.filter(function(r){return r.exit_reason==='OPEN';});
+    // cc#1599 scope 4/5: the Closed Book and its stat chips read the EXIT-date set the endpoint
+    // now sends (closed_by_exit), so a hold entered weeks ago and closed today shows on today.
+    // The Open Book stays keyed on the entry date. Older payloads without the key fall back to
+    // the entry-date rows, so nothing goes blank during a deploy.
+    var closedRows=d.closed_by_exit ? (d.closed_by_exit.buy||[]).concat(d.closed_by_exit.sell||[]) : allRows;
     box.innerHTML='<div class="tc13-wrap">'
       +openTable(openRows, d.date)
-      +closedTable(allRows)
+      +closedTable(closedRows)
       +'</div>';
     document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
     try{ tc13MarkScroll(box); }catch(e){ console.warn('[tc13 scroll]', e && e.message); }
