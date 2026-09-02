@@ -22,7 +22,7 @@ What lives here and what deliberately does NOT:
 import logging
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from mobile_endpoints import (
     rail_state, basket_label, _conn, _rows, _ist_now, _guard, _json_safe, _page,
@@ -144,6 +144,11 @@ def mobile_trades(request: Request, limit: int = 20, days: int = 30, era: str = 
     days = max(1, min(days, 120))
     now = _ist_now()
     with _conn() as conn, conn.cursor() as cur:
+        # cc#1604 V8_ERA_CUTOVER_ONLY_V1: era=all is refused with 410 while the ledger is suspended.
+        from v8_era import full_ledger_allowed as _fla, suspended_payload as _sp, era_block as _eb
+        if era == "all" and not _fla(cur):
+            return JSONResponse(status_code=410, content=_sp(cur))
+        _era_block = _eb(cur)
         cutover = None
         if era != "all":
             cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
@@ -200,6 +205,7 @@ def mobile_trades(request: Request, limit: int = 20, days: int = 30, era: str = 
             "wins": d["wins"], "losses": d["losses"],
         } for d in dl],
         "summary": {
+            "era_block": _era_block,             # cc#1604: caption, served not typed
             "era": canon["era"],
             "canon": canon["canon"],
             "retired_baskets": canon["retired_baskets"],
