@@ -156,25 +156,17 @@
         <span id="hdrBadge" style="display:none;vertical-align:middle;margin-left:8px;font-family:var(--mono);
           font-size:9.5px;font-weight:600;letter-spacing:.13em;padding:3px 8px;border-radius:4px;
           border:1px solid var(--amber);color:var(--amber);background:var(--amber-bg,rgba(245,185,74,.10))"></span></div>
-      <div class="tag" id="hdrTag">Full Futures Universe</div>
+      <div class="tag"><span id="hdrTag">Full Futures Universe</span><span id="hdrCounts"></span></div>
     </div>
     <div class="spacer"></div>
     <div class="clock" id="clock">—</div>
     <div class="live-pill"><span class="live-dot"></span><span id="liveTs">—</span></div>
   </header>
 
-  <!-- cc#1229: the tiles are SCAN-SHAPED now, and that is a deliberate change of meaning.
-       The old four came from the TC13 PAPER BOOK - open holds, closed trades, win rate, net points.
-       The score100 gated engine this page now reads is a SCREENER: it has no book, no entries, no
-       exits and no closed trades. Keeping a Win Rate tile would have meant computing a rate from
-       nothing and printing it next to real scan counts, which is the one thing a surface must
-       never do. So the tiles report what a screener actually knows. -->
-  <div class="cards" id="summaryCards">
-    <div class="card cy"><div class="k">Scanned</div><div class="v" id="sScanned">—</div><div class="vs" id="sUniverse">—</div></div>
-    <div class="card gr"><div class="k">Qualified</div><div class="v pos" id="sQual">—</div><div class="vs" id="sQualOf">—</div></div>
-    <div class="card"><div class="k">Buy Qualified</div><div class="v" id="sBuyQ">—</div><div class="vs" id="sBuyOf">—</div></div>
-    <div class="card rd"><div class="k">Sell Qualified</div><div class="v" id="sSellQ">—</div><div class="vs" id="sSellOf">—</div></div>
-  </div>
+  <!-- cc#1601 (founder 02-Sep 15:08): the four stat tiles (Scanned / Qualified / Buy Qualified /
+       Sell Qualified, cc#1229) are GONE — they took a full row above the tables. The two numbers
+       that matter now ride in the muted caption under the title (#hdrCounts, painted by
+       renderSummary from the same tc_config the tiles read). No box, no row. -->
 
   <div class="tabs" style="align-items:center">
     <div class="tabgrp">
@@ -351,32 +343,29 @@ async function loadSpec(){
 function renderSummary(){
   const cfg = (data && data.tc_config) || null;
   const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  /* cc#1601 scope 1: the counts live in the caption line now — "207 scanned · 1 qualified
+     (BUY 0 · SELL 1)" — from the same tc_config the tiles used to read. A failed annotation says
+     so in the same place rather than printing dashes in four boxes. */
   if (!cfg || cfg.error) {
-    ['sScanned','sQual','sBuyQ','sSellQ'].forEach(id => set(id, '—'));
-    set('sUniverse', cfg && cfg.error ? 'annotation unavailable' : '—');
-    set('sQualOf', '—');
+    set('hdrCounts', cfg && cfg.error ? ' · counts unavailable (annotation failed)' : '');
+    set('tabBuyN', ''); set('tabSellN', '');
     return;
   }
   const bb = cfg.by_bucket || {};
   const q = b => ((bb[b] || {}).would_qualify || 0);
-  set('sScanned', cfg.total);
-  set('sUniverse', 'of ' + (data.universe || '—') + ' in universe');
-  set('sQual', cfg.would_qualify);
-  set('sQualOf', 'of ' + cfg.total + ' scored');
   const buyQ = q('BUY-MOM') + q('BUY-REV'), sellQ = q('SELL-MOM') + q('SELL-REV');
-  set('sBuyQ', buyQ);
-  set('sSellQ', sellQ);
-  /* cc#1530: the R1 sub-lines and toggle counts — counted from the SAME results array the
-     panels render, so tile, toggle and table can never disagree. */
-  const sideN = p => (data.results || []).filter(r => String(r.best_label || '').indexOf(p) === 0).length;
-  set('sBuyOf', sideN('BUY') + ' scored on this side');
-  set('sSellOf', sideN('SELL') + ' scored on this side');
+  set('hdrCounts', ' · ' + cfg.total + ' scanned · ' + cfg.would_qualify + ' qualified (BUY ' + buyQ + ' · SELL ' + sellQ + ')');
   set('tabBuyN', buyQ);
   set('tabSellN', sellQ);
   set('liveTs', data.as_of || data.computed_at || '—');
 }
 
 const GATE_SHORT = { sector_week: 'SW', sector_month: 'SM', rsi_month: 'RSI' };
+/* cc#1601 scope 2: Near Miss renders OPEN on every fresh load; a hand-collapse is remembered in
+   memory only for this visit (the 30 s refresh re-renders the panel, so the state has to live
+   outside the DOM), never in localStorage. */
+const NM_OPEN = { BUY: true, SELL: true };
+function nmToggle(side, el){ NM_OPEN[side] = !!(el && el.open); if (typeof postSize === 'function') postSize(); }
 
 function gateStrip(x){
   const g = x && x.gate;
@@ -409,12 +398,20 @@ function scoreCell(x){
   const col = x.bar_met === true ? 'var(--grn)' : (x.bar_met === false ? 'var(--mut)' : 'var(--dim)');
   /* cc#1530: R1 mini-bar beside the number — fill = score against its own bucket bar, capped at
      100%. No bar value -> no bar drawn (nothing is measured against an unknown threshold). */
+  /* cc#1601 scope 3 (TC_SCORE_100_V1, 29138): the number is score100 and prints "/ 100" — never as
+     a fraction over the bar. The bar itself is a small muted chip "bar <n>" read from the payload
+     (x.bar, the bucket's qualifying threshold — never typed here). The mini-bar fill is score100
+     out of 100 with a thin tick at the bar value, so clearing or missing it stays visible. */
   const bar = (x.bar != null && x.bar > 0)
-    ? '<div class="sbar"><i style="width:' + Math.min(100, x.best_score100 / x.bar * 100).toFixed(0) + '%"></i></div>'
+    ? '<div class="sbar"><i style="width:' + Math.min(100, Math.max(0, Number(x.best_score100))).toFixed(0) + '%"></i>'
+      + '<em style="position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--txt);opacity:.75;left:' + Math.min(100, Number(x.bar)).toFixed(1) + '%"></em></div>'
+    : '<div class="sbar"><i style="width:' + Math.min(100, Math.max(0, Number(x.best_score100))).toFixed(0) + '%"></i></div>';
+  const chip = (x.bar != null)
+    ? '<span class="barchip" style="font-family:var(--mono);font-size:9px;color:var(--mut);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;white-space:nowrap">bar ' + esc(x.bar) + '</span>'
     : '';
   return '<div class="score"><span><b style="color:' + col + '">' + Number(x.best_score100).toFixed(1) + '</b>'
-       + '<span style="color:var(--dim);font-size:10px"> / ' + (x.bar != null ? x.bar : '—') + '</span></span>'
-       + bar + '</div>';
+       + '<span style="color:var(--dim);font-size:10px"> / 100</span></span>'
+       + chip + bar + '</div>';
 }
 
 function renderPanel(side){
@@ -447,20 +444,21 @@ function renderPanel(side){
     + '</tr>';
 
   const qualSection = '<div class="scroll desktop-tbl"><table><thead><tr>'
-    + '<th>Symbol</th><th>Bucket</th><th>Score / bar</th><th>Gates</th><th>Rank</th><th>CMP</th><th>Day %</th><th>Sector</th>'
+    + '<th>Symbol</th><th>Bucket</th><th>Score /100 &middot; bar</th><th>Gates</th><th>Rank</th><th>CMP</th><th>Day %</th><th>Sector</th>'
     + '</tr></thead><tbody>'
     + (qual.map(row).join('') || '<tr><td colspan="8" class="empty">No ' + side
        + ' signal clears both its score bar and its gates right now</td></tr>')
     + '</tbody></table></div>';
 
-  // cc#1530: Near Miss is a native <details> (closed by default) with the existing "N shown,
+  // cc#1530: Near Miss is a native <details> (cc#1601: OPEN by default, hand-collapse remembered
+  // in memory for the visit) with the existing "N shown,
   // strongest first" chip kept verbatim. Per-side elements as before — both panels stay in the
   // DOM at once. The ontoggle hook keeps the embed frame's height honest when it opens.
-  const missSection = '<details class="nm" id="missTbl' + side + '" ontoggle="postSize()">'
+  const missSection = '<details class="nm" id="missTbl' + side + '"' + (NM_OPEN[side] ? ' open' : '') + ' ontoggle="nmToggle(\'' + side + '\', this)">'
     + '<summary>Near miss <span class="ct">'
     + miss.length + ' shown, strongest first</span></summary>'
     + '<div class="scroll desktop-tbl"><table><thead><tr>'
-    + '<th>Symbol</th><th>Bucket</th><th>Score / bar</th><th>Gates</th><th>Why not</th>'
+    + '<th>Symbol</th><th>Bucket</th><th>Score /100 &middot; bar</th><th>Gates</th><th>Why not</th>'
     + '</tr></thead><tbody>'
     + (miss.map(missRow).join('') || '<tr><td colspan="5" class="empty">Nothing scored on this side</td></tr>')
     + '</tbody></table></div></details>';
