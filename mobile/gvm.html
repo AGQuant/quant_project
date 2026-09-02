@@ -475,13 +475,113 @@ function ratioLatest(r2, bucket, label){
     for(var k=row.values.length-1;k>=0;k--) if(num(row.values[k])) return row.values[k]; }
   return null;
 }
+/* ── cc#1617 · Financials as charts (founder 02-Sep 19:51 + 20:28 amendment) ─────────────────────
+   P&L, Balance and Cash are each a horizontal SWIPEABLE carousel of four chart cards (scroll-snap,
+   dots pager), one metric per card as bars per year (last five FYs + TTM where the block carries
+   one) with the latest value big and a one-line caption. Every number is read from the payload
+   block the tab is named after (finSeries / finSum); captions come from the same block or from
+   ratios_v2 Growth (5Y CAGR as served), never recomputed. All sizing is inline so the page adds no
+   raw declarations to the theme ratchet (gvm.html sits at 0). Bars are inline SVG, no chart lib. */
+function finIdx(tbl, nFY){
+  if(!tbl || !tbl.periods) return [];
+  var per = tbl.periods, fy = [], ttm = -1;
+  for(var i=0;i<per.length;i++){ if(/^Mar \d{4}$/.test(per[i])) fy.push(i); else if(per[i]==='TTM' && ttm<0) ttm = i; }
+  var idx = fy.slice(-nFY); if(ttm>=0) idx.push(ttm);
+  return idx;
+}
+function finRow(tbl, re){ if(!tbl || !tbl.rows) return null; return tbl.rows.filter(function(r){ return re.test(String(r.label||'')); })[0] || null; }
+function finSeries(tbl, re, idx){
+  var r = finRow(tbl, re); if(!r) return null;
+  return { label:r.label, unit:r.unit, vals: idx.map(function(i){ return num(r.values[i]) ? r.values[i] : null; }), labels: idx.map(function(i){ return fyLabel(tbl.periods[i]); }), ttm: idx.map(function(i){ return /TTM|Current/.test(tbl.periods[i]); }) };
+}
+function finSum(tbl, res, idx, label){
+  var parts = res.map(function(re){ return finSeries(tbl, re, idx); });
+  if(parts.some(function(x){ return !x; })) return null;
+  return { label:label, unit:parts[0].unit, labels:parts[0].labels, ttm:parts[0].ttm,
+    vals: idx.map(function(_, k){ var t = 0, any = false; parts.forEach(function(x){ if(num(x.vals[k])){ t += x.vals[k]; any = true; } }); return any ? t : null; }) };
+}
+function finLast(sr){ for(var k=sr.vals.length-1;k>=0;k--) if(num(sr.vals[k])) return {v:sr.vals[k], k:k}; return null; }
+function finAvg(sr){ var a = sr.vals.filter(function(v, k){ return num(v) && !sr.ttm[k]; }); return a.length ? a.reduce(function(x,y){ return x+y; },0)/a.length : null; }
+function finCagr(r2, label){
+  if(!r2 || !r2.buckets) return null;
+  var b = r2.buckets.filter(function(x){ return x.title === 'Growth'; })[0]; if(!b || !b.table) return null;
+  var row = (b.table.rows||[]).filter(function(r){ return r.label === label; })[0]; if(!row) return null;
+  var k = (b.table.periods||[]).indexOf('5Y CAGR'); if(k<0) return null;
+  return num(row.values[k]) ? row.values[k] : null;
+}
+/* bars per year: viewBox 360 x 118, zero line when any value is negative, latest FY bar gold,
+   TTM bar in the lighter gold, earlier years chalk at low opacity, negatives red; values on the
+   last two bars only; year labels under every bar. */
+function finBars(sr){
+  var W = 360, H = 118, T = 22, B = 96, n = sr.vals.length, gap = 10, bw = (W - 24 - gap*(n-1))/n;
+  var vs = sr.vals.filter(num); if(!vs.length) return '<div class="g-empty">No values.</div>';
+  var hi = Math.max(0, Math.max.apply(null, vs)), lo = Math.min(0, Math.min.apply(null, vs));
+  if(hi === lo){ hi = lo + 1; }
+  function y(v){ return B - (B - T) * (v - lo) / (hi - lo); }
+  var y0 = y(0), h = '<svg viewBox="0 0 '+W+' '+H+'" style="display:block;width:100%;height:auto" aria-hidden="true">';
+  if(lo < 0) h += '<line x1="12" y1="'+y0.toFixed(1)+'" x2="'+(W-12)+'" y2="'+y0.toFixed(1)+'" stroke="var(--line)" stroke-width="1"/>';
+  var last = finLast(sr), lastK = last ? last.k : -1, lastFY = -1;
+  for(var k=n-1;k>=0;k--){ if(num(sr.vals[k]) && !sr.ttm[k]){ lastFY = k; break; } }
+  sr.vals.forEach(function(v, k){
+    var x = 12 + k*(bw+gap);
+    if(num(v)){
+      var top = Math.min(y(v), y0), bh = Math.max(2, Math.abs(y(v) - y0));
+      var fill = v < 0 ? 'var(--red)' : (sr.ttm[k] ? 'var(--g-gold-hi, var(--gold))' : (k === lastFY ? 'var(--gold)' : 'var(--chalk)'));
+      var op = (v < 0 || sr.ttm[k] || k === lastFY) ? '1' : '.35';
+      h += '<rect x="'+x.toFixed(1)+'" y="'+top.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="3" fill="'+fill+'" opacity="'+op+'"/>';
+      if(k >= lastK-1) h += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(v < 0 ? (y0 + bh + 12) : (top - 6)).toFixed(1)+'" text-anchor="middle" font-family="var(--mono)" font-size="10" font-weight="700" fill="var(--chalk)">'+esc(finCell(v, sr.unit, sr.label))+'</text>';
+    } else {
+      h += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y0-6).toFixed(1)+'" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--mute)">—</text>';
+    }
+    h += '<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-4)+'" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="'+(sr.ttm[k] ? 'var(--gold)' : 'var(--mute)')+'">'+esc(sr.labels[k])+'</text>';
+  });
+  return h+'</svg>';
+}
+function finCard(title, sr, caption, note){
+  if(!sr){ return '<div class="g-cc"><div style="padding:10px 4px 6px;font-family:var(--body);font-weight:700;font-size:13px;color:var(--chalk)">'+esc(title)+'</div><div class="g-empty" style="padding:26px 8px">'+esc(note || 'Not in this report.')+'</div></div>'; }
+  var last = finLast(sr), avg = finAvg(sr);
+  var big = last ? finCell(last.v, sr.unit, sr.label) : '—';
+  var delta = '';
+  if(last && last.k > 0 && num(sr.vals[last.k-1]) && sr.vals[last.k-1] !== 0){
+    var ch = (last.v - sr.vals[last.k-1]) / Math.abs(sr.vals[last.k-1]) * 100;
+    delta = '<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:'+(ch >= 0 ? 'var(--grn, var(--up))' : 'var(--red)')+'">'+(ch >= 0 ? '+' : '−')+Math.abs(ch).toFixed(1)+'% vs '+esc(sr.labels[last.k-1])+'</span>';
+  }
+  return '<div class="g-cc"><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;padding:10px 4px 2px">'
+    + '<div><div style="font-family:var(--body);font-weight:700;font-size:13px;color:var(--chalk)">'+esc(title)+'</div><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute);margin-top:2px">'+esc(last ? sr.labels[last.k] : '')+(sr.unit === 'cr' ? ' · ₹ CR' : (sr.unit === 'pct' ? ' · %' : ''))+'</div></div>'
+    + '<div style="text-align:right"><div style="font-family:var(--mono);font-size:24px;font-weight:800;letter-spacing:-.3px;color:var(--chalk);line-height:1">'+esc(big)+'</div>'+delta+'</div></div>'
+    + finBars(sr)
+    + '<div style="font-family:var(--mono);font-size:10px;color:var(--mute);text-align:center;padding:2px 4px 8px">'+esc(caption || (num(avg) ? 'FY avg '+finCell(avg, sr.unit, sr.label) : ''))+'</div></div>';
+}
+function finCarousel(key, cards){
+  return '<div class="g-car" data-car="'+key+'">'+cards.join('')+'</div>'
+    + '<div class="g-dots" data-dots="'+key+'" style="gap:6px;padding:4px 0 8px">'+cards.map(function(_, k){ return '<span class="g-dot'+(k===0?' g-on':'')+'" style="width:6px;height:6px"></span>'; }).join('')+'</div>';
+}
+function finPL(f){
+  var t = f.profit_loss, r2 = f.ratios_v2; if(!t) return '<div class="g-empty">No profit and loss table.</div>';
+  var idx = finIdx(t, 5);
+  var sales = finSeries(t, /^Sales$/, idx), np = finSeries(t, /^Net Profit/, idx), opm = finSeries(t, /^OPM/, idx), eps = finSeries(t, /^EPS/, idx);
+  var sc = finCagr(r2, 'Sales Growth'), pc = finCagr(r2, 'Net Profit Growth');
+  return finCarousel('pl', [
+    finCard('Sales', sales, num(sc) ? 'Sales 5Y CAGR '+(sc>=0?'+':'')+sc.toFixed(1)+'%' : null),
+    finCard('Net Profit', np, num(pc) ? 'Profit 5Y CAGR '+(pc>=0?'+':'')+pc.toFixed(1)+'%' : null),
+    finCard('OPM %', opm, null),
+    finCard('EPS', eps, null)
+  ]);
+}
+/* dots follow the swipe: scroll does not bubble, so one capturing listener serves every carousel */
+document.addEventListener('scroll', function(e){
+  var car = e.target; if(!car || !car.getAttribute || !car.getAttribute('data-car')) return;
+  var w = car.clientWidth || 1, k = Math.round(car.scrollLeft / w);
+  var dots = document.querySelector('[data-dots="'+car.getAttribute('data-car')+'"]'); if(!dots) return;
+  Array.prototype.forEach.call(dots.children, function(d, i){ d.classList.toggle('g-on', i === k); });
+}, true);
 function secFinancials(d){
   var f = d.financials || {}, r2 = f.ratios_v2;
-  var head = sectHead('financials','Financials',(f.basis?String(f.basis).toLowerCase():'')+' · ₹ Cr');
+  var head = sectHead('financials','Financials',(f.basis?String(f.basis).toLowerCase():'')+' · ₹ Cr' + (f.profit_loss && f.profit_loss.periods ? ' · '+fyLabel(f.profit_loss.periods.filter(function(x){ return /^Mar/.test(x); }).slice(-1)[0]||'')+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : ''));
   if(!f.profit_loss && !f.balance_sheet && !f.cash_flow && !r2) return head+'<section class="slab"><div class="g-empty">No financial statements in this report.</div></section>';
   var seg = '<div class="g-seg" role="tablist">'+[['pl','P&amp;L'],['bs','Balance'],['cf','Cash'],['ra','Ratios']].map(function(t){ return '<button data-fin="'+t[0]+'"'+(t[0]===finView?' class="g-on"':'')+'>'+t[1]+'</button>'; }).join('')+'</div>';
   var body = '';
-  if(finView === 'pl') body = finTable(f.profit_loss, [/^Sales$/, /^OPM/, /^Net Profit/, /^EPS/], 6) || '<div class="g-empty">No profit and loss table.</div>';
+  if(finView === 'pl') body = finPL(f);   /* cc#1617 P2: the P&L carousel; the table returns under see table in P5 */
   else if(finView === 'bs') body = finTable(f.balance_sheet, [/^Reserves/, /^Borrowings/, /^Fixed Assets/, /^Total Assets/], 6) || '<div class="g-empty">No balance sheet.</div>';
   else if(finView === 'cf') body = finTable(f.cash_flow, [/Operating/, /Investing/, /Financing/, /^Free Cash/], 6) || '<div class="g-empty">No cash flow table.</div>';
   else {
