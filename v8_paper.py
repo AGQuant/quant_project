@@ -592,6 +592,24 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
     # entry has no futures bar (NTPC 29-Jul, INDUSINDBK 05-Aug, both pre-feed) keeps a cash exit, so
     # its P&L never books a basis difference as profit. pnl/return are computed AFTER the swap, from
     # the pair that is actually written.
+    #
+    # cc#1589 IDEMPOTENT CLOSE (31-Aug 15:30 double-close, 7 duplicate pairs ids 644..657). Two
+    # threads ran run_paper_exits(mode='eod') on the same tick (scheduler primary + cc#841 catch-up
+    # sweep), both SELECTed the same open positions before either DELETEd one, and both INSERTed.
+    # The old order was INSERT trade, then DELETE position, so the DELETE protected nothing. Now the
+    # position row is CLAIMED FIRST: DELETE ... RETURNING id. Under READ COMMITTED a second thread's
+    # DELETE on the same id waits for the first commit and then returns zero rows, so exactly one
+    # caller ever reaches the INSERT. Nothing was claimed => nothing is written, and the skip is
+    # logged to ops_log so a silent no-op is impossible to miss. P3 adds a second, independent
+    # SELECT-before-INSERT on the trade key itself for the case where the position row is already
+    # gone by some other path. Rule/formula/entry logic untouched (founder do_not_touch).
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM v8_paper_positions WHERE id=%s RETURNING id", (pid,))
+        claimed = cur.fetchone()
+    if claimed is None:
+        conn.commit()
+        _log_dup_close_skip(conn, sym, side, basket, ets, result, "position already closed (pid %s gone)" % pid)
+        return {"symbol":sym,"side":side,"result":result,"exit":None,"pnl":0.0,"skipped":True}
     try:
         from fut_fill_price import exit_price as _fut_exit
         exit_px, exit_basis = _fut_exit(conn, sym, ets, exit_ts, exit_px)
@@ -602,15 +620,48 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
     ret = (exit_px/entry-1)*100 if side=="LONG" else (entry/exit_px-1)*100
     log.info(f"cc#1019 close {sym} {side} {result}: exit {exit_px} [{exit_basis}] entry {entry}")
     with conn.cursor() as cur:
+        # cc#1589 P3 app-level guard: a closed row with this exact trade key already exists =>
+        # the second close is a no-op with a warning, never a second row. Mirrors the unique
+        # index proposed in migrations/2026-09-02_v8_paper_trades_unique_close.sql (DDL gated).
+        cur.execute("""SELECT id FROM v8_paper_trades
+                       WHERE symbol=%s AND side=%s AND basket=%s AND entry_ts=%s LIMIT 1""",
+                    (sym, side, basket, ets))
+        dup = cur.fetchone()
+        if dup:
+            conn.commit()
+            _log_dup_close_skip(conn, sym, side, basket, ets, result, "closed row id %s already exists" % dup[0])
+            return {"symbol":sym,"side":side,"result":result,"exit":exit_px,"pnl":round(pnl,2),"skipped":True}
         cur.execute("""
             INSERT INTO v8_paper_trades
             (symbol,side,basket,entry_price,entry_ts,exit_price,exit_ts,qty,target,stop_loss,
              pnl,return_pct,result,pivot_date,closed_at)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,(NOW() AT TIME ZONE 'Asia/Kolkata'))
         """, (sym,side,basket,entry,ets,exit_px,exit_ts,qty,tgt,sl,round(pnl,2),round(ret,2),result,pdt))
-        cur.execute("DELETE FROM v8_paper_positions WHERE id=%s", (pid,))
         conn.commit()
     return {"symbol":sym,"side":side,"result":result,"exit":exit_px,"pnl":round(pnl,2)}
+
+
+def _log_dup_close_skip(conn, sym, side, basket, ets, result, why):
+    """cc#1589: one ops_log warning per skipped duplicate close. Never raises — the skip itself is
+    the correct outcome and a logging failure must not turn it into an error."""
+    log.warning(f"cc#1589 duplicate close skipped {sym} {side} {basket} {result}: {why}")
+    try:
+        import json as _json
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'alert', 'V8_PAPER_DUP_CLOSE_SKIPPED', %s::jsonb)""",
+                        (_json.dumps({"cc": 1589, "symbol": sym, "side": side, "basket": basket,
+                                      "entry_ts": str(ets), "result": result, "why": why}),))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"cc#1589 dup-close oplog failed: {e}")
+        try: conn.rollback()
+        except Exception: pass
+
+
+def _real_exits(exits):
+    """cc#1589: drop skipped duplicate closes from a result list so 'closed' counts real rows."""
+    return [e for e in exits if e and not e.get("skipped")]
 
 
 REBUILD_CUTOVER_KEY = "v8_paper_rebuild_cutover_ts"
@@ -1074,6 +1125,7 @@ def run_paper_exits(conn, target_date: date = None, mode: str = "live", sim_ts=N
                 # cc#714: observation basket hard timeout — force-close at 21 calendar days, EOD close.
                 exit_ts = datetime.combine(d, time(15, 30))
                 exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,c,exit_ts,"TIMEOUT_21D"))
+        exits = _real_exits(exits)   # cc#1589: skipped duplicate closes are not closes
         return {"mode":"eod","date":str(d),"exits":exits,"closed":len(exits)}
 
     # mode == "live" — mirrors paper_tick EXIT section exactly
@@ -1102,4 +1154,5 @@ def run_paper_exits(conn, target_date: date = None, mode: str = "live", sim_ts=N
         elif basket == "s1_reclaim_obs" and ets is not None and (d - ets.date()).days >= 21:
             # cc#714: observation basket hard timeout — force-close at 21 calendar days, prevailing 5-min close.
             exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,_ts(cur_ts),"TIMEOUT_21D"))
+    exits = _real_exits(exits)   # cc#1589
     return {"mode":"live","date":str(d),"exits":exits,"closed":len(exits)}
