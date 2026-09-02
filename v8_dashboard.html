@@ -4602,8 +4602,7 @@ function renderDayLog(data){
     <div class="card"><div class="k">Total Brokerage</div><div class="v neg">${inr(s.total_brokerage)}</div></div>
     <div class="card" style="position:relative"><div class="k">Net P&L</div><div class="v ${pnlCls(s.total_net_pnl)}">${inr(s.total_net_pnl)}</div>${dlGlyph('net')}</div>
     <div class="card" style="position:relative"><div class="k">Overall Return</div><div class="v ${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</div>${dlInfoGlyph()}</div>
-  </div>
-  <div id="dlChartPanel" style="display:none;margin:-6px 0 16px"></div>`;
+  </div>`;   // cc#1579: the cc#1561 #dlChartPanel slide-down is gone; the chart is a modal (dlOpenChart)
   // cc#1019: on the Futures view, say which book this is. The cutover comes back with the payload,
   // so the line can never drift from the filter that produced the rows.
   const _dlNote=(data.view==='futures')
@@ -4644,8 +4643,8 @@ function renderDayLog(data){
 // ---- cc#1561: Day Log P&L chart panel + Overall Return info popover -----------------------
 // One endpoint (/api/v8/daylog/series) feeds both. It is the /api/v8/daylog payload folded
 // server-side, so every number here is the same number the KPI boxes print — nothing is
-// recomputed on the page. The panel slides down under the KPI row (no modal); both chart glyphs
-// open the same panel and only change which series is emphasised.
+// recomputed on the page. cc#1579: the chart is a centred popup modal (the cc#1561 slide-down
+// panel is gone); both chart glyphs open the same modal and only change which series is emphasised.
 let DL_SERIES=null, DL_SERIES_KEY=null, DL_CHART=null, DL_FOCUS='net';
 function dlGlyph(which){
   const t=which==='net'?'Net P&L chart':'Gross P&L chart';
@@ -4723,39 +4722,6 @@ async function dlLoadSeries(){
   return DL_SERIES;
 }
 function dlFmtD(d){if(!d)return'--';const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];const p=String(d).split('-');return p.length<3?String(d):p[2]+'-'+M[parseInt(p[1],10)-1]+'-'+p[0];}
-async function dlToggleChart(which){
-  const el=document.getElementById('dlChartPanel');if(!el)return;
-  const open=el.style.display!=='none';
-  if(open&&which===DL_FOCUS){dlCloseChart();return;}   // second click on the same glyph closes
-  DL_FOCUS=which;
-  el.style.display='block';
-  if(!open)el.innerHTML='<div class="loading">Loading P&L series...</div>';
-  try{
-    const d=await dlLoadSeries();
-    el.innerHTML=dlRenderPanel(d);
-    dlDrawChart(d);
-  }catch(e){el.innerHTML=`<div style="font-size:11px;color:var(--dim);padding:6px 2px">Chart unavailable - ${e.message}</div>`;}   // cc#1579: an inline line, not a red banner
-}
-function dlCloseChart(){
-  const el=document.getElementById('dlChartPanel');if(!el)return;
-  el.style.display='none';
-  if(DL_CHART){try{DL_CHART.destroy();}catch(e){}DL_CHART=null;}
-}
-function dlRenderPanel(d){
-  const title=`P&L performance - since ${dlFmtD(d.window_start)} (${d.trading_days??0} trading days)`;
-  const pts=(d.points||[]);
-  const body=pts.length
-    ? `<div style="position:relative;height:260px"><canvas id="dlChartCv"></canvas></div>`
-    : `<div class="empty">No closed trades in window.</div>`;
-  return `<div class="card" style="padding:12px 14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <div class="ptitle" style="margin:0">${title}</div>
-      <span class="info-btn" onclick="dlCloseChart()" title="Close">&#10005;</span>
-    </div>
-    <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Cumulative by exit date · <b style="color:var(--txt)">${DL_FOCUS==='net'?'Net':'Gross'}</b> emphasised · other series faint · Net is after Rs.500/closed trade brokerage</div>
-    ${body}
-  </div>`;
-}
 // cc#1579: colour-token reader for the chart. cc#1561 called `_tok`, which is a `const` inside the
 // Index Intel IIFE in a LATER <script> tag (L5363) — block-private, so this block threw
 // ReferenceError on the first draw. This is the same getComputedStyle/getPropertyValue read the
