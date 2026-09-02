@@ -192,6 +192,17 @@
 #gvp .g-ftbl td.g-ttm{color:var(--gold)}
 #gvp .g-fbk{margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute)}
 #gvp .g-ffoot{margin-top:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--dim)}
+/* tape: pivot strip + entry checks (ref .pv/.checks) */
+#gvp .g-pv{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:10px}
+#gvp .g-pv div{text-align:center;padding:6px 2px;background:var(--well);border:1px solid var(--line)}
+#gvp .g-pv .g-pk{font-family:var(--mono);font-size:9px;color:var(--mute)} #gvp .g-pv .g-pvv{font-family:var(--mono);font-size:11.5px;font-weight:700}
+#gvp .g-pv .g-pp{border-color:rgba(212,175,55,.5)} #gvp .g-pv .g-pp .g-pvv{color:var(--gold)}
+#gvp .g-checks{margin-top:12px}
+#gvp .g-chk{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+#gvp .g-chk:last-child{border-bottom:0}
+#gvp .g-chk .g-mk{font-family:var(--mono);font-weight:800;width:20px;text-align:center}
+#gvp .g-ctas{margin-top:12px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+#gvp .g-ctas .tag{padding:7px 12px;cursor:pointer;text-decoration:none}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -237,6 +248,8 @@ function inr(v){ if(!num(v)) return '—'; var s = Math.abs(v).toFixed(1); var p
 function cr(v){ if(!num(v)) return '—'; if(Math.abs(v)>=1e5) return '₹'+(v/1e5).toFixed(2)+'L Cr'; if(Math.abs(v)>=1000) return '₹'+(v/1000).toFixed(1)+'k Cr'; return '₹'+v.toFixed(0)+' Cr'; }
 function istNow(){ var n = new Date(); return new Date(n.getTime() + (330 + n.getTimezoneOffset())*60000); }
 function hhmm(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m ? (+m[3])+' '+MON[+m[2]-1] : String(iso||''); }
 function symFromUrl(){ var m = /[?&]sym=([^&#]+)/.exec(location.search); return m ? decodeURIComponent(m[1]).trim().toUpperCase() : null; }
 function verdictCls(v){ v = String(v||'').toLowerCase(); return v==='excellent'||v==='good' ? 'up' : v==='weak' ? 'dn' : 'am'; }
 /* ── search: /api/gvm/search autocomplete, tap navigates to /m/gvm?sym= ───────────────── */
@@ -734,7 +747,46 @@ function secHolders(d){
 }
 function secHolders_old(d){ var sh=(d.financials||{}).shareholding, per=sh&&sh.periods?sh.periods[sh.periods.length-1]:''; var pr=lastVal(finRow(sh,'Promoters')), fii=lastVal(finRow(sh,'FIIs')), dii=lastVal(finRow(sh,'DIIs'));
   return sectHead('holders','Holders',per)+sumLine(['Promoters <b>'+fx(pr,1)+'%</b>','FII <b>'+fx(fii,1)+'</b> · DII <b>'+fx(dii,1)+'</b>']); }
-function secTape(d){ var ex=d.extras||{}, t1=ex.tier1||{}, vc=ex.vol_canon||{}; return sectHead('tape','Tape',(d.price_is_live?'live':'last close')+(ex.pivot&&ex.pivot.pivot_date?' · '+ex.pivot.pivot_date:''))+
+/* Tape card (36513 cards.tape): 4 tiles from extras.volume / delivery / vol_canon, pivot strip from
+   extras.pivot, the tier1 7 checks, CTAs to the Trade Check flow and the shared chart card. */
+var TC_URL = '/check?symbol=';   /* the web Trade Check flow reads ?symbol= (scorr_check.html); /m/check has no symbol parameter yet */
+function checkWords(n){
+  var m = { 'GVM >= 7.0':'GVM 7 or more', 'Sector aligned (wk & mo > 0)':'Sector rising (week & month)', '2 of 3 MAs above':'Above 2 of 3 moving averages',
+            'RSI M>=50 & W>=50':'Monthly & weekly RSI above 50', 'Week & Month return > 0':'Week & month return positive', 'Daily RSI < 80':'Daily RSI under 80',
+            'Volume buying (A/D >= 50%)':'Buying volume 50%+' };
+  return m[n] || n;
+}
+function secTape(d){
+  var ex = d.extras || {}, vol = ex.volume || {}, del = ex.delivery || {}, vc = ex.vol_canon || {}, pv = ex.pivot || {}, t1 = ex.tier1 || {};
+  var head = sectHead('tape','Tape',(d.price_is_live?'live':'last close')+(pv.pivot_date?' · '+esc(dmy(pv.pivot_date)):''));
+  var tiles = '<div class="g-tiles">';
+  // volume A/D over the last N days
+  if(num(vol.up_vol_pct)) tiles += '<div class="g-tile well-up"><div class="g-tl">VOLUME '+(num(vol.days)?vol.days+'D':'')+'</div><div class="g-tv '+(vol.up_vol_pct>=50?'up':'dn')+'">'+Math.round(vol.up_vol_pct)+'% up-days</div><div class="g-ts">'+esc(String(vol.verdict||'').toLowerCase())+(num(vol.total_return_pct)?' · '+(vol.total_return_pct>0?'+':'−')+Math.abs(vol.total_return_pct).toFixed(1)+'% in '+(vol.days||'')+'d':'')+'</div></div>';
+  else tiles += '<div class="g-tile well-up"><div class="g-tl">VOLUME</div><div class="g-tv mu">—</div><div class="g-ts">no volume read</div></div>';
+  // delivery latest vs 30-day average
+  var ds = (del.series||[]).filter(function(x){ return num(x.deliv_pct); });
+  if(ds.length){ var last = ds[ds.length-1], win = ds.slice(-30), avg = win.reduce(function(a,x){ return a+x.deliv_pct; },0)/win.length;
+    tiles += '<div class="g-tile well-up"><div class="g-tl">DELIVERY</div><div class="g-tv '+(last.deliv_pct>=avg?'up':'dn')+'">'+last.deliv_pct.toFixed(1)+'%</div><div class="g-ts">'+win.length+'-day avg '+avg.toFixed(1)+'% · '+esc(dmy(last.d))+'</div></div>'; }
+  else tiles += '<div class="g-tile well-up"><div class="g-tl">DELIVERY</div><div class="g-tv mu">—</div><div class="g-ts">no delivery series</div></div>';
+  // relative volume today vs yesterday (vol_canon)
+  if(num(vc.vol_r)) tiles += '<div class="g-tile well-up"><div class="g-tl">RVOL TODAY</div><div class="g-tv '+(vc.vol_r>=1?'up':'')+'">'+vc.vol_r.toFixed(2)+'×</div><div class="g-ts">'+(num(vc.vol_p)?'yesterday '+vc.vol_p.toFixed(2)+'×':'')+(vc.vol_p_asof?' · '+esc(dmy(vc.vol_p_asof)):'')+'</div></div>';
+  else tiles += '<div class="g-tile well-up"><div class="g-tl">RVOL TODAY</div><div class="g-tv mu">—</div><div class="g-ts">no volume canon</div></div>';
+  // biggest day
+  var bd = vol.biggest_day;
+  if(bd && bd.d) tiles += '<div class="g-tile well-up"><div class="g-tl">BIGGEST DAY</div><div class="g-tv '+(String(bd.direction).toUpperCase()==='UP'?'up':'dn')+'">'+esc(dmy(bd.d))+'</div><div class="g-ts">'+(num(bd.v)?(bd.v>=1e6?(bd.v/1e6).toFixed(2)+'M':Math.round(bd.v/1e3)+'k')+' shares · ':'')+esc(String(bd.direction||'').toLowerCase())+'</div></div>';
+  else tiles += '<div class="g-tile well-up"><div class="g-tl">BIGGEST DAY</div><div class="g-tv mu">—</div><div class="g-ts">no volume bars</div></div>';
+  tiles += '</div>';
+  var pivots = '';
+  if(num(pv.pp)) pivots = '<div class="g-pv">'+[['S2',pv.s2,''],['S1',pv.s1,''],['PP',pv.pp,' g-pp'],['R1',pv.r1,''],['R2',pv.r2,'']].map(function(x){ return '<div class="'+x[2].trim()+'"><div class="g-pk">'+x[0]+'</div><div class="g-pvv">'+(num(x[1])?Math.round(x[1]).toLocaleString('en-IN'):'—')+'</div></div>'; }).join('')+'</div>';
+  var checks = '';
+  if(t1.checks && t1.checks.length){
+    checks = '<div class="g-checks"><div class="g-lbl" style="margin-top:0;margin-bottom:4px">'+t1.checks.length+' ENTRY CHECKS · '+(num(t1.passed)?t1.passed:t1.checks.filter(function(c){return c.pass;}).length)+' PASS</div>'+
+      t1.checks.map(function(c){ return '<div class="g-chk"><span>'+esc(checkWords(c.name))+'</span><span class="g-mk '+(c.pass?'up':'dn')+'">'+(c.pass?'✓':'✕')+'</span></div>'; }).join('')+'</div>';
+  } else checks = '<div class="g-empty">No entry checks for this symbol yet.</div>';
+  var ctas = '<div class="g-ctas"><a class="tag gd" href="'+TC_URL+(TC_URL.indexOf('=')>-1?encodeURIComponent(d.symbol):'')+'">Run Trade Check →</a><span class="tag mu" data-trend="1">Open chart</span></div>';
+  return head+'<section class="slab">'+tiles+pivots+checks+ctas+'<div class="g-asof">'+(vc.vol_p_asof?'volume canon as of '+esc(vc.vol_p_asof)+' · ':'')+(pv.pivot_date?'pivots '+esc(pv.pivot_date):'')+'</div></section>';
+}
+function secTape_old(d){ var ex=d.extras||{}, t1=ex.tier1||{}, vc=ex.vol_canon||{}; return sectHead('tape','Tape',(d.price_is_live?'live':'last close')+(ex.pivot&&ex.pivot.pivot_date?' · '+ex.pivot.pivot_date:''))+
   sumLine(['entry checks <b>'+(num(t1.passed)?t1.passed:'—')+' of '+(num(t1.total)?t1.total:'—')+'</b>','volume <b>'+esc(vc.vol_ad_label||'—')+'</b>']); }
 function renderSections(d){ return secGrowth(d)+secValue(d)+secMomentum(d)+secPeers(d)+secResults(d)+secFinancials(d)+secHolders(d)+secTape(d); }
 /* ── CAPSULE: active pill follows the scroll (IntersectionObserver), hash deep-links, hidden
