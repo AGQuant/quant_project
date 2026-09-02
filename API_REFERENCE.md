@@ -185,6 +185,7 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | GET | `/api/sectors` | sector ratings |
 | GET | `/api/market/top_gainers` | top gainers |
 | GET | `/api/cmp/{symbol}` | current market price |
+| GET | `/api/candles/{symbol}` | daily OHLC from raw_prices; `days=N` (5..1825, `<=0` = ALL). cc#1566: `tf=3Y` = 1095-day window with a 620-session depth gate → `{kind:"unavailable", reason, sessions_available, sessions_required}` when short; `probe=1` returns the gate answer only (`kind:"ok"` / `"unavailable"`) |
 | GET | `/api/intraday/{symbol}` | intraday series |
 | GET | `/api/intraday_ondemand/{symbol}` | on-demand intraday |
 | GET | `/api/global` | global indices |
