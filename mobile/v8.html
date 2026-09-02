@@ -125,6 +125,20 @@
 #v8p .dp-head .dlbl{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.2px}
 #v8p svg.dbars{display:block;width:100%;height:auto}
 #v8p .dp-foot{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px}
+/* funnel: stage rows, per the ref */
+#v8p .fn .seg{margin-bottom:14px}
+#v8p .stage{display:grid;grid-template-columns:110px 1fr 46px;gap:10px;align-items:center;margin:9px 0}
+#v8p .stage .sn{font-family:var(--mono);font-size:10.5px;letter-spacing:1px;color:var(--mute);text-transform:uppercase}
+#v8p .stage .sb{height:18px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
+#v8p .stage .sb i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--gold-lo),var(--gold))}
+#v8p .stage .sb i.fin{background:linear-gradient(90deg,var(--gold),var(--gold-hi));box-shadow:0 0 10px rgba(212,175,55,.35)}
+#v8p .stage .sc{font-family:var(--mono);font-size:14px;font-weight:800;text-align:right}
+#v8p .stage.dim .sc,#v8p .stage.dim .sn{color:var(--dim)}
+#v8p .fn .why{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+#v8p .fn .why .wt{font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--mute);margin-bottom:6px}
+#v8p .fn .why .wr{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:11.5px;padding:4px 0}
+#v8p .fn .why .wr b{color:var(--chalk)} #v8p .fn .why .wr span{color:var(--mute);text-align:right}
+#v8p .fn .ffoot{display:flex;justify-content:space-between;margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--dim)}
 /* foot note */
 #v8p .tbl-note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
 /* bottom nav: markup is the app's own (do_not_touch); the active tab takes the ref's gold */
@@ -154,6 +168,8 @@
   <div class="kpi" id="cl-kpi"></div>
   <div class="plist" id="sec-closed"><div class="slab dense empty">Loading closed trades…</div></div>
   <div class="vmore" id="cl-more"></div>
+  <div class="sect">Funnel <span class="r">why these, not others</span></div>
+  <section class="pressed fn" id="sec-funnel" aria-label="Signal funnel by basket"><div class="empty">Loading the funnel…</div></section>
   <div style="height:18px"></div>
   <div class="tbl-note" style="text-align:center" id="foot-note">Numbers are the paper book.</div>
 </div>
@@ -175,9 +191,12 @@ var URLS = {
   book:   '/api/mobile/v8book',
   sectors:'/api/v8/theme_sectors',
   n50:    '/api/v8/nifty50_sectors',
-  daylog: '/api/v8/daylog'
+  daylog: '/api/v8/daylog',
+  funnel: '/api/mobile/v8funnel',
+  pass:   '/api/v8/stock_passcount/',
+  paper:  '/api/paper/status'
 };
-var STATE = { mood:null, book:null, sectors:null, n50:null, daylog:null, fetchedAt:null };
+var STATE = { mood:null, book:null, sectors:null, n50:null, daylog:null, funnel:null, paper:null, pass:{}, fetchedAt:null };
 function getJ(url){
   return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); });
 }
@@ -496,6 +515,71 @@ function renderClosed(){
   more.innerHTML = rows.length > CL_LIMIT
     ? '<span class="chip" data-cl-toggle="1">'+(clAll ? 'Fewer closed ▴' : 'All '+rows.length+' closed ▾')+'</span>' : '';
 }
+/* ── 6 · FUNNEL ──────────────────────────────────────────────────────────────────────── */
+/* Baskets come from /api/mobile/v8funnel (registry-derived, never a list on the page). Stages
+   are counted from /api/v8/stock_passcount/<basket> rows; "entered" is the open book for that
+   basket; "qualified but not entered" is today's v8_paper_missed via /api/paper/status. */
+var fnBasket = null;
+var MISS_WORDS = { has_open:'already in position', before_cooloff:'already exited today · cool-off',
+                   conflict_exit_blocked:'opposite side open · conflict', opposite_open:'opposite side open',
+                   conflict:'both sides fired · conflict', no_slot:'no free slot', slot:'no free slot', slots_full:'no free slot' };
+function shortBasket(l){ return String(l||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'); }
+function fnBaskets(){ var f = STATE.funnel; return (f && f.baskets) ? f.baskets.map(function(b){ return {key:b.basket, label:b.label||b.basket}; }) : null; }
+function stageRow(name, n, base, cls, fin){
+  var w = (num(n) && base>0) ? Math.max(n>0?2:0, Math.min(100, n/base*100)) : 0;
+  return '<div class="stage'+(cls||'')+'"><div class="sn">'+esc(name)+'</div><div class="sb"><i'+(fin?' class="fin"':'')+' style="width:'+w.toFixed(1)+'%"></i></div><div class="sc'+(fin?' gd':'')+'">'+(num(n)?n:'—')+'</div></div>';
+}
+function renderFunnel(){
+  var el = document.getElementById('sec-funnel'), bks = fnBaskets();
+  if(!bks || !bks.length){ emptyBox('sec-funnel', 'Basket list is not available right now.'); return; }
+  if(!fnBasket || !bks.some(function(b){ return b.key===fnBasket; })) fnBasket = bks[0].key;
+  var seg = '<div class="seg" role="tablist">'+bks.map(function(b){ return '<button data-fn-basket="'+esc(b.key)+'"'+(b.key===fnBasket?' class="on"':'')+'>'+esc(shortBasket(b.label))+'</button>'; }).join('')+'</div>';
+  var pc = STATE.pass[fnBasket];
+  if(pc === undefined){
+    el.innerHTML = seg + '<div class="empty">Counting the '+esc(shortBasket(bks.filter(function(b){return b.key===fnBasket;})[0].label))+' checks…</div>';
+    STATE.pass[fnBasket] = null;
+    getJ(URLS.pass + encodeURIComponent(fnBasket)).then(function(j){ STATE.pass[fnBasket] = j || false; }, function(){ STATE.pass[fnBasket] = false; }).then(renderFunnel);
+    return;
+  }
+  if(pc === null){ return; }
+  if(pc === false || !pc.stocks){
+    el.innerHTML = seg + '<div class="empty">Check counts for this basket are not available right now.<br><span class="chip" data-fn-retry="1">Retry</span></div>';
+    return;
+  }
+  var st = pc.stocks, total = num(pc.filter_count) ? pc.filter_count : (st.length ? st[0].total : 0), near = Math.max(1, total-2);
+  var uni = num(pc.universe) ? pc.universe : st.length;
+  var sectorOk = 0, nearN = 0, allN = 0, qual = 0;
+  for(var i=0;i<st.length;i++){
+    var r = st[i], pf = r.passed_filters || [];
+    if(pf.indexOf('sector_week')>-1 || pf.indexOf('sector')>-1) sectorOk++;
+    if(num(r.passed) && r.passed >= near) nearN++;
+    if(num(r.passed) && r.passed >= total){ allN++; if(!pc.v21_enabled || r.v21_pass !== false) qual++; }
+  }
+  var bk = STATE.book, open = (bk && bk.positions) ? bk.positions.filter(function(p){ return p.basket===fnBasket; }) : [];
+  var h = seg +
+    stageRow('Universe', uni, uni) +
+    stageRow('Sector ok', sectorOk, uni) +
+    stageRow(near+' of '+total+' pass', nearN, uni) +
+    stageRow('All '+total+' pass', allN, uni) +
+    stageRow('Qualified', qual, uni, '', true) +
+    stageRow('Entered', open.length, uni, ' dim', true);
+  var today = istToday(), miss = (STATE.paper && STATE.paper.missed) ? STATE.paper.missed.filter(function(m){ return m.basket===fnBasket && String(m.miss_date).slice(0,10)===today; }) : null;
+  h += '<div class="why"><div class="wt">QUALIFIED BUT NOT ENTERED · TODAY</div>';
+  if(miss === null) h += '<div class="wr"><span>Blocked list is not available right now.</span></div>';
+  else if(!miss.length) h += '<div class="wr"><span>Nothing blocked today. Every qualified name in this basket was either entered or not free to trade.</span></div>';
+  else {
+    var seen = {};
+    for(var k=0;k<miss.length;k++){ var m = miss[k], key = m.symbol+'|'+m.reason; if(seen[key]) continue; seen[key] = 1;
+      h += '<div class="wr"><b>'+esc(m.symbol)+'</b><span>'+esc(MISS_WORDS[m.reason] || String(m.reason||'').replace(/_/g,' '))+'</span></div>'; }
+  }
+  h += '</div>';
+  var side = /^sell/.test(fnBasket) ? 'short' : 'long', md = STATE.mood;
+  var cap = md ? (side==='short' ? md.sell_slots : md.buy_slots) : null, used = (bk && bk[side]) ? bk[side].n : null;
+  var slotTxt = (num(cap) && num(used)) ? side.replace('short','sell').replace('long','buy')+' slots '+used+' / '+cap+' · '+Math.max(0,cap-used)+' free' : 'slots not available';
+  h += '<div class="ffoot"><span>'+esc(slotTxt)+'</span><span>'+esc(pc.score_date ? 'checks '+pc.score_date : '')+'</span></div>';
+  h += asofLine(STATE.fetchedAt, 'sector = sector_week check' + (pc.v21_enabled ? ' · qualified = all checks + V21 confirm' : ' · qualified = all checks'));
+  el.innerHTML = h;
+}
 function renderTop(){
   var d = istNow(), open = marketOpen();
   document.getElementById('tdot').className = 'dot' + (open?'':' off');
@@ -510,16 +594,19 @@ function renderTop(){
   if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book. ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
 }
 /* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
-function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); renderClosed(); }
+function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); renderClosed(); renderFunnel(); }
 function load(){
   return Promise.all([
     getJ(URLS.mood).catch(function(){ return null; }),
     getJ(URLS.book).catch(function(){ return null; }),
     getJ(URLS.sectors).catch(function(){ return null; }),
     getJ(URLS.n50).catch(function(){ return null; }),
-    getJ(URLS.daylog).catch(function(){ return null; })
+    getJ(URLS.daylog).catch(function(){ return null; }),
+    getJ(URLS.funnel).catch(function(){ return null; }),
+    getJ(URLS.paper).catch(function(){ return null; })
   ]).then(function(res){
     STATE.mood = res[0]; STATE.book = res[1]; STATE.sectors = res[2]; STATE.n50 = res[3]; STATE.daylog = res[4];
+    STATE.funnel = res[5]; STATE.paper = res[6]; STATE.pass = {};
     var d = istNow();
     STATE.fetchedAt = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+hhmm(d);
     renderAll();
@@ -531,7 +618,9 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); return; }
   var sv = e.target.closest('[data-sec-view]'); if(sv){ secView = sv.getAttribute('data-sec-view'); secAll = false; renderSectors(); return; }
   var st = e.target.closest('[data-sec-toggle]'); if(st){ secAll = !secAll; renderSectors(); return; }
-  var ct = e.target.closest('[data-cl-toggle]'); if(ct){ clAll = !clAll; renderClosed(); }
+  var ct = e.target.closest('[data-cl-toggle]'); if(ct){ clAll = !clAll; renderClosed(); return; }
+  var fb = e.target.closest('[data-fn-basket]'); if(fb){ fnBasket = fb.getAttribute('data-fn-basket'); renderFunnel(); return; }
+  var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); }
 });
 load();
 setInterval(function(){ if(document.visibilityState === 'visible') load(); }, 300000);
