@@ -882,6 +882,33 @@ function stageRow(name, n, base, cls, fin){
   var w = (num(n) && base>0) ? Math.max(n>0?2:0, Math.min(100, n/base*100)) : 0;
   return '<div class="stage'+(cls||'')+'"><div class="sn">'+esc(name)+'</div><div class="sb"><i'+(fin?' class="fin"':'')+' style="width:'+w.toFixed(1)+'%"></i></div><div class="sc'+(fin?' gd':'')+'">'+(num(n)?n:'—')+'</div></div>';
 }
+/* ── cc#1614 · CLOSEST TO QUALIFYING: the funnel continues into names. Under the stage bars, the
+   top 10 symbols by checks passed for the selected basket (served order: passed desc, GVM desc),
+   "close" = passed >= total - 2 (the same near stage the bars count). Each row: symbol, a mini
+   gold bar N/total in the stage-bar gradient, the failing checks as short muted chips from
+   failed_filters, GVM, Day % (day_1d forwarded by the passcount endpoint). A thin gold line
+   drops from the bars into the table header. Tap a row -> Trade Check for that symbol. */
+var CHIP_WORDS = { sector_week:'sector', sector_month:'sector-m', rsi_weekly:'rsi-w', true_weekly_rsi:'rsi-w', rsi_month:'rsi-m', daily_rsi:'rsi-d', dma_200:'dma200', dma_50:'dma50', dma_20:'dma20',
+  mom_2d:'2d', week_return:'week', month_return:'month', week_index_52:'52w', gvm_score:'gvm', volume_ratio:'vol', vol_ratio:'vol', vol_trend:'vol', day_1d:'day', hourly_pct:'hour',
+  s1_touch:'s1', r1_touch:'r1', cmp_lt_pp:'< pivot', room:'room', s2_clearance:'s2', fall_from_r1:'r1 fall', ma9_vs_ma21:'ma9/21', year_return:'year', range_3d:'range' };
+function chipWord(k){ return CHIP_WORDS[k] || String(k||'').replace(/_/g,' ').slice(0, 9); }
+function closestTable(pc, total){
+  /* close = within three checks of the full set (5+ of 8 today): the near stage and the rung under it */
+  var near = Math.max(1, total-3), st = (pc.stocks||[]).filter(function(r){ return num(r.passed) && r.passed >= near; }).slice(0, 10);
+  var head = '<div style="position:relative;margin:2px 0 0 110px;height:14px;border-left:1px solid var(--gold);opacity:.7"></div>'
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 6px"><span data-fn-head="1" style="font-family:var(--mono);font-size:10.5px;letter-spacing:1.5px;color:var(--gold)">CLOSEST TO QUALIFYING</span><span style="font-family:var(--mono);font-size:10px;color:var(--mute)">top '+st.length+' · '+near+'+ of '+total+' passed</span></div>';
+  if(!st.length) return head + '<div class="empty" style="padding:10px 0">No name is close in this basket today.</div>';
+  var rows = st.map(function(r){
+    var w = total ? Math.max(4, Math.min(100, r.passed/total*100)) : 0, full = r.passed >= total;
+    var chips = (r.failed_filters||[]).map(function(k){ return '<span style="display:inline-block;font-family:var(--mono);font-size:9px;letter-spacing:.3px;padding:1px 5px;border:1px solid var(--line);border-radius:4px;color:var(--mute);white-space:nowrap">'+esc(chipWord(k))+'</span>'; }).join(' ');
+    return '<div data-fn-sym="'+esc(r.symbol)+'" role="button" style="display:grid;grid-template-columns:96px 1fr 44px 52px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line);cursor:pointer">'
+      + '<div style="min-width:0"><div style="font-weight:800;font-size:13px;color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(r.symbol)+'</div><div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px">'+(chips || '<span style="font-family:var(--mono);font-size:9px;color:var(--gold)">all pass</span>')+'</div></div>'
+      + '<div><div style="height:12px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)"><i style="position:absolute;left:0;top:0;bottom:0;width:'+w.toFixed(0)+'%;background:linear-gradient(90deg,var(--gold-lo),'+(full?'var(--gold-hi)':'var(--gold)')+')"></i></div><div style="font-family:var(--mono);font-size:9.5px;color:var(--mute);margin-top:2px">'+r.passed+' / '+total+(pc.v21_enabled && r.v21_pass === false ? ' · V21 no' : '')+'</div></div>'
+      + '<div style="font-family:var(--mono);font-size:12.5px;font-weight:800;text-align:right;color:'+(num(r.gvm_score) && r.gvm_score >= 7.5 ? 'var(--gold)' : 'var(--chalk)')+'">'+(num(r.gvm_score) ? r.gvm_score.toFixed(1) : '—')+'</div>'
+      + '<div class="'+sgn(r.day_1d)+'" style="font-family:var(--mono);font-size:12px;font-weight:700;text-align:right">'+(num(r.day_1d) ? pct(r.day_1d, 1) : '—')+'</div></div>';
+  }).join('');
+  return head + '<div style="display:grid;grid-template-columns:96px 1fr 44px 52px;gap:8px;font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--dim);padding-bottom:2px"><span>SYMBOL · MISSES</span><span>PASSED</span><span style="text-align:right">GVM</span><span style="text-align:right">DAY %</span></div>' + rows;
+}
 function renderFunnel(){
   var el = document.getElementById('sec-funnel'), bks = fnBaskets();
   if(!bks || !bks.length){ emptyBox('sec-funnel', 'Basket list is not available right now.'); return; }
@@ -915,7 +942,8 @@ function renderFunnel(){
     stageRow(near+' of '+total+' pass', nearN, uni) +
     stageRow('All '+total+' pass', allN, uni) +
     stageRow('Qualified', qual, uni, '', true) +
-    stageRow('Entered', open.length, uni, ' dim', true);
+    stageRow('Entered', open.length, uni, ' dim', true) +
+    closestTable(pc, total);   /* cc#1614 */
   var today = istToday(), miss = (STATE.paper && STATE.paper.missed) ? STATE.paper.missed.filter(function(m){ return m.basket===fnBasket && String(m.miss_date).slice(0,10)===today; }) : null;
   h += '<div class="why"><div class="wt">QUALIFIED BUT NOT ENTERED · TODAY</div>';
   if(miss === null) h += '<div class="wr"><span>Blocked list is not available right now.</span></div>';
@@ -992,7 +1020,8 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var cs = e.target.closest('[data-cl-side]'); if(cs){ CL_SIDE = cs.getAttribute('data-cl-side'); clAll = false; renderClosed(); return; }   /* cc#1613 */
   var cd = e.target.closest('[data-cl-dur]'); if(cd){ CL_DUR = cd.getAttribute('data-cl-dur'); clAll = false; renderClosed(); return; }
   var fb = e.target.closest('[data-fn-basket]'); if(fb){ fnBasket = fb.getAttribute('data-fn-basket'); renderFunnel(); return; }
-  var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); }
+  var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); return; }
+  var fs = e.target.closest('[data-fn-sym]'); if(fs){ location.href = '/m/check#tc?sym=' + encodeURIComponent(fs.getAttribute('data-fn-sym')); return; }   /* cc#1614: row -> Trade Check */
 });
 load();
 setInterval(function(){ if(document.visibilityState === 'visible') load(); }, 300000);

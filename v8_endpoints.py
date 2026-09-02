@@ -434,6 +434,7 @@ def _registry_passcount(basket: str, rows, custom):
         out.append({"symbol": s["symbol"], "passed": len(passed), "total": len(reg),
                     "passed_filters": passed, "failed_filters": failed,
                     "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
+                        "day_1d": s.get("day_1d"),   # cc#1614: the app funnel table Day % column
                     "v21_pass": None, "actuals": actuals})
     out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1),
              reverse=True)
@@ -2130,6 +2131,7 @@ def br_stock_passcount():
                 out.append({"symbol": sym, "passed": len(passed), "total": len(reg),
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
+                        "day_1d": s.get("day_1d"),   # cc#1614: the app funnel table Day % column
                             "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_reversal", "score_date": str(date.today()),
@@ -3005,6 +3007,7 @@ def stock_passcount(basket: str):
             out.append({"symbol": s["symbol"], "passed": len(passed_list), "total": n_filters,
                         "passed_filters": passed_list, "failed_filters": failed_list,
                         "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
+                        "day_1d": s.get("day_1d"),   # cc#1614: the app funnel table Day % column
                         "v21_pass": v21_pass})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": basket, "score_date": str(date.today()),
