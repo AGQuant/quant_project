@@ -496,3 +496,473 @@ async def dismiss_alert(req: Request):
         row = _row(r)
         conn.commit()
     return {"status": "ok", "alert": row}
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# cc#1620 · APP_ALERTS_IDEAS_V1 (session_log 37072) — the approved book as CURATED IDEA CARDS.
+# READ-ONLY. One call, everything the app Ideas screen prints: live price and since-approval P&L,
+# the plan (target / stop / to-target / R:R) from the ORIGIN signal the approval points to, a
+# plain-words why line, the sparkline since approval, held / expiry, and header stats.
+#
+# Origin link (P1 discovery): source_ref = symbol@to_char(entry_ts,'YYYY-MM-DD HH24:MI:SS') of
+# the wall row (trade_wall_endpoints _EVENTS_SQL, cc#1524) with source_engine = the wall's engine
+# label. V8 rows resolve to v8_paper_positions (OPEN) first, then v8_paper_trades; TC Scanner to
+# tc_scanner_holds; Index Intel to v10_trades (OPTION legs only, V10_DISPLAY_OPTIONS_ONLY_V1 36703:
+# a futures leg is never rendered, so such an approval is left out and counted). Manual rows have
+# no origin by design — the trigger IS the story.
+#
+# DISPLAY RULE (founder 02-Sep 20:50, 37072 display_rule_v2): no engine or basket code reaches the
+# card. origin_tag is always "EXPERT HANDPICKED"; `style` is plain words; the engine name stays in
+# source_engine / source_ref for the founder-only web tabs, which this payload does not repeat.
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+from datetime import datetime, timedelta, date as _date
+from zoneinfo import ZoneInfo
+
+_IST = ZoneInfo("Asia/Kolkata")
+_ORIGIN_TAG = "EXPERT HANDPICKED"
+_STYLE_WORDS = {"buy_momentum": "Momentum long", "sell_momentum": "Momentum short",
+                "buy_reversal": "Reversal long", "sell_reversal": "Reversal short"}
+_CLOSE_WORDS = {"TARGET": "target hit", "SL": "stop hit", "GAP_TARGET_EXIT": "gap through target",
+                "GAP_SL_EXIT": "gap through stop", "TIME": "time out", "GATE_EXIT": "setup faded",
+                "SUITE_REBUILD": "book rebuilt", "MANUAL": "closed by hand"}
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _fnum(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ist_naive(ts):
+    """Any timestamp -> naive IST. A tz-aware value is converted; a naive one is ALREADY IST
+    (v8 / tc / intraday tables store naive IST, the wall doctrine)."""
+    if ts is None:
+        return None
+    if getattr(ts, "tzinfo", None) is not None:
+        return ts.astimezone(_IST).replace(tzinfo=None)
+    return ts
+
+
+def _fmt_ist(dt):
+    dt = _ist_naive(dt)
+    return None if dt is None else "%d %s %02d:%02d" % (dt.day, _MONTHS[dt.month - 1], dt.hour, dt.minute)
+
+
+def _held_words(seconds):
+    if seconds is None:
+        return None
+    s = max(0, int(seconds))
+    d, h, m = s // 86400, (s % 86400) // 3600, (s % 3600) // 60
+    if d:
+        return "%dd %dh" % (d, h)
+    if h:
+        return "%dh %dm" % (h, m)
+    return "%dm" % m
+
+
+def _last_tuesday(year, month):
+    """NSE monthly expiry = last Tuesday (tc_v4_endpoints rule, weekday()==1)."""
+    nxt = _date(year + 1, 1, 1) if month == 12 else _date(year, month + 1, 1)
+    d = nxt - timedelta(days=1)
+    while d.weekday() != 1:
+        d -= timedelta(days=1)
+    return d
+
+
+def _fut_expiry(today):
+    exp = _last_tuesday(today.year, today.month)
+    if today > exp:
+        ny, nm = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+        exp = _last_tuesday(ny, nm)
+    return exp
+
+
+def _pct_since(price, entry, direction):
+    """Direction-aware move from entry to price, in %. SELL: a fall is positive."""
+    if price is None or entry in (None, 0):
+        return None
+    v = (price / entry - 1.0) * 100.0
+    return round(v if direction == "BUY" else -v, 2)
+
+
+def _to_target_pct(price, target, direction):
+    if price in (None, 0) or target is None:
+        return None
+    v = (target - price) / price * 100.0
+    return round(v if direction == "BUY" else -v, 2)
+
+
+def _track(entry, stop, target, price):
+    """Positions on the stop -> target axis, 0..100. Works for both sides because the axis is
+    signed by (target - stop)."""
+    if stop is None or target is None or target == stop:
+        return None
+    def pos(x):
+        if x is None:
+            return None
+        return round(max(0.0, min(100.0, (x - stop) / (target - stop) * 100.0)), 1)
+    return {"entry_pos": pos(entry), "price_pos": pos(price)}
+
+
+def _n(v, d=2):
+    """Number for a sentence: no trailing zeros, Indian grouping is the page's job."""
+    if v is None:
+        return None
+    s = ("%." + str(d) + "f") % float(v)
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
+def _origin_v8(cur, sym, ts):
+    cur.execute("""SELECT id, basket, entry_price, entry_ts, target, stop_loss, pp
+                   FROM v8_paper_positions
+                   WHERE symbol = %s AND status = 'OPEN'
+                     AND to_char(entry_ts, 'YYYY-MM-DD HH24:MI:SS') = %s
+                   ORDER BY id DESC LIMIT 1""", (sym, ts))
+    r = cur.fetchone()
+    if r:
+        return {"table": "v8_paper_positions", "id": r[0], "basket": r[1], "entry_price": _fnum(r[2]),
+                "entry_ts": r[3], "target": _fnum(r[4]), "stop": _fnum(r[5]), "pivot": _fnum(r[6]),
+                "exit_price": None, "exit_ts": None, "exit_reason": None}
+    cur.execute("""SELECT id, basket, entry_price, entry_ts, target, stop_loss, exit_price,
+                          COALESCE(exit_ts, closed_at), result
+                   FROM v8_paper_trades
+                   WHERE symbol = %s AND to_char(entry_ts, 'YYYY-MM-DD HH24:MI:SS') = %s
+                   ORDER BY id DESC LIMIT 1""", (sym, ts))
+    r = cur.fetchone()
+    if not r:
+        return None
+    return {"table": "v8_paper_trades", "id": r[0], "basket": r[1], "entry_price": _fnum(r[2]),
+            "entry_ts": r[3], "target": _fnum(r[4]), "stop": _fnum(r[5]), "pivot": None,
+            "exit_price": _fnum(r[6]), "exit_ts": r[7], "exit_reason": r[8]}
+
+
+def _evidence_v8(cur, sym, basket, entry_ts):
+    """The qualified row the entry came from: same symbol + basket, nearest signal_ts inside
+    fifteen minutes of the entry. Its metrics feed the why line; nothing is recomputed."""
+    if entry_ts is None:
+        return {}
+    lo, hi = entry_ts - timedelta(minutes=15), entry_ts + timedelta(minutes=15)
+    cur.execute("""SELECT metrics, sector_week, sector_month, month_return, week_return, mom_2d,
+                          week_index_52, gvm_score
+                   FROM v8_qualified
+                   WHERE symbol = %s AND basket = %s AND signal_ts BETWEEN %s AND %s
+                   ORDER BY abs(extract(epoch from (signal_ts - %s))) LIMIT 1""",
+                (sym, basket, lo, hi, entry_ts))
+    r = cur.fetchone()
+    if not r:
+        return {}
+    m = dict(r[0] or {}) if isinstance(r[0], dict) else {}
+    for k, v in zip(("sector_week", "sector_month", "month_return", "week_return", "mom_2d",
+                     "week_index_52", "gvm_score"), r[1:]):
+        if m.get(k) is None and v is not None:
+            m[k] = _fnum(v)
+    return m
+
+
+def _origin_tc(cur, sym, ts):
+    cur.execute("""SELECT id, side, style, entry_price, entry_ts, target, sl, score,
+                          exit_price, exit_ts, exit_reason
+                   FROM tc_scanner_holds
+                   WHERE symbol = %s AND to_char(entry_ts, 'YYYY-MM-DD HH24:MI:SS') = %s
+                   ORDER BY id DESC LIMIT 1""", (sym, ts))
+    r = cur.fetchone()
+    if not r:
+        return None
+    is_open = (r[10] or "OPEN") == "OPEN"
+    style = "Momentum" if str(r[2] or "").upper().startswith("MOM") else "Reversal"
+    side = "long" if str(r[1] or "").upper() == "BUY" else "short"
+    return {"table": "tc_scanner_holds", "id": r[0], "basket": None, "style_word": style + " " + side,
+            "entry_price": _fnum(r[3]), "entry_ts": r[4], "target": _fnum(r[5]), "stop": _fnum(r[6]),
+            "pivot": None, "score": r[7],
+            "exit_price": None if is_open else _fnum(r[8]), "exit_ts": None if is_open else r[9],
+            "exit_reason": None if is_open else r[10]}
+
+
+def _origin_v10(cur, sym, ts):
+    cur.execute("""SELECT id, leg, opt_type, opt_strike, entry_price, exit_price, exit_ts, exit_reason,
+                          (entry_ts AT TIME ZONE 'Asia/Kolkata')
+                   FROM v10_trades
+                   WHERE symbol = %s
+                     AND to_char(entry_ts AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD HH24:MI:SS') = %s
+                   ORDER BY id DESC LIMIT 1""", (sym, ts))
+    r = cur.fetchone()
+    if not r:
+        return None
+    if str(r[1] or "FUT").upper() != "OPT":
+        return {"hidden": True, "table": "v10_trades", "id": r[0]}     # 36703: never rendered
+    return {"table": "v10_trades", "id": r[0], "basket": None, "style_word": "Option write",
+            "opt_type": r[2], "opt_strike": _fnum(r[3]), "entry_price": _fnum(r[4]),
+            "entry_ts": r[8], "target": None, "stop": None, "pivot": None,
+            "exit_price": _fnum(r[5]), "exit_ts": _ist_naive(r[6]), "exit_reason": r[7]}
+
+
+def _resolve_origin(cur, row):
+    eng = (row.get("source_engine") or "").strip()
+    ref = (row.get("source_ref") or "").strip()
+    if not eng or "@" not in ref:
+        return None
+    sym, ts = ref.split("@", 1)
+    try:
+        if eng == "V8":
+            o = _origin_v8(cur, sym, ts)
+            if o:
+                o["instrument"] = "FUT"
+                o["style_word"] = _STYLE_WORDS.get(o["basket"] or "", str(o["basket"] or "").replace("_", " ").capitalize())
+                o["evidence"] = _evidence_v8(cur, sym, o["basket"], o["entry_ts"])
+            return o
+        if eng == "TC Scanner":
+            o = _origin_tc(cur, sym, ts)
+            if o:
+                o["instrument"] = "FUT"
+                o["evidence"] = {}
+            return o
+        if eng == "Index Intel":
+            o = _origin_v10(cur, sym, ts)
+            if o and not o.get("hidden"):
+                o["instrument"] = "OPT"
+                o["evidence"] = {}
+            return o
+    except Exception as e:                       # an origin table hiccup must not blank the book
+        log.warning("ideas: origin lookup failed for %s/%s: %s", eng, ref, e)
+    return None
+
+
+def _why_line(kind, direction, o, ev, row, extra):
+    """ONE plain-words line: setup + evidence, never the engine (37072; 36283 plain_words_v2).
+    Templates filed for Fable OK in cc_task_logs (cc#1620 P1). A missing field drops its
+    sentence rather than printing a blank."""
+    parts = []
+    def add(s):
+        if s:
+            parts.append(s)
+    if kind == "waiting":
+        cond = "above" if row.get("trigger_condition") == "ABOVE" else "below"
+        add("Becomes an idea only if price crosses %s %s." % (cond, _n(row.get("trigger_price"))))
+        dist = extra.get("distance_pct")
+        if dist is not None:
+            add("%s%% away today, will not fire early." % _n(abs(dist), 1))
+        return " ".join(parts)
+    if kind == "manual":
+        cond = "above" if row.get("trigger_condition") == "ABOVE" else "below"
+        add("Price level. Set to %s on a cross %s %s." % ("buy" if direction == "BUY" else "sell", cond, _n(row.get("trigger_price"))))
+        if extra.get("triggered_day"):
+            add("Triggered %s and approved at %s." % (extra["triggered_day"], _n(row.get("approved_price"))))
+        add("No set target, managed by hand.")
+        return " ".join(parts)
+    basket = (o or {}).get("basket") or ""
+    ev = ev or {}
+    if basket == "sell_momentum":
+        add("Momentum short.")
+        if ev.get("mom_2d") is not None:
+            add("Down %s%% in two days." % _n(abs(ev["mom_2d"]), 1))
+        if ev.get("sector_week") is not None and abs(ev["sector_week"]) >= 0.05:
+            add("Sector %s%s%% on the week." % ("+" if ev["sector_week"] > 0 else "", _n(ev["sector_week"], 1)))
+        add("Target is the next support.")
+    elif basket == "buy_momentum":
+        add("Momentum long.")
+        if ev.get("month_return") is not None:
+            add("Up %s%% on the month." % _n(ev["month_return"], 1))
+        if ev.get("week_index_52") is not None:
+            add("Sits at %s%% of its 52-week range." % _n(ev["week_index_52"], 0))
+        if ev.get("sector_week") is not None and abs(ev["sector_week"]) >= 0.05:
+            add("Sector %s%s%% on the week." % ("+" if ev["sector_week"] > 0 else "", _n(ev["sector_week"], 1)))
+    elif basket == "buy_reversal":
+        add("Reversal long.")
+        add("Bounced off support S1 today." if ev.get("s1_touch") else "Bought the dip at support.")
+        if ev.get("month_return") is not None and ev.get("gvm_score") is not None:
+            add("Down %s%% on the month, quality %s." % (_n(abs(ev["month_return"]), 1), _n(ev["gvm_score"], 1)))
+        if (o or {}).get("pivot"):
+            add("Needs the pivot %s to run." % _n(o["pivot"], 2))
+    elif basket == "sell_reversal":
+        add("Reversal short.")
+        add("Touched resistance R1 and turned." if ev.get("r1_touch") else "Sold the bounce at resistance.")
+        if ev.get("fall_from_r1") is not None and ev.get("room_pct") is not None:
+            add("%s%% off R1, %s%% room to target." % (_n(ev["fall_from_r1"], 1), _n(ev["room_pct"], 1)))
+    elif (o or {}).get("table") == "tc_scanner_holds":
+        add("%s." % o.get("style_word", "Scan idea").capitalize())
+        if o.get("score") is not None:
+            add("Scored %s of 100 on the scan." % _n(o["score"], 0))
+    elif (o or {}).get("table") == "v10_trades":
+        add("Option write.")
+        if o.get("opt_type") and o.get("opt_strike"):
+            add("%s %s, sold at %s." % (o["opt_type"], _n(o["opt_strike"], 0), _n(o.get("entry_price"))))
+    else:
+        add("Handpicked idea.")
+    return " ".join(parts)
+
+
+def _spark(cur, sym, start_ist, end_ist=None, cap=80):
+    """5-minute spot closes since approval (intraday_prices fyers_eq, naive IST), thinned to at
+    most `cap` points; daily raw_prices when the 5m window has fewer than two bars."""
+    if start_ist is None:
+        return None
+    pts, tf = [], "5m"
+    try:
+        if end_ist is None:
+            cur.execute("""SELECT ts, close FROM intraday_prices
+                           WHERE symbol = %s AND timeframe = '5m' AND source = 'fyers_eq'
+                             AND ts >= %s AND close IS NOT NULL ORDER BY ts""", (sym, start_ist))
+        else:
+            cur.execute("""SELECT ts, close FROM intraday_prices
+                           WHERE symbol = %s AND timeframe = '5m' AND source = 'fyers_eq'
+                             AND ts >= %s AND ts <= %s AND close IS NOT NULL ORDER BY ts""",
+                        (sym, start_ist, end_ist))
+        pts = [(r[0], _fnum(r[1])) for r in cur.fetchall()]
+        if len(pts) < 2:
+            tf = "1d"
+            cur.execute("""SELECT price_date, close FROM raw_prices
+                           WHERE symbol = %s AND price_date >= %s AND close IS NOT NULL
+                           ORDER BY price_date""", (sym, start_ist.date()))
+            pts = [(r[0], _fnum(r[1])) for r in cur.fetchall()]
+            if end_ist is not None:
+                pts = [p for p in pts if p[0] <= end_ist.date()]
+    except Exception as e:
+        log.warning("ideas: spark failed for %s: %s", sym, e)
+        return None
+    if not pts:
+        return {"tf": tf, "n": 0, "pts": []}
+    n = len(pts)
+    if n > cap:
+        step = -(-n // cap)
+        thinned = pts[::step]
+        if thinned[-1] is not pts[-1]:
+            thinned.append(pts[-1])
+        pts = thinned
+    return {"tf": tf, "n": n, "pts": [p[1] for p in pts],
+            "from": str(pts[0][0]), "to": str(pts[-1][0])}
+
+
+@router.get("/api/alerts/ideas")
+def alerts_ideas(limit: int = 100):
+    limit = max(1, min(int(limit), 500))
+    now_ist = datetime.now(_IST).replace(tzinfo=None)
+    today = now_ist.date()
+    with _conn() as conn, conn.cursor() as cur:
+        _ensure_schema(conn)
+        cur.execute(f"""SELECT {_COLS} FROM trade_alerts
+                        WHERE status IN ('approved', 'pending', 'triggered')
+                        ORDER BY COALESCE(approved_at, created_at) DESC, id DESC LIMIT %s""", (limit,))
+        raws = cur.fetchall()
+        rows = [_row(r) for r in raws]
+        syms = sorted({r["symbol"] for r in rows})
+        live = {}
+        if syms:
+            try:
+                import cmp_resolver
+                live = cmp_resolver.resolve_cmp_many(cur, syms) or {}
+            except Exception as e:
+                log.warning("ideas: resolve_cmp_many failed (%s) — cards ship without cmp", e)
+        ideas, hidden = [], 0
+        for raw, row in zip(raws, rows):
+            sym, direction = row["symbol"], row["direction"]
+            created_at, triggered_at, approved_at = _ist_naive(raw[7]), _ist_naive(raw[8]), _ist_naive(raw[9])
+            hit = live.get(sym) or {}
+            cmp_v = _fnum(hit.get("cmp"))
+            card = {
+                "id": row["id"], "symbol": sym, "direction": direction,
+                "side": "LONG" if direction == "BUY" else "SHORT",
+                "origin_tag": _ORIGIN_TAG, "style": "Price level", "instrument": "EQ",
+                "cmp": cmp_v, "cmp_live": bool(hit.get("live")) if hit else None,
+                "cmp_source": hit.get("source"), "cmp_ts": str(hit.get("ts")) if hit.get("ts") else None,
+                "notes": row.get("notes"),
+                "via": ("app" if "app" in str(row.get("approved_via") or "") else
+                        "web" if "web" in str(row.get("approved_via") or "") else None),
+            }
+            if row["status"] in ("pending", "triggered"):
+                tp = row["trigger_price"]
+                dist = (round((tp - cmp_v) / cmp_v * 100.0, 2) if (cmp_v and tp is not None) else None)
+                card.update({
+                    "status": "waiting", "triggered": row["status"] == "triggered",
+                    "trigger_price": tp, "trigger_condition": row["trigger_condition"],
+                    "set_at_ist": _fmt_ist(created_at), "triggered_at_ist": _fmt_ist(triggered_at),
+                    "distance_pct": dist,
+                    "why": _why_line("waiting", direction, None, None, row, {"distance_pct": dist}),
+                })
+                ideas.append(card)
+                continue
+            # approved ────────────────────────────────────────────────────────────────────────
+            entry = row["approved_price"]
+            o = _resolve_origin(cur, row)
+            if o and o.get("hidden"):
+                hidden += 1                     # a V10 futures leg: stored, never shown (36703)
+                continue
+            ev = (o or {}).get("evidence") or {}
+            closed = bool(o and o.get("exit_ts"))
+            final_price = o["exit_price"] if closed else None
+            exit_ts = _ist_naive(o["exit_ts"]) if closed else None
+            ref_price = final_price if closed else cmp_v
+            card.update({
+                "status": "closed" if closed else "live",
+                "approved_at_ist": _fmt_ist(approved_at), "approved_price": entry,
+                "since_pct": _pct_since(ref_price, entry, direction),
+                "held": _held_words(((exit_ts or now_ist) - approved_at).total_seconds() if approved_at else None),
+                "held_seconds": int(((exit_ts or now_ist) - approved_at).total_seconds()) if approved_at else None,
+                "spark": _spark(cur, sym, approved_at, exit_ts),
+            })
+            if closed:
+                card["closed"] = {"at_ist": _fmt_ist(exit_ts), "price": final_price,
+                                  "final_pct": card["since_pct"],
+                                  "reason": _CLOSE_WORDS.get(str(o.get("exit_reason") or "").upper(),
+                                                             str(o.get("exit_reason") or "closed").replace("_", " ").lower())}
+            if o:
+                target, stop = o.get("target"), o.get("stop")
+                rr = (round(abs(target - entry) / abs(entry - stop), 2)
+                      if (target is not None and stop is not None and entry not in (None, stop)) else None)
+                card.update({
+                    "style": o.get("style_word") or "Handpicked idea", "instrument": o.get("instrument", "FUT"),
+                    "target": target, "stop": stop, "pivot": o.get("pivot"),
+                    "to_target_pct": _to_target_pct(ref_price, target, direction),
+                    "rr_at_entry": rr, "track": _track(entry, stop, target, ref_price),
+                    "why": _why_line("engine", direction, o, ev, row, {}),
+                })
+                if card["instrument"] == "FUT":
+                    exp = _fut_expiry(exit_ts.date() if closed else today)
+                    card["expiry"] = {"date": str(exp), "label": _MONTHS[exp.month - 1] + " expiry",
+                                      "days": (exp - today).days if not closed else None}
+                if card["instrument"] == "OPT":
+                    card["opt"] = {"type": o.get("opt_type"), "strike": o.get("opt_strike")}
+                    card["since_pct"] = None       # option price is not what the resolver tracks
+                    card["since_note"] = "option leg — P&L tracked on the Index page"
+            else:
+                # manual: the trigger IS the plan
+                tp = row["trigger_price"]
+                is_manual = not row.get("source_engine")
+                card.update({
+                    "style": "Price level" if is_manual else "Handpicked idea",
+                    "instrument": "EQ",
+                    "trigger_price": tp if is_manual else None,
+                    "trigger_condition": row["trigger_condition"] if is_manual else None,
+                    "from_trigger_pct": _pct_since(ref_price, tp, direction) if is_manual else None,
+                    "why": _why_line("manual" if is_manual else "engine", direction, None, {}, row,
+                                     {"triggered_day": (" ".join(_fmt_ist(triggered_at).split(" ")[:2]) if triggered_at else None)}),
+                    "origin_unresolved": (not is_manual),
+                })
+            ideas.append(card)
+    live_cards = [c for c in ideas if c["status"] == "live" and c.get("since_pct") is not None]
+    best = max(live_cards, key=lambda c: c["since_pct"]) if live_cards else None
+    stats = {
+        "live": sum(1 for c in ideas if c["status"] == "live"),
+        "winning": sum(1 for c in live_cards if c["since_pct"] > 0),
+        "avg_since_pct": (round(sum(c["since_pct"] for c in live_cards) / len(live_cards), 2) if live_cards else None),
+        "best_pct": best["since_pct"] if best else None,
+        "best_symbol": best["symbol"] if best else None,
+    }
+    counts = {
+        "all": len(ideas),
+        "live": stats["live"],
+        "waiting": sum(1 for c in ideas if c["status"] == "waiting"),
+        "closed": sum(1 for c in ideas if c["status"] == "closed"),
+        "long": sum(1 for c in ideas if c["direction"] == "BUY"),
+        "short": sum(1 for c in ideas if c["direction"] == "SELL"),
+    }
+    any_live = any(c.get("cmp_live") for c in ideas)
+    return {
+        "as_of_ist": "%02d:%02d IST" % (now_ist.hour, now_ist.minute),
+        "price_basis": "LIVE" if any_live else "CLOSE",
+        "counts": counts, "stats": stats,
+        "honesty": "Every idea here was handpicked and approved by hand. Prices and P&L are live since approval.",
+        "ideas": ideas, "hidden_option_context": hidden,
+        "spec_ref": "APP_ALERTS_IDEAS_V1 session_log 37072 · cc#1620",
+    }

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Alerts</title>
+<!-- scorr_mobile_alerts_R1 — filed in full to cc_task_logs 4673 (Fable, 02-Sep-2026 20:05 IST).
+     Saved to the repo by CC under cc#1620 P2 with the founder 20:50 amendment applied on save:
+     no engine names on the Ideas cards or filters — every origin tag reads EXPERT HANDPICKED and
+     the style tag is plain words (Momentum short / Reversal long / Price level); the V8 / Manual
+     filter chips are dropped and a Closed chip added; header honesty line per 37072 display_rule_v2.
+     Dummy data by design (the live book at 20:05 IST); the wiring card binds real fields. -->
+<style>
+:root{--field:#0A0A0C;--panel:#17171B;--well:#131316;--sunk:#0C0C0F;--chalk:#F5F2EA;--mute:#8A8A93;--dim:#5E5E66;--line:#2A2A31;--gold:#D4AF37;--gold-lo:#7A6320;--gold-hi:#F0D070;--gold-d:rgba(212,175,55,.12);--up:#2FD48B;--down:#FF5C6C;--amber:#FF9F45;--aqua:#35E0FF;--up-d:rgba(47,212,139,.14);--down-d:rgba(255,92,108,.14);--amber-d:rgba(255,159,69,.14);--display:'Archivo Black','Space Grotesk',system-ui,sans-serif;--body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;--mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--field);color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45}
+body{background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);padding-bottom:100px}
+.wrap{max-width:430px;margin:0 auto;padding:0 12px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.up{color:var(--up)}.dn{color:var(--down)}.am{color:var(--amber)}.mu{color:var(--mute)}.gd{color:var(--gold)}
+.pressed{background:var(--sunk);border:1px solid #000;border-radius:12px;padding:14px 16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
+.slab{background:var(--panel);border:1.5px solid var(--line);border-radius:14px;padding:0;box-shadow:0 5px 0 0 var(--gold-lo),0 5px 0 1.5px var(--line);overflow:hidden;position:relative}
+.tag{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 7px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+.tag.up{background:var(--up-d);color:var(--up)}.tag.dn{background:var(--down-d);color:var(--down)}.tag.gd{background:var(--gold-d);color:var(--gold)}.tag.mu{background:var(--well);color:var(--mute);border:1px solid var(--line)}.tag.am{background:var(--amber-d);color:var(--amber)}
+.top{display:flex;align-items:flex-end;justify-content:space-between;padding:16px 0 10px}
+.h1{font-family:var(--display);font-size:26px;letter-spacing:.5px;line-height:1}
+.h1 small{display:block;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--gold);margin-top:6px;text-transform:uppercase;white-space:nowrap}
+.top .r{font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0 12px}
+.stats>div{padding:9px 6px;text-align:center}.stats .k{font-family:var(--mono);font-size:9px;letter-spacing:1.4px;color:var(--mute)}.stats .v{font-family:var(--mono);font-size:17px;font-weight:800;margin-top:2px}
+.filters{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-bottom:12px}.filters::-webkit-scrollbar{display:none}
+.chip{flex:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:7px 11px;border:1px solid var(--line);background:var(--well);color:var(--mute);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
+.chip.on{color:var(--gold);border-color:rgba(212,175,55,.45);background:var(--gold-d)}
+.idea{margin-bottom:12px}
+.ribbon{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:1.4px;padding:2px 8px;border-radius:4px;color:#141005;background:var(--gold);margin-bottom:4px}
+.ribbon.live{background:var(--up-d);color:var(--up);border:1px solid rgba(47,212,139,.4)}.ribbon.pend{background:var(--amber-d);color:var(--amber);border:1px solid rgba(255,159,69,.4)}
+.idea .hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px 0}
+.idea .sym{font-family:var(--display);font-size:22px;line-height:1;letter-spacing:-.2px}
+.idea .tags{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+.idea .appr{font-family:var(--mono);font-size:10px;color:var(--mute);margin-top:6px}
+.idea .appr b{color:var(--chalk);font-weight:600}
+.idea .live{text-align:right;flex:none}
+.idea .live .px{font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:-.3px}
+.idea .live .ch{font-family:var(--mono);font-size:13px;font-weight:800}
+.idea .live .l{font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--dim)}
+svg.spark{display:block;width:100%;height:56px;margin:8px 0 2px}
+.idea .why{padding:0 16px;font-size:13.5px;line-height:1.5}
+.idea .why b{color:var(--gold);font-weight:700}
+.plan{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:10px 16px 0}
+.plan>div{padding:7px 8px;background:var(--well);border:1px solid var(--line);border-radius:7px}
+.plan .k{font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)}.plan .v{font-family:var(--mono);font-size:13.5px;font-weight:800;margin-top:1px}
+.trk{position:relative;height:7px;margin:10px 16px 0;background:var(--well);border:1px solid var(--line)}
+.trk .fill{position:absolute;top:0;bottom:0;left:0}
+.trk.long .fill{background:var(--up)}.trk.short .fill{background:var(--down)}
+.trk .z{position:absolute;top:-4px;width:1px;height:13px;background:var(--dim)}
+.trk .cmp{position:absolute;top:-4px;width:2px;height:13px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
+.trk .lab{position:absolute;top:10px;font-family:var(--mono);font-size:9px;color:var(--dim)}
+.idea .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;padding:22px 16px 12px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.idea .foot b{color:var(--mute);font-weight:600}
+.pend .why{color:var(--mute)}
+.dist{margin:10px 16px 0;position:relative;height:7px;background:var(--well);border:1px solid var(--line)}
+.dist .fill{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,var(--amber),var(--gold))}
+.dist .lab{position:absolute;top:10px;font-family:var(--mono);font-size:9px;color:var(--dim)}
+.acts{display:flex;gap:8px;padding:0 16px 14px;margin-top:24px}
+.acts a{flex:1;text-align:center;font-family:var(--mono);font-size:11px;font-weight:800;letter-spacing:.8px;padding:10px 6px;border-radius:9px;text-decoration:none}
+.acts .pri{background:var(--gold);color:#141005;box-shadow:0 3px 0 var(--gold-lo)}
+.acts .sec{background:var(--well);color:var(--mute);border:1px solid var(--line)}
+.sect{display:flex;align-items:center;gap:10px;margin:18px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center}
+.sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
+.sect .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
+.fab{position:fixed;right:18px;bottom:96px;width:56px;height:56px;border-radius:50%;background:var(--gold);color:#141005;font-size:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 5px 0 var(--gold-lo),0 10px 30px rgba(0,0,0,.6);z-index:40}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;background:#0A101E;border-top:1px solid var(--line);padding:8px 0 max(10px,env(safe-area-inset-bottom))}
+.bn{display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--body);font-size:11px;letter-spacing:1px;font-weight:700;color:var(--aqua);text-decoration:none;position:relative}
+.bn .i{font-size:16px;opacity:.85}.bn.on{color:var(--gold)}.bn.on::before{content:"";position:absolute;top:-9px;left:25%;right:25%;height:3px;background:var(--gold)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><div class="h1">Ideas<small>Curated · Equity &amp; Futures</small></div><div class="r">6 ideas · 5 live · 1 waiting<br>as of 20:05 IST</div></div>
+<section class="pressed">
+  <div class="stats"><div><div class="k">LIVE</div><div class="v">5</div></div><div><div class="k">WINNING</div><div class="v up">3</div></div><div><div class="k">AVG SINCE</div><div class="v up">+0.0%</div></div><div><div class="k">BEST</div><div class="v up">+2.5%</div></div></div>
+  <div style="font-family:var(--mono);font-size:10px;color:var(--dim);text-align:center">Every idea here was handpicked and approved by hand. Prices and P&amp;L are live since approval.</div>
+</section>
+<div class="filters" style="margin-top:12px"><span class="chip on">All 6</span><span class="chip">Live 5</span><span class="chip">Waiting 1</span><span class="chip">Closed 0</span><span class="chip">Long 3</span><span class="chip">Short 2</span></div>
+<article class="slab idea">
+  <div class="hd" data-status="live"><div><div class="sym">ANGELONE</div><div class="tags"><span class="tag dn">SHORT</span><span class="tag gd">EXPERT HANDPICKED</span><span class="tag mu">Momentum short</span><span class="tag mu">FUT</span></div><div class="appr">approved <b>1 Sep 07:57</b> @ <b>286.35</b> · via app</div></div><div class="live"><div class="ribbon live">LIVE</div><div class="l">NOW</div><div class="px">279.25</div><div class="ch up">+2.48%</div></div></div>
+  <svg class="spark" viewBox="0 0 360 56" aria-hidden="true"><line x1="16" y1="22" x2="344" y2="22" stroke="#2A2A31" stroke-dasharray="3 4"/><polyline fill="none" stroke="#2FD48B" stroke-width="2" points="16,22 60,25 104,19 148,28 192,33 236,30 280,37 324,41 344,44"/><circle cx="344" cy="44" r="3.5" fill="#2FD48B"/></svg>
+  <div class="why"><b>Momentum short.</b> Broke below its week low on 1.6× volume; sector down on the month. Target is the next support.</div>
+  <div class="plan"><div><div class="k">TARGET</div><div class="v up">274.2</div></div><div><div class="k">STOP</div><div class="v dn">294.9</div></div><div><div class="k">TO TARGET</div><div class="v">1.8%</div></div></div>
+  <div class="trk short"><i class="fill" style="width:59%"></i><i class="z" style="left:41%"></i><i class="cmp" style="left:59%"></i><span class="lab" style="left:0">stop 294.9</span><span class="lab" style="right:0">target 274.2</span></div>
+  <div class="foot"><span>held <b>1d 12h</b></span><span>Sep expiry · <b>27 days</b></span><span>R:R at entry <b>1.4</b></span></div>
+</article>
+<article class="slab idea">
+  <div class="hd" data-status="live"><div><div class="sym">BHARATFORG</div><div class="tags"><span class="tag up">LONG</span><span class="tag gd">EXPERT HANDPICKED</span><span class="tag mu">Reversal long</span><span class="tag mu">FUT</span></div><div class="appr">approved <b>1 Sep 07:56</b> @ <b>2,041.9</b> · via app</div></div><div class="live"><div class="ribbon live">LIVE</div><div class="l">NOW</div><div class="px">2,031.8</div><div class="ch dn">−0.49%</div></div></div>
+  <svg class="spark" viewBox="0 0 360 56" aria-hidden="true"><line x1="16" y1="28" x2="344" y2="28" stroke="#2A2A31" stroke-dasharray="3 4"/><polyline fill="none" stroke="#FF5C6C" stroke-width="2" opacity=".9" points="16,28 60,24 104,30 148,36 192,31 236,38 280,34 324,31 344,32"/><circle cx="344" cy="32" r="3.5" fill="#FF5C6C"/></svg>
+  <div class="why"><b>Reversal long.</b> Bounced from S1 with the sector turning; GVM 6.9. Needs to reclaim the pivot at 2,054 to run.</div>
+  <div class="plan"><div><div class="k">TARGET</div><div class="v up">2,107</div></div><div><div class="k">STOP</div><div class="v dn">1,984</div></div><div><div class="k">TO TARGET</div><div class="v">3.7%</div></div></div>
+  <div class="trk long"><i class="fill" style="width:39%"></i><i class="z" style="left:47%"></i><i class="cmp" style="left:39%"></i><span class="lab" style="left:0">stop 1,984</span><span class="lab" style="right:0">target 2,107</span></div>
+  <div class="foot"><span>held <b>1d 12h</b></span><span>Sep expiry · <b>27 days</b></span><span>R:R at entry <b>1.1</b></span></div>
+</article>
+<article class="slab idea">
+  <div class="hd" data-status="live"><div><div class="sym">RELIANCE</div><div class="tags"><span class="tag up">LONG</span><span class="tag gd">EXPERT HANDPICKED</span><span class="tag mu">Price level</span><span class="tag mu">EQ</span></div><div class="appr">triggered ≥ 1,270 · approved <b>31 Aug 16:40</b> @ <b>1,294.5</b></div></div><div class="live"><div class="ribbon live">LIVE</div><div class="l">NOW</div><div class="px">1,313.1</div><div class="ch up">+1.44%</div></div></div>
+  <svg class="spark" viewBox="0 0 360 56" aria-hidden="true"><line x1="16" y1="34" x2="344" y2="34" stroke="#2A2A31" stroke-dasharray="3 4"/><polyline fill="none" stroke="#2FD48B" stroke-width="2" points="16,34 60,30 104,32 148,26 192,24 236,27 280,20 324,17 344,15"/><circle cx="344" cy="15" r="3.5" fill="#2FD48B"/></svg>
+  <div class="why"><b>Price level.</b> Set to buy on a reclaim of 1,270; triggered and approved the same day. No set target, managed by hand.</div>
+  <div class="plan"><div><div class="k">TRIGGER</div><div class="v">≥ 1,270</div></div><div><div class="k">FROM TRIGGER</div><div class="v up">+3.4%</div></div><div><div class="k">NOTE</div><div class="v mu" style="font-size:11px;font-weight:600">first sweep</div></div></div>
+  <div class="foot"><span>held <b>2d 3h</b></span><span>cash equity</span><span>handpicked · founder</span></div>
+</article>
+<div class="sect">Waiting for price <span class="r">1 idea</span></div>
+<article class="slab idea pend">
+  <div class="hd" data-status="pend"><div><div class="sym">RELIANCE</div><div class="tags"><span class="tag dn">SHORT</span><span class="tag gd">EXPERT HANDPICKED</span><span class="tag mu">Price level</span><span class="tag mu">EQ</span></div><div class="appr">set <b>31 Aug 10:35</b> · triggers ≤ <b>1,150</b></div></div><div class="live"><div class="ribbon pend">WAITING</div><div class="l">NOW</div><div class="px">1,313.1</div><div class="ch mu">12.4% away</div></div></div>
+  <div class="why" style="margin-top:10px">Becomes an idea only if price falls under 1,150. Far from it today — stays waiting, will not fire early.</div>
+  <div class="dist"><i class="fill" style="width:8%"></i><span class="lab" style="left:0">trigger 1,150</span><span class="lab" style="right:0">now 1,313</span></div>
+  <div class="acts"><a class="sec" href="#">Dismiss</a><a class="pri" href="#">Approve now</a></div>
+</article>
+<div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px">Ideas are the approved book. Prices live. Nothing lands here before it is approved by hand.</div>
+</div>
+<div class="fab">+</div>
+<nav class="bnav"><a class="bn" href="#"><span class="i">◧</span>Home</a><a class="bn" href="#"><span class="i">△</span>V8</a><a class="bn" href="#"><span class="i">◈</span>GVM</a><a class="bn" href="#"><span class="i">◉</span>Check</a><a class="bn on" href="#"><span class="i">⚠</span>Alerts</a></nav>
+</body>
+</html>
