@@ -159,17 +159,49 @@ var FLAG_MAX = 5;
 function flagCard(b, strong, i){
   var cls = strong ? 'up' : 'dn', tone = strong ? {bg:'var(--up-d)', bd:'var(--up)', fg:'var(--up)'} : {bg:'var(--down-d)', bd:'var(--down)', fg:'var(--down)'};
   var ctx = [];
-  if(num(b.peer_median)) ctx.push('peers '+bmPeerTxt(b));
+  var val = bmVal(b);
+  if(num(b.peer_median) && !/ vs /.test(val)) ctx.push('peers '+bmPeerTxt(b));
   if(num(b.rank) && num(b.peer_n)) ctx.push('#'+b.rank+' of '+b.peer_n);
   return '<button type="button" class="g-cc" data-flag="'+esc(b.key)+'" style="flex:0 0 150px;scroll-snap-align:start;display:flex;flex-direction:column;justify-content:space-between;gap:6px;min-height:92px;padding:9px 10px 8px;text-align:left;border-radius:9px;border:1px solid '+tone.bd+';background:'+tone.bg+';color:var(--chalk);cursor:pointer;min-width:0">'
     + '<span style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:'+tone.fg+'"><svg viewBox="0 0 12 14" width="10" height="12" aria-hidden="true"><path d="M1 0h1v14H1zM2 1h9l-2.5 3L11 7H2z" fill="currentColor"/></svg>'+(strong ? 'STRONG' : 'WEAK')+' '+(i+1)+'</span>'
     + '<span style="font-family:var(--body);font-size:11px;line-height:1.25;color:var(--chalk);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'+esc(plainLabel(b))+'</span>'
-    + '<span><span style="display:block;font-family:var(--mono);font-size:18px;font-weight:800;letter-spacing:-.3px;line-height:1;color:'+tone.fg+'">'+esc(bmVal(b))+'</span>'
+    + '<span><span style="display:block;font-family:var(--mono);font-size:18px;font-weight:800;letter-spacing:-.3px;line-height:1;color:'+tone.fg+'">'+esc(val)+'</span>'
     + '<span style="display:block;margin-top:3px;font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(ctx.join(' · ') || 'no peer read')+'</span></span></button>';
 }
 function flagMore(n, strong){
   var fg = strong ? 'var(--up)' : 'var(--down)';
   return '<button type="button" class="g-cc" data-flag-more="'+(strong ? 'pos' : 'neg')+'" style="flex:0 0 96px;scroll-snap-align:start;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:92px;border-radius:9px;border:1px dashed '+fg+';background:transparent;color:'+fg+';font-family:var(--mono);font-weight:800;font-size:14px;cursor:pointer"><span>+'+n+' more</span><span style="font-size:9px;letter-spacing:1.2px">'+(strong ? 'STRONG' : 'WEAK')+'</span></button>';
+}
+/* P3 · "+N more" opens a sheet with every flag of that side, same card style stacked full-width. */
+function flagSheetClose(){ var w = document.getElementById('g-fsheet'); if(w) w.remove(); }
+function flagSheetOpen(side){
+  var d = STATE.co; if(!d) return;
+  flagSheetClose();
+  var strong = side === 'pos', rows = (strong ? d.positives : d.negatives) || [];
+  var el = document.createElement('div'); el.id = 'g-fsheet';
+  el.innerHTML = '<div data-fs-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80"></div>'
+    + '<div style="position:fixed;left:0;right:0;bottom:0;max-height:84vh;display:flex;flex-direction:column;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0">'
+    + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 4px;flex-shrink:0"></div>'
+    + '<div style="overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px))">'
+    + '<div style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:'+(strong ? 'var(--up)' : 'var(--down)')+'">'+(strong ? 'STRONG' : 'WEAK')+' · ALL '+rows.length+' · '+esc(STATE.sym||'')+'</div>'
+    + '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">'+rows.map(function(b, i){ return flagCard(b, strong, i).replace('flex:0 0 150px;scroll-snap-align:start;', 'width:100%;'); }).join('')+'</div>'
+    + '<button type="button" data-fs-close="1" style="width:100%;min-height:44px;margin-top:16px;border-radius:12px;border:0;background:var(--gold);color:var(--well);font-family:var(--mono);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer">DONE</button></div></div>';
+  document.body.appendChild(el);
+  el.addEventListener('click', function(e){
+    if(e.target.closest('[data-fs-close]')){ flagSheetClose(); return; }
+    var f = e.target.closest('[data-flag]'); if(f){ flagSheetClose(); flagGo(f.getAttribute('data-flag')); }
+  });
+}
+/* P4 · tap a flag -> scroll to that parameter in its pillar card (the row, or the grid box when
+   Grid is on) and light it for a moment. The web has no tap on the reel, so this follows scope 4
+   option A. */
+function flagGo(key){
+  var el = document.querySelector('[data-gbox="'+key+'"]') || document.querySelector('[data-bmkey="'+key+'"]');
+  if(!el){ var pill = bmRow(STATE.co||{}, key); var id = pill && pill.pillar === 'V' ? 'value' : pill && pill.pillar === 'M' ? 'momentum' : 'growth'; var hd = document.getElementById(id); if(hd) hd.scrollIntoView({behavior:'smooth', block:'start'}); return; }
+  el.scrollIntoView({behavior:'smooth', block:'center'});
+  var prev = el.style.boxShadow, prevT = el.style.transition;
+  el.style.transition = 'box-shadow .25s'; el.style.boxShadow = '0 0 0 2px var(--gold)';
+  setTimeout(function(){ el.style.boxShadow = prev; setTimeout(function(){ el.style.transition = prevT; }, 300); }, 1400);
 }
 function flagRow(d){
   var pos = (d.positives||[]), neg = (d.negatives||[]), cards = [];
@@ -279,7 +311,7 @@ function bmRowHtml(b, opts){
   if(num(b.rank) && num(b.peer_n)) sub.push('rank '+b.rank+' of '+b.peer_n);
   if(opts && opts.sub) sub = [opts.sub].concat(num(b.rank) && num(b.peer_n) ? ['rank '+b.rank+' of '+b.peer_n] : []);
   var cls = (opts && opts.signed && num(b.company)) ? (b.company > 0 ? ' up' : b.company < 0 ? ' dn' : '') : '';
-  return '<div class="g-bm"><div class="g-bk">'+esc((opts && opts.label) || plainLabel(b))+'</div><div class="g-bsub">'+esc(sub.join(' · ')||'no peer read')+'</div>'+
+  return '<div class="g-bm" data-bmkey="'+esc(b.key||'')+'"><div class="g-bk">'+esc((opts && opts.label) || plainLabel(b))+'</div><div class="g-bsub">'+esc(sub.join(' · ')||'no peer read')+'</div>'+
          '<div class="g-bval"><b class="'+cls+'">'+esc(bmSelf(b))+'</b>'+rtChip(b.rating)+'</div>'+(opts && opts.track===false ? '' : peerTrack(b))+'</div>';
 }
 var LEGEND = '<div class="g-legend"><span><i style="background:var(--gold)"></i>this company</span><span><i style="background:var(--mute)"></i>peer median</span><span><i style="background:rgba(138,138,147,.25)"></i>peer range</span></div>';
@@ -1208,6 +1240,8 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
   var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); refreshPillars(); return; }   /* cc#1618 */
   var gb = e.target.closest('[data-gbox]'); if(gb){ paramSheetOpen(gb.getAttribute('data-gbox')); return; }   /* cc#1618 P4 */
+  var fm = e.target.closest('[data-flag-more]'); if(fm){ flagSheetOpen(fm.getAttribute('data-flag-more')); return; }   /* cc#1619 P3 */
+  var fl = e.target.closest('[data-flag]'); if(fl){ flagGo(fl.getAttribute('data-flag')); return; }   /* cc#1619 P4 */
   if(e.target.closest('[data-ratio-filter]')){ ratioSheetOpen(); return; }   /* cc#1617 P4 */
   var ft = e.target.closest('[data-fin-table]'); if(ft){ var fk = ft.getAttribute('data-fin-table'); finTableOpen[fk] = !finTableOpen[fk]; refreshFin(); return; }   /* cc#1617 P5 */
   var fb = e.target.closest('[data-fin]'); if(fb){ finView = fb.getAttribute('data-fin'); var fh = document.getElementById('financials'); var fs = fh && fh.nextElementSibling; if(fs){ var tmp2 = document.createElement('div'); tmp2.innerHTML = secFinancials(STATE.co); fh.parentNode.replaceChild(tmp2.children[1], fs); } return; }
