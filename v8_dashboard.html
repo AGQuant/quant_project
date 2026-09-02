@@ -2021,7 +2021,23 @@ function closeAdr(){const el=document.getElementById('adrCard');if(el)el.classLi
 function closeBankniftyPcr(){const el=document.getElementById('bankniftyPcrCard');if(el)el.classList.remove('open');}
 // cc#536: V10 index open-positions popup — read-only display bridge, fetches the existing
 // /api/v10/positions fresh on each open. No V10 compute in V8; pure fetch + render.
-function closeIdxPos(){const el=document.getElementById('idxPosCard');if(el)el.classList.remove('open');}
+function closeIdxPos(){const el=document.getElementById('idxPosCard');if(el)el.classList.remove('open');if(_idxHeldTimer){clearInterval(_idxHeldTimer);_idxHeldTimer=null;}}
+// cc#1581: entry stamp under the symbol. entry_ts is a genuine UTC timestamptz (cc#844 class), so it
+// is converted with timeZone Asia/Kolkata — never string-sliced. Held duration is client-side from
+// now and re-ticks every 60s while the popup is open (the popup has no refresh cycle of its own).
+let _idxHeldTimer=null;
+function idxEntryIst(ts){
+  const d=new Date(ts);if(!ts||isNaN(d))return'';
+  const p=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(d).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
+  return p.day+'-'+p.month+' '+p.hour+':'+p.minute+' IST';
+}
+function idxHeld(ts){
+  const d=new Date(ts);if(!ts||isNaN(d))return'';
+  let m=Math.max(0,Math.floor((Date.now()-d.getTime())/60000));
+  const dd=Math.floor(m/1440);m-=dd*1440;const h=Math.floor(m/60);m-=h*60;
+  return dd?dd+'d '+h+'h':h?h+'h '+m+'m':m+'m';
+}
+function idxTickHeld(){document.querySelectorAll('#idxPosBody .idx-held').forEach(el=>{el.textContent='· '+idxHeld(el.getAttribute('data-ts'));});}
 async function openIdxPos(){
   const card=document.getElementById('idxPosCard'), body=document.getElementById('idxPosBody');
   document.getElementById('idxPosCount').textContent='';
@@ -2065,7 +2081,11 @@ function renderIdxPos(rows){
        that IIFE — rather than assuming a same-file function is automatically reachable. */
     return '<tr>'
       +'<td>'+(window.v10ChartIcon?window.v10ChartIcon(p.symbol):'')+'</td>'
-      +'<td '+L+'><span class="sym">'+symLabel+'</span></td>'
+      +'<td '+L+'><span class="sym">'+symLabel+'</span>'
+      /* cc#1581: second line — entry stamp in IST + held time. Same format on both legs, so a paired
+         trade shows the same stamp twice. Row grows to fit; the header row does not move. */
+      +(p.entry_ts?'<div style="font:400 10px var(--f-m);color:var(--mut);margin-top:2px;white-space:nowrap">'+idxEntryIst(p.entry_ts)+' <span class="idx-held" data-ts="'+p.entry_ts+'" style="opacity:.7">· '+idxHeld(p.entry_ts)+'</span></div>':'')
+      +'</td>'
       +'<td '+L+'>'+sideChip(p.side)+'</td>'
       +'<td '+L+' style="color:var(--mut);font-size:11px;text-align:left">'+typeLabel+'</td>'
       +'<td>'+num(p.entry_price)+'</td>'
@@ -2085,6 +2105,8 @@ function renderIdxPos(rows){
     +'<th style="cursor:default">STOP</th><th style="cursor:default">QTY</th><th style="cursor:default">P&amp;L</th>'
     +'<th style="cursor:default">P&amp;L% <span title="P&amp;L% is on entry notional (entry price x qty)" style="cursor:help;opacity:.7">&#9432;</span></th>'
     +'</tr></thead><tbody>'+trs+'</tbody></table>';
+  if(_idxHeldTimer)clearInterval(_idxHeldTimer);
+  _idxHeldTimer=setInterval(idxTickHeld,60000);   // cc#1581: held time re-ticks while open
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInfo();closeVix();closeNiftyPcr();closeBankniftyPcr();closeIdxPos();}});
 
