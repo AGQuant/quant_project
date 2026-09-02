@@ -59,7 +59,7 @@ Auto-documented from `main.py` (v2.9.53). Base URL: `https://quantproject-produc
 | POST | `/api/v8/run_signal_writer` | `v8_run_signal_writer` | 🔒 admin — run live 5-min signal writer |
 | GET | `/api/v8/metrics/all` | `v8_metrics_all` | All ~23 metrics for latest `score_date`, all symbols |
 | GET | `/api/v8/metrics/{symbol}` | `v8_metrics_single` | Single-symbol metrics. Query: `score_date` (defaults today, falls back to latest) |
-| GET | `/api/v8/live_metrics` | `v8_live_metrics` | Live CMP, day%, hourly% for active futures universe |
+| GET | `/api/v8/live_metrics` | `v8_live_metrics` | MOVED to `v8_endpoints.py` (cc#1565, rule 4) — see the V8 router section |
 | POST | `/api/momentum/run` | `momentum_run` | 🔒 admin — run `momentum_daily.compute_momentum()` |
 
 ---
@@ -133,6 +133,7 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v8/market_mood` | market mood + buy/sell slots |
+| GET | `/api/v8/live_metrics` | cc#1565: per active-futures symbol `cmp`, `day_open`, `prev_close`, `prev_close_basis` (`raw_eod` / `auction_bar` / `last_bar`, from `prev_close.py`), `day_pct` = cmp vs PREVIOUS-SESSION close (the Fyers/NSE day change), `open_pct` = cmp vs today's open (the old since-open number, now labelled), `hour_ago_close`, `hourly_pct`. `as_of` = last fyers_eq bar date; prev close is taken BEFORE `as_of`, so a weekend read pairs Friday's tick with Thursday's close. Null when a leg is missing, never 0. The Market Gate (`nifty_dwm.py`) Day anchor reads the same `prev_close.py` close |
 | GET | `/api/v8/scan` | full V8 scan |
 | GET | `/api/v8/filter_config/{basket}` | filter config for basket |
 | GET | `/api/v8/qualified/{basket}` | qualified signals for basket |
