@@ -883,7 +883,7 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .sch h3{font:700 13.5px var(--f-d);color:var(--tx)}
 #pane-index .sch .sub{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3)}
 #pane-index .sch .ib{margin-left:auto}
-#pane-index .tb{width:100%;border-collapse:collapse;font:500 11.5px var(--f-m)}
+#pane-index .tb{width:100%;min-width:0;border-collapse:collapse;font:500 11.5px var(--f-m)}   /* cc#1570: min-width:0 lifts the page-wide table{min-width:640px} floor (line ~290) that held every Index Intel card at 674px and clipped Bearish Flow's last column */
 #pane-index .tb th{font:600 8.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-align:right;padding:4px 3px;border-bottom:1px solid var(--line);text-transform:none}
 #pane-index .tb th:first-child,#pane-index .tb td:first-child{text-align:left;padding-left:0}
 #pane-index .tb td{padding:7px 3px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -7423,19 +7423,21 @@ function vfCell(v, isPct){
   if (isPct) return '<td class="' + (v >= 0 ? 'pos' : 'neg') + '">' + sgn(v, 2) + '%</td>';
   return '<td class="am">' + Number(v).toFixed(2) + '×</td>';
 }
-function vfRows(list, n2, side, full){
+function vfRows(list, n2, side){
+  /* cc#1570: the card face carries the SAME six columns the app's vfRows renders, in the app
+     order — SYMBOL, DAY, WK, Vol R, Vol P, Vol D. Nothing is held back for the sheet any more;
+     the VIEW MORE sheet differs only in row count. */
   var sorted = _sortByState(list, VF_SORT[side], VF_SORT_GETTERS);
   var rows = (n2 ? sorted.slice(0, n2) : sorted).map(function(r){
     return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
       + vfCell(r.day_chg_pct, 1) + vfCell(r.week_chg_pct, 1)
-      + vfCell(r.rvol, 0)
-      + (full ? vfCell(r.vol_p, 0) + vfCell(r.deliv_ratio, 0) : '')
+      + vfCell(r.rvol, 0) + vfCell(r.vol_p, 0) + vfCell(r.deliv_ratio, 0)
       + '</tr>';
   }).join('');
   var head = vfTh('SYMBOL', 'SYMBOL', side) + vfTh('DAY', 'DAY', side) + vfTh('WK', 'WK', side)
-    + vfTh('Vol R', 'RVOL', side)
-    + (full ? vfTh('Vol P', 'VOLP', side) + vfTh('Vol D', 'DELIV', side) : '');
-  return '<table class="tb"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    + vfTh('Vol R', 'RVOL', side) + vfTh('Vol P', 'VOLP', side) + vfTh('Vol D', 'DELIV', side);
+  /* the wrapper lets a phone-width card scroll the six columns sideways instead of clipping */
+  return '<div style="overflow-x:auto"><table class="tb"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 function vfAsofHtml(){
   var d = VF.data;
@@ -7457,7 +7459,7 @@ function vfCard(side){
       body = '<div class="unavail">No symbol has 60%+ of its volume on '
         + (up ? 'green' : 'red') + ' ticks in this window.</div>';
     } else {
-      body = vfRows(list, 5, side, false)
+      body = vfRows(list, 5, side)
         + (list.length > 5
            ? '<button type="button" class="more" onclick="iiVfMore(\'' + side + '\')">VIEW MORE · '
              + list.length + ' QUALIFY</button>'
@@ -7479,7 +7481,7 @@ function vfMore(side){
   II_SHEET.kind = 'vf'; II_SHEET.key = side;
   iiSheet('<div class="iish">' + (side === 'bullish' ? 'Bullish' : 'Bearish') + ' Flow · '
     + list.length + ' qualify · ' + VF.ticks + ' ticks</div>'
-    + vfRows(list, 0, side, true)
+    + vfRows(list, 0, side)
     + vfAsofHtml());
 }
 function vfGuide(){
@@ -7529,26 +7531,24 @@ function qbSort(k, key){
 function qbTh(label, key, k){
   return _sortTh(label, key, QB_SORT[k], "iiQbSort('" + k + "','" + key + "')");
 }
-function qbTable(rows, k, full){
-  /* card face: SYMBOL / CMP / DAY / OI Δ% (34998 founder default). The VIEW MORE sheet adds
-     SEC DAY + Vol R — the payload's own remaining columns. The card asked for Vol P / Vol D
-     there, but /api/quality-bullish-basis does not serve them (verified in
-     volume_flow_endpoints.py), and a column the payload does not carry is not invented. */
-  return '<table class="tb"><thead><tr>'
+function qbTable(rows, k){
+  /* cc#1570: the card face carries the app qbTable's six columns in the app order — SYMBOL,
+     CMP, DAY%, SEC DAY, OI Δ%, Vol R (cc#1462 app split). The sheet is the same table with
+     every row. Vol P / Vol D are NOT served by /api/quality-bullish-basis (verified in
+     volume_flow_endpoints.py) and a column the payload does not carry is not invented. */
+  return '<div style="overflow-x:auto"><table class="tb"><thead><tr>'
     + qbTh('SYMBOL', 'SYMBOL', k) + qbTh('CMP', 'CMP', k) + qbTh('DAY%', 'DAY', k)
-    + (full ? qbTh('SEC DAY', 'SECDAY', k) : '')
-    + qbTh('OI Δ%', 'OI', k)
-    + (full ? qbTh('Vol R', 'VOLR', k) : '')
+    + qbTh('SEC DAY', 'SECDAY', k) + qbTh('OI Δ%', 'OI', k) + qbTh('Vol R', 'VOLR', k)
     + '</tr></thead><tbody>'
     + rows.map(function(r){
         return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
           + '<td>' + (r.cmp != null ? num(r.cmp) : '—') + '</td>'
           + buNum(r.day_pct, 2, '%', true)
-          + (full ? buNum(r.sector_day, 2, '%', true) : '')
+          + buNum(r.sector_day, 2, '%', true)
           + buNum(r.oi_chg_pct, 1, '%', true)
-          + (full ? (r.rvol == null ? '<td>—</td>' : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>') : '')
+          + (r.rvol == null ? '<td>—</td>' : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
           + '</tr>';
-      }).join('') + '</tbody></table>';
+      }).join('') + '</tbody></table></div>';
 }
 function qbGuide(){
   iiSheet('<div class="iish">How to read Quality Bullish · Basis</div><div class="vfg">'
@@ -7568,7 +7568,7 @@ function qbMore(k){
   II_SHEET.kind = 'qb'; II_SHEET.key = k;
   var st = QBB_STATES.filter(function(s){ return s.k === k; })[0] || {};
   iiSheet('<div class="iish">' + esc(st.t || k) + ' · ' + pool.length + ' qualify</div>'
-    + qbTable(pool, k, true)
+    + qbTable(pool, k)
     + iiStamp(D.qbb && D.qbb.as_of));
 }
 function qbCard(st){
@@ -7580,7 +7580,7 @@ function qbCard(st){
     body = '<div class="unavail">No stocks currently qualify — the funnel is strict and basis '
          + 'flips with market conditions. A zero here is the market’s answer, not a bug.</div>';
   } else {
-    body = qbTable(rows, st.k, false)
+    body = qbTable(rows, st.k)
       + (pool.length > 5
          ? '<button type="button" class="more" onclick="iiQbMore(\'' + st.k + '\')">VIEW MORE · '
            + pool.length + ' QUALIFY</button>'
@@ -7590,9 +7590,24 @@ function qbCard(st){
     + '<div class="sch"><h3><span class="' + (st.cls === 'w' ? 'pos' : 'neg') + '">' + st.mark + '</span> ' + st.h + '</h3>'
     + '<button type="button" class="ib" onclick="iiQbGuide()" aria-label="How to read this card">i</button></div>'
     + body
-    + (D.qbb ? iiStamp(D.qbb.as_of) : '')
+    + qbFoot()
     + '</div>';
 }
+function qbFoot(){
+  /* cc#1570: same .scf footer as the flow cards, plus the one fact the ticks selector cannot
+     change — /api/quality-bullish-basis runs its funnel on a fixed 50-bar window (the endpoint
+     takes no ticks param), so the header chips drive the two flow cards only. Said on the
+     card, never implied by a chip that does nothing. */
+  if (!D.qbb) return '';
+  var st = scorrAsofStamp(D.qbb.as_of);
+  return '<div class="scf' + (st.amber ? ' stale' : '') + '">' + (st.txt ? esc(st.txt) + ' · ' : '')
+    + 'flow window 50 ticks (fixed by the funnel)</div>';
+}
+/* cc#1570: six nowrap columns need ~540px per card, so the pair stacks to one column when the
+   pane cannot give both cards that much (roughly under 1130px) instead of overflowing the pane;
+   at the founder's 1183px both rows are two-up with every column on the card. min() keeps a
+   narrow phone from being forced to 540px. */
+var II_TWO_COLS = 'grid-template-columns:repeat(auto-fit,minmax(min(540px,100%),1fr))';
 function rFlowBasis(){
   var st = scorrAsofStamp(VF.data && VF.data.as_of);
   var badge = st.txt
@@ -7604,8 +7619,12 @@ function rFlowBasis(){
   }).join('');
   return '<section class="iisec"><div class="sh"><span class="st">Volume Flow &amp; Basis</span>' + badge
     + '<div class="ticks">' + chips + '</div></div>'
-    + '<div class="four">' + vfCard('bullish') + vfCard('bearish')
-    + qbCard(QBB_STATES[0]) + qbCard(QBB_STATES[1]) + '</div></section>';
+    /* cc#1570: app order and app shape — the two flow tables side by side, then the two basis
+       tables directly under them, each row a .two grid (the four-up row squeezed every card to
+       ~250px at 1183px, clipping Bearish Flow's last column and starving the basis tables). */
+    + '<div class="two" style="' + II_TWO_COLS + '">' + vfCard('bullish') + vfCard('bearish') + '</div>'
+    + '<div class="two" style="margin-top:14px;' + II_TWO_COLS + '">' + qbCard(QBB_STATES[0]) + qbCard(QBB_STATES[1]) + '</div>'
+    + '</section>';
 }
 
 /* inline-onclick handlers - the pane is an IIFE, so every handler the HTML strings name is
