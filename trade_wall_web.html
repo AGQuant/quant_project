@@ -148,7 +148,13 @@ var BUCKETS = {
   EQUITY: ['QB Basket', 'Investment Scanner'],
 };
 var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: null,
-              status: 'open', instrument: 'FUTURES', bucket: 'V8' };
+              status: 'open', instrument: 'FUTURES', bucket: 'V8',
+              /* cc#1587 WOT_APPROVED_ONLY_V1: 'approved' = the flat approved-trades list (the
+                 default, app_config wot_buckets_enabled = ["approved_alerts"]); 'engines' = the
+                 three-level engine hierarchy above, used only when the flag names other buckets.
+                 The mode is read from the API response, never assumed, so widening the flag
+                 brings the old wall back with no deploy. */
+              mode: 'approved', approvedAsOf: null };
 var PAGE  = { cursor: null, more: true, busy: false };
 var LIMIT = 100;
 
@@ -260,7 +266,53 @@ function moreHtml(){
   return '<button class="tw-btn" onclick="loadMore()">Load more</button>';
 }
 
+/* ══ cc#1587 approved-only mode ══ Columns per the card: symbol, direction, approved price,
+   approved_at IST, origin (manual / engine name), notes. approved_at is entry.when_full — the
+   union stamps an alert's entry with its approved_at (cc#1505), converted to IST in SQL. */
+/* the approval price is the record itself (resolver price AT approval, cc#1505) — never rounded */
+function pxApproved(v){
+  if (v === null || v === undefined || isNaN(Number(v))) return '--';
+  return Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function approvedTheadHtml(){
+  return '<tr><th>Symbol</th><th>Direction</th><th class="num">Approved price</th>'
+    + '<th>Approved at (IST)</th><th>Origin</th><th>Notes</th></tr>';
+}
+function approvedRowsHtml(list){
+  var h = '', day = null;
+  list.forEach(function(e){
+    if (e.day !== day){
+      day = e.day;
+      h += '<tr class="tw-day"><td colspan="6">' + esc(day || 'undated') + '</td></tr>';
+    }
+    h += '<tr>'
+      + '<td class="sym">' + esc(e.symbol) + '</td>'
+      + '<td class="' + sideCls(e.side) + '">' + esc(e.side === 'SHORT' ? 'SELL' : e.side === 'LONG' ? 'BUY' : (e.side || '')) + '</td>'
+      + '<td class="num">' + pxApproved(e.entry_price) + '</td>'
+      + '<td class="tw-tag">' + esc((e.entry && e.entry.when_full) || '--') + '</td>'
+      + '<td>' + esc(e.origin || 'manual') + '</td>'
+      + '<td class="tw-tag">' + esc(e.note || '') + '</td>'
+      + '</tr>';
+  });
+  return h;
+}
+function renderApproved(){
+  document.getElementById('tabsStatus').innerHTML = '';
+  document.getElementById('tabsInstrument').innerHTML = '';
+  document.getElementById('tabsBucket').innerHTML = '';
+  document.getElementById('thead').innerHTML = approvedTheadHtml();
+  var view = STATE.events;
+  document.getElementById('meta').textContent =
+    'showing ' + view.length + ' of ' + (STATE.total == null ? '--' : STATE.total) + ' approved trades'
+    + (STATE.approvedAsOf ? ' · as of ' + STATE.approvedAsOf + ' IST' : '');
+  document.getElementById('body').innerHTML = view.length
+    ? approvedRowsHtml(view)
+    : '<tr><td colspan="6" class="empty">No approved trades yet.</td></tr>';
+  document.getElementById('more').innerHTML = moreHtml();
+}
+
 function render(){
+  if (STATE.mode === 'approved') return renderApproved();
   document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
   document.getElementById('tabsInstrument').innerHTML = instrumentTabsHtml();
   document.getElementById('tabsBucket').innerHTML = bucketTabsHtml();
@@ -287,7 +339,9 @@ function render(){
 }
 
 function url(cursor){
-  var u = '/api/tradewall?limit=' + LIMIT + '&instrument=' + encodeURIComponent(STATE.instrument)
+  var u = STATE.mode === 'approved'
+        ? '/api/tradewall?limit=' + LIMIT + '&instrument=ALL&status=ALL'
+        : '/api/tradewall?limit=' + LIMIT + '&instrument=' + encodeURIComponent(STATE.instrument)
         + '&status=' + encodeURIComponent(STATE.status);
   if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
   return u;
@@ -342,6 +396,17 @@ function boot(keepCounts){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (d.error) throw new Error(d.error);
+      /* cc#1587: the server says which buckets are on. Approved-only = the flat list; anything
+         wider = the engine hierarchy. The first fetch is always approved-shaped (ALL/ALL); if the
+         flag turns out to be wider, switch mode and refetch with the hierarchy's own scope. */
+      var be = d.buckets_enabled || [];
+      var approvedOnly = be.length === 1 && be[0] === 'approved_alerts';
+      if (STATE.mode === 'approved' && !approvedOnly){
+        STATE.mode = 'engines'; STATE.events = [];
+        PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
+        return boot(false);
+      }
+      STATE.approvedAsOf = d.approved_as_of || null;
       STATE.events = d.events || [];
       if (!keepCounts || STATE.total == null){
         STATE.counts = d.counts || {};
@@ -353,12 +418,12 @@ function boot(keepCounts){
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
       render();
-      twLoadApproved();   /* cc#1525 scope 4: paint APPROVED before the user touches anything */
+      if (STATE.mode !== 'approved') twLoadApproved();   /* cc#1525 scope 4: paint APPROVED before the user touches anything */
     })
     .catch(function(e){
       document.getElementById('meta').textContent = 'Could not load the wall — ' + e.message;
       document.getElementById('body').innerHTML =
-        '<tr><td colspan="9" class="empty">Could not load the wall.</td></tr>';
+        '<tr><td colspan="' + (STATE.mode === 'approved' ? 6 : 9) + '" class="empty">Could not load the wall.</td></tr>';
       document.getElementById('more').innerHTML = '';
     });
 }
