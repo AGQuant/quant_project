@@ -8271,7 +8271,13 @@ function showV8Pane(name){
 /* cc#851 kept its promise a different way now: a saved /dashboard#digest bookmark opens the
    digest INSIDE the shell (cc#1282) instead of redirecting away — the link still means "the
    digest", it just no longer costs the V8 nav to follow it. */
+/* cc#1612: INNER-TAB hash routes — #daylog, #tradelog and the rest open the V8 pane's own tab
+   directly (selectTab is the same function the tab buttons call), so an app or external link can
+   land on the Day Log table instead of a 404 or the default tab. Keys map to TAB_LABELS indices. */
+var INNER_TABS={master:0,buyrev:1,buymom:2,sellrev:4,sellmom:5,tradelog:7,daylog:8,rawdata:9,news:11,results:12,global:13,matrix:15};
+function openInnerTab(h){ if(!(h in INNER_TABS))return false; try{ showV8Pane('v8'); selectTab(INNER_TABS[h]); }catch(e){} return true; }
 (function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model'];var h=(location.hash||'').replace('#','');
+  if(openInnerTab(h))return;
   // cc#1207: the hidden V14 tab reveals itself only for a direct #v14 link, so the strip stays
   // clean for everyone else and the deep link still works with its tab visible.
   if(h==='v14'){var _vt=document.getElementById('v14tab'); if(_vt) _vt.style.display='';}
@@ -8279,6 +8285,7 @@ function showV8Pane(name){
   if(h==='bt'){var _bt=document.getElementById('bttab'); if(_bt) _bt.style.display='';}
   if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
 window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model'];var h=(location.hash||'').replace('#','');
+  if(openInnerTab(h))return;
   showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
 /* cc#1584: Model Portfolio chip strip. Baskets come from /api/qb/registry (is_active rows, never a
    hardcoded list) in the founder's order — the 3 quant baskets, the 6 FINZ, then Large/Mid/Small.
