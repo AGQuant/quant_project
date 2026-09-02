@@ -6746,7 +6746,20 @@ function ipGuide(){
     + 'option write; they are peers, not a hedge.</p>'
     + '<p><b>View on chart.</b> Opens the same shared chart every symbol on Scorr opens — '
     + '5-minute candles with the V10 trade markers.</p>'
+    /* cc#1572 (founder comment 3, 02-Sep-2026): the entry rule that used to sit in the flat-state
+       box on the cards lives here now. Numbers come from D.cfg - the same object the Entry / Exit
+       Settings card renders - never retyped. */
+    + '<p><b>How V10 enters.</b> While the engine is flat, a new trade needs an aligned ST + EMA '
+    + 'flip — SuperTrend and the EMA gate agreeing on the same side — inside the entry window. '
+    + 'No flip, no entry; the card says "No open leg — engine flat" until one lands.</p>'
+    + '<p class="scf" style="margin:0">' + esc(ipRuleLine()) + '</p>'
     + '</div>');
+}
+/* cc#1572: the locked settings line for the guide, read from D.cfg (rSettings renders the same keys). */
+function ipRuleLine(){
+  var c = D.cfg || {};
+  return 'ST ' + c.stP + '/' + c.stM + ' ' + c.stTf + ' · EMA ' + c.emaF + '/' + c.emaS + ' ' + c.emaTf
+    + ' · window ' + c.entry + ' IST · cutoff ' + c.cut + ' IST · ' + c.legs + ' · V10 · locked 16-Jun-2026';
 }
 function rIndexPos(){
   var mpN = D.maxpainAll.NIFTY;
