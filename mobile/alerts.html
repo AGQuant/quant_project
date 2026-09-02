@@ -80,6 +80,16 @@
 .ia-acts .sec{background:var(--well);color:var(--mute)}
 .ia-acts button[disabled]{opacity:.55;cursor:default}
 .ia-cerr{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--down);line-height:1.5}
+/* P6: sparkline since approval + the why line */
+.ia-spark{display:block;width:100%;height:56px;margin:8px 0 2px}
+.ia-spark .base{stroke:var(--line);stroke-dasharray:3 4;stroke-width:1}
+.ia-spark .ln{fill:none;stroke-width:2}
+.ia-spark.up .ln{stroke:var(--up)}.ia-spark.dn .ln{stroke:var(--down)}.ia-spark.mu .ln{stroke:var(--mute)}
+.ia-spark.up .dot{fill:var(--up)}.ia-spark.dn .dot{fill:var(--down)}.ia-spark.mu .dot{fill:var(--mute)}
+.ia-sparkn{font-family:var(--mono);font-size:9px;color:var(--dim);text-align:right;margin:-2px 0 6px}
+.ia-why{font-size:13.5px;line-height:1.5;color:var(--chalk,var(--txt));margin-bottom:10px}
+.ia-why b{color:var(--gold);font-weight:700}
+.ia-why.mu{color:var(--mute)}
 /* cc#1507 — create-alert flow. All classes namespaced al- (this app has collided four times on
    short class names — the intel.html nc- lesson). The sheet is home.html's .pfveil/.pfsheet
    shape (veil z-80, bottom sheet z-81, grab handle), re-declared here because those classes are
@@ -247,15 +257,39 @@ function foot(c, tight){
 function waitBody(c){
   var dist = c.distance_pct == null ? null : Math.abs(c.distance_pct);
   var fill = dist == null ? 0 : Math.max(3, Math.min(100, 100 / (1 + dist)));
-  var h = '<div class="ia-dist"><i class="fill" style="width:' + fill.toFixed(1) + '%"></i>'
+  var h = why(c) + '<div class="ia-dist"><i class="fill" style="width:' + fill.toFixed(1) + '%"></i>'
     + '<span class="lab" style="left:0">trigger ' + fmtPx(c.trigger_price) + '</span><span class="lab" style="right:0">now ' + fmtPx(c.cmp) + '</span></div>';
   h += '<div class="ia-acts"><button type="button" class="sec" data-act="dismiss" data-id="' + c.id + '">Dismiss</button>'
     + '<button type="button" class="pri" data-act="approve" data-id="' + c.id + '">' + (c.triggered ? 'Approve' : 'Approve now') + '</button></div>';
   return '<div class="ia-body">' + h + '</div>';
 }
+/* P6: sparkline = the payload's spot closes since approval (5m, or daily when the 5m window is
+   thin), drawn against a dotted baseline at the approved price; green when the idea is ahead,
+   red when behind (direction-aware since_pct), grey when there is no since figure. Why line =
+   the payload's plain-words sentence; the first sentence (the setup) is the gold lead. */
+function spark(c){
+  var sp = c.spark, pts = (sp && sp.pts) || [];
+  if (pts.length < 2) return '';
+  var W = 360, H = 56, L = 16, R = 344, T = 8, B = 48;
+  var base = c.approved_price, lo = Math.min.apply(null, pts.concat(base != null ? [base] : [])), hi = Math.max.apply(null, pts.concat(base != null ? [base] : []));
+  if (hi === lo){ hi += 1; lo -= 1; }
+  function x(i){ return (L + (R - L) * i / (pts.length - 1)).toFixed(1); }
+  function y(v){ return (B - (B - T) * (v - lo) / (hi - lo)).toFixed(1); }
+  var cls = c.since_pct == null ? 'mu' : (c.since_pct > 0 ? 'up' : (c.since_pct < 0 ? 'dn' : 'mu'));
+  var poly = pts.map(function(v, i){ return x(i) + ',' + y(v); }).join(' ');
+  return '<svg class="ia-spark ' + cls + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
+    + (base != null ? '<line class="base" x1="' + L + '" y1="' + y(base) + '" x2="' + R + '" y2="' + y(base) + '"/>' : '')
+    + '<polyline class="ln" points="' + poly + '"/><circle class="dot" cx="' + x(pts.length - 1) + '" cy="' + y(pts[pts.length - 1]) + '" r="3.5"/></svg>'
+    + '<div class="ia-sparkn">' + (sp.tf === '1d' ? 'daily closes' : '5-min closes') + ' since approval · ' + sp.n + ' bars · dotted = approved price</div>';
+}
+function why(c){
+  var t = String(c.why || '').trim(); if (!t) return '';
+  var m = t.match(/^([^.]{2,40}\.)\s*(.*)$/);
+  return '<div class="ia-why' + (c.status === 'waiting' ? ' mu' : '') + '">' + (m ? '<b>' + esc(m[1]) + '</b> ' + esc(m[2]) : esc(t)) + '</div>';
+}
 function cardBody(c){
   if (c.status === 'waiting') return waitBody(c);
-  var h = '', done = c.status === 'closed';
+  var h = spark(c) + why(c), done = c.status === 'closed';
   if (c.target != null && c.stop != null){
     h += '<div class="ia-plan"><div><div class="ia-k">TARGET</div><div class="ia-v up">' + fmtPx(c.target) + '</div></div>'
       + '<div><div class="ia-k">STOP</div><div class="ia-v dn">' + fmtPx(c.stop) + '</div></div>'
