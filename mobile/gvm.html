@@ -277,11 +277,25 @@ function gridRows(d){
   });
   return out;
 }
-function gridBox(b){
-  return '<button type="button" data-gbox="'+esc(b.key)+'" style="display:flex;flex-direction:column;justify-content:space-between;gap:4px;min-height:64px;padding:7px 7px 6px;text-align:left;border-radius:8px;border:1px solid var(--line);background:var(--well);color:var(--chalk);cursor:pointer;min-width:0">'
-    + '<span style="font-family:var(--body);font-size:9.5px;line-height:1.2;color:var(--mute);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'+esc(GRID_LBL[b.key] || plainLabel(b))+'</span>'
-    + '<span style="font-family:var(--mono);font-size:13px;font-weight:800;letter-spacing:-.2px;white-space:nowrap">'+esc(bmSelf(b))+'</span></button>';
+/* P3 · colour = the web rule, read from beats_peer and never re-derived here (gvm_company_report
+   sets it direction-aware: higher is better unless the metric is PE / PB style, where lower wins;
+   gvm_twopager.py 428-437 and the fightcard duelRowP colour from the same flag). Green = beats the
+   peer median, red = behind it, grey = no peer read (context rows like PE vs sector). The rating
+   chip (hi / mid / lo bands shared with the rows) sits top-right; the peer median prints small. */
+function gridTone(b){
+  if(b.beats_peer === true) return {bg:'var(--up-d)', bd:'var(--up)', fg:'var(--up)', k:'g'};
+  if(b.beats_peer === false) return {bg:'var(--down-d)', bd:'var(--down)', fg:'var(--down)', k:'r'};
+  return {bg:'var(--well)', bd:'var(--line)', fg:'var(--chalk)', k:'n'};
 }
+function gridBox(b){
+  var t = gridTone(b), med = bmPeerTxt(b);
+  return '<button type="button" data-gbox="'+esc(b.key)+'" data-tone="'+t.k+'" style="position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:3px;min-height:72px;padding:7px 7px 6px;text-align:left;border-radius:8px;border:1px solid '+t.bd+';background:'+t.bg+';color:var(--chalk);cursor:pointer;min-width:0">'
+    + '<span style="font-family:var(--body);font-size:9.5px;line-height:1.2;color:var(--mute);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;padding-right:22px">'+esc(GRID_LBL[b.key] || plainLabel(b))+'</span>'
+    + '<span style="position:absolute;top:5px;right:5px;transform:scale(.85);transform-origin:top right">'+rtChip(b.rating)+'</span>'
+    + '<span><span style="display:block;font-family:var(--mono);font-size:13px;font-weight:800;letter-spacing:-.2px;white-space:nowrap;color:'+t.fg+'">'+esc(bmSelf(b))+'</span>'
+    + '<span style="display:block;font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(med ? 'peers '+med : 'no peer read')+'</span></span></button>';
+}
+var GRID_LEGEND = '<div class="g-legend" style="flex-wrap:wrap;gap:8px 14px"><span><i style="background:var(--up)"></i>better than peers</span><span><i style="background:var(--down)"></i>behind peers</span><span><i style="background:var(--line)"></i>no peer read</span><span>lower wins on PE and price / book · chip = rating</span></div>';
 function gridHtml(d){
   var groups = gridRows(d), n = 0, h = '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">';
   var NAME = {G:'GROWTH', V:'VALUE', M:'MOMENTUM'};
@@ -306,7 +320,7 @@ function secGrowth(d){
   var head = sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+scored, gvToggle());
   if(gvView === 'grid'){   /* cc#1618: one grid for all three pillars */
     var gr = gridHtml(d);
-    return head+'<section class="slab">'+(gr.n ? gr.html : '<div class="g-empty">No peer checks in this report.</div>')+'<div class="g-asof">'+gr.n+' checks · score as of '+esc(d.score_date||'—')+'</div></section>';
+    return head+'<section class="slab">'+(gr.n ? gr.html+GRID_LEGEND : '<div class="g-empty">No peer checks in this report.</div>')+'<div class="g-asof">'+gr.n+' checks · score as of '+esc(d.score_date||'—')+'</div></section>';
   }
   if(!g.length) return head+'<section class="slab"><div class="g-empty">No growth checks in this report. The nightly run scores growth only where five years of accounts exist.</div></section>';
   var rows = g.map(function(b){ return bmRowHtml(b, {signed:/^(qoq_|opm_exp)/.test(b.key||''), label:(b.key==='opm_exp'?'Margin change':null)}); }).join('');
