@@ -41,6 +41,10 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
   <div class="c-view" id="v-ic"><div id="ic-main"></div></div>
 </div>
 
+<!-- R3: the detail sheet — one container, bound per tap (rule rows now; invest components with P10b) -->
+<div class="c-scrim" id="c-scrim"></div>
+<div class="c-sheet" id="c-sheet" role="dialog" aria-modal="true" aria-label="Rule detail"><div class="c-grab"></div><button type="button" class="c-x" id="c-sheet-x" aria-label="Close">✕</button><div id="c-sheet-body"></div></div>
+
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -220,7 +224,7 @@ function renderTC(){
   h += '<section class="slab" id="tc-rules"><div class="c-grp"><span>RULE · CREDIT · WEIGHT</span><span>bar = credit earned</span></div>'
     + (c.rules || []).map(function(r, i){
         var st = ruleState(r);
-        return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id">' + esc(r.rule) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + st.word + ' · w' + wfmt(r.weight) + '</span>'
+        return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id' + (String(r.rule).indexOf('LOCK_') === 0 ? ' lk' : '') + '">' + esc(String(r.rule).replace('LOCK_', '')) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + st.word + ' · w' + wfmt(r.weight) + '</span>'
           + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div><div class="c-why">' + whyLine(r, st) + '</div></div>';
       }).join('') + '</section>';
   if (c.unmapped_rules && c.unmapped_rules.length) h += '<div class="c-note">Rules with no registry row (scored at weight 1): ' + esc(c.unmapped_rules.join(', ')) + '.</div>';
@@ -233,6 +237,48 @@ function renderTCLanding(){
   $('c-live').textContent = '';
 }
 
+/* ── the detail sheet (R3, cc_task_logs 4495): FIELD PARITY with the web Check page rule card —
+   id + label, bucket + weight + registry sum, credit earned / weight, REQUIRED (the engine
+   condition), COMPANY (the engine reading), the value fields as tiles, the credit ladder with the
+   earned tier lit, the plain line, source + as-of. DEFS carries the web (i) card's two prose
+   fields that no threshold edit can stale (data source, why it matters); the condition itself is
+   always the engine's own `required` string, never a copy. */
+var DEFS = {"R1":{"s":"adr_daily.adr + live Nifty day/week/month","w":"A weak-breadth tape lowers the odds of any single-name setup following through."},"R2":{"s":"v8_metrics.sector_week / sector_month","w":"A stock swims with its sector — trade with the segment tide, not against it."},"R3":{"s":"gvm_scores.segment ⋈ v8_metrics.day_1d","w":"Confirmation from peers means the move is a segment theme, not a lone tick."},"R4":{"s":"v8_metrics.dma_20 / dma_50 / dma_200","w":"Trend alignment across timeframes; more MAs on-side = stronger structural backing."},"R5":{"s":"raw_prices close & volume (21 sessions)","w":"Volume leaning to the trade direction shows real participation, not drift."},"R6":{"s":"intraday volume_ratio (r6_volume)","w":"Fresh demand showing up today, not just historically."},"R7":{"s":"v8_metrics.rsi_weekly / rsi_month; REV: true weekly RSI + daily RSI","w":"Momentum wants RSI on-side; reversal wants a stretched-then-turning sandwich."},"R8":{"s":"v8_metrics.week_return / month_return","w":"The name should already be going your way on its own return."},"R9":{"s":"intraday_prices 5m VWAP, range position, 2-day recovery","w":"Where price sits vs VWAP intraday tells you who is winning the session."},"R10":{"s":"v8_metrics.mom_2d, week_index_52; derived recovery","w":"A style-specific fitness check: not too extended (MOM), a real but not-broken dip (REV)."},"R11":{"s":"v8_paper_pivots.pp / r1 / s1","w":"Enter where there is room to run, not into a level that caps the move."},"R12":{"s":"v8_metrics.day_1d, futures_basis.oi_chg","w":"Positioning confirms conviction behind the price move."},"R13":{"s":"futures_basis.basis_pct (newest vs prior)","w":"Basis widening in your favour flags smart-money positioning ahead of spot."},"R14":{"s":"raw_prices OHLC + intraday day hi/lo","w":"Expansion confirms the move has energy, not a quiet drift."},"R15":{"s":"derived: v8 week/month return − Nifty week/month","w":"Outperforming the index is the cleanest read on genuine leadership."},"R16":{"s":"last ~63 raw_prices high/low (3M swing)","w":"Where price sits in its own range sets the reward-to-risk for the style being scored."},"R17":{"s":"gvm_scores.v_score (latest)","w":"Entering at a sane valuation sets the margin of safety independent of the momentum read."},"R18":{"s":"gvm_scores.m_score + mcap-weighted segment avg m_score","w":"Momentum confirmed at both the stock and sector level is a higher-conviction trend than either alone."},"R19":{"s":"raw_prices 63d return: stock vs mcap-weighted segment vs NIFTY50","w":"Beating both the sector and the index is the cleanest read on genuine relative leadership."},"R20":{"s":"gvm_history (nearest score_date on/before today−180d)","w":"A rising quality score confirms the thesis is strengthening; a falling one warns it is fading."},"LOCK_VOLUME":{"s":"derived vol_ratio_today","w":"A break needs participation behind it; a quiet break is a drift."},"LOCK_MOOD":{"s":"mood gate fail count","w":"A short into an all-bullish tape is fighting the market."},"LOCK_ENTRYDAY_FALL":{"s":"v8_metrics.day_1d","w":"SELL-MOM is an ignition short: the break happens on the day you enter."},"LOCK_WEEK_FALLING_BAND":{"s":"v8_metrics.week_return","w":"Falling but not exhausted. A stock already down 8% on the week has had its move."},"LOCK_MOM_2D":{"s":"v8_metrics.mom_2d","w":"The slide should already be underway when the ignition candle prints."},"LOCK_ALT_IGNITION":{"s":"v8_metrics.mom_2d, conditional on the entry-day fall credit","w":"The same ignition can arrive as one candle or as two days of selling; the score should not miss the second shape, and should not pay twice for the first."},"LOCK_52W_INDEX":{"s":"v8_metrics.week_index_52","w":"A short wants a name that is not near its highs."},"LOCK_MA_NOT_DEEP":{"s":"v8_metrics.ma9_vs_ma21","w":"Far below the slower mean is a move already spent, not one starting."},"LOCK_GVM":{"s":"gvm_scores.gvm_score","w":"Quality names bounce; a short wants the ones that do not."},"LOCK_FALL_FRESHNESS":{"s":"v8_metrics.month_return","w":"A stock already down 15% on the month is a crowded short. The edge is in the fresh break."},"LOCK_TRIO_52W":{"s":"v8_metrics.week_index_52","w":"Continuation shorts start from the lows, not from a rally into resistance."},"LOCK_TRIO_RSI":{"s":"true weekly RSI","w":"An already-overbought name is a crowded fade. The winning setups sat at RSI 30-42."},"LOCK_TRIO_MOM2D":{"s":"v8_metrics.mom_2d","w":"The two-day move should already be down when the position opens."},"LOCK_WEEK_FALLING":{"s":"v8_metrics.week_return","w":"This bucket shorts a stock that is already falling, and keeps falling."},"LOCK_5M_WEAK":{"s":"v8_metrics.day_1d","w":"The session should be going your way on the day you enter it."},"LOCK_MA_SHALLOW":{"s":"v8_metrics.ma9_vs_ma21","w":"An early break beats an exhausted one. A wide gap either way means the move has run."},"LOCK_QUALITY_FADE":{"s":"gvm_scores.gvm_score","w":"A continuation short wants a name whose quality is fading, not one that will be bought."},"LOCK_SECTOR_WEAK":{"s":"v8_metrics.sector_month","w":"A falling sector carries the trade; a rising one fights it."}};
+var KEYNAMES = { mom_2d:'2-DAY MOVE', mom2d:'2-DAY MOVE', week_return:'WEEK', wk:'WEEK', mo:'MONTH', day:'DAY', today:'TODAY x', vol1M:'MONTH UP/DOWN',
+  ratio:'RATIO', mRSI:'MONTHLY RSI', trueWk:'WEEKLY RSI', vwap:'VWAP', rangePos:'RANGE POS', low_5d:'5-DAY LOW', high_5d:'5-DAY HIGH', s1:'S1', r1:'R1',
+  abovePP:'ABOVE PIVOT', room:'ROOM %', oi_chg:'OI CHANGE %', basis_now:'BASIS NOW %', basis_prev:'BASIS PREV %', pos:'SWING POS %', zone:'ZONE',
+  v_score:'V PILLAR', m:'STOCK M', sector_m:'SECTOR M', ret63_pct:'63-DAY %', rs_nifty_pct:'VS NIFTY', rs_sector_pct:'VS SECTOR', sector_n:'SECTOR N',
+  dgvm180:'GVM Δ180D', dma_50:'50-DAY %', w52:'52W INDEX', gvm:'GVM', deliv_3d:'DELIV 3D %', deliv_base:'DELIV BASE %', days:'DAYS', d20:'20D %', d50:'50D %', d200:'200D %',
+  strong:'STRONG PEERS', dir:'PEERS UP', n:'PEERS', ma9v21:'MA9 VS MA21 %', state:'STATE', entryday_credit:'ENTRY-DAY CREDIT', leg_today:'TODAY LEG', leg_1m:'MONTH LEG', range_ok:'RANGE OK', cash_na:'CASH', chip:'NOTE', no_data:'NO DATA', no_history:'NO HISTORY', m_180d:'M 180D AGO', delta_m_180d:'M Δ180D' };
+function keyName(k){ return KEYNAMES[k] || String(k).replace(/_/g, ' ').toUpperCase(); }
+function fmtVal(x){ if (x == null) return '—'; if (typeof x === 'boolean') return x ? 'yes' : 'no'; if (typeof x === 'number') return num(x, Math.abs(x) >= 100 ? 0 : 2); return String(x); }
+function ladderText(required){
+  var s = String(required || ''), i = s.indexOf('(');
+  var full = (i > 0 ? s.slice(0, i) : s).trim(), half = (i > 0 ? s.slice(i + 1).replace(/\)\s*$/, '') : '').trim();
+  return {full: full || '—', half: half || 'no half tier', none: 'otherwise'};
+}
+function openSheet(html){ $('c-sheet-body').innerHTML = html; $('c-sheet').classList.add('open'); $('c-scrim').classList.add('open'); $('c-sheet').scrollTop = 0; }
+function closeSheet(){ $('c-sheet').classList.remove('open'); $('c-scrim').classList.remove('open'); }
+function ruleSheet(c, r){
+  var d = S.tc || {}, st = ruleState(r), lad = ladderText(r.required), def = DEFS[r.rule] || {};
+  var w = Number(r.weight), earned = (r.max > 0 && !isNaN(w)) ? w * (Number(r.credit) / Number(r.max)) : null;
+  var tierCls = st.cls === 'pass' ? 'full' : (st.cls === 'watch' ? 'half' : 'none');
+  var tiles = '';
+  if (r.value && typeof r.value === 'object'){
+    Object.keys(r.value).slice(0, 4).forEach(function(k){ tiles += '<div><div class="c-kk">' + esc(keyName(k)) + '</div><div class="c-kvv">' + esc(fmtVal(r.value[k])) + '</div></div>'; });
+  }
+  return '<div class="c-shd"><div class="c-t">' + esc(plainName(r)) + '<small>' + esc(r.rule) + ' · ' + esc(c.label) + ' · WEIGHT ' + wfmt(r.weight) + ' OF ' + (c.weight_sum == null ? '?' : n1(c.weight_sum)) + '</small></div>'
+    + '<div class="c-credit"><div class="c-n ' + (st.cls === 'pass' ? 'up' : (st.cls === 'watch' ? 'am' : (st.cls === 'fail' ? 'dn' : 'mu'))) + '">' + (earned == null ? '—' : wfmt(Math.round(earned * 100) / 100)) + '</div><div class="c-l">OF ' + wfmt(r.weight) + ' EARNED · credit ' + wfmt(r.credit) + '/' + wfmt(r.max) + '</div></div></div>'
+    + '<div class="c-kv"><div class="wide"><div class="c-kk">REQUIRED</div><div class="c-kvv">' + esc(r.required || '—') + '</div></div>'
+    + '<div class="wide"><div class="c-kk">COMPANY</div><div class="c-kvv ' + (st.cls === 'pass' ? 'ok' : (st.cls === 'watch' ? 'half' : (st.cls === 'fail' ? 'no' : ''))) + '">' + esc(actualText(r.value)) + '</div></div>' + tiles + '</div>'
+    + '<div class="c-ladder"><div class="' + (tierCls === 'full' ? 'on full' : '') + '"><b>FULL</b>' + esc(lad.full) + '</div><div class="' + (tierCls === 'half' ? 'on' : '') + '"><b>HALF</b>' + esc(lad.half) + '</div><div class="' + (tierCls === 'none' ? 'on none' : '') + '"><b>NONE</b>' + esc(lad.none) + '</div></div>'
+    + '<div class="c-swhy"><b>' + (st.word === 'FULL' ? 'Full credit.' : (st.word === 'HALF' ? 'Half credit.' : (st.word === 'NONE' ? 'No credit.' : 'Not applicable.'))) + '</b> ' + whyLine(r, st) + (def.w ? '<br><span class="mu">Why it matters: ' + esc(def.w) + '</span>' : '') + '</div>'
+    + '<div class="c-sfoot"><span>' + esc(def.s ? 'source ' + def.s : 'source tc_v4_dual ' + r.rule) + '</span><span>scored ' + esc(hhmm(d.computed_at) || '—') + ' IST · spot</span></div>';
+}
+$('c-sheet-x').addEventListener('click', closeSheet);
+$('c-scrim').addEventListener('click', closeSheet);
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeSheet(); });
+
 /* ── events ──────────────────────────────────────────────────────────────────────────── */
 $('c-modes').addEventListener('click', function(e){ var b = e.target.closest('button[data-mode]'); if (b) setMode(b.getAttribute('data-mode')); });
 $('c-q').addEventListener('input', function(e){ clearTimeout(searchT); var v = e.target.value.trim(); searchT = setTimeout(function(){ search(v); }, 250); });
@@ -241,6 +287,7 @@ $('c-drop').addEventListener('click', function(e){ var r = e.target.closest('[da
 document.addEventListener('click', function(e){ if (!e.target.closest('.c-search')) $('c-drop').hidden = true; });
 $('tc-main').addEventListener('click', function(e){
   var bk = e.target.closest('[data-bucket]'); if (bk){ S.bucket = bk.getAttribute('data-bucket'); renderTC(); return; }
+  var rr = e.target.closest('[data-rule]'); if (rr && S.tc){ var c = cardOf(S.bucket) || cardOf(S.tc.best_label); var r = c && (c.rules || [])[Number(rr.getAttribute('data-rule'))]; if (r) openSheet(ruleSheet(c, r)); return; }
   var rt = e.target.closest('[data-act="tc"]'); if (rt){ loadTC(); }
 });
 window.addEventListener('hashchange', function(){ setMode(location.hash, false); });
