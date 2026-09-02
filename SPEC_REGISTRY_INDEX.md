@@ -821,6 +821,7 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | id | Title |
 |---|---|
 | 18337 | V8_PNL_CANON_V1 — one book formula, retired baskets excluded everywhere |
+| 36757 | V8_ERA_CUTOVER_ONLY_V1 — V8 performance reported for the post-cutover era only, captioned "Since 18-Jul-2026"; full ledger suspended (410, not computed); amends 18337 era handling (cc#1604, added by hand 02-Sep ahead of the next `gen_spec_index.py` run) |
 | 18278 | FABLE_DIAGNOSIS_FIRST_V1 |
 | 18213 | OPS_METRICS_RETIRED |
 
@@ -900,6 +901,7 @@ someone re-adopts by accident.
 
 | retired id | was | now live |
 |---|---|---|
+| 18337 (era handling only) | V8_PNL_CANON_V1 served two eras (fresh + all) | **36757** V8_ERA_CUTOVER_ONLY_V1 — cutover era only; the formula in 18337 stays live |
 | 17868 | ROLE_CHARTER_V3 — Fable owns all app tasks, CC benched | **27934** ROLE_CHARTER_V4 / EXECUTION_MODEL_PHASE_3 |
 | 22301, 22318, 22324, 22338 | V8 table specs, four rounds | **22342** (+ base 22321), per the 22344 lineage pointer |
 | 22405 | SEGMENT_TAXONOMY_V1 | **22406** SEGMENT_TAXONOMY_V2 |

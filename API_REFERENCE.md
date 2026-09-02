@@ -70,7 +70,7 @@ Auto-documented from `main.py` (v2.9.53). Base URL: `https://quantproject-produc
 |---|---|---|---|
 | POST | `/api/paper/compute_pivots` | `paper_compute_pivots` | 🔒 admin — compute paper pivots |
 | POST | `/api/paper/tick` | `paper_tick_now` | 🔒 admin — run paper tick (pulls buy/sell slots from market_mood) |
-| GET | `/api/paper/status` | `paper_status` | Open positions (with unrealised P&L), recent trades, missed, summary |
+| GET | `/api/paper/status` | `paper_status` | Open positions (with unrealised P&L), recent trades, missed, summary (cutover era), `era_block`. cc#1604: `all_trades` = the cutover-era list with no LIMIT and `all_summary` = the suspended payload while the full ledger is suspended |
 | GET | `/api/paper/pivots` | `paper_pivots` | Latest paper pivots. Query: `limit` (default 250) |
 
 ---
@@ -133,6 +133,9 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v8/market_mood` | market mood + buy/sell slots |
+| GET | `/api/v8/era` | cc#1604 (`v8_era.py`): `{era, since, era_label, cutover_ts, full_ledger_allowed}` — the caption every V8 surface prints ("Since 18-Jul-2026"), read from `app_config` at request time, never typed |
+| GET | `/api/v8/book_canon` | rule 13 canon book. Query `era` (`fresh` default); `era=all` → **410** suspended payload while `app_config.v8_full_ledger_suspended` is true (cc#1604). Payload carries `era_block` |
+| GET | `/api/mobile/trades` | app closed-trades list, cutover era; `era=all` → **410** while suspended (cc#1604); carries `era_block` |
 | GET | `/api/v8/live_metrics` | cc#1565: per active-futures symbol `cmp`, `day_open`, `prev_close`, `prev_close_basis` (`raw_eod` / `auction_bar` / `last_bar`, from `prev_close.py`), `day_pct` = cmp vs PREVIOUS-SESSION close (the Fyers/NSE day change), `open_pct` = cmp vs today's open (the old since-open number, now labelled), `hour_ago_close`, `hourly_pct`. `as_of` = last fyers_eq bar date; prev close is taken BEFORE `as_of`, so a weekend read pairs Friday's tick with Thursday's close. Null when a leg is missing, never 0. The Market Gate (`nifty_dwm.py`) Day anchor reads the same `prev_close.py` close |
 | GET | `/api/v8/scan` | full V8 scan |
 | GET | `/api/v8/filter_config/{basket}` | filter config for basket |
@@ -147,7 +150,7 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | GET | `/api/v8/domestic_live` | live domestic indices |
 | GET | `/api/v8/positions` | positions |
 | GET | `/api/v8/trades` | trades |
-| GET | `/api/v8/daylog` | Day Log: per-exit-date opened/closed/gross/brokerage/net rows + summary. Query: `era` (`fresh` default), `view` (`equity` default / `futures`) |
+| GET | `/api/v8/daylog` | Day Log: per-exit-date opened/closed/gross/brokerage/net rows + summary + `era_block`. Query: `era` (`fresh` default; `all` → **410** `full ledger suspended` while `app_config.v8_full_ledger_suspended` is true, cc#1604 V8_ERA_CUTOVER_ONLY_V1 36757), `view` (`equity` default / `futures`) |
 | GET | `/api/v8/daylog/series` | cc#1561 (`v8_daylog_extras.py`): the `/api/v8/daylog` payload folded into cumulative gross/net points by exit date, plus return facts (window_start = first exit day, table_start, trading/calendar days, capital, return_pct, cagr_pct null under 7 calendar days, cagr_note). Feeds the Day Log chart panel + Overall Return (i). Query: `view` |
 
 ### V8 Futures — `v8_futures.py` (prefix `/api/v8/futures`)
