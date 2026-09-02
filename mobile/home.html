@@ -2804,6 +2804,37 @@ function oiSheetOpen(inner){
   });  return sheet;
 }
 function oiGuide(){ oiSheetOpen(oiGuideInner()); }
+/* cc#1576 (PCR_READ_INTERPRET_V1, 36294): the PCR card (i) read sheet. Everything printed comes
+   from /api/pcr/mood's `interpret` block (pcr_mood.compose_read) — state read, band read, change /
+   hour / range lines, evidence line, the existing CAUTIOUS reason, the ATM option-price block,
+   caveats. Nothing is worded or re-banded here. App card is NIFTY only (36294 out_of_scope). */
+function pcrRead(){
+  var sheet = oiSheetOpen('<div class="pfsh">Market mood · PCR · the read</div>'
+    + '<div class="pffx" id="pcrReadBody"><p>Loading the read…</p></div>');
+  fetchWithTimeout('/api/pcr/mood?underlying=NIFTY').then(function(r){ return r.json(); }).then(function(m){
+    var body = document.getElementById('pcrReadBody');
+    if (!body || !sheet.parentNode) return;
+    var it = m && m.interpret;
+    if (!it || !it.headline){ body.innerHTML = '<p>The read is not available this tick.</p>'; return; }
+    var op = it.option_price, opHtml = '';
+    if (op && !op.error && (op.ce || op.pe)){
+      opHtml = '<p><b>ATM option price.</b> ' + esc((op.ce && op.ce.line) || '') + ' ' + esc((op.pe && op.pe.line) || '') + '</p>'
+        + '<p style="opacity:.7">' + esc(op.header || '') + '. ' + esc(op.footer || '') + ' ' + esc(op.cuts || '') + '</p>';
+    }
+    body.innerHTML = '<p><b>' + esc(it.headline) + '</b></p>'
+      + '<p>' + esc(it.read_text || (it.read || []).join(' ')) + '</p>'
+      + '<p>' + [it.change_line, it.hour_line, it.range_line].filter(Boolean).map(esc).join(' ') + '</p>'
+      + (m.reason ? '<p>' + esc(m.reason) + '</p>' : '')
+      + '<p><b>' + esc(it.evidence_line || '') + '</b></p>'
+      + ((it.caveats || []).length ? '<p style="opacity:.75">' + it.caveats.map(esc).join(' ') + '</p>' : '')
+      + opHtml
+      + '<p style="opacity:.6;font-size:10px">' + esc(it.note || 'Descriptive read only. Not a trading signal.')
+      + (m.as_of ? ' · PCR ' + esc(m.pcr != null ? Number(m.pcr).toFixed(2) : '') + ' as of ' + esc(m.as_of) + (m.basis ? ' (' + esc(String(m.basis).toLowerCase()) + ')' : '') : '') + '</p>';
+  }).catch(function(){
+    var body = document.getElementById('pcrReadBody');
+    if (body) body.innerHTML = '<p>The read is not available this tick.</p>';
+  });
+}
 /* cc#1575 (OI_STRUCTURE_INTERPRET_V1, 36283): the Max Pain (i) read — headline, read, evidence
    line, caveats — from the ONE composer /api/oi/structure?underlying= (the web popover reads the
    same words). Nothing is worded or classified here; the guide sits underneath. */
@@ -4484,6 +4515,10 @@ function pcrMood(hero){
     + (hero.pcr_basis === 'LIVE'
         ? (hero.pcr_asof ? ' · ' + esc(hero.pcr_asof) : '')
           + (hero.pcr_stale ? ' · <span style="color:var(--amber,#FF9F45)">STALE</span>' : ' · LIVE')
+        /* cc#1576 (Fable 4642): after the close the pill reads "close" with the last bar time —
+           never LIVE on a closed market. The server decides the basis; nothing is timed here. */
+        : hero.pcr_basis === 'CLOSE'
+        ? (hero.pcr_asof ? ' · last ' + esc(hero.pcr_asof) : '') + ' · close'
         : (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) + ' EOD' : ''))
     + '</div>'
     /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
@@ -4555,8 +4590,11 @@ function heroCard2(d){
      with two, it just has one gap to spread instead of two; re-measured, not assumed, see this
      task's own result for the before/after deck-height numbers (unchanged, per the founder's hard
      constraint). adrBar()'s own function body is untouched, only this call site moved. */
+  /* cc#1576: the (i) beside the date opens the PCR read sheet (pcrRead) — the same words the web
+     popover and /api/pcr/mood carry. */
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
-    + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
+    + '<div class="rgt" style="display:inline-flex;align-items:center;gap:8px">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today')
+    + '<button type="button" class="oiib" onclick="pcrRead()" aria-label="Read this card">i</button></div></div>'
     + pcrMood(d.hero || {})
     + '</div>'
     /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,

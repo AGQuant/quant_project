@@ -136,7 +136,11 @@ def latest_pcr(cur, underlying="NIFTY"):
     """, (underlying,))
     r = cur.fetchone()
     if r and r[0] is not None:
-        return _f(r[0]), "LIVE", r[1].strftime("%Y-%m-%d %H:%M")
+        # cc#1576 (Fable 4642): LIVE only inside the session; after 15:30 IST the basis is CLOSE.
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz, time as _time
+        _now = _dt.now(_tz(_td(hours=5, minutes=30)))
+        _open = (_now.weekday() < 5 and _time(9, 15) <= _now.time() <= _time(15, 30))
+        return _f(r[0]), ("LIVE" if _open else "CLOSE"), r[1].strftime("%Y-%m-%d %H:%M")
     cur.execute("""
         SELECT pcr, price_date FROM pcr_daily
         WHERE underlying=%s AND pcr IS NOT NULL

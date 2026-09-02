@@ -942,12 +942,17 @@ def mobile_home2(request: Request):
                 pcr_latest = float(_i[0])
                 pcr_date = _i[1].date().isoformat()
                 pcr_asof = _i[1].strftime("%H:%M")
-                pcr_basis = "LIVE"
-                # STALENESS GUARD (pcr_guard convention): a bar older than 15 minutes during the
+                # cc#1576 (Fable 4642, founder screenshot 19:34 IST "PCR 1.44 · 15:25 · LIVE" on a
+                # closed market): LIVE only while the session is open. After 15:30 IST, or on a
+                # non-trading day, the basis is CLOSE — the pill says "close", never LIVE. Same
+                # rule the Digest Internals pill follows (cc#1607).
+                _in_session = bool(is_td and now.time() >= dt_time(9, 15) and now.time() <= dt_time(15, 30))
+                pcr_basis = "LIVE" if _in_session else "CLOSE"
+                # STALENESS GUARD (pcr_guard convention): a bar older than 10 minutes during the
                 # session is shown WITH its time and tagged, never presented as current. It is not
                 # suppressed — a 20-minute-old PCR is still the last thing that happened.
-                if is_td and now.time() >= dt_time(9, 15) and now.time() <= dt_time(15, 30):
-                    pcr_stale = (now - _i[1]).total_seconds() > 900
+                if _in_session:
+                    pcr_stale = (now - _i[1]).total_seconds() > 600
         except Exception as e:
             log.warning("cc#1140 intraday PCR unavailable, falling back to EOD: %s", e)
             try:
@@ -1338,7 +1343,7 @@ def mobile_home2(request: Request):
             "chips": chips,
             "pcr": pcr_latest,
             "pcr_date": pcr_date,
-            # cc#1140: the as-of travels WITH the value, always. pcr_basis is LIVE or EOD,
+            # cc#1140: the as-of travels WITH the value, always. pcr_basis is LIVE, CLOSE or EOD,
             # pcr_asof is the bar time when live, pcr_stale flags a bar older than 15 min during
             # the session. The card cannot render a live-looking number without them because they
             # arrive in the same object from the same query.
