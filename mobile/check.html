@@ -29,13 +29,11 @@ document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnig
   <div class="c-top"><div class="c-brand">CHE<b>CK</b></div><div class="c-live" id="c-live"></div></div>
   <div class="c-modes" id="c-modes" role="tablist"></div>
 
-  <div class="c-view" id="v-tc">
-    <div class="c-search">
-      <div class="c-sbox"><span class="c-ic">◈</span><input id="c-q" type="search" placeholder="Search a stock to check" autocomplete="off" autocapitalize="characters" aria-label="Search a stock"></div>
-      <div class="c-drop" id="c-drop" hidden></div>
-    </div>
-    <div id="tc-main"></div>
+  <div class="c-search" id="c-searchwrap">
+    <div class="c-sbox"><span class="c-ic">◈</span><input id="c-q" type="search" placeholder="Search a stock to check" autocomplete="off" autocapitalize="characters" aria-label="Search a stock"></div>
+    <div class="c-drop" id="c-drop" hidden></div>
   </div>
+  <div class="c-view" id="v-tc"><div id="tc-main"></div></div>
 
   <div class="c-view" id="v-scan"><div id="scan-main"></div></div>
   <div class="c-view" id="v-ic"><div id="ic-main"></div></div>
@@ -60,9 +58,10 @@ var URLS = { tc:'/api/mobile/check/tc?symbol=', scan:'/api/mobile/check/scan?uni
              invest:'/api/mobile/check/invest?symbol=', search:'/api/gvm/search?q=' };
 /* Modes are added to this list as each view lands (cc#1593 pushes P4 → P6 → P8); a mode not in
    the list has no view yet, so its button is not drawn and its deep link falls back to #tc. */
-var MODES = [ {key:'tc', label:'Trade Check'}, {key:'scan', label:'Run Scan'} ];
+var MODES = [ {key:'tc', label:'Trade Check'}, {key:'scan', label:'Run Scan'}, {key:'ic', label:'Invest Check'} ];
 var S = { mode:'tc', sym:'', tc:null, tcErr:null, bucket:null, busy:false,
-          scan:{ universe:'nifty50', data:null, err:null, busy:false, showFail:false } };
+          scan:{ universe:'nifty50', data:null, err:null, busy:false, showFail:false },
+          ic:{ sym:'', data:null, err:null, busy:false } };
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -92,12 +91,14 @@ function drawModes(){
     return '<button type="button" role="tab" data-mode="' + m.key + '"' + (S.mode === m.key ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>' + esc(m.label) + '</button>';
   }).join('');
   ['tc','scan','ic'].forEach(function(k){ var v = $('v-' + k); if (v) v.classList.toggle('on', S.mode === k); });
+  $('c-searchwrap').style.display = (S.mode === 'scan') ? 'none' : '';
 }
 function setMode(k, push){
   S.mode = modeOf(k); drawModes();
   if (push !== false){ try { history.replaceState(null, '', location.pathname + (S.sym ? '?sym=' + encodeURIComponent(S.sym) : '') + '#' + S.mode); } catch(e){} }
   if (S.mode === 'tc' && S.sym && !S.tc && !S.busy) loadTC();
   if (S.mode === 'scan') renderScan();
+  if (S.mode === 'ic'){ if (S.sym && S.ic.sym !== S.sym && !S.ic.busy) loadIC(); else if (!S.sym) renderICLanding(); }
 }
 
 /* ── search: the app's one autocomplete (/api/gvm/search), same as /m/gvm and /m/alerts ─── */
@@ -120,6 +121,7 @@ function chooseSym(sym){
   S.sym = sym; S.tc = null; S.tcErr = null; S.bucket = null;
   try { history.replaceState(null, '', location.pathname + '?sym=' + encodeURIComponent(sym) + '#' + S.mode); } catch(e){}
   if (S.mode === 'tc') loadTC();
+  if (S.mode === 'ic') loadIC();
 }
 
 /* ── TRADE CHECK ─────────────────────────────────────────────────────────────────────── */
@@ -291,6 +293,92 @@ $('scan-main').addEventListener('click', function(e){
   var row = e.target.closest('tr[data-row]'); if (row){ setMode('tc'); chooseSym(row.getAttribute('data-row')); window.scrollTo(0, 0); }
 });
 
+/* ── INVEST CHECK (R1 4481 invest view; spec 36637 invest_view). /api/mobile/check/invest =
+   invest_check_v2.compute + CMP. The score stays /10 by its own lock (27979); band cuts are parsed
+   from the payload's bands string, never typed. Components arrive heaviest first; bar length =
+   weight / total_weight, gold fill = weight x credit, red stub at credit 0, hatched + reason when
+   excluded from the denominator. */
+var ICNAMES = { gvm_level:'GVM level', fundamentals:'Fundamentals', dgvm_90d:'GVM direction, 90 days', dma_stack:'Moving averages',
+  accumulation:'Accumulation, 21 days', s1_reclaim:'Support reclaim', rs_1y:'Strength vs Nifty, 1 year', segment_month:'Sector month', rsi_monthly:'Monthly RSI guard' };
+function icName(c){ return ICNAMES[c.key] || c.label || c.key; }
+function icBandInfo(d){
+  var m = String(d.bands || '').match(/STRONG_BUY>=([\d.]+).*ACCUMULATE>=([\d.]+).*WATCH>=([\d.]+)/);
+  return m ? {strong: Number(m[1]), acc: Number(m[2]), watch: Number(m[3])} : null;
+}
+function icBandWord(b){ return {STRONG_BUY:'Strong buy', ACCUMULATE:'Accumulate', WATCH:'Watch', AVOID:'Avoid'}[b] || 'No data'; }
+function icBandCls(b){ return (b === 'STRONG_BUY' || b === 'ACCUMULATE') ? 'pass' : (b === 'WATCH' ? 'watch' : (b === 'AVOID' ? 'fail' : 'na')); }
+function mcap(cr){ if (cr == null) return ''; var x = Number(cr); return x >= 1000 ? '₹' + (x / 1000).toFixed(1) + 'k Cr' : '₹' + Math.round(x) + ' Cr'; }
+function icCreditWord(c){ if (!c.computable) return 'Excluded.'; var cr = Number(c.credit); return cr >= 1 ? 'Full credit.' : (cr <= 0 ? 'No credit.' : Math.round(cr * 100) + '% credit.'); }
+function icDetailText(det){
+  if (!det || typeof det !== 'object') return '—';
+  var parts = [];
+  Object.keys(det).forEach(function(k){ var x = det[k]; if (x == null || k === 'checks' || k === 'gate' || k === 'note') return;
+    if (Array.isArray(x)) x = x.map(function(y){ return typeof y === 'number' ? num(y, 1) : String(y); }).join(' / ');
+    parts.push(keyName(k).toLowerCase() + ' ' + (typeof x === 'number' ? num(x, Math.abs(x) >= 100 ? 0 : 2) : (typeof x === 'boolean' ? (x ? 'yes' : 'no') : String(x)))); });
+  return parts.length ? parts.join(' · ') : '—';
+}
+/* the ONE line per component — until the per-key templates pass review (P10) it is the engine
+   detail, unedited, plus the credit word */
+function icWhy(c){
+  if (!c.computable) return 'Not scored: ' + esc(c.excluded_reason || 'no data') + '. Left out of the denominator, not scored zero.';
+  var det = c.detail || {};
+  if (c.key === 'fundamentals' && det.checks) return '<b>' + det.passed + ' of ' + det.of + '</b> pass: ' + esc(det.checks.map(function(x){ return x.name + (x.pass === true ? ' ✓' : (x.pass === false ? ' ✗' : ' ?')); }).join(' · ')) + '. ' + esc(icCreditWord(c));
+  return '<b>' + esc(icDetailText(det)) + '</b>. ' + esc(icCreditWord(c));
+}
+function icRead(d){
+  var b = icBandInfo(d), s = Number(d.score10), out = '';
+  if (d.score10 == null) out = '<b>No score.</b> Nothing computable. ';
+  else if (d.band === 'STRONG_BUY') out = '<b>Strong buy.</b> Clears every band. ';
+  else if (d.band === 'ACCUMULATE') out = '<b>Accumulate' + (b ? ' — ' + n1(b.strong - s) + ' short of Strong buy' : '') + '.</b> ';
+  else if (d.band === 'WATCH') out = '<b>Watch' + (b ? ' — ' + n1(b.acc - s) + ' short of Accumulate' : '') + '.</b> ';
+  else out = '<b>Avoid' + (b ? ' — ' + n1(b.watch - s) + ' short of Watch' : '') + '.</b> ';
+  var comps = d.components || [], full = [], zero = [];
+  comps.forEach(function(c){ if (!c.computable) return; if (Number(c.credit) >= 1) full.push(icName(c)); else if (Number(c.credit) <= 0) zero.push(icName(c)); });
+  if (full.length) out += esc(full.slice(0, 2).join(' and ')) + (full.length > 2 ? ' earn full credit, with ' + (full.length - 2) + ' more' : (full.length > 1 ? ' earn full credit' : ' earns full credit')) + '. ';
+  if (zero.length) out += esc(zero.slice(0, 2).join(' and ')) + (zero.length > 2 ? ' earn nothing, with ' + (zero.length - 2) + ' more' : (zero.length > 1 ? ' earn nothing' : ' earns nothing')) + '. ';
+  if (d.excluded_components && d.excluded_components.length) out += d.excluded_components.length + ' check' + (d.excluded_components.length > 1 ? 's' : '') + ' could not be computed and sit outside the score. ';
+  return out;
+}
+function loadIC(){
+  var ic = S.ic; if (!S.sym) { renderICLanding(); return; }
+  ic.busy = true; ic.sym = S.sym; ic.err = null;
+  $('ic-main').innerHTML = '<div class="slab c-empty"><b>' + esc(S.sym) + '</b>Scoring the 9 investment checks…</div>';
+  apiGet(URLS.invest + encodeURIComponent(S.sym)).then(function(d){ ic.data = d; ic.busy = false; renderIC(); })
+    .catch(function(e){ ic.busy = false; ic.err = e.message || 'failed'; $('ic-main').innerHTML = emptyBox('Could not score ' + S.sym, ic.err, 'ic'); });
+}
+function renderICLanding(){ $('ic-main').innerHTML = '<div class="slab c-empty"><b>Search a stock to check</b>Nine weighted checks, heaviest first — the score is out of 10.</div>'; }
+function renderIC(){
+  var d = S.ic.data; if (!d) return;
+  var b = icBandInfo(d), tot = Number(d.total_weight) || 100, comps = d.components || [];
+  var cmpTs = hhmm(d.cmp_line && d.cmp_line.ts);
+  var asOf = (d.as_of && d.as_of.price_date) || null;
+  var h = '<section class="pressed c-hero">'
+    + '<div class="c-hd"><div><div class="c-sym">' + esc(d.symbol) + '</div><div class="c-nm">' + esc(d.company || '') + (d.segment ? ' · ' + esc(d.segment) : '') + (d.market_cap_cr != null ? ' · ' + mcap(d.market_cap_cr) : '') + '</div></div>'
+    + '<div class="c-px"><div class="c-pv">' + inr(d.cmp_line && d.cmp_line.cmp) + '</div><div class="c-ps">CMP · ' + esc(cmpTs || '—') + '</div></div></div>'
+    + '<div class="c-vrow"><div><div class="c-eye">INVEST CHECK · ' + esc(d.version || 'IC-V2') + '</div><div class="c-vword ' + icBandCls(d.band) + '">' + esc(icBandWord(d.band)) + '</div></div>'
+    + '<div class="c-vscore"><div class="c-n">' + (d.score10 == null ? '—' : num(d.score10, 2)) + '<small> / 10</small></div><div class="c-l">INVEST SCORE</div></div></div>'
+    + (b ? '<div class="c-bands">'
+        + '<div class="' + (d.band === 'AVOID' ? 'on avoid' : '') + '"><b>AVOID</b>under ' + n1(b.watch) + '</div>'
+        + '<div class="' + (d.band === 'WATCH' ? 'on watch' : '') + '"><b>WATCH</b>' + n1(b.watch) + '+</div>'
+        + '<div class="' + (d.band === 'ACCUMULATE' ? 'on acc' : '') + '"><b>ACCUMULATE</b>' + n1(b.acc) + '+</div>'
+        + '<div class="' + (d.band === 'STRONG_BUY' ? 'on strong' : '') + '"><b>STRONG BUY</b>' + n1(b.strong) + '+</div></div>' : '')
+    + '<div class="c-read">' + icRead(d) + '</div>'
+    + '<div class="c-foot"><span>' + comps.length + ' checks · weight-based · ' + (d.computable_weight == null ? '?' : num(d.computable_weight, 0)) + ' of ' + num(tot, 0) + ' computable' + (d.weighted === false ? ' · registry unread' : '') + '</span><span>scores as of ' + esc(asOf || '—') + '</span></div>'
+    + '</section>';
+  h += '<div class="c-sect">' + comps.length + ' checks by weight <span class="c-r">earned ' + n1(d.earned_weight) + ' of ' + num(tot, 0) + '</span></div>';
+  h += '<section class="slab" id="ic-rows">' + comps.map(function(c, i){
+      var w = Number(c.weight) || 0, cr = c.computable ? (Number(c.credit) || 0) : 0, got = w * cr;
+      return '<div class="c-ic' + (c.computable ? '' : ' excl') + '" data-comp="' + i + '"><span class="c-k">' + esc(icName(c)) + '</span><span class="c-w">' + (c.computable ? wfmt(Math.round(got * 10) / 10) : '—') + ' / ' + wfmt(w) + '</span>'
+        + '<div class="c-bar"><i class="c-cap" style="width:' + clamp(w / tot * 100, 0, 100) + '%"></i>' + (c.computable ? '<i class="c-got' + (cr <= 0 ? ' z' : '') + '" style="width:' + clamp(got / tot * 100, 0, 100) + '%"></i>' : '') + '</div>'
+        + '<div class="c-why">' + icWhy(c) + '</div></div>';
+    }).join('') + '</section>';
+  h += '<div class="c-cover">Bar length = weight. Gold fill = credit earned. Weights from ' + esc(d.weight_source || 'ic_rule_weights') + ' · ' + esc(d.version || 'IC-V2') + '</div>';
+  $('ic-main').innerHTML = h;
+}
+$('ic-main').addEventListener('click', function(e){
+  if (e.target.closest('[data-act="ic"]')){ loadIC(); return; }
+});
+
 /* ── the detail sheet (R3, cc_task_logs 4495): FIELD PARITY with the web Check page rule card —
    id + label, bucket + weight + registry sum, credit earned / weight, REQUIRED (the engine
    condition), COMPANY (the engine reading), the value fields as tiles, the credit ladder with the
@@ -352,7 +440,8 @@ window.addEventListener('hashchange', function(){ setMode(location.hash, false);
   S.mode = modeOf(location.hash); drawModes();
   if (S.mode === 'scan') renderScan();
   if (q){ $('c-q').value = String(q).toUpperCase(); S.sym = String(q).trim().toUpperCase(); }
-  if (S.sym) loadTC(); else renderTCLanding();
+  if (S.mode === 'ic'){ renderTCLanding(); if (S.sym) loadIC(); else renderICLanding(); }
+  else if (S.sym) loadTC(); else renderTCLanding();
 })();
 })();
 </script>
