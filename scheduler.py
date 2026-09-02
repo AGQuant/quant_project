@@ -2,7 +2,7 @@
 Scheduler — Scorr background tasks (restored 18-Jun-2026).
 Deactivation: _bg_intraday_paper commented out — on-demand only via /api/intraday/tick.
 """
-import asyncio, json, logging, os, time
+import asyncio, json, logging, os, threading, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone, time as dt_time
 from typing import Optional
@@ -339,6 +339,12 @@ def _bg_catchup_sweep():
                 lr = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
                 if lr >= floor:
                     continue                   # already ran inside this period
+            if (exp.hour, exp.minute) == (now.hour, now.minute):
+                # cc#1589: the slot IS this minute — the tick loop is dispatching it on this very
+                # tick (the sweep runs on m%5==0, so every :00/:05 exact-minute job landed here).
+                # Firing it again is the double run that wrote 7 duplicate paper closes on 31-Aug.
+                # A job that truly misses this tick is caught by the next sweep, 5 minutes on.
+                continue
             fn = globals().get("_" + job_name) or globals().get(job_name)
             if not callable(fn):
                 log.warning("catchup: no resolvable function for %s — skipped, not guessed", job_name)
@@ -493,6 +499,7 @@ _fu_sync_ran_this_week: Optional[date] = None
 _lot_sync_ran_today: Optional[date] = None   # cc#314: nightly Fyers lot-size audit day-lock
 _v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit pass guard
 _v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
+_v8_paper_exit_eod_lock = threading.Lock()       # cc#1589: claim the day BEFORE running, not after
 _premarket_check_ran: Optional[date] = None      # cc_task #72 bug_1: 09:10 check day-lock
 _v21_ks_ran_today: Optional[date] = None         # cc#158: V2.1 kill-switch day-lock
 
@@ -982,7 +989,14 @@ def _bg_v8_paper_exit_eod():
     loop missed (e.g. the writer was down). Uses the latest completed trading day."""
     global _v8_paper_exit_eod_ran
     today = _ist_now().date()
-    if _v8_paper_exit_eod_ran == today: return _Skip.already_ran()
+    # cc#1589: the day-lock used to be set AFTER the run (so two threads dispatched on the same
+    # tick — the h==2,m==0 primary and the cc#841 catch-up sweep — both passed it and both ran;
+    # 31-Aug: 7 duplicate closes). Claim the day under a lock BEFORE running, so the second
+    # dispatch is a recorded skip, not a second run. On failure the claim is released so the
+    # catch-up sweep can still retry the day.
+    with _v8_paper_exit_eod_lock:
+        if _v8_paper_exit_eod_ran == today: return _Skip.already_ran()
+        _v8_paper_exit_eod_ran = today
     try:
         import v8_paper
         with _conn() as conn:
@@ -990,9 +1004,10 @@ def _bg_v8_paper_exit_eod():
                 cur.execute("SELECT MAX(price_date) FROM raw_prices")
                 d = cur.fetchone()[0]
             if d is None:
+                with _v8_paper_exit_eod_lock:
+                    _v8_paper_exit_eod_ran = None
                 return _Skip.precondition_missing('no raw_prices session yet')
             res = v8_paper.run_paper_exits(conn, target_date=d, mode="eod")
-        _v8_paper_exit_eod_ran = today
         with _conn() as _c:   # cc#255: write a ran-ok health row regardless of close count
             _log_health(_c, "v8_paper_exit_eod", {"date": str(d), "closed": res.get("closed", 0)})
         if res.get("closed"):
@@ -1000,6 +1015,8 @@ def _bg_v8_paper_exit_eod():
                        f"EOD fallback closed {res['closed']} position(s) on {d} daily close")
         log.info(f"v8_paper_exit_eod: {res}")
     except Exception as e:
+        with _v8_paper_exit_eod_lock:
+            _v8_paper_exit_eod_ran = None   # cc#1589: release the claim so a retry can run
         log.error(f"v8_paper_exit_eod: {e}")
 
 def _bg_v10_tick():
