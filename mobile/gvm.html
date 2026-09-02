@@ -70,17 +70,45 @@
 #gvp .g-row .g-nm{grid-column:2;font-size:11px;color:var(--mute);margin-top:-2px}
 #gvp .g-row .g-sc{grid-column:3;grid-row:1 / span 2;font-family:var(--mono);font-weight:800;font-size:16px;text-align:right}
 #gvp .g-row .g-sc small{display:block;font-size:9.5px;letter-spacing:.5px;font-weight:700;color:var(--mute)}
-/* compact company head (the P3 hero replaces this block) */
-#gvp .g-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
-#gvp .g-head .g-sym{font-family:var(--display);font-size:26px;letter-spacing:-.3px;line-height:1}
-#gvp .g-head .g-nm{color:var(--mute);font-size:12.5px;margin-top:4px}
-#gvp .g-head .g-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-#gvp .g-head .g-px{text-align:right}
-#gvp .g-head .g-px .g-v{font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:-.3px}
-#gvp .g-head .g-px .g-s{font-family:var(--mono);font-size:10px;color:var(--mute);white-space:nowrap}
-#gvp .g-score{display:flex;gap:14px;align-items:baseline;margin-top:12px;font-family:var(--mono)}
-#gvp .g-score b{font-size:34px;font-weight:800;color:var(--gold);letter-spacing:-1px}
-#gvp .g-score span{font-size:11px;color:var(--mute);letter-spacing:1px}
+/* hero (ref .hero, page-local names) */
+#gvp .g-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+#gvp .g-sym{font-family:var(--display);font-size:26px;letter-spacing:-.3px;line-height:1}
+#gvp .g-nm{color:var(--mute);font-size:12.5px;margin-top:4px}
+#gvp .g-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+#gvp .g-px{text-align:right}
+#gvp .g-px .g-pv{font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:-.3px}
+#gvp .g-px .g-ps{font-family:var(--mono);font-size:10px;color:var(--mute);white-space:nowrap}
+#gvp .g-score{display:grid;grid-template-columns:130px 1fr;gap:14px;align-items:center;margin:16px 0 12px}
+#gvp .g-dial{position:relative;width:130px;height:130px}
+#gvp .g-dial svg{width:130px;height:130px;transform:rotate(-90deg)}
+#gvp .g-dial .g-dn{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+#gvp .g-dial .g-dn b{font-family:var(--mono);font-size:38px;font-weight:800;letter-spacing:-1.5px;line-height:1;color:var(--gold)}
+#gvp .g-dial .g-dn small{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.5px;margin-top:2px}
+#gvp .g-pillars{display:flex;flex-direction:column;gap:9px}
+#gvp .g-pl .g-pll{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute)}
+#gvp .g-pl .g-pll b{color:var(--chalk);letter-spacing:0;font-size:13px}
+#gvp .g-pl .g-pbar{height:7px;margin-top:4px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
+#gvp .g-pl .g-pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-lo),var(--gold))}
+#gvp .g-pl.pg .g-pbar i{background:linear-gradient(90deg,#3d6b3f,var(--up))}
+#gvp .g-pl.pv .g-pbar i{background:linear-gradient(90deg,#6b4a1e,var(--amber))}
+#gvp .g-pl.pm .g-pbar i{background:linear-gradient(90deg,#1f5a6b,var(--aqua))}
+#gvp .g-verdict{display:flex;align-items:center;gap:10px;margin:6px 0 10px}
+#gvp .g-verdict .g-w{font-family:var(--display);font-size:22px;letter-spacing:.5px;color:var(--amber);transform:skewX(-6deg)}
+#gvp .g-verdict .g-w.good{color:var(--up)} #gvp .g-verdict .g-w.weak{color:var(--down)}
+#gvp .g-punch{font-size:13.5px;line-height:1.5;color:var(--chalk)}
+#gvp .g-punch b{color:var(--gold);font-weight:700}
+#gvp .g-facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+#gvp .g-f{padding:9px 10px}
+#gvp .g-f .g-fl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)}
+#gvp .g-f .g-fv{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px}
+#gvp .g-f .g-fs{font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+#gvp .g-pn{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+#gvp .g-pn .g-col{padding:8px 10px}
+#gvp .g-pn .g-pt{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;margin-bottom:5px}
+#gvp .g-pn .g-pr{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)}
+#gvp .g-pn .g-pr:last-child{border-bottom:0}
+#gvp .g-pn .g-pr span{font-family:var(--mono);font-weight:700;white-space:nowrap}
+#gvp .g-hfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:12px;font-family:var(--mono);font-size:10px;color:var(--dim)}
 /* states */
 #gvp .g-empty{padding:18px 14px;text-align:center;color:var(--mute);font-size:13px;line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:10px;padding:8px 14px;border:1px solid var(--line);border-radius:0;font-family:var(--mono);font-size:11px;color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
@@ -167,21 +195,84 @@ function loadCompany(sym){
     STATE.co = d; STATE.fetchedAt = istNow(); renderCompany();
   }).catch(function(){ if(STATE.sym === sym) fail('Could not load the GVM report for '+sym+'.', sym); });
 }
-function renderCompany(){
-  var d = STATE.co, sc = d.scores || {};
+/* ── HERO (ref hero; session_log 36513 hero + rule 4 of the card) ─────────────────────── */
+var CIRC = 2*Math.PI*56;   /* r=56 in the ref dial */
+var LBL = { sales_5y:'Sales 5Y growth', sales_3y:'Sales 3Y growth', profit_5y:'Profit 5Y CAGR', profit_3y:'Profit 3Y CAGR', qoq_sales:'Sales this year', qoq_profit:'Profit this year',
+  opm:'Operating margin', opm_exp:'Margin', pe:'PE', fwd_pe:'PE next year', hist_pe:'PE vs own 5y', sector_pe:'PE vs sector', pb:'Price / Book', annual_upside:'Upside to fair value',
+  div_yield:'Dividend yield', roce:'Return on capital', int_cov:'Interest cover', inst_abs:'Institutions', inst_chg:'Institutional buying',
+  ret_1y:'Return 1Y', ret_3y:'Return 3Y', ret_52w_idx:'vs Nifty 52W', ret_1m:'Return 1M', dma_50:'vs 50-day avg', dma_200:'vs 200-day avg', rsi_month:'Monthly RSI', vol_trend:'Volume trend' };
+function plainLabel(b){ return LBL[b.key] || String(b.label||b.key||'').replace(/\s*\(.*?\)\s*/g,' ').trim(); }
+function bmVal(b){
+  var v = b.company, u = b.unit || '';
+  if(!num(v)) return '—';
+  if(u === 'x'){ var pm = num(b.peer_median) ? ' vs '+Math.round(b.peer_median)+'×' : ''; return Math.round(v)+'×'+pm; }
+  if(u === 'bps') return (v>0?'+':v<0?'−':'')+Math.abs(Math.round(v))+' bps';
+  if(u === '%'){ var big = Math.abs(v) >= 20 && /^ret_/.test(b.key||''); return (v>0 && /^(ret_|inst_chg|dma_|qoq_)/.test(b.key||'')?'+':v<0?'−':'')+Math.abs(v).toFixed(big?0:1)+'%'; }
+  return fx(v,1);
+}
+/* punchline → plain words, <= 20 words (card rule 4). Built from the API sentence's own three
+   adjectives and its call to action; falls back to the trimmed sentence when the pattern is absent. */
+function plainPunch(p){
+  p = String(p||'').trim(); if(!p) return '';
+  var m = /considering its\s+(\w+)\s+Growth,\s*(\w+)\s+Valuation,\s*(\w+)\s+Momentum/i.exec(p);
+  var act = /advisable to\s+(.+?)\s+for\s+(short|medium|long)(?:\s+to\s+(short|medium|long))?\s*term/i.exec(p);
+  var ACT = { 'watch and accumulate on dips':'Watch, and add on dips', 'accumulate on dips':'Add on dips', 'accumulate':'Add slowly', 'buy':'Buy', 'hold':'Hold', 'avoid':'Avoid', 'book profits':'Book profits', 'sell':'Sell', 'watch':'Watch' };
+  if(m && act){
+    var a = act[1].trim().toLowerCase().replace(/\s+/g,' '), aw = ACT[a] || (act[1].charAt(0).toUpperCase()+act[1].slice(1).toLowerCase());
+    var hz = act[3] ? act[2]+' to '+act[3]+' term' : act[2]+' term';
+    var val = m[2].toLowerCase() === 'fair' ? 'fair value' : m[2].toLowerCase()+' value';
+    var out = m[1].charAt(0).toUpperCase()+m[1].slice(1).toLowerCase()+' growth, '+val+', '+m[3].toLowerCase()+' momentum. <b>'+esc(aw)+'</b> for the '+hz+'.';
+    if(out.replace(/<[^>]+>/g,'').split(/\s+/).length <= 20) return out;
+  }
+  var first = p.split(/(?<=\.)\s/)[0].replace(/\s+/g,' ');
+  var w = first.split(' '); if(w.length > 20) first = w.slice(0,20).join(' ')+'…';
+  return esc(first);
+}
+function trendWord(tr){
+  if(!tr || tr.length < 2) return null;
+  var a = tr[0].gvm, b = tr[tr.length-1].gvm; if(!num(a)||!num(b)) return null;
+  var d = b - a; return { word: d >= 0.1 ? 'up' : d <= -0.1 ? 'down' : 'flat', cls: d >= 0.1 ? 'up' : d <= -0.1 ? 'dn' : 'mu', days: tr.length, now: b, d: d };
+}
+function pnCol(title, cls, rows){
+  var h = '<div class="g-col well-up"><div class="g-pt '+cls+'">'+title+'</div>';
+  if(!rows || !rows.length) h += '<div class="g-pr mu">none flagged</div>';
+  else for(var i=0;i<rows.length && i<3;i++) h += '<div class="g-pr">'+esc(plainLabel(rows[i]))+'<span class="'+cls+'">'+esc(bmVal(rows[i]))+'</span></div>';
+  return h+'</div>';
+}
+function renderHero(d){
+  var sc = d.scores || {}, ex = d.extras || {}, pc = ex.percentile, sg = ex.segment_ctx, r52 = ex.range52;
   var chips = '';
   if(d.segment) chips += '<span class="tag gd">'+esc(String(d.segment).toUpperCase())+'</span>';
   if(d.cap_category) chips += '<span class="tag mu">'+esc(String(d.cap_category).toUpperCase())+' CAP'+(num(d.mcap_rank)?' · #'+d.mcap_rank:'')+'</span>';
   if(num(d.segment_rank) && num(d.segment_total)) chips += '<span class="tag mu">RANK '+d.segment_rank+' / '+d.segment_total+'</span>';
-  var r52 = d.extras && d.extras.range52;
-  var h = '<section class="pressed" id="score">'+
-    '<div class="g-head"><div><div class="g-sym">'+esc(d.symbol)+'</div><div class="g-nm">'+esc(d.company_name||'')+'</div><div class="g-chips">'+chips+'</div></div>'+
-    '<div class="g-px"><div class="g-v">'+inr(d.price)+'</div><div class="g-s">'+esc(d.price_label||'CMP')+(d.price_is_live?' · live '+hhmm(STATE.fetchedAt):(d.price_date?' · '+esc(d.price_date):''))+'</div>'+
-    (r52 && num(r52.lo) && num(r52.hi) ? '<div class="g-s">52W '+Math.round(r52.lo).toLocaleString('en-IN')+'–'+Math.round(r52.hi).toLocaleString('en-IN')+'</div>' : '')+'</div></div>'+
-    '<div class="g-score"><b>'+fx(sc.gvm,1)+'</b><span>GVM / 10 · <span class="'+verdictCls(d.verdict)+'">'+esc(d.verdict||'—')+'</span> · G '+fx(sc.g,1)+' · V '+fx(sc.v,1)+' · M '+fx(sc.m,1)+'</span></div>'+
-    '<div class="g-asof">score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</div>'+
+  var gvm = num(sc.gvm) ? Math.max(0, Math.min(10, sc.gvm)) : null;
+  var arc = gvm==null ? 0 : (gvm/10*CIRC);
+  var vcls = /^(excellent|good)$/i.test(d.verdict||'') ? ' good' : /^weak$/i.test(d.verdict||'') ? ' weak' : '';
+  var tw = trendWord(ex.trend);
+  var pill = function(k, name, v){ return '<div class="g-pl '+k+'"><div class="g-pll"><span>'+name+'</span><b>'+fx(v,1)+'</b></div><div class="g-pbar"><i style="width:'+(num(v)?Math.max(0,Math.min(100,v*10)).toFixed(0):0)+'%"></i></div></div>'; };
+  return '<section class="pressed" id="score" aria-label="GVM score">'+
+    '<div class="g-top"><div><div class="g-sym">'+esc(d.symbol)+'</div><div class="g-nm">'+esc(d.company_name||'')+'</div><div class="g-chips">'+chips+'</div></div>'+
+    '<div class="g-px"><div class="g-pv">'+inr(d.price)+'</div><div class="g-ps">'+esc(d.price_label||'CMP')+(d.price_is_live?' · live '+hhmm(STATE.fetchedAt):(d.price_date?' · '+esc(d.price_date):' · last close'))+'</div>'+
+    (r52 && num(r52.lo) && num(r52.hi) ? '<div class="g-ps">52W '+Math.round(r52.lo).toLocaleString('en-IN')+'–'+Math.round(r52.hi).toLocaleString('en-IN')+'</div>' : '')+'</div></div>'+
+    '<div class="g-score"><div class="g-dial"><svg viewBox="0 0 130 130" aria-hidden="true"><circle cx="65" cy="65" r="56" fill="none" stroke="var(--line)" stroke-width="12"/>'+
+    (gvm==null?'':'<circle cx="65" cy="65" r="56" fill="none" stroke="var(--gold)" stroke-width="12" stroke-linecap="round" stroke-dasharray="'+arc.toFixed(1)+' '+CIRC.toFixed(1)+'"/>')+
+    '</svg><div class="g-dn"><b>'+fx(gvm,1)+'</b><small>GVM / 10</small></div></div>'+
+    '<div class="g-pillars">'+pill('pg','G · GROWTH',sc.g)+pill('pv','V · VALUE',sc.v)+pill('pm','M · MOMENTUM',sc.m)+'</div></div>'+
+    '<div class="g-verdict"><span class="g-w'+vcls+'">'+esc(d.verdict||'—')+'</span>'+
+    (pc && num(pc.top_pct) ? '<span class="tag mu">TOP '+Math.round(pc.top_pct)+'% OF '+(num(pc.universe_total)?pc.universe_total.toLocaleString('en-IN'):'—')+'</span>' : '')+'</div>'+
+    (d.punchline ? '<div class="g-punch">'+plainPunch(d.punchline)+'</div>' : '<div class="g-punch mu">No summary line for this company yet.</div>')+
+    '<div class="g-facts">'+
+      '<div class="g-f well-up"><div class="g-fl">MCAP</div><div class="g-fv">'+cr(d.market_cap)+'</div><div class="g-fs">'+esc(d.cap_category||'—')+(num(d.mcap_rank)?' · rank '+d.mcap_rank:'')+'</div></div>'+
+      '<div class="g-f well-up"><div class="g-fl">SECTOR GVM</div><div class="g-fv">'+(sg?fx(sg.mcap_wtd_gvm,2):'—')+'</div><div class="g-fs">'+(sg && num(sg.stock_vs_sector) ? 'you are '+(sg.stock_vs_sector>0?'+':sg.stock_vs_sector<0?'−':'')+Math.abs(sg.stock_vs_sector).toFixed(2) : 'no sector read')+'</div></div>'+
+      '<div class="g-f well-up"><div class="g-fl">SCORE TREND</div><div class="g-fv '+(tw?tw.cls:'mu')+'">'+(tw?tw.word:'—')+'</div><div class="g-fs">'+(tw?tw.days+' days · '+fx(tw.now,1):'no trend yet')+'</div></div>'+
+    '</div>'+
+    '<div class="g-pn">'+pnCol('STRONG','up',d.positives)+pnCol('WEAK','dn',d.negatives)+'</div>'+
+    '<div class="g-hfoot"><span>score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</span><span>Pick a capsule below ↓</span></div>'+
     '</section>';
-  main.innerHTML = h;
+}
+function renderCompany(){
+  var d = STATE.co;
+  main.innerHTML = renderHero(d);
   foot.textContent = 'Scores rebuild nightly. Prices live.'+(num(d.peer_count)?' Peer set = same segment, '+d.peer_count+' companies.':'');
 }
 /* ── landing: no symbol yet → today's top 25 by GVM, tap to open ─────────────────────── */
