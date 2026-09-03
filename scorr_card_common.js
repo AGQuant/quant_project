@@ -452,13 +452,25 @@ window.scorrAsofStamp = function (asof) {
   if (window.__scorrLogoMenu) return;
   window.__scorrLogoMenu = true;
 
+  /* cc#1636 (founder 02-Sep 23:12 / placement 23:18): the app's theme lives HERE, behind the
+     wordmark tap, as four real rows - Gold Night / Dark / Aqua White / Gold Day - and every row goes
+     through window.SCORR_THEME.set (pwa_endpoints APP_THEME_RESOLVE_JS), the ONE path that
+     validates, stores localStorage 'scorr_theme', applies body[data-theme] live and announces
+     scorr:theme. No reload: the themes are custom properties on <body>. The web light | dark pill
+     is untouched and web-scoped. The fallbacks below exist only for a page whose head lost the
+     resolver; they mirror its contract rather than invent one. */
+  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Dark'], ['aquawhite', 'Aqua White'], ['goldday', 'Gold Day']];
+  var THEME_GLYPH = { goldnight: '\u25c6', dark: '\u25c7', aquawhite: '\u25cb', goldday: '\u25c8' };
+  function themeList() { var T = window.SCORR_THEME; return (T && T.list) || THEME_FALLBACK; }
   function curTheme() {
-    try { return localStorage.getItem('scorr_theme') || 'light'; } catch (e) { return 'light'; }
+    var T = window.SCORR_THEME; if (T && T.get) return T.get();
+    var b = document.body; return (b && b.getAttribute('data-theme')) || 'goldnight';
   }
-  function flipTheme() {
-    var t = curTheme() === 'light' ? 'dark' : 'light';
-    try { localStorage.setItem('scorr_theme', t); } catch (e) { /* private mode: still reload */ }
-    location.reload();
+  function setTheme(k) {
+    var T = window.SCORR_THEME; if (T && T.set) return T.set(k);
+    try { localStorage.setItem('scorr_theme', k); } catch (e) {}
+    if (document.body) document.body.setAttribute('data-theme', k);
+    return k;
   }
 
   function build() {
@@ -467,18 +479,30 @@ window.scorrAsofStamp = function (asof) {
       var h1 = document.querySelector('.head h1');
       if (!h1 || !h1.parentNode) return;
 
-      var dark = curTheme() === 'dark';
       var menu = document.createElement('div');
       menu.className = 'lgm';
-      /* the label is the ACTION, not the current state — in a menu "Light" reads as a command
-         and would flip the opposite way to what the founder taps for. The pill shows state
-         because it is a toggle; a menu row should say what it will do. */
+      /* four theme rows, the current one ticked in gold, then Log out behind a hairline */
       menu.innerHTML =
-        '<button type="button" id="lgm-th"><span class="ic">' + (dark ? '☀' : '☾')
-        + '</span>Switch to ' + (dark ? 'light' : 'dark') + '</button>'
+        '<div style="padding:8px 12px 2px;font-family:ui-monospace,monospace;font-size:9.5px;letter-spacing:1.4px;color:var(--mut,#8A8A93)">THEME</div>'
+        + themeList().map(function (t) {
+            return '<button type="button" class="lgm-th" data-k="' + t[0] + '"><span class="ic">' + (THEME_GLYPH[t[0]] || '\u25c6')
+              + '</span>' + t[1] + '<span class="lgm-tick" aria-hidden="true" style="margin-left:auto;color:var(--gold,#D4AF37);display:none">\u2713</span></button>';
+          }).join('')
+        + '<div style="height:1px;background:var(--line,#2A2A31);margin:4px 0"></div>'
         + '<button type="button" id="lgm-lo"><span class="ic">⏏</span>Log out</button>';
       h1.classList.add('lgt');
       h1.parentNode.appendChild(menu);
+      function markCurrent() {
+        var cur = curTheme();
+        Array.prototype.forEach.call(menu.querySelectorAll('.lgm-th'), function (b) {
+          var on = b.getAttribute('data-k') === cur;
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          b.style.color = on ? 'var(--gold,#D4AF37)' : '';
+          var tk = b.querySelector('.lgm-tick'); if (tk) tk.style.display = on ? 'inline' : 'none';
+        });
+      }
+      markCurrent();
+      window.addEventListener('scorr:theme', markCurrent);
 
       h1.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -491,8 +515,9 @@ window.scorrAsofStamp = function (asof) {
         if (e.key === 'Escape') menu.classList.remove('open');
       });
 
-      var th = document.getElementById('lgm-th');
-      if (th) th.onclick = flipTheme;
+      Array.prototype.forEach.call(menu.querySelectorAll('.lgm-th'), function (b) {
+        b.onclick = function () { setTheme(b.getAttribute('data-k')); markCurrent(); menu.classList.remove('open'); };
+      });
       var lo = document.getElementById('lgm-lo');
       if (lo) lo.onclick = function () { location.href = '/logout'; };
     } catch (e) { /* a missing header must never break the screen under it */ }
