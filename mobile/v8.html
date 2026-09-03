@@ -805,17 +805,24 @@ function closedRow(t){
    /api/mobile/v8book), ANY filter recomputes from the visible subset of the SAME rows - realised
    = sum(pnl) - Rs 500 x trades (netPnl), wins = result TARGET, losses = result SL (the app's
    canon rule, cc#950), avg win / loss % from return_pct. bk.closed carries every closed trade
-   of the era (no LIMIT in the builder), so the subset sums are complete. */
-var CL_SIDE = 'all', CL_DUR = 'all', CL_BRK = 500;
+   of the era (no LIMIT in the builder), so the subset sums are complete.
+   cc#1626 adds a THIRD row, STRATEGY: ALL | Buy Reversal | Buy Momentum | Sell Reversal | Sell
+   Momentum on the row's basket key, ANDed with Side and Duration; tiles, captions and the list
+   all follow the combined cut. The four names are the founder's fixed list for this card; the
+   chip counts are live from the same era-wide rows. */
+var CL_SIDE = 'all', CL_DUR = 'all', CL_BSK = 'all', CL_BRK = 500;
+var CL_BASKETS = [['all','ALL'],['buy_reversal','Buy Reversal'],['buy_momentum','Buy Momentum'],['sell_reversal','Sell Reversal'],['sell_momentum','Sell Momentum']];
+function clBskWord(k){ var hit = ''; CL_BASKETS.forEach(function(b){ if(b[0] === k) hit = b[1]; }); return hit || String(k||'').replace(/_/g, ' '); }
 function clCut(dur){
   if(dur === 'all') return null;
   var d = istNow(); d.setDate(d.getDate() - (dur === '1w' ? 7 : 30));
   return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
 }
-function clRows(rows, side, dur){
-  var cut = clCut(dur);
+function clRows(rows, side, dur, bsk){
+  var cut = clCut(dur); bsk = bsk || 'all';
   return rows.filter(function(t){
     if(side !== 'all' && String(t.side||'').toUpperCase() !== side.toUpperCase()) return false;
+    if(bsk !== 'all' && String(t.basket||'').toLowerCase() !== bsk) return false;
     if(cut && String(t.exit_date || t.exit_ts || '').slice(0, 10) < cut) return false;
     return true;
   });
@@ -839,21 +846,23 @@ function renderClosed(){
       rEl = document.getElementById('cl-r'), kpi = document.getElementById('cl-kpi'), more = document.getElementById('cl-more');
   if(!bk || !bk.closed){ nEl.textContent = ''; rEl.textContent = ''; kpi.innerHTML = ''; kpi.className = ''; more.innerHTML = '';
     el.innerHTML = '<div class="slab dense" id="cl-empty"></div>'; emptyBox('cl-empty', 'Closed trades are not available right now.'); return; }
-  var all = bk.closed, rows = clRows(all, CL_SIDE, CL_DUR), isAll = (CL_SIDE === 'all' && CL_DUR === 'all');
-  var sideCounts = { all: clRows(all, 'all', CL_DUR).length, long: clRows(all, 'long', CL_DUR).length, short: clRows(all, 'short', CL_DUR).length };
-  var durCounts = { all: clRows(all, CL_SIDE, 'all').length, '1w': clRows(all, CL_SIDE, '1w').length, '1m': clRows(all, CL_SIDE, '1m').length };
+  var all = bk.closed, rows = clRows(all, CL_SIDE, CL_DUR, CL_BSK), isAll = (CL_SIDE === 'all' && CL_DUR === 'all' && CL_BSK === 'all');
+  var sideCounts = { all: clRows(all, 'all', CL_DUR, CL_BSK).length, long: clRows(all, 'long', CL_DUR, CL_BSK).length, short: clRows(all, 'short', CL_DUR, CL_BSK).length };
+  var durCounts = { all: clRows(all, CL_SIDE, 'all', CL_BSK).length, '1w': clRows(all, CL_SIDE, '1w', CL_BSK).length, '1m': clRows(all, CL_SIDE, '1m', CL_BSK).length };
+  var bskCounts = {}; CL_BASKETS.forEach(function(b){ bskCounts[b[0]] = clRows(all, CL_SIDE, CL_DUR, b[0]).length; });
   var st = clStats(rows);
   var n = isAll && num(bk.trades) ? bk.trades : rows.length;
   nEl.textContent = n;
   var first = all.length ? all[all.length-1] : null;
   var since = (bk.era_block && bk.era_block.era_label) ? bk.era_block.era_label : (first && first.exit_ts ? 'since '+dmy(first.exit_ts) : 'era');
-  rEl.textContent = since.toLowerCase() + ' · all baskets';
-  var win = since + ' · ' + (CL_SIDE === 'all' ? 'ALL' : CL_SIDE.toUpperCase()) + ' · ' + (CL_DUR === 'all' ? 'ALL' : CL_DUR.toUpperCase());
+  rEl.textContent = since.toLowerCase() + ' · ' + (CL_BSK === 'all' ? 'all baskets' : clBskWord(CL_BSK).toLowerCase());
+  var win = since + ' · ' + (CL_SIDE === 'all' ? 'ALL' : CL_SIDE.toUpperCase()) + ' · ' + (CL_DUR === 'all' ? 'ALL' : CL_DUR.toUpperCase()) + (CL_BSK === 'all' ? '' : ' · ' + clBskWord(CL_BSK));
   var realised = isAll && num(bk.realised) ? bk.realised : st.net, gross = isAll && num(bk.gross) ? bk.gross : st.gross, brk = isAll && num(bk.brokerage) ? bk.brokerage : st.brokerage;
   var wins = isAll && num(bk.wins) ? bk.wins : st.wins, losses = isAll && num(bk.losses) ? bk.losses : st.losses;
   var acc = isAll && num(bk.win_rate) && num(bk.decided) && bk.decided > 0 ? bk.win_rate : st.acc;
   var segs = clSeg('side', CL_SIDE, [['all','ALL'],['long','LONG'],['short','SHORT']], sideCounts)
-           + clSeg('dur', CL_DUR, [['all','ALL'],['1w','1W'],['1m','1M']], durCounts);
+           + clSeg('dur', CL_DUR, [['all','ALL'],['1w','1W'],['1m','1M']], durCounts)
+           + clSeg('bsk', CL_BSK, CL_BASKETS, bskCounts);
   kpi.className = '';   /* #cl-kpi was the 3-column grid itself; it now wraps the two seg rows + the grid */
   kpi.innerHTML = segs.replace(/class="filters"/g, 'class="filters" data-cl-seg="1"') + '<div class="kpi">'
     + kpiWell('REALISED', inr(realised), sgn(realised), 'gross '+inrShort(gross)+' · brk '+inrShort(brk)+'<br>'+esc(win))
@@ -862,7 +871,7 @@ function renderClosed(){
     + '</div>';
   if(!rows.length){
     more.innerHTML = '';
-    var what = (CL_SIDE === 'all' ? '' : (CL_SIDE === 'long' ? 'long ' : 'short ')) + 'trades';
+    var what = (CL_SIDE === 'all' ? '' : (CL_SIDE === 'long' ? 'long ' : 'short ')) + (CL_BSK === 'all' ? '' : clBskWord(CL_BSK) + ' ') + 'trades';
     var when = CL_DUR === '1w' ? ' in the last week' : CL_DUR === '1m' ? ' in the last month' : ' in this era';
     el.innerHTML = '<div class="slab dense empty">No '+what+' closed'+when+'.'+(all.length ? ' Widen a filter to see the rest.' : ' The first exit lands here.')+'</div>' + asofSession(bk.as_of);
     return;
@@ -1024,6 +1033,7 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var ct = e.target.closest('[data-cl-toggle]'); if(ct){ clAll = !clAll; renderClosed(); return; }
   var cs = e.target.closest('[data-cl-side]'); if(cs){ CL_SIDE = cs.getAttribute('data-cl-side'); clAll = false; renderClosed(); return; }   /* cc#1613 */
   var cd = e.target.closest('[data-cl-dur]'); if(cd){ CL_DUR = cd.getAttribute('data-cl-dur'); clAll = false; renderClosed(); return; }
+  var cb = e.target.closest('[data-cl-bsk]'); if(cb){ CL_BSK = cb.getAttribute('data-cl-bsk'); clAll = false; renderClosed(); return; }   /* cc#1626 */
   var fb = e.target.closest('[data-fn-basket]'); if(fb){ fnBasket = fb.getAttribute('data-fn-basket'); renderFunnel(); return; }
   var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); return; }
   var fs = e.target.closest('[data-fn-sym]'); if(fs){ location.href = '/m/check#tc?sym=' + encodeURIComponent(fs.getAttribute('data-fn-sym')); return; }   /* cc#1614: row -> Trade Check */
