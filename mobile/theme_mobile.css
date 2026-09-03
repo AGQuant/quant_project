@@ -372,3 +372,39 @@ body.mcards .as-hdr{ padding-top:var(--space-8); padding-bottom:var(--space-8); 
  * single-headed before this card (an original as-shell reference page, cc#1126's two-row
  * design), confirmed unchanged. */
 .as-hide{ display:none; }
+
+/* ══ cc#1668 · SHELL HEADER READABLE ON LIGHT SETS (Blush/Aqua White screenshot) ═══════════════
+ * Item 1: the shell page title (.as-pg .t) never carried an explicit colour, so it inherited
+ * whatever ambient text colour happened to be in force -- fine by accident on dark sets, pale on
+ * pale on light ones (Blush screenshot: HOME near-invisible). --ink is the contract's own
+ * high-contrast text token per theme; on dark sets --ink IS the existing chalk-ish tone already
+ * in effect, so nothing visibly changes there. */
+body[data-theme] .as-hdr .as-pg .t{ color:var(--ink); }
+
+/* Item 2: scorr_bell.js (site-wide: web AND app) hardcodes its button in a vocabulary this app
+ * never defined app-side -- --well/--line/--chalk/--gold, each written as var(name, FALLBACK)
+ * with a literal hex fallback baked in per call site. With the custom property genuinely
+ * undefined, every browser used the fallback -- correct by coincidence on goldnight (the
+ * fallbacks were chosen to match it) and wrong everywhere else (Blush screenshot: a dark navy
+ * square on a pink field). Defined here, APP-ONLY (this file loads only on /m/* + /preview/*, so
+ * web -- which also reads this same vocabulary from the same shared JS -- is untouched), mapped
+ * to the real per-theme contract:
+ *   --well  -> --panel   (goldnight #131316 vs the old hardcoded #131316 fallback -- exact)
+ *   --line  -> --edge    (goldnight #2A2A32 vs #2A2A31 -- 1 unit off, imperceptible)
+ *   --chalk -> --ink     (goldnight #F5F2EA vs #F5F2EA -- exact)
+ *   --gold  -> --brand, NOT --label as a first reading of the card might suggest: goldnight
+ *             --label is #8C7A3F (a muted brown, nothing like the live badge), while --brand is
+ *             #D4AF37 -- an EXACT match for the hardcoded #D4AF37 fallback the gold badge uses
+ *             today. Mapping to --label would have visibly changed the working dark badge,
+ *             which do_not_touch forbids; --brand is also the better semantic fit for an
+ *             attention badge than a muted eyebrow-label tone.
+ * Scoped to `body[data-theme]`, not `:root`, so it only reaches elements a page's own more
+ * specific local block (e.g. mobile/v8.html's `#v8p{--well:...;--gold:...}`) does not already
+ * win on -- v8.html's own internal UI (inside #v8p) is unaffected; the shared-shell bell, which
+ * sits in .as-hdr OUTSIDE any such page-local scope, is what actually picks this up. */
+body[data-theme]{
+  --well: var(--panel);
+  --line: var(--edge);
+  --chalk: var(--ink);
+  --gold: var(--brand);
+}
