@@ -47,17 +47,22 @@
   /* cc#1636 (founder 02-Sep): all FOUR token sets are real choices now, and this menu no longer
      writes storage or the body attribute itself - it calls window.SCORR_THEME.set (the resolver in
      pwa_endpoints APP_THEME_RESOLVE_JS), the one path that validates, stores, applies and announces
-     scorr:theme. The local fallback mirrors that contract for a page whose head lost the resolver. */
-  var THEMES = [
-    { k: 'goldnight', label: 'Gold Night', ic: '◆' },
-    { k: 'dark',      label: 'Dark',       ic: '◇' },
-    { k: 'aquawhite', label: 'Aqua White', ic: '○' },
-    { k: 'goldday',   label: 'Gold Day',   ic: '◈' },
-    { k: 'blush',     label: 'Blush',      ic: '❀' },   /* cc#1637 */
-    { k: 'rosenight', label: 'Rose Night', ic: '✿' },
-    { k: 'rosewall',  label: 'Rose Wall',  ic: '❉' }
-  ];
-  var THEME_OK = { goldnight: 1, dark: 1, aquawhite: 1, goldday: 1, blush: 1, rosenight: 1, rosewall: 1 };
+     scorr:theme. The local fallback mirrors that contract for a page whose head lost the resolver.
+     cc#1657: this list used to be a literal 7-entry array (including goldday/rosenight/rosewall,
+     which stay hidden everywhere else, and missing ainight, which cc#1654 added) — it had drifted
+     from the resolver and from scorr_card_common.js's own logo menu, which already reads
+     window.SCORR_THEME.list. Same fix here: read the resolver's list first (the ONE authority,
+     pwa_endpoints NAMES), literal THEME_FALLBACK only for a page whose head lost the resolver
+     entirely. Glyphs match scorr_card_common.js THEME_GLYPH exactly, so the two menus never show
+     two different icons for the same theme. */
+  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Dark'], ['ainight', 'AI Night'], ['aquawhite', 'Aqua White'], ['blush', 'Blush']];
+  var THEME_GLYPH = { goldnight: '◆', dark: '◇', ainight: '✦', aquawhite: '○', blush: '❀' };
+  function themeList() { var T = window.SCORR_THEME; return (T && T.list) || THEME_FALLBACK; }
+  function themeOk(k) {
+    var list = themeList();
+    for (var i = 0; i < list.length; i++) { if (list[i][0] === k) return true; }
+    return false;
+  }
 
   function storedTheme() {
     var T = window.SCORR_THEME; if (T && T.get) return T.get();
@@ -66,7 +71,7 @@
   function applyTheme(k) {
     var T = window.SCORR_THEME; if (T && T.set) { T.set(k); return; }
     try { localStorage.setItem('scorr_theme', k); } catch (e) {}
-    document.body.setAttribute('data-theme', THEME_OK[k] ? k : 'goldnight');
+    document.body.setAttribute('data-theme', themeOk(k) ? k : 'goldnight');
   }
 
   function buildMenu(wm) {
@@ -74,9 +79,9 @@
     menu.className = 'as-menu';
     /* the theme row sits ABOVE Log out: it is the thing you come back to, and Log out is the
        thing you press once. A separator keeps a mis-tap off the exit. */
-    menu.innerHTML = THEMES.map(function (t) {
-        return '<button type="button" class="as-th" data-k="' + t.k + '">'
-          + '<span class="ic">' + t.ic + '</span>' + t.label
+    menu.innerHTML = themeList().map(function (t) {
+        return '<button type="button" class="as-th" data-k="' + t[0] + '">'
+          + '<span class="ic">' + (THEME_GLYPH[t[0]] || '◆') + '</span>' + t[1]
           + '<span class="as-tick" aria-hidden="true"></span></button>';
       }).join('')
       + '<div class="as-sep"></div>'
@@ -85,7 +90,7 @@
     wm.appendChild(menu);
 
     function markCurrent() {
-      var cur = THEME_OK[storedTheme()] ? storedTheme() : 'goldnight';
+      var cur = themeOk(storedTheme()) ? storedTheme() : 'goldnight';
       Array.prototype.forEach.call(menu.querySelectorAll('.as-th'), function (b) {
         b.classList.toggle('on', b.getAttribute('data-k') === cur);
       });
