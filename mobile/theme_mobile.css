@@ -41,3 +41,13 @@
 }
 :root:root:not([data-theme="light"]) .ix .v{ font-family:var(--r5-mono); }
 :root:root:not([data-theme="light"]) .chd .t{ color:var(--r5-chalk); }
+
+/* cc#1629 · ONE FIELD, TOP TO BOTTOM. The shared sheet paints <body> in the R5 petrol
+ * (--r5-field #0D1322) with the 115deg grain, but an app page's own field token can differ: V8
+ * and Home declare GOLD NIGHT (--field #0A0A0C) and painted it on a wrapper only, so the petrol
+ * body showed above, beside and behind the wrapper as a different band. The body now paints the
+ * page's OWN --field (declared on <body> by the page or by scorr_themes.css body[data-theme]);
+ * pages that never redeclare it still resolve --field to the petrol, so nothing moves for them.
+ * Only background-color: the grain (background-image) stays exactly as the shared sheet draws it.
+ * Same prefix and specificity as the body rule in scorr_theme_r5.css; this sheet loads later. */
+:root:root:not([data-theme="light"]) body{ background-color:var(--field); }
