@@ -260,10 +260,12 @@ def quality_bullish_basis():
       then split by futures_basis latest-tick basis sign. basis NULL or exactly 0 joins NEITHER
       list (missing/flat never counts as a direction). A zero-row list is a legitimate outcome
       (basis_neg was 0 on the day this shipped) — the card renders that honestly.
-    Rows (refinement, task log 11:39): DISPLAY columns cmp (futures close, Buildup's own CMP
-    framing) / day_pct / sector_day (v8_metrics live peer day) / oi_chg_pct (the EXACT Buildup
-    formula, session-last tick); the gating values (flow50, month_return, sector_month, basis)
-    ride along in the payload for transparency + the |basis| default sort but are not shown."""
+    Rows (cc#1650, supersedes the cc#1455 11:39 refinement column list): DISPLAY columns cmp
+    (futures close, Buildup's own CMP framing) / day_pct / basis (futures premium/discount over
+    spot, %; also the |basis| default sort key) / oi_chg_pct (the EXACT Buildup formula,
+    session-last tick). sector_day still rides in the payload for transparency — it is no longer
+    a displayed column, but it is NOT dropped; the gating values (flow50, month_return,
+    sector_month) ride along too."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT symbol FROM futures_universe WHERE is_active ORDER BY symbol")
