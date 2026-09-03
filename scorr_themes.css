@@ -233,3 +233,15 @@ body[data-theme="rosewall"]{--field:#B8355F;--panel:#FFEAF1;--hi:#FFDDE8;--edge:
  --railgrad:linear-gradient(90deg,#FFF1F5,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.05) 0 2px,transparent 2px 9px);
  --gold-lo:#7A0C3D;--gold-hi:#FFFFFF;--sunk:#FFF6F9}
+
+/* cc#1641 · THEME_AINIGHT_V1 (session_log 37945, founder approved on glass 03-Sep ~17:40 IST via
+   scorr_home_theme_mockup.html: "blue background could be dark and shiny like AI colour"). A NEW
+   eighth set, not a rewrite of dark (dark stays byte-locked to the R1 ref). Near-black blue field
+   with a cyan brand and a faint violet accent; P&L keeps hue (green up, red down). All six text
+   tokens measured AA or better on all three grounds. Append only, existing sets untouched. */
+body[data-theme="ainight"]{--field:#05070F;--panel:#0B1020;--hi:#111A30;--edge:#1E3050;
+ --ink:#EAF2FF;--muted:#7F90B3;--brand:#35E0FF;--brandglow:rgba(53,224,255,.55);--accent:#8B7BFF;
+ --label:#FFB454;--win:#3DF5A0;--loss:#FF4D6D;
+ --railgrad:linear-gradient(90deg,#35E0FF,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
+ --gold-lo:#1E3050;--gold-hi:#9FF0FF;--sunk:#03050B}

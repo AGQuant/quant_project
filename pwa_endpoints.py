@@ -2498,9 +2498,9 @@ except Exception:
 # this returns untouched. Setting one would ACTIVATE the theme blocks on a web page that was never
 # built for them, which is a visible break, so the guard is the first thing it checks.
 APP_THEME_RESOLVE_JS = """(function(){
-  var ALLOWED={goldnight:1,dark:1,aquawhite:1,goldday:1,blush:1,rosenight:1,rosewall:1};   /* cc#1636: all four token sets in scorr_themes.css are real choices */
+  var ALLOWED={goldnight:1,dark:1,aquawhite:1,goldday:1,blush:1,rosenight:1,rosewall:1,ainight:1};   /* cc#1636: all four token sets in scorr_themes.css are real choices; cc#1641 adds ainight */
   var DEFAULT='goldnight';
-  var PREVIEW={aqua_white:'aquawhite',aquawhite:'aquawhite',gold_day:'goldday',goldday:'goldday',gold_night:'goldnight',goldnight:'goldnight',dark:'dark',blush:'blush',rose_night:'rosenight',rosenight:'rosenight',rose_wall:'rosewall',rosewall:'rosewall'};   /* ?theme= stays a one-load preview, never stored */
+  var PREVIEW={aqua_white:'aquawhite',aquawhite:'aquawhite',gold_day:'goldday',goldday:'goldday',gold_night:'goldnight',goldnight:'goldnight',dark:'dark',blush:'blush',rose_night:'rosenight',rosenight:'rosenight',rose_wall:'rosewall',rosewall:'rosewall',ai_night:'ainight',ainight:'ainight'};   /* ?theme= stays a one-load preview, never stored */
   function stored(){try{return localStorage.getItem('scorr_theme');}catch(e){return null;}}
   function previewed(){
     try{var m=/[?&]theme=([\\w-]+)/.exec(location.search);
@@ -2527,7 +2527,7 @@ APP_THEME_RESOLVE_JS = """(function(){
   /* cc#1636: the one set path. Validates, stores under the key the resolver reads, applies live on
      any body that carries data-theme, and announces scorr:theme (same event scorr_theme_boot.js
      dispatches on the web) so a page with its own canvas can repaint. */
-  var NAMES=[['goldnight','Gold Night'],['dark','Dark'],['aquawhite','Aqua White'],['goldday','Gold Day'],['blush','Blush'],['rosenight','Rose Night'],['rosewall','Rose Wall']];   /* cc#1637 */
+  var NAMES=[['goldnight','Gold Night'],['dark','Dark'],['aquawhite','Aqua White'],['goldday','Gold Day'],['blush','Blush'],['rosenight','Rose Night'],['ainight','AI Night'],['rosewall','Rose Wall']];   /* cc#1637, cc#1641 adds AI Night next to Rose Night */
   function get(){var b=document.body;var t=b&&b.getAttribute('data-theme');return (t&&ALLOWED[t])?t:resolve();}
   function set(k){
     if(!ALLOWED[k])return get();

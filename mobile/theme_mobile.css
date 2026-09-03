@@ -153,3 +153,21 @@ body[data-theme="rosewall"]{ --on-field:#FFF1F5; --on-field-muted:#FFD0DE; --nav
 /* known nit from the row: the active chip's dark fill went dark-on-dark here - a light fill instead */
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .chip.on,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .chip.gd{ background:var(--sunk); color:var(--brand); border-color:var(--gold-lo); }
+
+/* cc#1641 · AI NIGHT glow (THEME_AINIGHT_V1, session_log 37945). A DARK set, so the R5 skin
+ * stays fully active on it — this block adds nothing structural, only the cyan glow the founder
+ * approved on glass: eyebrows, the active nav tab, a top hairline on cards, a faint number glow.
+ * The three literals are the set's own on-field values, declared once as custom properties on
+ * body[data-theme="ainight"] exactly like cc#1637's --on-field/--nav-bg, so every rule below
+ * reads a var() and the file stays raw-free. NEVER on P&L: no rule here touches .pos, .neg,
+ * .st .v, or anything carrying --win/--loss, by the card's own instruction. */
+body[data-theme="ainight"]{ --glow-line:rgba(53,224,255,.35); --glow-num:rgba(53,224,255,.25); --nav-bg:#070A16; }
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .sect{ text-shadow:0 0 12px var(--brandglow); }
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .as-bn.on{ text-shadow:var(--glow-10) var(--brandglow); }
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .m{ box-shadow:inset 0 var(--bw-1) 0 var(--glow-line); }
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .ix .v{ text-shadow:var(--glow-8) var(--glow-num); }
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .bnav,
+:root:root:not([data-theme="light"]) body[data-theme="ainight"] .as-nav{ background:var(--nav-bg); }
