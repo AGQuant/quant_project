@@ -329,12 +329,19 @@ function bmRowHtml(b, opts){
 }
 var LEGEND = '<div class="g-legend"><span><i style="background:var(--gold)"></i>this company</span><span><i style="background:var(--mute)"></i>peer median</span><span><i style="background:rgba(138,138,147,.25)"></i>peer range</span></div>';
 /* ── cc#1618 · second breakup view: Rows | Grid on the three pillar cards (founder 02-Sep 19:53).
-   Default Rows. Grid = ONE 4-across grid of 24 boxes shown once on the Growth card (pillar groups
+   Grid = ONE 3-across grid (cc#1663) of 24 boxes shown once on the Growth card (pillar groups
    G / V / M in the page's own row order; the payload carries 12 G, 6 V and 8 M rows for BHARATFORG,
-   so Growth lends its two extra checks to fill 24), Value and Momentum collapse to eyebrow + score
-   while Grid is on. In-memory, one choice for all three cards. Box colour lands in P3, the tap
-   sheet in P4. */
-var gvView = 'rows';
+   so Growth lends its two extra checks to fill 24). cc#1664: Grid is now the DEFAULT (was Rows);
+   Value and Momentum no longer collapse to an eyebrow+score placeholder while Grid is on -- they
+   render nothing at all (the Growth card's own eyebrow carries all three scores instead), and
+   their capsule pills hide rather than dead-end. Per-device choice persists (scorr_gvm_view).
+   Box colour lands in P3, the tap sheet in P4. */
+/* cc#1664: Grid is the default view on every open; a device that picks Rows keeps Rows (stored
+   under scorr_gvm_view). */
+var gvView = (function(){
+  try { var v = localStorage.getItem('scorr_gvm_view'); return (v === 'rows' || v === 'grid') ? v : 'grid'; }
+  catch(e){ return 'grid'; }
+})();
 function gvToggle(){
   return '<span data-gv-seg="1" style="margin-left:auto;display:inline-flex;gap:2px;padding:2px;background:var(--well);border:1px solid var(--line);border-radius:7px;transform:skewX(6deg);letter-spacing:0;text-transform:none">'
     + ['rows','grid'].map(function(k){ return '<button type="button" data-gv="'+k+'" style="border:0;border-radius:5px;min-height:24px;padding:2px 9px;font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:1px;cursor:pointer;'+(gvView===k ? 'background:var(--gold);color:var(--well)' : 'background:transparent;color:var(--mute)')+'">'+k.toUpperCase()+'</button>'; }).join('')+'</span>';
@@ -359,19 +366,55 @@ function gridRows(d){
    sets it direction-aware: higher is better unless the metric is PE / PB style, where lower wins;
    gvm_twopager.py 428-437 and the fightcard duelRowP colour from the same flag). Green = beats the
    peer median, red = behind it, grey = no peer read (context rows like PE vs sector). The rating
-   chip (hi / mid / lo bands shared with the rows) sits top-right; the peer median prints small. */
+   chip (hi / mid / lo bands shared with the rows) sits top-right; the peer median prints small.
+   cc#1663: SOLID fills, not a dim wash + coloured border -- color-mix toward --field so the tint
+   still tracks the theme's own field colour rather than a hardcoded black. --up/--down are this
+   page's own established tokens (matches gridTone's own prior bg/border pair); the spec named
+   --loss for the false case, but --loss and --down resolve to the identical goldnight hex
+   (#FF5C6C, verified), so --down is used both places for one consistent vocabulary rather than
+   mixing two names for the same colour. Border = the fill colour (no contrasting outline) on the
+   two coloured cases; the spec named --edge for the grey case, which this page has never defined
+   (its own token for this exact role, already used here before this change, is --line) --
+   substituted for the same "the page's own working token beats an unused literal name" reason as
+   cc#1668. fg is var(--chalk) uniformly now (white text on a solid fill, not tinted text on a
+   wash) -- kept in the tone object so gridBox's shape is unchanged, even though all three tones
+   now agree on it.
+   MIX PERCENTAGE MEASURED, not the spec's literal 78%: the card's own verify line requires chalk
+   text on the two fills to contrast >= 4.5. Computed (WCAG relative-luminance formula, goldnight
+   hex): 78% up -> fill rgb(39,168,111), contrast with chalk 2.71 -- fails. 78% down -> fill
+   rgb(201,74,87), contrast 4.08 -- also fails. Both fail because --up/--down are themselves light,
+   saturated colours, and mixing them 78% strong against a near-black field still leaves a fill
+   too light for light chalk text to read against. 55% clears both with margin: green fill
+   rgb(30,121,82) contrasts 4.80, red fill rgb(145,55,65) contrasts 6.64 -- used here for both
+   tones, prioritising the explicit numeric accessibility requirement the card itself states over
+   the illustrative 78% figure. Still a clearly saturated, solid fill at 55%, not a wash. */
 function gridTone(b){
-  if(b.beats_peer === true) return {bg:'var(--up-d)', bd:'var(--up)', fg:'var(--up)', k:'g'};
-  if(b.beats_peer === false) return {bg:'var(--down-d)', bd:'var(--down)', fg:'var(--down)', k:'r'};
+  if(b.beats_peer === true){ var cUp = 'color-mix(in srgb, var(--up) 55%, var(--field))'; return {bg:cUp, bd:cUp, fg:'var(--chalk)', k:'g'}; }
+  if(b.beats_peer === false){ var cDn = 'color-mix(in srgb, var(--down) 55%, var(--field))'; return {bg:cDn, bd:cDn, fg:'var(--chalk)', k:'r'}; }
   return {bg:'var(--well)', bd:'var(--line)', fg:'var(--chalk)', k:'n'};
 }
+/* cc#1663: "more clean" -- min-height one step up (72->78, boxes are wider now with room to
+   breathe), radius --radius-10 (was a raw 8px), no box-shadow (none existed before this change
+   either -- there was no inner shadow or border glow to remove, stated here rather than silently
+   claimed). Label 2-line clamp KEPT, not removed: MEASURED headless at 360/390px against every
+   GRID_LBL string plus the plainLabel() fallback shape -- 5 of 16 real labels ("Upside to fair
+   value", "vs 200-day avg", "PE vs own 5Y avg", "Margin change", "1-month return") still wrap to
+   a second line at 360px in the new 3-column width, so removing the clamp would let them run
+   past the chip or the box edge. Kept a single-line-safe white-space:nowrap swapped out only in
+   this comment's measurement rig for the fits-in-one-line cases -- the live code always clamps at
+   2, which is a no-op (nothing to clamp) for the labels that already fit on one line. Chip gets a
+   var(--well) pill behind it so the hi/mid/lo washes (.g-rt, itself untouched) stay legible
+   against the box's own now-saturated fill instead of nearly disappearing into it. Value font
+   one ramp step up (13px -> var(--type-14), the box is wider). */
 function gridBox(b){
-  var t = gridTone(b), med = bmPeerTxt(b);
-  return '<button type="button" data-gbox="'+esc(b.key)+'" data-tone="'+t.k+'" style="position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:3px;min-height:72px;padding:7px 7px 6px;text-align:left;border-radius:8px;border:1px solid '+t.bd+';background:'+t.bg+';color:var(--chalk);cursor:pointer;min-width:0">'
-    + '<span style="font-family:var(--body);font-size:9.5px;line-height:1.2;color:var(--mute);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;padding-right:22px">'+esc(GRID_LBL[b.key] || plainLabel(b))+'</span>'
-    + '<span style="position:absolute;top:5px;right:5px;transform:scale(.85);transform-origin:top right">'+rtChip(b.rating)+'</span>'
-    + '<span><span style="display:block;font-family:var(--mono);font-size:13px;font-weight:800;letter-spacing:-.2px;white-space:nowrap;color:'+t.fg+'">'+esc(bmSelf(b))+'</span>'
-    + '<span style="display:block;font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(med ? 'peers '+med : 'no peer read')+'</span></span></button>';
+  var t = gridTone(b), med = bmPeerTxt(b), coloured = t.k !== 'n';
+  var lblCol = coloured ? 'color-mix(in srgb, var(--chalk) 85%, transparent)' : 'var(--mute)';
+  var peerCol = coloured ? 'color-mix(in srgb, var(--chalk) 80%, transparent)' : 'var(--dim)';
+  return '<button type="button" data-gbox="'+esc(b.key)+'" data-tone="'+t.k+'" style="position:relative;display:flex;flex-direction:column;justify-content:space-between;gap:3px;min-height:78px;padding:8px 8px 7px;text-align:left;border-radius:var(--radius-10);border:1px solid '+t.bd+';background:'+t.bg+';color:var(--chalk);cursor:pointer;min-width:0">'
+    + '<span style="font-family:var(--body);font-size:9.5px;line-height:1.2;color:'+lblCol+';overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;padding-right:22px">'+esc(GRID_LBL[b.key] || plainLabel(b))+'</span>'
+    + '<span style="position:absolute;top:5px;right:5px;transform:scale(.85);transform-origin:top right;background:var(--well);border-radius:999px;padding:2px 3px;line-height:0">'+rtChip(b.rating)+'</span>'
+    + '<span><span style="display:block;font-family:var(--mono);font-size:var(--type-14);font-weight:800;letter-spacing:-.2px;white-space:nowrap;color:'+t.fg+'">'+esc(bmSelf(b))+'</span>'
+    + '<span style="display:block;font-family:var(--mono);font-size:8.5px;color:'+peerCol+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(med ? 'peers '+med : 'no peer read')+'</span></span></button>';
 }
 /* cc#1630 · THE PARAMETER SHEET, one component for every benchmark row, momentum tile and grid
    box (it began as cc#1618 P4's grid-box sheet). Title = the plain name + "top 10 in <segment>";
@@ -436,7 +479,10 @@ function paramSheetOpen(key){
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape') paramSheetClose(); });
 var GRID_LEGEND = '<div class="g-legend" style="flex-wrap:wrap;gap:8px 14px"><span><i style="background:var(--up)"></i>better than peers</span><span><i style="background:var(--down)"></i>behind peers</span><span><i style="background:var(--line)"></i>no peer read</span><span>lower wins on PE and price / book · chip = rating</span></div>';
 function gridHtml(d){
-  var groups = gridRows(d), n = 0, h = '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">';
+  /* cc#1663: 3 across, not 4 -- boxes are wider (room to breathe), gap one ramp step up (6->7).
+     Box count stays whatever the payload gives (24 today); 3 across means 8 rows, boxes are NOT
+     trimmed to make rows even. */
+  var groups = gridRows(d), n = 0, h = '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-7)">';
   var NAME = {G:'GROWTH', V:'VALUE', M:'MOMENTUM'};
   groups.forEach(function(g){
     if(!g.rows.length) return;
@@ -446,9 +492,6 @@ function gridHtml(d){
   h += '</div>';
   return {html:h, n:n};
 }
-function gvCollapsed(id, title, right){
-  return sectHead(id, title, right, gvToggle())+'<section class="slab g-pillar"><div class="g-sum"><span>Shown in the grid on the Growth card.</span></div></section>';
-}
 function secGrowth(d){
   /* ref order first (8 rows), then any other G row except the holding rows (those live on Holders) */
   var ORDER = ['sales_5y','profit_5y','profit_3y','qoq_sales','qoq_profit','opm','opm_exp','roce'];
@@ -456,11 +499,12 @@ function secGrowth(d){
   var g = ORDER.map(function(k){ return all.filter(function(b){ return b.key===k; })[0]; }).filter(Boolean)
             .concat(all.filter(function(b){ return ORDER.indexOf(b.key) < 0; }));
   var cov = (d.pillar_coverage||{}).track_score, scored = cov && num(cov.scored) ? cov.scored+' of '+cov.total+' scored' : g.filter(function(b){ return num(b.rating); }).length+' of '+g.length+' scored';
-  var head = sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+scored, gvToggle());
-  if(gvView === 'grid'){   /* cc#1618: one grid for all three pillars */
+  if(gvView === 'grid'){   /* cc#1618/cc#1664: one grid for all three pillars, one eyebrow carrying all three scores */
+    var head = sectHead('growth','Growth · Value · Momentum','G '+fx(d.scores&&d.scores.g,1)+' · V '+fx(d.scores&&d.scores.v,1)+' · M '+fx(d.scores&&d.scores.m,1), gvToggle());
     var gr = gridHtml(d);
     return head+'<section class="slab g-pillar">'+(gr.n ? gr.html+GRID_LEGEND : '<div class="g-empty">No peer checks in this report.</div>')+'<div class="g-asof">'+gr.n+' checks · score as of '+esc(d.score_date||'—')+'</div></section>';
   }
+  var head = sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+scored, gvToggle());
   if(!g.length) return head+'<section class="slab g-pillar"><div class="g-empty">No growth checks in this report. The nightly run scores growth only where five years of accounts exist.</div></section>';
   var rows = g.map(function(b){ return bmRowHtml(b, {signed:/^(qoq_|opm_exp)/.test(b.key||''), label:(b.key==='opm_exp'?'Margin change':null)}); }).join('');
   return head+'<section class="slab g-pillar">'+rows+LEGEND+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
@@ -504,7 +548,7 @@ function peWords(hp, pe, sp){
 }
 function secValue(d){
   var pe = bmRow(d,'pe'), fp = bmRow(d,'fwd_pe'), pb = bmRow(d,'pb'), up = bmRow(d,'annual_upside'), hp = bmRow(d,'hist_pe'), sp = bmRow(d,'sector_pe');
-  if(gvView === 'grid') return gvCollapsed('value','Value','V '+fx(d.scores&&d.scores.v,1));   /* cc#1618 */
+  if(gvView === 'grid') return '';   /* cc#1664: shown in the grid on the Growth card, no separate placeholder card */
   var head = sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict&&sp.verdict.label?' · '+String(sp.verdict.label).toLowerCase()+' on PE':''), gvToggle());
   if(!pe && !fp && !pb && !up) return head+'<section class="slab g-pillar"><div class="g-empty">No valuation checks in this report.</div></section>';
   var rows = '';
@@ -541,7 +585,7 @@ function secMomentum(d){
   var d50 = bmRow(d,'dma_50'), d200 = bmRow(d,'dma_200'), rsi = bmRow(d,'rsi_month'), vt = bmRow(d,'vol_trend');
   var yr = y1 && num(y1.company) ? (y1.company > 15 ? 'strong year' : y1.company < -10 ? 'weak year' : 'flat year') : '';
   var mo = m1 && num(m1.company) ? (m1.company < -3 ? 'soft month' : m1.company > 3 ? 'firm month' : 'quiet month') : '';
-  if(gvView === 'grid') return gvCollapsed('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1));   /* cc#1618 */
+  if(gvView === 'grid') return '';   /* cc#1664: shown in the grid on the Growth card, no separate placeholder card */
   var head = sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1)+(yr||mo ? ' · '+[yr,mo].filter(Boolean).join(', ') : ''), gvToggle());
   if(!y1 && !y3 && !ix && !m1 && !d50 && !d200 && !rsi && !vt) return head+'<section class="slab g-pillar"><div class="g-empty">No momentum checks in this report.</div></section>';
   var tiles = '<div class="g-tiles">'+tile('1 YEAR', y1)+tile('3 YEARS', y3)+tile('VS NIFTY 52W', ix, {rankOf:true})+tile('1 MONTH', m1)+'</div>';
@@ -879,10 +923,29 @@ function finSeeTable(f, key){
   return '<button type="button" data-fin-table="'+key+'" aria-expanded="'+(open?'true':'false')+'" style="display:block;width:100%;min-height:36px;margin-top:4px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--gold);font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:1px;text-align:center;cursor:pointer">'+(open ? 'hide table ▴' : 'see table ▾')+'</button>'
     + (open ? '<div style="padding-bottom:6px">'+inner+'</div>' : '');
 }
+/* cc#1664: value/momentum can now render '' (Grid mode collapses them into the Growth grid), so
+   this needs to both REMOVE a section that just went empty and RE-INSERT one that just came back
+   (Rows -> Grid -> Rows must not lose Value/Momentum permanently). Growth never returns '', so
+   it always takes the plain replace-in-place path unchanged. */
 function replaceSection(id, html){
-  var hd = document.getElementById(id); var sec = hd && hd.nextElementSibling; if(!hd || !sec) return;
+  var hd = document.getElementById(id), sec = hd && hd.nextElementSibling;
+  if(!html){ if(sec) sec.remove(); if(hd) hd.remove(); return; }
   var tmp = document.createElement('div'); tmp.innerHTML = html;
-  hd.parentNode.replaceChild(tmp.children[1], sec); hd.parentNode.replaceChild(tmp.children[0], hd);
+  if(hd && sec){ hd.parentNode.replaceChild(tmp.children[1], sec); hd.parentNode.replaceChild(tmp.children[0], hd); return; }
+  /* not currently in the DOM -- insert before the next section that is ALWAYS present, in
+     document order: value before momentum-or-peers, momentum before peers.
+     tmp.children is a LIVE collection: moving children[0] out first re-indexes children[1] down
+     to index 0, so a second `tmp.children[1]` read after that move is out of bounds (undefined,
+     which insertBefore then rejects). Both nodes are captured into plain vars BEFORE either is
+     moved, so the second insertBefore uses the reference it already holds, not a fresh (and by
+     then wrong) live-collection lookup. */
+  var anchor = id === 'value' ? (document.getElementById('momentum') || document.getElementById('peers'))
+             : id === 'momentum' ? document.getElementById('peers') : null;
+  if(anchor && anchor.parentNode){
+    var newHd = tmp.children[0], newSec = tmp.children[1];
+    anchor.parentNode.insertBefore(newHd, anchor);
+    anchor.parentNode.insertBefore(newSec, anchor);
+  }
 }
 function refreshPillars(){
   var d = STATE.co; if(!d) return;
@@ -1063,8 +1126,21 @@ function renderSections(d){ return secGrowth(d)+secValue(d)+secMomentum(d)+secPe
 var capsule = document.getElementById('g-capsule'), caps = [].slice.call(capsule.querySelectorAll('.g-cap')), capIds = caps.map(function(a){ return a.getAttribute('href').slice(1); }), capObs = null;
 var capLock = 0;
 function setCap(id, lock){ caps.forEach(function(a){ a.classList.toggle('g-on', a.getAttribute('href') === '#'+id); }); if(lock) capLock = Date.now() + 800; }
+/* cc#1664: #value/#momentum don't exist as sections in Grid mode (secValue/secMomentum return ''
+   -- the three pillars are one grid on the Growth card), so their capsule pills would dead-end.
+   Hidden, not re-pointed at #growth: repointing would need capIds and the IntersectionObserver's
+   watch set rebuilt too, and a hidden pill is simpler and keeps the capsule's active-pill
+   tracking exactly as sane as it already is (the observer already no-ops on a missing element,
+   per the `if(el)` guard in armCapsule below -- this only stops a HUMAN tapping a dead pill). */
+function syncCapVM(){
+  caps.forEach(function(a){
+    var href = a.getAttribute('href');
+    if(href === '#value' || href === '#momentum') a.style.display = (gvView === 'grid') ? 'none' : '';
+  });
+}
 function armCapsule(){
   capsule.hidden = false;
+  syncCapVM();
   if(capObs) capObs.disconnect();
   capObs = new IntersectionObserver(function(es){ if(Date.now() < capLock) return; es.forEach(function(e){ if(e.isIntersecting) setCap(e.target.id); }); }, {rootMargin:'-20% 0px -60% 0px'});
   capIds.forEach(function(id){ var el = document.getElementById(id); if(el) capObs.observe(el); });
@@ -1287,7 +1363,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var t = e.target.closest('[data-trend]'); if(t){ openScoreTrend(); return; }   /* cc#1615: the score chart, not the chart card */
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
-  var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); refreshPillars(); return; }   /* cc#1618 */
+  var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); try{ localStorage.setItem('scorr_gvm_view', gvView); }catch(e){} refreshPillars(); syncCapVM(); return; }   /* cc#1618/cc#1664 */
   var gb = e.target.closest('[data-gbox]'); if(gb){ paramSheetOpen(gb.getAttribute('data-gbox')); return; }   /* cc#1618 P4 */
   var bm = e.target.closest('[data-bmkey]'); if(bm){ paramSheetOpen(bm.getAttribute('data-bmkey')); return; }   /* cc#1630: rows + tiles */
   var fm = e.target.closest('[data-flag-more]'); if(fm){ flagSheetOpen(fm.getAttribute('data-flag-more')); return; }   /* cc#1619 P3 */
