@@ -90,6 +90,9 @@ def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
         "best":       p.get("best"),
         "worst":      p.get("worst"),
         "peers":      p.get("peers", []),          # cc#507: peer-ladder chart data
+        # cc#1630: the direction the rank and rating used. build_company_report always sets it;
+        # this whitelist was dropping it, so the app had to infer direction from beats_peer.
+        "higher_is_better": p.get("higher_is_better"),
         "extra_marker": p.get("extra_marker"),     # cc#507: e.g. PE row's "own 5y avg" line
         "beats_peer": p.get("beats_peer"),
         # cc#1095 P3: how much of the scored universe this metric's source actually covers, so a
@@ -152,6 +155,7 @@ def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
         "worst":      worst,
         "peers":      [{"symbol": s, "value": round(v, 2)} for s, v in ordered],
         "beats_peer": beats,
+        "higher_is_better": not lower_is_better,   # cc#1630
     }
 
 
@@ -349,6 +353,7 @@ def gvm_company_report(symbol: str):
                     "worst":      worst_fwd,
                     "peers":      [{"symbol": s, "value": v} for s, v in sorted_asc],
                     "beats_peer": (sym_fwd is not None and sym_fwd <= peer_median_fwd),
+                    "higher_is_better": False,   # cc#1630: a lower forward PE ranks better
                 }
                 # Insert right after PE
                 pe_idx = next((i for i, b in enumerate(benchmark) if b.get("key") == "pe"), -1)
@@ -435,6 +440,7 @@ def gvm_company_report(symbol: str):
                     "best":       best_h,
                     "worst":      worst_h,
                     "peers":      [{"symbol": s, "value": round(v, 2)} for s, v in sorted_hist],
+                    "higher_is_better": False,   # cc#1630: sorted_hist is ascending, lower ranks better
                     "chart_type": "pe_trend",
                     "pe_trend":   pe_trend,
                     "median_pe":  median_pe,
