@@ -204,3 +204,22 @@ body[data-theme="aquawhite"]{--field:#F4F9FB;--panel:#FFFFFF;--hi:#E9F3F7;--edge
  --railgrad:linear-gradient(90deg,#07657A,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
  --gold-lo:#9FC6D2;--gold-hi:#FFFFFF;--sunk:#E4EEF2}
+
+/* ── cc#1637 · THEME_BLUSH_ROSENIGHT_V1 (session_log 37303, founder 03-Sep-2026) ──────────────
+   Two pink sets designed and contrast-measured by Fable (WCAG AA on all three grounds; worst
+   ratios in the log row). Values copied in by code from that row, not retyped. P&L keeps hue:
+   --win green, --loss red; the pink brand is used on eyebrows, icons, active nav and glow only,
+   never on a number. --gold-lo / --gold-hi / --sunk keep their gold NAMES and carry pink values,
+   exactly as aquawhite does above - inherited contract, do not rename. Append only. */
+body[data-theme="blush"]{--field:#FFF4F7;--panel:#FFFFFF;--hi:#FCE8EE;--edge:#F0CAD5;
+ --ink:#2A171F;--muted:#7D5765;--brand:#C2185B;--brandglow:rgba(194,24,91,.22);--accent:#C2185B;
+ --label:#9C3B63;--win:#177245;--loss:#B3261E;
+ --railgrad:linear-gradient(90deg,#C2185B,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
+ --gold-lo:#E8A8BE;--gold-hi:#FFFFFF;--sunk:#FBE3EA}
+body[data-theme="rosenight"]{--field:#0F0A0D;--panel:#1A1216;--hi:#241820;--edge:#2E1F27;
+ --ink:#FBF1F4;--muted:#B08A98;--brand:#FF6B9D;--brandglow:rgba(255,107,157,.35);--accent:#FF6B9D;
+ --label:#D98AA8;--win:#3DD68C;--loss:#FF5C6C;
+ --railgrad:linear-gradient(90deg,#FF6B9D,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
+ --gold-lo:#7A2F4C;--gold-hi:#FFB3CC;--sunk:#0C0709}
