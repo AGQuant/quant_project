@@ -404,7 +404,8 @@ PWA_JS = """
     // top-nav and the mobile More sheet both build from this array. These are JS comments,
     // not Python: this array lives INSIDE the pwa.js string, and a '#' here is a syntax
     // error that kills the whole injected bundle site-wide (the cc#853 class).
-    ['/m/intel', '\\u25a4', 'Intel (mobile)', 'm'],
+    // cc#1638 (founder 03-Sep 07:58): Intel left the nav. It is a Home grid tile now (next to Custom
+    // Alert) that opens /m/intel as a full page; the route is unchanged and still PROTECTED.
     ['/m/positions', '\\u25e7', 'Open Book (mobile)', 'm'],
     ['/m/qb', '\\u25f0', 'Baskets (mobile)', 'm'],
     ['/m/gvm', '\\u25c8', 'GVM (mobile)', 'm'],

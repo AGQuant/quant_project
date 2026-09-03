@@ -5213,6 +5213,9 @@ function renderHome(d, pv){
          the SAME New Alert flow the Alerts page + button used to open - the page reads #new and
          calls its own alOpen() (cc#1634) - so creation moved out of that page without a rebuild. */
     + '<a class="tool slab dense" href="/m/alerts#new"><span>\uff0b</span>Custom Alert</a>'
+      /* cc#1638 (founder 03-Sep 07:58): Intel (news) left the nav and lives here, next to Custom
+         Alert, opening the full /m/intel page as a normal navigation - no embed, no sheet. */
+    + '<a class="tool slab dense" href="/m/intel"><span>\u25a4</span>Intel</a>'
     + '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
     + '<a class="tool slab dense" href="/m/screeners"><span>\u2637</span>Screeners</a>'
     + '<a class="tool slab dense" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'

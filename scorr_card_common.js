@@ -410,6 +410,7 @@ window.scorrAsofStamp = function (asof) {
   var PARENT = { '/m/positions': '/m/v8', '/m/qb': '/m/v8', '/m/results': '/m/v8',
                  '/m/holdings': '/m/home', '/m/screeners': '/m/home',
                  '/m/sector': '/m/home', '/m/fpc': '/m/home', '/m/digest': '/m/home',
+                 '/m/intel': '/m/home',   /* cc#1638: opened from the Home grid, so Home stays lit (the Sector pattern) */
                  '/m/models': '/m/home' };
   function build() {
     try {
