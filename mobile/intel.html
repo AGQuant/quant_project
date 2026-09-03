@@ -18,7 +18,7 @@
 if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
      four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
      the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
-var __r1644=({dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <!-- cc#1645 P3: shared appshell header (VARIANT B). Existing .screen content below is untouched. -->
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Intel</span></div><div class="as-slot"></div></div>

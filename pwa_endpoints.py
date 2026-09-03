@@ -2498,12 +2498,15 @@ except Exception:
 # this returns untouched. Setting one would ACTIVATE the theme blocks on a web page that was never
 # built for them, which is a visible break, so the guard is the first thing it checks.
 APP_THEME_RESOLVE_JS = """(function(){
-  var ALLOWED={goldnight:1,aquawhite:1,blush:1,ainight:1};   /* cc#1644 (founder 03-Sep ~17:35 IST):
-  dark/goldday/rosenight/rosewall discarded from the switcher. Their token blocks in scorr_themes.css
-  stay byte-identical - hidden, not deleted - so re-showing one is a one-line change. */
-  var REMAP={dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'};   /* a stored
-  hidden choice lands on the nearest visible set, once, and the remap is written back so it does not
-  repeat on every load */
+  var ALLOWED={goldnight:1,dark:1,aquawhite:1,blush:1,ainight:1};   /* cc#1654 (founder 04-Sep ~10:00
+  IST): Dark restored to compare against Gold Night and AI Night. goldday/rosenight/rosewall stay
+  discarded (cc#1644). Every token block stays byte-identical - hidden, not deleted. */
+  var REMAP={goldday:'aquawhite',rosenight:'blush',rosewall:'blush'};   /* cc#1654: the dark->ainight
+  entry is gone - dark is a first-class visible choice again, so nothing remaps away from it. A
+  hidden goldday/rosenight/rosewall choice still lands on the nearest visible set, once, and the
+  remap is written back so it does not repeat on every load. cc#1644 already rewrote every phone that
+  held 'dark' to 'ainight' -- that write is not undone; those devices hold ainight until the founder
+  re-picks Dark from the switcher (spec item 3, stated rather than silently patched). */
   var DEFAULT='goldnight';
   var PREVIEW={aqua_white:'aquawhite',aquawhite:'aquawhite',gold_day:'goldday',goldday:'goldday',gold_night:'goldnight',goldnight:'goldnight',dark:'dark',blush:'blush',rose_night:'rosenight',rosenight:'rosenight',rose_wall:'rosewall',rosewall:'rosewall',ai_night:'ainight',ainight:'ainight'};   /* ?theme= stays a one-load preview, never stored */
   function stored(){try{return localStorage.getItem('scorr_theme');}catch(e){return null;}}
@@ -2536,7 +2539,7 @@ APP_THEME_RESOLVE_JS = """(function(){
   /* cc#1636: the one set path. Validates, stores under the key the resolver reads, applies live on
      any body that carries data-theme, and announces scorr:theme (same event scorr_theme_boot.js
      dispatches on the web) so a page with its own canvas can repaint. */
-  var NAMES=[['goldnight','Gold Night'],['ainight','AI Night'],['aquawhite','Aqua White'],['blush','Blush']];   /* cc#1644: dark/goldday/rosenight/rosewall hidden, order founder-set */
+  var NAMES=[['goldnight','Gold Night'],['dark','Dark'],['ainight','AI Night'],['aquawhite','Aqua White'],['blush','Blush']];   /* cc#1654: Dark restored (founder 04-Sep); goldday/rosenight/rosewall stay hidden, order founder-set */
   function get(){var b=document.body;var t=b&&b.getAttribute('data-theme');return (t&&ALLOWED[t])?t:resolve();}
   function set(k){
     if(!ALLOWED[k])return get();
