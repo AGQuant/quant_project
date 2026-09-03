@@ -966,3 +966,44 @@ def alerts_ideas(limit: int = 100):
         "ideas": ideas, "hidden_option_context": hidden,
         "spec_ref": "APP_ALERTS_IDEAS_V1 session_log 37072 · cc#1620",
     }
+
+
+@router.get("/api/alerts/pending_manual")
+def alerts_pending_manual():
+    """cc#1634: the bell. MANUAL price alerts still waiting: status pending with NO engine origin
+    (source_engine IS NULL; engine rows from the wall carry their engine label and are not the
+    founder's own alerts). Read-only. Distance is trigger vs the same CMP resolver the ideas feed
+    uses, so the bell and the Alerts page never disagree about how far a trigger is."""
+    now = datetime.now(_IST)
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT id, symbol, direction, trigger_condition, trigger_price, created_at, notes, kind
+                           FROM trade_alerts
+                           WHERE status = 'pending' AND source_engine IS NULL
+                           ORDER BY created_at DESC, id DESC""")
+            rows = cur.fetchall()
+            live = {}
+            syms = sorted({r[1] for r in rows if r[1]})
+            if syms:
+                try:
+                    import cmp_resolver
+                    live = cmp_resolver.resolve_cmp_many(cur, syms) or {}
+                except Exception as e:
+                    log.warning("pending_manual: resolve_cmp_many failed (%s) - rows ship without cmp", e)
+        out = []
+        for aid, sym, direction, cond, tp, created, notes, kind in rows:
+            hit = live.get(sym) or {}
+            cmp_v, tp_f = _fnum(hit.get("cmp")), _fnum(tp)
+            dist = round((tp_f - cmp_v) / cmp_v * 100.0, 2) if (cmp_v and tp_f is not None) else None
+            out.append({
+                "id": aid, "symbol": sym, "direction": direction, "trigger_condition": cond,
+                "trigger_price": tp_f, "kind": kind, "notes": notes,
+                "created_at_ist": created.astimezone(_IST).strftime("%d %b %H:%M") if created else None,
+                "cmp": cmp_v, "cmp_live": bool(hit.get("live")) if hit else None,
+                "distance_pct": dist,
+            })
+        return {"count": len(out), "alerts": out, "as_of_ist": now.strftime("%H:%M"),
+                "basis": "trade_alerts status=pending AND source_engine IS NULL"}
+    except Exception as e:
+        log.warning("pending_manual failed: %s", e)
+        return {"count": 0, "alerts": [], "error": str(e)[:200], "as_of_ist": now.strftime("%H:%M")}

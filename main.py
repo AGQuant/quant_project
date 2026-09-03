@@ -356,6 +356,7 @@ _MOBILE_HEAD = (
     # cc#859 Part A added scorr_mobile_cards.js — it is self-contained (no ScorrCardCommon
     # dependency), so its position is not load-bearing, but it must precede its consumers.
     + b'<script src="/scorr_card_common.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared card primitives (must precede every consumer)
+    + b'<script src="/scorr_bell.js?v=' + _BUILD_B + b'" defer></script>'   # cc#1634: shared notification bell (self-contained, mounts on [data-scorr-bell])
     + b'<script src="/scorr_mobile_cards.js?v=' + _BUILD_B + b'" defer></script>'  # cc#859 Part A: shared mobile section card (cc#862/#863 import it, never redefine it)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
     + b'<script src="/scorr_segment_results.js?v=' + _BUILD_B + b'" defer></script>'  # cc#1191: SEGMENT RESULTS popout — AFTER the strip, which it calls per row
@@ -575,6 +576,7 @@ async def auth_gate(request: Request, call_next):
                     # so it is added here in the SAME change as those tags — the cc#1060
                     # lesson, applied at the time rather than after the outage.
                     b"scorr_news_row.js",
+                    b"scorr_bell.js",   # cc#1634: added WITH its script tag in the same commit (cc#1060 rule)
                     # cc#1191: added WITH its script tag in the same commit. This file is
                     # served max-age=86400 like its neighbours, so without the stamp a reader
                     # who loaded a page before this deploy keeps the old bundle for a day —
