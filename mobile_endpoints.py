@@ -2109,6 +2109,10 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
   /* theme tokens are read through g- aliases: a token that referenced itself (--gold:var(--gold,…))
      is a cycle and computes to invalid for every descendant, which blanked the capsule (P4). */
   --g-field:var(--field,#0A0A0C); --g-panel:var(--panel,#17171B); --g-sunk:var(--sunk,#0C0C0F); --g-gold-lo:var(--gold-lo,#7A6320); --g-gold-hi:var(--gold-hi,#F0D070);
+  /* cc#1632 (founder 02-Sep 22:42, revised): the eight pillar cards sit ONE small step darker than
+     --g-panel and clearly lighter than the hero's --g-sunk. Mixed from the two tokens rather than
+     a third literal, so the step follows the palette wherever --panel resolves. */
+  --g-panel-2:color-mix(in srgb, var(--g-panel) 78%, var(--g-sunk));
   --well:#131316; --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
   --gold:#D4AF37; --gold-d:rgba(212,175,55,.12);
   --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45; --aqua:#35E0FF;
@@ -2141,6 +2145,9 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 /* shells (ref) */
 #gvp .pressed{background:var(--g-sunk);border:1px solid #000;border-radius:12px;padding:16px;box-shadow:inset 0 3px 9px rgba(0,0,0,.9),inset 0 -1px 0 rgba(255,255,255,.10),0 1px 0 rgba(255,255,255,.05)}
 #gvp .slab{background:var(--g-panel);border:1.5px solid var(--line);border-radius:13px;padding:14px 15px;box-shadow:0 5px 0 0 var(--g-gold-lo),0 5px 0 1.5px var(--line)}
+/* cc#1632: only the eight pillar cards take the darker fill; .slab itself keeps --g-panel. Their
+   nested wells step down by the same margin so tiles and tables keep their inset read. */
+#gvp .slab.g-pillar{background:var(--g-panel-2);--well:color-mix(in srgb, var(--g-panel-2) 70%, var(--g-sunk))}
 #gvp .well-up{background:var(--well);border-radius:7px;box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000}
 #gvp .well{background:var(--g-sunk);border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 0 0 #000}
 #gvp .tag{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;border-radius:0;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
