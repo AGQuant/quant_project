@@ -86,12 +86,13 @@ body{ --field:#0A0A0C; }
 #v8p .hero .gword.bull{color:var(--up);text-shadow:0 0 28px rgba(47,212,139,.35)}
 #v8p .hero .sub{color:var(--mute);font-size:13px;margin-bottom:12px}
 #v8p .hero .sub b{color:var(--chalk);font-family:var(--mono)}
-#v8p .checks{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-10);margin:var(--space-16) 0}   /* cc#1656 P2: gap one step (6->10), the mood bar's own --space-16 above/below */
+#v8p .checks{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-10);margin:var(--space-12) 0}   /* cc#1656 P2: gap one step (6->10). Margin corrected in P3: this is not the mood bar (see .moodbar below) - kept a modest bump rather than the literal --space-16, which belongs to .moodbar alone. */
+#v8p .moodbar{height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);border-radius:var(--radius-4);margin:var(--space-16) 0}   /* cc#1656 P3: THIS is the actual mood bar (JS-rendered, previously a bare inline-styled div with no class) - --space-16 above/below per P2, plus a calm radius-4 per P3(a). No literal full-height left-edge rail was found anywhere in this file or the shared shell CSS after a targeted search (border-left, box-shadow); P3(a)'s wording most likely describes cc#1646's digest rail (same sprint), not this page - flagged in cc_task_logs rather than inventing an element that does not exist today. */
 #v8p .ck{padding:var(--space-13) var(--space-11) var(--space-12);text-align:center;border:1px solid var(--line);background:var(--well)}   /* cc#1656 P2: inner padding two steps (8/6/7 -> 13/11/12) */
 #v8p .ck .cl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute)}
 #v8p .ck .cv{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px}
-#v8p .ck.bad{border-color:rgba(255,92,108,.35)} #v8p .ck.bad .cv{color:var(--down)}
-#v8p .ck.ok{border-color:rgba(47,212,139,.35)} #v8p .ck.ok .cv{color:var(--up)}
+#v8p .ck.bad{border-color:color-mix(in srgb, var(--down) 55%, var(--line))} #v8p .ck.bad .cv{color:var(--down)}   /* cc#1656 P3: box border calms, number stays fully coloured */
+#v8p .ck.ok{border-color:color-mix(in srgb, var(--up) 55%, var(--line))} #v8p .ck.ok .cv{color:var(--up)}
 #v8p .slots{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:var(--space-16)}   /* cc#1656 P2: --space-16 above the labels */
 #v8p .slot .l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute);margin-bottom:var(--space-10)}   /* cc#1656 P2: --space-10 between label and bar */
 #v8p .slot .l b{color:var(--chalk);font-size:13px;letter-spacing:0}
@@ -324,7 +325,7 @@ function renderMood(){
   var ck = checks.map(function(c){
     var ind = c.indeterminate || !num(c.value);
     var v = ind ? '—' : (c.filter==='ADR' ? c.value.toFixed(2) : pct(c.value, 2));
-    if(c.filter === 'ADR') return '<div class="ck '+(ind?'':(c.pass?'ok':'bad'))+'" data-mood-adr="1" title="'+esc(c.required||'')+'" style="padding:8px 6px 6px"><div class="cl">ADR</div><div class="cv">'+v+'</div>'
+    if(c.filter === 'ADR') return '<div class="ck '+(ind?'':(c.pass?'ok':'bad'))+'" data-mood-adr="1" title="'+esc(c.required||'')+'"><div class="cl">ADR</div><div class="cv">'+v+'</div>'
       + '<div style="margin:5px 0 3px">'+adrStrip(6)+'</div>'
       + '<div style="font-family:var(--mono);font-size:9px;color:var(--mute);white-space:nowrap">'+(adShare == null ? 'no count' : 'A '+adA+' / D '+adD)+'</div></div>';
     return '<div class="ck '+(ind?'':(c.pass?'ok':'bad'))+'" title="'+esc(c.required||'')+'"><div class="cl">'+esc(LBL[c.filter]||c.filter)+'</div><div class="cv">'+v+'</div></div>';
@@ -347,10 +348,10 @@ function renderMood(){
   el.innerHTML =
     '<div class="eyebrow"><span>Market gate</span><span>'+esc(String(m.checked_at||''))+'</span></div>'
     + '<div class="gword '+cls+'">'+esc(mood)+'</div>'
-    + '<div style="height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);margin:2px 0 10px"><i style="display:block;height:100%;width:'+Math.max(barW, cls ? 8 : 0)+'%;background:'+barCol+'"></i></div>'
+    + '<div class="moodbar"><i style="display:block;height:100%;width:'+Math.max(barW, cls ? 8 : 0)+'%;background:'+barCol+'"></i></div>'
     + '<div class="sub">'+sentence+'</div>'
     + '<div class="eyebrow" data-mood-fails="1" style="margin-top:12px"><span>'+fails+' of '+checks.length+' checks failed</span><span>evidence</span></div>'
-    + '<div class="checks" style="margin-top:10px">'+ck+'</div>'
+    + '<div class="checks">'+ck+'</div>'
     + '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'
     + '<div class="foot"><span>'+breadth+'</span><span style="color:var(--gold)">rules →</span></div>'
     + moodFoot(m);
