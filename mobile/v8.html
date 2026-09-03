@@ -554,8 +554,10 @@ function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m ? 
    daylogRows - no second endpoint), headline tiles that follow the toggle, a tap tooltip per bar,
    and ONE fixed y-scale per view = max |net| across the WHOLE era (every row of that view, not
    the scrolled-into-view window), computed once at render and stated in the footer; scrolling only
-   updates the "N of M in view" count (cc#1625). Footer status after 15:30 IST reads close · HH:MM
-   (asofSession, cc#1621). */
+   updates the "N of M in view" count (cc#1625). The footer is ONE line under the chart:
+   <era_start> -> <era_end> · N of M sessions · close HH:MM (sessionStamp, cc#1621); the scale sits
+   on the chart itself as a small axis label and a session with no exit yet says so INSIDE the
+   TODAY NET tile, not in footer prose (cc#1625 amend). */
 var DAY_PITCH = 28, DAY_TIP = null;
 function dayRowsForView(){
   var rows = daylogRows(DAY_VIEW).slice().reverse();   /* API is newest first; draw oldest -> newest */
@@ -593,8 +595,9 @@ function renderDay(){
     return;
   }
   nEl.textContent = rows.length + (DAY_VIEW === 'daily' ? (rows.length===1?' session':' sessions') : DAY_VIEW === 'weekly' ? (rows.length===1?' week':' weeks') : (rows.length===1?' month':' months'));
-  var tiles = dayTiles(rows);
-  var head = '<div class="dp-head"><div><div class="dlbl">'+esc(tiles[0][0])+'</div><div class="dbig '+sgn(tiles[0][1])+'">'+inr(tiles[0][1])+'</div><div class="dlbl" style="letter-spacing:.3px;text-transform:none">'+esc(tiles[0][2])+'</div></div>'
+  var tiles = dayTiles(rows), noExit = !dayIsCurrent(rows[rows.length-1]);
+  /* cc#1625 amend: a period with no exit yet says so inside the tile itself, in muted type */
+  var head = '<div class="dp-head"><div><div class="dlbl">'+esc(tiles[0][0])+'</div><div class="dbig '+sgn(tiles[0][1])+'">'+inr(tiles[0][1])+'</div><div class="dlbl" style="letter-spacing:.3px;text-transform:none">'+esc(tiles[0][2])+(noExit ? ' · <span data-day-noexit="1" style="color:var(--dim)">no exit yet</span>' : '')+'</div></div>'
     + '<div style="text-align:right"><div class="dlbl">'+esc(tiles[1][0])+'</div><div class="dbig '+sgn(tiles[1][1])+'">'+inr(tiles[1][1])+'</div><div class="dlbl" style="letter-spacing:.3px;text-transform:none">'+esc(tiles[1][2])+'</div></div></div>';
   var pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64);
   var W = Math.max(rows.length * pitch, 10), H = 150, BASE = 78, MAXH = 60, bw = pitch * 0.62;
@@ -627,10 +630,10 @@ function renderDay(){
   var strip = '<div style="position:relative"><div data-day-scroll="1" style="overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;position:relative">'
     + '<div style="position:relative;width:'+W+'px;min-width:100%">'+svg+'<div data-day-tip="1" style="display:none;position:absolute;top:8px;padding:5px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--chalk);white-space:nowrap;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.4)"></div></div></div>'
     + '<div data-day-scale="1" style="position:absolute;left:0;top:0;padding:2px 6px;background:var(--panel);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:9px;color:var(--mute);pointer-events:none">'+scaleTxt+'</div></div>';
-  var lastRow = rows[rows.length-1];
-  var note = (DAY_VIEW === 'daily' && !dayIsCurrent(lastRow)) ? '<div class="tbl-note">No exit booked today yet, so today reads ₹0. The last bar is '+esc(dmy(lastRow.date))+'.</div>' : '';
-  el.innerHTML = seg + head + strip + '<div class="dp-foot"><span>'+esc(dayBarLabel(rows[0]))+' → '+esc(dayBarLabel(lastRow))+'</span><span data-day-scaletxt="1" data-day-scaleval="'+esc(scaleTxt)+'"></span></div>' + note
-    + asofSession(STATE.fetchedAt, 'era · '+daylogSince(dl).toLowerCase()+(DAY_VIEW === 'daily' && num(lastRow.closed) ? ' · '+lastRow.closed+' closed on last day' : ''));
+  var lastRow = rows[rows.length-1], st = sessionStamp(STATE.fetchedAt);
+  /* cc#1625 amend: ONE footer line - range · N of M in view · close HH:MM. The scale is on the
+     chart as the axis label above, not repeated here. */
+  el.innerHTML = seg + head + strip + '<div class="dp-foot'+(st.amber?' stale':'')+'"><span>'+esc(dayBarLabel(rows[0]))+' → '+esc(dayBarLabel(lastRow))+'</span><span data-day-scaletxt="1" data-day-asof="'+esc(st.txt||'')+'"></span></div>';
   var sc = el.querySelector('[data-day-scroll]');
   sc.scrollLeft = sc.scrollWidth;   /* snap to the newest end */
   dayInView();
@@ -638,14 +641,14 @@ function renderDay(){
   sc.addEventListener('scroll', function(){ clearTimeout(t); t = setTimeout(dayInView, 120); });
 }
 /* cc#1625: scrolling never touches the scale or the bars. The only thing that follows the scroll
-   is the honest "N of M <unit> in view" count in the footer; the scale number is the one fixed
-   at render from the whole era and is read back from the footer's data attribute. */
+   is the honest "N of M <unit>" count in the one-line footer; the scale number is fixed at
+   render from the whole era and lives on the chart as the axis label. */
 function dayInView(){
   var el = document.getElementById('sec-day'), sc = el && el.querySelector('[data-day-scroll]'); if(!sc) return;
   var rows = dayRowsForView(), pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64);
   var from = Math.max(0, Math.floor(sc.scrollLeft / pitch)), to = Math.min(rows.length-1, Math.ceil((sc.scrollLeft + sc.clientWidth) / pitch));
   var unit = DAY_VIEW === 'daily' ? 'sessions' : DAY_VIEW === 'weekly' ? 'weeks' : 'months';
-  var st = el.querySelector('[data-day-scaletxt]'); if(st) st.textContent = (st.getAttribute('data-day-scaleval') || 'scale ±—')+' · '+(to-from+1)+' of '+rows.length+' '+unit+' in view';
+  var st = el.querySelector('[data-day-scaletxt]'); if(st){ var asof = st.getAttribute('data-day-asof'); st.textContent = (to-from+1)+' of '+rows.length+' '+unit+(asof ? ' · '+asof : ''); }
 }
 function dayTip(k){
   var el = document.getElementById('sec-day'), tip = el && el.querySelector('[data-day-tip]'), svg = el && el.querySelector('[data-dbars]'); if(!tip || !svg) return;
