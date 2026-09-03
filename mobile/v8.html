@@ -176,9 +176,11 @@ if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Se
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <!-- cc#1645 P2: shared appshell header (VARIANT B). Existing .top strip below is untouched. -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">V8</span></div><div class="as-slot"></div></div>
+<!-- cc#1661 P2: page-local title ("V8") + bell hidden/moved via the shared rule in
+     theme_mobile.css (#v8p .top{display:none}); the bell markup stays here, moved into .as-slot. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">V8</span></div><div class="as-slot"><span data-scorr-bell></span></div></div>
 <div id="v8p">
-  <div class="top"><div class="brand">V<b>8</b></div><span data-scorr-bell></span></div>
+  <div class="top"><div class="brand">V<b>8</b></div></div>
   <div class="sect">Market mood <span class="r" id="mood-r"></span></div>
   <section class="pressed hero" id="sec-mood" aria-label="Market mood gate"><div class="empty">Loading the market gate…</div></section>
   <div class="sect">Open positions <span class="n" id="open-n"></span><span class="r" id="open-r"></span></div>

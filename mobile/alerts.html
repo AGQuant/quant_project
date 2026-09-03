@@ -139,7 +139,12 @@ var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <!-- cc#1645 P2: the shared appshell header (VARIANT B, section page). Existing top strip below
      is untouched, just pushed under this. -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Trade Alerts</span></div><div class="as-slot"></div></div>
+<!-- cc#1661 P2: page-local title (.ia-h1) hidden via the shared rule in theme_mobile.css; the
+     as-of line and bell it sat beside both move into .as-slot. NOTE: the card spec assumed
+     alerts has no bell -- it does (data-scorr-bell was already in .ia-top); moved it here to
+     match every other nav page rather than following the "no bell" branch, logged in
+     cc_task_logs task 1661. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Trade Alerts</span></div><div class="as-slot"><div class="ia-r" id="ia-r">loading…</div><span data-scorr-bell></span></div></div>
 <!--
   cc#1620 — IDEAS (APP_ALERTS_IDEAS_V1, session_log 37072). The Alerts tab is the APPROVED BOOK
   (WOT_APPROVAL_SURFACE_V1 36394) shown as curated idea cards. Newest first (36394): the cc#1506
@@ -153,7 +158,6 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
 
   <div class="ia-top">
     <div class="ia-h1">Trade Alerts<small>Curated · Equity &amp; Futures</small></div>
-    <div style="display:flex;align-items:center;gap:10px"><div class="ia-r" id="ia-r">loading…</div><span data-scorr-bell></span></div>
   </div>
 
   <div class="body">
