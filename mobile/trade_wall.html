@@ -6,64 +6,65 @@
 <title>Wall of Trades · Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
 <script src="/scorr_card_common.js"></script>
 <style>
 /* cc#991 · Wall of Trades. Every class is `tw-` prefixed, LEAVES INCLUDED. This app has been bitten
    six times by short generic class names (cc#964 .v/.m, cc#966 .m, cc#967 .v, cc#974 .a, cc#986
    .g/.n/.v), and cc#986 proved that scoping a short name under a prefixed parent is not protection
    — mobile_app.css's own rules still win. */
-.tw-card{margin:0 12px 8px;padding:11px 13px;background:var(--panel);border:1px solid var(--line);
-  border-radius:12px}
-.tw-top{display:flex;align-items:baseline;gap:8px}
-.tw-ev{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;
-  letter-spacing:.11em;padding:3px 7px;border-radius:5px;flex:none}
-.tw-in{color:var(--grn);background:rgba(47,212,139,.13)}
-.tw-out-up{color:var(--grn);background:rgba(47,212,139,.13)}
-.tw-out-dn{color:var(--red);background:rgba(255,92,108,.13)}
+.tw-card{margin:0 var(--space-12) var(--space-8);padding:var(--space-11) var(--space-13);background:var(--panel);border:var(--bw-1) solid var(--line);
+  border-radius:var(--radius-12)}
+.tw-top{display:flex;align-items:baseline;gap:var(--space-8)}
+.tw-ev{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;
+  letter-spacing:var(--track-em13);padding:var(--space-3) var(--space-7);border-radius:var(--radius-5);flex:none}
+.tw-in{color:var(--grn);background:color-mix(in srgb, var(--grn) 13%, transparent)}
+.tw-out-up{color:var(--grn);background:color-mix(in srgb, var(--grn) 13%, transparent)}
+.tw-out-dn{color:var(--red);background:color-mix(in srgb, var(--red) 13%, transparent)}
 .tw-out-flat{color:var(--mut);background:var(--panel2)}
-.tw-sym{font-size:14px;font-weight:800;letter-spacing:.01em;min-width:0;overflow:hidden;
+.tw-sym{font-size:var(--type-14);font-weight:800;letter-spacing:var(--track-em5);min-width:0;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .tw-when{margin-left:auto;flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10.5px;color:var(--dim);text-align:right}
+  font-size:var(--type-105);color:var(--dim);text-align:right}
 /* cc#1532: QB Basket only — the batch-write clock time, honestly labelled "computed" so it is
    never mistaken for a market entry time. Sits under the existing date, smaller/dimmer. */
-.tw-computed{display:block;font-size:9px;opacity:.75}
-.tw-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px}
-.tw-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:700;
-  letter-spacing:.07em;padding:2px 6px;border-radius:5px;border:1px solid var(--line2);
+.tw-computed{display:block;font-size:var(--type-9);opacity:.75}
+.tw-meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-6);margin-top:var(--space-7)}
+.tw-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:700;
+  letter-spacing:var(--track-em10);padding:var(--space-2) var(--space-6);border-radius:var(--radius-5);border:var(--bw-1) solid var(--line2);
   color:var(--mut)}
-.tw-long{color:var(--grn);border-color:rgba(47,212,139,.4)}
-.tw-short{color:var(--red);border-color:rgba(255,92,108,.4)}
-.tw-px{margin-top:7px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;
-  color:var(--mut);display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
+.tw-long{color:var(--grn);border-color:color-mix(in srgb, var(--grn) 40%, transparent)}
+.tw-short{color:var(--red);border-color:color-mix(in srgb, var(--red) 40%, transparent)}
+.tw-px{margin-top:var(--space-7);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-115);
+  color:var(--mut);display:flex;flex-wrap:wrap;gap:var(--space-10);align-items:baseline}
 .tw-px b{color:var(--txt);font-weight:700}
-.tw-pnl{margin-left:auto;font-weight:800;font-size:13px}
-.tw-note{margin-top:6px;font-size:10px;color:var(--dim);line-height:1.5}
-.tw-day{margin:16px 12px 8px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;
-  font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
-.tw-sent{padding:18px 2px;text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:10px;color:var(--dim)}
+.tw-pnl{margin-left:auto;font-weight:800;font-size:var(--type-13)}
+.tw-note{margin-top:var(--space-6);font-size:var(--type-10);color:var(--dim);line-height:1.5}
+.tw-day{margin:var(--space-16) var(--space-12) var(--space-8);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);
+  font-weight:800;letter-spacing:var(--track-em16);text-transform:uppercase;color:var(--dim)}
+.tw-sent{padding:var(--space-18) var(--space-2);text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-10);color:var(--dim)}
 /* cc#1295: i-button (other engines not in the 5 primary buckets — QSR today). */
-.tw-ibtn{margin:0 12px 10px;padding:8px 12px;border-radius:9px;border:1px solid var(--line);
-  background:var(--panel);color:var(--mut);font-size:11px;font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
-.tw-ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.6);z-index:9998;
-  align-items:center;justify-content:center;padding:20px}
+.tw-ibtn{margin:0 var(--space-12) var(--space-10);padding:var(--space-8) var(--space-12);border-radius:var(--radius-9);border:var(--bw-1) solid var(--line);
+  background:var(--panel);color:var(--mut);font-size:var(--type-11);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.tw-ov{display:none;position:fixed;inset:0;background:color-mix(in srgb, var(--field) 60%, transparent);z-index:9998;
+  align-items:center;justify-content:center;padding:var(--space-20)}
 .tw-ov.open{display:flex}
-.tw-ov-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:380px;
-  width:100%;padding:16px}
-.tw-ov-h{font-size:14px;font-weight:800;margin-bottom:2px}
-.tw-ov-s{font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.5}
-.tw-ov-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line2);
-  font-size:12px}
+.tw-ov-box{background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:var(--radius-14);max-width:380px;
+  width:100%;padding:var(--space-16)}
+.tw-ov-h{font-size:var(--type-14);font-weight:800;margin-bottom:var(--space-2)}
+.tw-ov-s{font-size:var(--type-11);color:var(--dim);margin-bottom:var(--space-10);line-height:1.5}
+.tw-ov-row{display:flex;justify-content:space-between;padding:var(--space-9) 0;border-bottom:var(--bw-1) solid var(--line2);
+  font-size:var(--type-12)}
 .tw-ov-row:last-child{border-bottom:none}
-.tw-ov-close{margin-top:12px;width:100%}
+.tw-ov-close{margin-top:var(--space-12);width:100%}
 
 /* cc#1526 built Approve/Alert clusters here; cc#1537 (founder confirmed 31-Aug) removed them —
    the wall is pure display, /m/alerts is the app's sole approve surface. What survives is the
    read-only APPROVED badge row (a GET off approved_map, showing a decision already taken). */
-.twa-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}
+.twa-row{display:flex;gap:var(--space-8);align-items:center;flex-wrap:wrap;margin-top:var(--space-9)}
 .twa-row:empty{display:none}
-.twa-ok{font:700 11px 'IBM Plex Mono',ui-monospace,monospace;color:var(--grn)}
+.twa-ok{font:700 var(--type-11) 'IBM Plex Mono',ui-monospace,monospace;color:var(--grn)}
 </style>
 </head>
 <body>
