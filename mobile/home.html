@@ -185,7 +185,7 @@ body[data-theme]{
    this sandbox (network-blocked from scorr.in) — flagging for a live check at 360/390/430. */
 .hc.vixc{margin-left:var(--space-4)}
 .hc.vixc{background:transparent;border-color:var(--line2)}
-.hc.vixc.bad{background:transparent;border-color:rgba(255,92,108,.45);color:var(--red)}
+.hc.vixc.bad{background:transparent;border-color:color-mix(in srgb, var(--red) 45%, transparent);color:var(--red)}
 /* cc#1123: the middle tier — VIX moved less than 5% either way. Same #FF9F45 as the tape's .neu
    and the Digest's --amber, so one number is one colour across all three surfaces. The chip stays
    FLAT (transparent, same border as its siblings) because APP_QA_R5 P3 removed the boxed
@@ -207,7 +207,7 @@ body[data-theme]{
 @media (prefers-reduced-motion:reduce){.tkr-track{animation:none}.tkr{overflow-x:auto}}
 .tk{flex:none;display:flex;align-items:baseline;gap:var(--space-6);padding:var(--space-4) var(--space-9);border-radius:var(--radius-8);
   background:var(--panel);border:var(--bw-1) solid var(--line)}
-.tk .n{font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--txt,#E9EEFB);text-transform:uppercase;white-space:nowrap}
+.tk .n{font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-em9);color:var(--txt,#E9EEFB);text-transform:uppercase;white-space:nowrap}
 .tk .d{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:700;white-space:nowrap}
 /* cc#1123: volatility's neutral tier on the tape. #FF9F45 is not a new amber — it is the exact
    value this page already gives an index NAME (.ibk-id .sym below, cc#1158) and the
@@ -296,7 +296,7 @@ body[data-theme]{
 .rg{flex:1;min-height:32px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);
   font-weight:800;letter-spacing:var(--track-em9);color:var(--txt,#E9EEFB);background:var(--panel);
   border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
-.rg.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.rg.on{color:var(--blu,#4D7CFE);border-color:color-mix(in srgb, var(--blu) 50%, transparent);background:color-mix(in srgb, var(--blu) 12%, transparent)}
 /* cc#904 full-screen Market Tape overlay */
 .tpo{position:fixed;inset:0;z-index:60;background:var(--bg,#0A0F1E);display:none;
   flex-direction:column;overscroll-behavior:contain}
@@ -335,8 +335,8 @@ body[data-theme]{
    has to survive next to 15 other rows without turning the sheet into a traffic light, and the
    coloured value + % still carry the precise reading. A row with a null change gets no tint at
    all: unknown is not flat. */
-.tpr.up{background:rgba(47,212,139,.07)}
-.tpr.dn{background:rgba(255,92,108,.07)}
+.tpr.up{background:color-mix(in srgb, var(--grn) 7%, transparent)}
+.tpr.dn{background:color-mix(in srgb, var(--red) 7%, transparent)}
 /* cc#1410 · ADVANCE/DECLINE FULL-SCREEN TABLE. Own row/header classes rather than reusing
    .tpr/.tph verbatim — same visual language throughout (border-bottom rows, the sticky sortable
    header with the identical arrow glyph, the same faint up/dn tint at 7% alpha).
@@ -367,15 +367,15 @@ body[data-theme]{
 .brh .h-bsym{flex:1;min-width:0}
 .brh .h-bday{justify-content:flex-end;text-align:right;min-width:54px}
 .brh .ar{font-size:var(--type-9);opacity:.9}
-.brr.up{background:rgba(47,212,139,.07)}
-.brr.dn{background:rgba(255,92,108,.07)}
+.brr.up{background:color-mix(in srgb, var(--grn) 7%, transparent)}
+.brr.dn{background:color-mix(in srgb, var(--red) 7%, transparent)}
 /* ── cc#906: V10 trade-log chart ─────────────────────────────────────────────────────────── */
 /* cc#1158: .v10ic went with v10Icon(), its only caller. */
 .v10tg{display:flex;gap:var(--space-6);margin:var(--space-10) 0 var(--space-6)}
 .v10tg button{flex:1;min-height:34px;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:var(--type-105);font-weight:800;letter-spacing:var(--track-em8);color:var(--txt,#E9EEFB);background:var(--panel);
   border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
-.v10tg button.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.v10tg button.on{color:var(--blu,#4D7CFE);border-color:color-mix(in srgb, var(--blu) 50%, transparent);background:color-mix(in srgb, var(--blu) 12%, transparent)}
 .v10st{display:flex;gap:var(--space-10);flex-wrap:wrap;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:var(--type-10);color:var(--txt,#E9EEFB);margin:var(--space-2) 0 var(--space-8)}
 /* ── cc#928: chart window + panned history ─────────────────────────────────────────────────── */
@@ -397,7 +397,7 @@ body[data-theme]{
   font-weight:800;letter-spacing:var(--track-em10);color:var(--txt,#E9EEFB);background:var(--panel);
   border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
 .lgt i{font-style:normal;color:var(--txt,#E9EEFB);margin-left:var(--space-3)}
-.lgt.on{color:var(--blu,#4D7CFE);border-color:rgba(77,124,254,.5);background:rgba(77,124,254,.12)}
+.lgt.on{color:var(--blu,#4D7CFE);border-color:color-mix(in srgb, var(--blu) 50%, transparent);background:color-mix(in srgb, var(--blu) 12%, transparent)}
 .lgt.on i{color:var(--blu,#4D7CFE)}
 /* ── cc#941: paired trade card + summary strip ─────────────────────────────────────────────
    The card keeps the 3px result rail the leg rows used (green win / red loss / blue open) so the
@@ -424,7 +424,7 @@ body[data-theme]{
    a tokened page never gets eyeballed hexes. z 80/81 clears the .tpo overlay (z 60) hosting the
    V10 popup. The i itself rides the VALUE line (nowrap, ~65px used of an 83px cell at 360px) —
    on the label line it would wrap "PROFIT FACTOR" at every phone width, measured not assumed. */
-.pfveil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+.pfveil{position:fixed;inset:0;background:var(--veil);z-index:80}
 /* cc#1483 (34212): the View Logs overlay's (i) — 44px tap target like .tpo-x, small circled
    glyph inside — and the Engine spec sheet's own blocks (per-index name, spec string, note).
    The sheet body reuses the pf shell + .pfrow below unchanged. */
@@ -434,14 +434,14 @@ body[data-theme]{
   font-style:normal;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;
   font-size:var(--type-10);color:var(--txt,#E9EEFB);display:inline-flex;align-items:center;justify-content:center}
 .specblk{margin-bottom:var(--space-14)}
-.specnm{font-size:var(--type-11);font-weight:800;letter-spacing:1px;margin-bottom:var(--space-2)}
+.specnm{font-size:var(--type-11);font-weight:800;letter-spacing:var(--track-px10);margin-bottom:var(--space-2)}
 .specstr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--cyan);
   margin-bottom:var(--space-4)}
 .specnote{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--dim);
   margin-top:var(--space-4)}
 .pfsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;z-index:81;
-  background:var(--panel,#161F33);border-top:var(--bw-1) solid var(--line);border-radius:var(--radius-18,18px) var(--radius-18,18px) 0 0}
-.pfgrab{width:38px;height:4px;border-radius:var(--radius-2,2px);background:var(--line);margin:var(--space-9) auto var(--space-6);flex-shrink:0}
+  background:var(--panel,#161F33);border-top:var(--bw-1) solid var(--line);border-radius:var(--radius-18,var(--radius-18)) var(--radius-18,var(--radius-18)) 0 0}
+.pfgrab{width:38px;height:4px;border-radius:var(--radius-2,var(--radius-2));background:var(--line);margin:var(--space-9) auto var(--space-6);flex-shrink:0}
 .pfsb{overflow-y:auto;padding:var(--space-4) var(--space-16) 26px;-webkit-overflow-scrolling:touch}
 .pfsh{font-size:var(--type-14);font-weight:800;letter-spacing:var(--track-em15);text-transform:uppercase;
   color:var(--txt,#E9EEFB);margin-bottom:var(--space-10)}
@@ -464,7 +464,7 @@ body[data-theme]{
 .v10c{display:flex;align-items:stretch;gap:var(--space-9);padding:var(--space-9) var(--space-3);border-bottom:var(--bw-1) solid var(--line)}
 .v10c .rl{width:3px;border-radius:var(--radius-2);flex:none;background:var(--mut)}
 .v10c.wn .rl{background:var(--volt, #2FD48B)} .v10c.ls .rl{background:var(--heat, #FF5C6C)} .v10c.op .rl{background:var(--pulse, #4D7CFE)}
-.v10c.sel{background:rgba(77,124,254,.10)}
+.v10c.sel{background:color-mix(in srgb, var(--blu) 10%, transparent)}
 .v10cb{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:var(--space-3)}
 .v10rt{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;flex:none}
 .v10rt b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);font-weight:800;
@@ -478,10 +478,10 @@ body[data-theme]{
 .v10c .c1 .sym{flex:0 1 auto}
 .v10c .rsn2{font-size:var(--type-95);font-weight:800;letter-spacing:var(--track-px7);padding:var(--space-2) var(--space-6);border-radius:var(--radius-5);
   text-transform:uppercase;white-space:nowrap}
-.v10c .rsn2.bad{background:rgba(255,92,108,.16);color:var(--heat, #FF5C6C)}
-.v10c .rsn2.good{background:rgba(47,212,139,.16);color:var(--volt, #2FD48B)}
-.v10c .rsn2.open{background:rgba(77,124,254,.16);color:var(--pulse, #4D7CFE)}
-.v10c .rsn2.neut{background:rgba(255,255,255,.07);color:var(--txt,#E9EEFB)}
+.v10c .rsn2.bad{background:color-mix(in srgb, var(--red) 16%, transparent);color:var(--heat, #FF5C6C)}
+.v10c .rsn2.good{background:color-mix(in srgb, var(--grn) 16%, transparent);color:var(--volt, #2FD48B)}
+.v10c .rsn2.open{background:color-mix(in srgb, var(--blu) 16%, transparent);color:var(--pulse, #4D7CFE)}
+.v10c .rsn2.neut{background:color-mix(in srgb, var(--ink) 7%, transparent);color:var(--txt,#E9EEFB)}
 .v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
 .v10c .c3{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--txt,#E9EEFB);
@@ -493,7 +493,7 @@ body[data-theme]{
   display:flex;align-items:center;gap:var(--space-6);font-size:var(--type-11);color:var(--txt,#E9EEFB);
   font-family:'IBM Plex Mono',ui-monospace,monospace}
 .v10c .c4 .htag{font-size:var(--type-85);font-weight:800;letter-spacing:var(--track-em9);padding:var(--space-2) var(--space-5);
-  border-radius:var(--radius-4);background:rgba(255,255,255,.06);color:var(--txt,#E9EEFB);flex:none}
+  border-radius:var(--radius-4);background:color-mix(in srgb, var(--ink) 6%, transparent);color:var(--txt,#E9EEFB);flex:none}
 .v10c .c4 .hmid{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v10c .c4 em{font-style:normal;font-weight:700;flex:none}
 /* item 4: nothing in the log below 9.5px */
@@ -509,7 +509,7 @@ body[data-theme]{
 .mhd.op .mn{color:var(--amber,#F5B94A)}
 .tr2{display:flex;align-items:stretch;gap:var(--space-9);padding:var(--space-8) var(--space-3);border-bottom:var(--bw-1) solid var(--line);
   min-height:54px;cursor:pointer}
-.tr2.sel{background:rgba(77,124,254,.10)}
+.tr2.sel{background:color-mix(in srgb, var(--blu) 10%, transparent)}
 .tr2 .rl{width:3px;border-radius:var(--radius-2);flex:none;background:var(--line2)}
 .tr2.wn .rl{background:var(--grn,#2FD48B)}
 .tr2.ls .rl{background:var(--red,#FF5C6C)}
@@ -519,8 +519,8 @@ body[data-theme]{
 .tr2 .dt{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--txt,#E9EEFB)}
 .tr2 .pill{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
   letter-spacing:var(--track-em9);padding:var(--space-2) var(--space-6);border-radius:var(--radius-5)}
-.tr2 .pill.lg{color:var(--grn,#2FD48B);background:rgba(47,212,139,.13)}
-.tr2 .pill.sh{color:var(--red,#FF5C6C);background:rgba(255,92,108,.13)}
+.tr2 .pill.lg{color:var(--grn,#2FD48B);background:color-mix(in srgb, var(--grn) 13%, transparent)}
+.tr2 .pill.sh{color:var(--red,#FF5C6C);background:color-mix(in srgb, var(--red) 13%, transparent)}
 .tr2 .ostk{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);color:var(--txt,#E9EEFB)}
 .tr2 .pr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-115);font-weight:700}
 .tr2 .l2{display:flex;gap:var(--space-7);align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
@@ -913,7 +913,7 @@ body[data-theme]{
    so gating the animation on the same JS capability that gates the registration is what keeps this
    "static or smooth", never "broken or jerky". */
 #heroTrack > .c::after{
-  content:'';position:absolute;inset:0;border-radius:inherit;padding:2px;box-sizing:border-box;
+  content:'';position:absolute;inset:0;border-radius:inherit;padding:var(--space-2);box-sizing:border-box;
   pointer-events:none;background:#35E0FF;
   -webkit-mask:linear-gradient(black 0 0) content-box,linear-gradient(black 0 0);
   -webkit-mask-composite:xor;mask-composite:exclude;
@@ -1336,8 +1336,8 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    than approximated from an unrelated token — same disclosed-exception precedent cc#1378's
    #35E0FF set: #3D2E0A (ink on the gold-filled toggle pill) and the five .dirbadge tint/border/
    text values (#3E5A18/#18240E bull, #5A2634/#241019 bear, #FF8FA5 bear text). */
-.pstg{display:flex;gap:1px;background:var(--panel2);border:var(--bw-1) solid var(--line2);
-  border-radius:var(--radius-8);padding:1px;flex-shrink:0}
+.pstg{display:flex;gap:var(--space-1);background:var(--panel2);border:var(--bw-1) solid var(--line2);
+  border-radius:var(--radius-8);padding:var(--space-1);flex-shrink:0}
 .pstg button{border:0;background:transparent;border-radius:var(--radius-7);
   padding:var(--space-2) var(--space-5);color:var(--mut);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:7px;font-weight:800;
@@ -1355,35 +1355,35 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 .legwrap{margin-top:var(--space-12)}
 .leghd{display:flex;justify-content:space-between;align-items:center}
 .leghd .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
-  font-weight:800;letter-spacing:1px;color:var(--txt,#E9EEFB)}
+  font-weight:800;letter-spacing:var(--track-px10);color:var(--txt,#E9EEFB)}
 .dirbadge{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);
-  font-weight:700;letter-spacing:1px;border:var(--bw-1) solid;
+  font-weight:700;letter-spacing:var(--track-px10);border:var(--bw-1) solid;
   padding:var(--space-2) var(--space-7);border-radius:var(--radius-9)}
 .dirbadge.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
 .dirbadge.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
 /* cc#1404 · posbar's own margin-bottom is the "range bar -> label row" breathing-room gap the
    founder asked for (4px -> 20px). Everything else about this rule (position/height/zone bars)
    is do-not-touch per the task's own scope -- untouched. */
-.posbar{position:relative;height:6px;margin:var(--space-12) 2px var(--space-20);border-radius:3px;
+.posbar{position:relative;height:6px;margin:var(--space-12) var(--space-2) var(--space-20);border-radius:var(--radius-3);
   background:var(--panel2)}
 .posbar i{position:absolute;top:0;height:100%}
 .posbar .zr{background:var(--red);opacity:.32}
 .posbar .zg{background:var(--grn);opacity:.32}
 .posbar .ben{position:absolute;top:-4px;width:2px;height:14px;background:var(--mut)}
-.posbar .bdot{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;
-  border-radius:50%;background:var(--amber);border:2px solid var(--panel)}
+.posbar .bdot{position:absolute;top:50%;width:12px;height:12px;margin:var(--space-n6) 0 0 var(--space-n6);
+  border-radius:50%;background:var(--amber);border:var(--bw-2) solid var(--panel)}
 /* cc#1404 · height 26px -> 34px: room for .poslb b's own +2-notch bump (below) without crowding
    .poslb em, which stays at its existing literal 8px -- not on the file's --type-* scale, so it
    is outside this task's own "on the existing --type-* scale" instruction and is left alone. */
-.poslb{position:relative;height:34px;margin:0 2px;
+.poslb{position:relative;height:34px;margin:0 var(--space-2);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9)}
 .poslb span{position:absolute;top:0;text-align:center}
 /* cc#1404 · +2 notches on the round --type-* steps, read from the file before guessing:
    --type-10 (10px) -> --type-12 (12px). */
 .poslb b{display:block;font-weight:800;font-size:var(--type-12);color:var(--txt,#E9EEFB)}
-.poslb em{display:block;font-style:normal;font-size:8px;color:var(--mut);letter-spacing:.5px}
-.decwrap{margin:var(--space-12) 2px var(--space-4)}
-.decbar{position:relative;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}
+.poslb em{display:block;font-style:normal;font-size:var(--type-8);color:var(--mut);letter-spacing:var(--track-px7)}
+.decwrap{margin:var(--space-12) var(--space-2) var(--space-4)}
+.decbar{position:relative;height:6px;border-radius:var(--radius-3);background:var(--panel2);overflow:hidden}
 .decbar i{display:block;height:100%;background:var(--grn)}
 .decbar.loss i{background:var(--red)}
 .declb{display:flex;justify-content:space-between;margin-top:var(--space-5);

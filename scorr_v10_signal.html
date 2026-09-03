@@ -14,7 +14,7 @@
 :root{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--chalk:#EAF0FA;--muted:#8A97B0;
 --volt:#C8F542;--heat:#FF4D6D;--aqua:#35E0FF;--pulse:#7C5CFF;--amber:#FF9F45;--cut:16px}
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
+body{background:var(--field-night);font-family:'Space Grotesk',sans-serif;color:var(--chalk)}
 .phone{max-width:480px;margin:0 auto;background:var(--field);min-height:100vh;padding-bottom:var(--space-70);
  background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px)}
 .num{font-family:'JetBrains Mono',monospace}
@@ -155,24 +155,24 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .oihd .oiasof{white-space:nowrap;margin-left:auto}
 /* cc#1468: .oird.oifacts is gone with the footer it styled — the facts live on the chart now. */
 /* ── cc#1526 · TRADE_CONTROL_V1 (35003 locks 3/6): approve/alert row on the live V10 state ── */
-.iic{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;margin-bottom:var(--space-8);
- background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:12px}
+.iic{display:flex;align-items:center;gap:var(--space-10);flex-wrap:wrap;padding:var(--space-10) var(--space-12);margin-bottom:var(--space-8);
+ background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12)}
 .iic .nm{font-weight:800;font-size:var(--type-125)}
-.iic .dir{font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:700;letter-spacing:.06em}
+.iic .dir{font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:700;letter-spacing:var(--track-em9)}
 .iic .dir.up{color:var(--volt)} .iic .dir.dn{color:var(--heat)}
 .iic .sp{flex:1}
-.iic button{min-height:44px;padding:10px 14px;border-radius:10px;border:var(--bw-1) solid var(--edge);
+.iic button{min-height:44px;padding:var(--space-10) var(--space-14);border-radius:var(--radius-10);border:var(--bw-1) solid var(--edge);
  background:transparent;color:var(--chalk);font-family:'JetBrains Mono';font-size:var(--type-105);font-weight:700;cursor:pointer}
 .iic button.pri{background:var(--chalk);color:var(--ink)}
 .iic button[disabled]{opacity:.5}
 .iic .ok{font-family:'JetBrains Mono';font-size:var(--type-10);font-weight:700;color:var(--volt)}
 .iic .chip2{font-family:'JetBrains Mono';font-size:var(--type-9);font-weight:700;color:var(--amber);
- border:var(--bw-1) solid var(--amber);border-radius:6px;padding:3px 7px}
+ border:var(--bw-1) solid var(--amber);border-radius:var(--radius-6);padding:var(--space-3) var(--space-7)}
 .iic .err{font-family:'JetBrains Mono';font-size:var(--type-95);color:var(--heat);width:100%}
-.iicf .lb{font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:.1em;color:var(--muted);margin:12px 0 6px}
-.iicin{width:100%;min-height:44px;border-radius:10px;border:var(--bw-1) solid var(--edge);background:transparent;
- color:var(--chalk);font-family:'JetBrains Mono';font-size:var(--type-115);padding:10px 12px;box-sizing:border-box}
-.iicgo{width:100%;min-height:48px;margin-top:14px;border-radius:12px;border:var(--bw-1) solid var(--edge);
+.iicf .lb{font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:var(--track-em12);color:var(--muted);margin:var(--space-12) 0 var(--space-6)}
+.iicin{width:100%;min-height:44px;border-radius:var(--radius-10);border:var(--bw-1) solid var(--edge);background:transparent;
+ color:var(--chalk);font-family:'JetBrains Mono';font-size:var(--type-115);padding:var(--space-10) var(--space-12);box-sizing:border-box}
+.iicgo{width:100%;min-height:48px;margin-top:var(--space-14);border-radius:var(--radius-12);border:var(--bw-1) solid var(--edge);
  background:var(--chalk);color:var(--ink);font-weight:800;font-family:inherit;font-size:var(--type-125);cursor:pointer}
 /* ── the pivot ladder, same rungs and same numbers as the digest ladders ─────────────────── */
 .plad{display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-10)}
@@ -331,7 +331,7 @@ body{background:#070B14;font-family:'Space Grotesk',sans-serif;color:var(--chalk
 .vfmore{width:100%;min-height:40px;margin-top:var(--space-8);font-family:'JetBrains Mono';font-size:var(--type-10);
  font-weight:700;letter-spacing:var(--track-em9);color:var(--chalk);background:var(--hi);
  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-7);cursor:pointer}
-.vfveil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+.vfveil{position:fixed;inset:0;background:var(--veil);z-index:80}
 .vfsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;z-index:81;
  background:var(--panel);border-top:var(--bw-1) solid var(--edge);border-radius:var(--radius-18) var(--radius-18) 0 0}
 .vfgrab{width:38px;height:4px;border-radius:var(--radius-2);background:var(--edge);margin:var(--space-9) auto var(--space-6);flex-shrink:0}
