@@ -278,7 +278,7 @@ function bmRow(d, key){ var b = (d.benchmark||[]); for(var i=0;i<b.length;i++) i
 function finRow(tbl, label){ if(!tbl || !tbl.rows) return null; for(var i=0;i<tbl.rows.length;i++) if(tbl.rows[i].label===label) return tbl.rows[i]; return null; }
 function lastVal(row){ if(!row || !row.values) return null; for(var i=row.values.length-1;i>=0;i--) if(num(row.values[i])) return row.values[i]; return null; }
 function sectHead(id, title, right, extra){ return '<div class="sect" id="'+id+'">'+title+' <span class="g-r">'+esc(right||'')+'</span>'+(extra||'')+'</div>'; }
-function sumLine(parts){ return '<section class="slab"><div class="g-sum">'+parts.map(function(x){ return '<span>'+x+'</span>'; }).join('')+'</div></section>'; }
+function sumLine(parts){ return '<section class="slab g-pillar"><div class="g-sum">'+parts.map(function(x){ return '<span>'+x+'</span>'; }).join('')+'</div></section>'; }
 /* rating chip: hi >= 7.5 / lo <= 3.75 / mid between (36513 growth card); NULL → em dash chip */
 function rtChip(r){ if(!num(r)) return '<span class="g-rt na">—</span>'; var c = r >= 7.5 ? 'hi' : r <= 3.75 ? 'lo' : 'mid'; return '<span class="g-rt '+c+'">'+(Number.isInteger(r)?r:r.toFixed(1).replace(/\.0$/,''))+'</span>'; }
 /* value text for a benchmark row in its own unit (no peer suffix here; the sub line carries peers) */
@@ -436,7 +436,7 @@ function gridHtml(d){
   return {html:h, n:n};
 }
 function gvCollapsed(id, title, right){
-  return sectHead(id, title, right, gvToggle())+'<section class="slab"><div class="g-sum"><span>Shown in the grid on the Growth card.</span></div></section>';
+  return sectHead(id, title, right, gvToggle())+'<section class="slab g-pillar"><div class="g-sum"><span>Shown in the grid on the Growth card.</span></div></section>';
 }
 function secGrowth(d){
   /* ref order first (8 rows), then any other G row except the holding rows (those live on Holders) */
@@ -448,11 +448,11 @@ function secGrowth(d){
   var head = sectHead('growth','Growth','G '+fx(d.scores&&d.scores.g,1)+' · '+scored, gvToggle());
   if(gvView === 'grid'){   /* cc#1618: one grid for all three pillars */
     var gr = gridHtml(d);
-    return head+'<section class="slab">'+(gr.n ? gr.html+GRID_LEGEND : '<div class="g-empty">No peer checks in this report.</div>')+'<div class="g-asof">'+gr.n+' checks · score as of '+esc(d.score_date||'—')+'</div></section>';
+    return head+'<section class="slab g-pillar">'+(gr.n ? gr.html+GRID_LEGEND : '<div class="g-empty">No peer checks in this report.</div>')+'<div class="g-asof">'+gr.n+' checks · score as of '+esc(d.score_date||'—')+'</div></section>';
   }
-  if(!g.length) return head+'<section class="slab"><div class="g-empty">No growth checks in this report. The nightly run scores growth only where five years of accounts exist.</div></section>';
+  if(!g.length) return head+'<section class="slab g-pillar"><div class="g-empty">No growth checks in this report. The nightly run scores growth only where five years of accounts exist.</div></section>';
   var rows = g.map(function(b){ return bmRowHtml(b, {signed:/^(qoq_|opm_exp)/.test(b.key||''), label:(b.key==='opm_exp'?'Margin change':null)}); }).join('');
-  return head+'<section class="slab">'+rows+LEGEND+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
+  return head+'<section class="slab g-pillar">'+rows+LEGEND+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
 }
 /* Value card (36513 cards.value): pe / fwd_pe / pb / annual_upside rows, PE trend from
    hist_pe.pe_trend with the own-5y-average dashed, one plain-words line from hist_pe.verdict +
@@ -495,7 +495,7 @@ function secValue(d){
   var pe = bmRow(d,'pe'), fp = bmRow(d,'fwd_pe'), pb = bmRow(d,'pb'), up = bmRow(d,'annual_upside'), hp = bmRow(d,'hist_pe'), sp = bmRow(d,'sector_pe');
   if(gvView === 'grid') return gvCollapsed('value','Value','V '+fx(d.scores&&d.scores.v,1));   /* cc#1618 */
   var head = sectHead('value','Value','V '+fx(d.scores&&d.scores.v,1)+(sp&&sp.verdict&&sp.verdict.label?' · '+String(sp.verdict.label).toLowerCase()+' on PE':''), gvToggle());
-  if(!pe && !fp && !pb && !up) return head+'<section class="slab"><div class="g-empty">No valuation checks in this report.</div></section>';
+  if(!pe && !fp && !pb && !up) return head+'<section class="slab g-pillar"><div class="g-empty">No valuation checks in this report.</div></section>';
   var rows = '';
   if(pe){ var sub = []; if(pe.extra_marker && num(pe.extra_marker.value)) sub.push('own 5-year average '+Math.round(pe.extra_marker.value)+'×'); if(sp && num(sp.sector_pe)) sub.push('sector '+Math.round(sp.sector_pe)+'×'); else if(num(pe.peer_median)) sub.push('peers '+Math.round(pe.peer_median)+'×');
     rows += bmRowHtml(pe, {label:'PE now', sub: sub.join(' · '), track:false, signed:false}); }
@@ -503,7 +503,7 @@ function secValue(d){
   if(pb) rows += bmRowHtml(pb, {label:'Price / Book', track:false});
   if(up) rows += bmRowHtml(up, {label:'Upside to fair value (FY27e)', track:false, signed:true});
   var words = peWords(hp, pe, sp);
-  return head+'<section class="slab">'+rows+peTrendSvg(hp)+(words?'<div class="g-note">'+esc(words)+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
+  return head+'<section class="slab g-pillar">'+rows+peTrendSvg(hp)+(words?'<div class="g-note">'+esc(words)+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
 }
 /* Momentum card (36513 cards.momentum): 4 tiles ret_1y / ret_3y / ret_52w_idx / ret_1m, then
    rows dma_50, dma_200, rsi_month, vol_trend. Values and peers straight off benchmark[]. */
@@ -532,14 +532,14 @@ function secMomentum(d){
   var mo = m1 && num(m1.company) ? (m1.company < -3 ? 'soft month' : m1.company > 3 ? 'firm month' : 'quiet month') : '';
   if(gvView === 'grid') return gvCollapsed('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1));   /* cc#1618 */
   var head = sectHead('momentum','Momentum','M '+fx(d.scores&&d.scores.m,1)+(yr||mo ? ' · '+[yr,mo].filter(Boolean).join(', ') : ''), gvToggle());
-  if(!y1 && !y3 && !ix && !m1 && !d50 && !d200 && !rsi && !vt) return head+'<section class="slab"><div class="g-empty">No momentum checks in this report.</div></section>';
+  if(!y1 && !y3 && !ix && !m1 && !d50 && !d200 && !rsi && !vt) return head+'<section class="slab g-pillar"><div class="g-empty">No momentum checks in this report.</div></section>';
   var tiles = '<div class="g-tiles">'+tile('1 YEAR', y1)+tile('3 YEARS', y3)+tile('VS NIFTY 52W', ix, {rankOf:true})+tile('1 MONTH', m1)+'</div>';
   var rows = '';
   [['dma_50','Price vs 50-day average'],['dma_200','Price vs 200-day average'],['rsi_month','Monthly RSI'],['vol_trend','Volume trend']].forEach(function(k){
     var b = bmRow(d,k[0]); if(!b) return;
     rows += bmRowHtml(b, {label:k[1], sub:momWords(b,k[0]), track:false, signed:/^dma_/.test(k[0])});
   });
-  return head+'<section class="slab">'+tiles+(rows?'<div style="margin-top:12px">'+rows+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
+  return head+'<section class="slab g-pillar">'+tiles+(rows?'<div style="margin-top:12px">'+rows+'</div>':'')+'<div class="g-asof">score as of '+esc(d.score_date||'—')+'</div></section>';
 }
 /* Peers card (36513 cards.peers): ladder top 4, collapsed middle, self highlighted gold, next
    1-2, collapsed tail; header sector GVM + sector rank; expand to the full ladder with PE / ROE / 1Y. */
@@ -554,7 +554,7 @@ function ladGap(n, words, gvmTxt){ return '<div class="g-lad"><span class="g-rk"
 function secPeers(d){
   var sg = (d.extras||{}).segment_ctx || {}, lad = (d.ladder||[]).slice().sort(function(a,b){ return (a.rank||0)-(b.rank||0); });
   var head = sectHead('peers','Peers',(d.segment||'')+(num(d.peer_count)?' · '+d.peer_count:''));
-  if(!lad.length) return head+'<section class="slab"><div class="g-empty">No peer ladder for this segment yet.</div></section>';
+  if(!lad.length) return head+'<section class="slab g-pillar"><div class="g-empty">No peer ladder for this segment yet.</div></section>';
   var top = '<div class="g-ladhead"><span>Sector GVM '+fx(sg.mcap_wtd_gvm,2)+(num(sg.sector_rank)&&num(sg.sector_total)?' · rank '+sg.sector_rank+' of '+sg.sector_total:'')+'</span><span>sorted by GVM</span></div>';
   var body = '';
   if(peersFull || lad.length <= 8){
@@ -577,7 +577,7 @@ function secPeers(d){
     }
   }
   var more = lad.length > 8 ? '<div class="g-more"><span class="tag mu" data-peers-toggle="1">'+(peersFull ? 'Compact ladder ▴' : 'Full ladder with PE · ROE · 1Y ▾')+'</span></div>' : '';
-  return head+'<section class="slab">'+top+body+more+'<div class="g-asof">score as of '+esc(sg.score_date||d.score_date||'—')+'</div></section>';
+  return head+'<section class="slab g-pillar">'+top+body+more+'<div class="g-asof">score as of '+esc(sg.score_date||d.score_date||'—')+'</div></section>';
 }
 /* Results card (36513 cards.results): content.result_analysis parsed into Sales / PAT / Margins /
    PE rows with the traffic-light dot the text carries, the remaining lines as the plain-words
@@ -634,7 +634,7 @@ function secResults(d){
     if(ra.words.length) body += '<div class="g-note">'+esc(ra.words.join(' '))+'</div>';
   }
   var upd = (d.content||{}).last_result_analysis_updated;
-  return head+'<section class="slab">'+body+profitBars(q)+'<div class="g-asof">'+(upd ? 'analysis updated '+esc(upd) : 'no analysis date')+'</div></section>';
+  return head+'<section class="slab g-pillar">'+body+profitBars(q)+'<div class="g-asof">'+(upd ? 'analysis updated '+esc(upd) : 'no analysis date')+'</div></section>';
 }
 /* Financials card (36513 cards.financials): seg P&L | Balance | Cash | Ratios, each a compact
    table of the last FYs (+ TTM where the block carries one) from the matching payload block, rows
@@ -922,7 +922,7 @@ document.addEventListener('scroll', function(e){
 function secFinancials(d){
   var f = d.financials || {}, r2 = f.ratios_v2;
   var head = sectHead('financials','Financials',(f.basis?String(f.basis).toLowerCase():'')+' · ₹ Cr' + (f.profit_loss && f.profit_loss.periods ? ' · '+fyLabel(f.profit_loss.periods.filter(function(x){ return /^Mar/.test(x); }).slice(-1)[0]||'')+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : ''));
-  if(!f.profit_loss && !f.balance_sheet && !f.cash_flow && !r2) return head+'<section class="slab"><div class="g-empty">No financial statements in this report.</div></section>';
+  if(!f.profit_loss && !f.balance_sheet && !f.cash_flow && !r2) return head+'<section class="slab g-pillar"><div class="g-empty">No financial statements in this report.</div></section>';
   var seg = '<div class="g-seg" role="tablist">'+[['pl','P&amp;L'],['bs','Balance'],['cf','Cash'],['ra','Ratios']].map(function(t){ return '<button data-fin="'+t[0]+'"'+(t[0]===finView?' class="g-on"':'')+'>'+t[1]+'</button>'; }).join('')+'</div>';
   var body = '';
   if(finView === 'pl') body = finPL(f);   /* cc#1617 P2: the P&L carousel; the table sits under see table */
@@ -932,7 +932,7 @@ function secFinancials(d){
   body += finSeeTable(f, finView);   /* cc#1617 P5: the full table folds out under every tab */
   var de = ratioLatest(r2,'Solvency','Debt / Equity'), ic = ratioLatest(r2,'Solvency','Interest Coverage'), roce = ratioLatest(r2,'Profitability','ROCE %');
   var foot = '<div class="g-ffoot"><span>Debt / equity '+(num(de)?de.toFixed(2):'—')+' · interest cover '+(num(ic)?ic.toFixed(1)+'×':'—')+'</span><span>ROCE '+(num(roce)?Math.round(roce)+'%':'—')+'</span></div>';
-  return head+'<section class="slab">'+seg+body+foot+'<div class="g-asof">'+(f.profit_loss && f.profit_loss.periods ? 'statements to '+esc(fyLabel(f.profit_loss.periods.filter(function(x){ return x!=='TTM'; }).slice(-1)[0]||''))+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : '')+'</div></section>';
+  return head+'<section class="slab g-pillar">'+seg+body+foot+'<div class="g-asof">'+(f.profit_loss && f.profit_loss.periods ? 'statements to '+esc(fyLabel(f.profit_loss.periods.filter(function(x){ return x!=='TTM'; }).slice(-1)[0]||''))+(f.profit_loss.periods.indexOf('TTM')>-1?' + TTM':'') : '')+'</div></section>';
 }
 /* Holders card (36513 cards.holders): 4 tiles from financials.shareholding (Promoters, FIIs + DIIs,
    Public, No. of Shareholders) with plain subs, FII vs DII 12-quarter lines, one plain-words line
@@ -965,7 +965,7 @@ function trendWords(vals, unit){
 function secHolders(d){
   var sh = (d.financials||{}).shareholding, per = sh && sh.periods ? sh.periods[sh.periods.length-1] : '';
   var head = sectHead('holders','Holders', per ? qLabel(per).replace(/(\w{3}) (\d{2})/,'$1 20$2') : '');
-  if(!sh || !sh.rows || !sh.rows.length) return head+'<section class="slab"><div class="g-empty">No shareholding data in this report.</div></section>';
+  if(!sh || !sh.rows || !sh.rows.length) return head+'<section class="slab g-pillar"><div class="g-empty">No shareholding data in this report.</div></section>';
   var pr = shRow(sh,/^Promoter/i), fii = shRow(sh,/^FII/i), dii = shRow(sh,/^DII/i), pub = shRow(sh,/^Public/i), cnt = shRow(sh,/No\. of Shareholders|Shareholders/i);
   var pv = lastNum(pr), fv = lastNum(fii), dv = lastNum(dii), pubv = lastNum(pub), cv = lastNum(cnt);
   var inst = (num(fv)?fv:0) + (num(dv)?dv:0);
@@ -985,7 +985,7 @@ function secHolders(d){
     if(fl.length>=2 && dl.length>=2){ var df = fl[fl.length-1]-fl[0], dd = dl[dl.length-1]-dl[0]; lead = (dd > 0.5 && df < -0.5) ? 'Over three years domestic funds have been buying what foreign funds sold. ' : (df > 0.5 && dd < -0.5) ? 'Over three years foreign funds have been buying what domestic funds sold. ' : (df > 0.5 && dd > 0.5) ? 'Both foreign and domestic funds have added over three years. ' : (df < -0.5 && dd < -0.5) ? 'Both foreign and domestic funds have trimmed over three years. ' : ''; }
     words = lead+'Net institutional change this quarter '+(ic.company>0?'+':ic.company<0?'−':'')+Math.abs(ic.company).toFixed(2)+'%'+(rk?', '+rk:'')+'.';
   }
-  return head+'<section class="slab">'+tiles+fiiDiiSvg(sh, fii, dii)+(words?'<div class="g-note">'+esc(words)+'</div>':'')+'<div class="g-asof">'+(per?'quarter '+esc(per):'')+'</div></section>';
+  return head+'<section class="slab g-pillar">'+tiles+fiiDiiSvg(sh, fii, dii)+(words?'<div class="g-note">'+esc(words)+'</div>':'')+'<div class="g-asof">'+(per?'quarter '+esc(per):'')+'</div></section>';
 }
 /* Tape card (36513 cards.tape): 4 tiles from extras.volume / delivery / vol_canon, pivot strip from
    extras.pivot, the tier1 7 checks, CTAs to the Trade Check flow and the shared chart card. */
@@ -1070,7 +1070,7 @@ function secTape(d){
   var ctas = '<div class="g-ctas" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
     + '<a class="tag gd" style="text-align:center;justify-content:center" href="/m/check?sym='+sym+'#tc">Run Trade Check →</a>'
     + '<a class="tag gd" style="text-align:center;justify-content:center" href="/m/check?sym='+sym+'#ic">Run Investment Check →</a></div>';
-  return head+'<section class="slab" id="g-tape">'+chart+tiles+pivots+checks+ctas+'<div class="g-asof">'+(vc.vol_p_asof?'volume canon as of '+esc(vc.vol_p_asof)+' · ':(vc.eod_asof?'volume (EOD) as of '+esc(vc.eod_asof)+' · ':''))+(pv.pivot_date?'pivots '+esc(pv.pivot_date):'')+'</div></section>';
+  return head+'<section class="slab g-pillar" id="g-tape">'+chart+tiles+pivots+checks+ctas+'<div class="g-asof">'+(vc.vol_p_asof?'volume canon as of '+esc(vc.vol_p_asof)+' · ':(vc.eod_asof?'volume (EOD) as of '+esc(vc.eod_asof)+' · ':''))+(pv.pivot_date?'pivots '+esc(pv.pivot_date):'')+'</div></section>';
 }
 function repaintTape(){ var el = document.getElementById('g-tape'); if(!el || !STATE.co) return; el.outerHTML = secTape(STATE.co).replace(/^[\s\S]*?(<section)/, '$1'); }
 function renderSections(d){ return secGrowth(d)+secValue(d)+secMomentum(d)+secPeers(d)+secResults(d)+secFinancials(d)+secHolders(d)+secTape(d); }
