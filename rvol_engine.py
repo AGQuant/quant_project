@@ -329,3 +329,18 @@ def eod_rvol_pair(cur, symbol):
             "vol_p": (round(float(r[1]), 2) if r[1] is not None else None),
             "asof": str(r[2]),
             "prev_asof": (str(r[3]) if r[3] is not None else None)}
+
+
+def eod_volume_ratio(cur, symbol):
+    """cc#1631: the END-OF-DAY volume ratio for ANY symbol raw_prices carries - the latest session's
+    volume over the trailing 21-session average (that session excluded from its own average),
+    exactly the EOD_RVOL_PAIR_SQL derivation above, so the fallback and the futures Vol P canon are
+    ONE formula. This answers "was volume high on the last session", never "is it high right now":
+    callers must label it as EOD, not as RVOL TODAY. Returns {'ratio','asof','window','basis'} or
+    None when the symbol has fewer than EOD_MIN_SESSIONS sessions of volume in the window."""
+    pair = eod_rvol_pair(cur, symbol)
+    if not pair or pair.get("rvol") is None:
+        return None
+    return {"ratio": pair["rvol"], "asof": pair["asof"], "window": 21,
+            "basis": "raw_prices volume, latest session vs trailing 21-session average"}
+

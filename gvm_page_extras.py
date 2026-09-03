@@ -416,11 +416,30 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                         # deliv_ratio_batch (cc#1444 form), Vol AD from the _ad_21d read the
                         # A/D card already holds in ad_map.
                         try:
-                            from rvol_engine import live_rvol, closing_rvol
+                            from rvol_engine import live_rvol, closing_rvol, eod_volume_ratio
                             from volume_flow_endpoints import deliv_ratio_batch
                             _lv = live_rvol(cur, symbol) or {}
                             _vp = closing_rvol(cur, symbol) or {}
                             _ad = ad_map.get(symbol) or {}
+                            # cc#1631 (founder 02-Sep 22:39): rvol_profiles covers the futures set
+                            # (228 symbols); the other 1,566 GVM names had no volume read at all.
+                            # When there is NO intraday RVOL for this symbol, ship the END-OF-DAY
+                            # ratio (rvol_engine.eod_volume_ratio, the same raw_prices formula as
+                            # the futures Vol P canon) under its own keys, so the tile can label it
+                            # honestly as EOD - never as RVOL TODAY. The intraday keys are untouched.
+                            # The gate is PROFILE MEMBERSHIP, not a null intraday read: a futures
+                            # name outside market hours keeps its intraday tile exactly as today.
+                            _eod, _has_profile = None, False
+                            try:
+                                cur.execute("SELECT 1 FROM rvol_profiles WHERE symbol = %s LIMIT 1", (symbol,))
+                                _has_profile = cur.fetchone() is not None
+                            except Exception as _pe:
+                                log.warning(f"rvol_profiles membership check failed {symbol}: {_pe}")
+                            if not _has_profile:
+                                try:
+                                    _eod = eod_volume_ratio(cur, symbol)
+                                except Exception as _ee:
+                                    log.warning(f"eod_volume_ratio failed {symbol}: {_ee}")
                             extras["vol_canon"] = {
                                 "vol_r": _lv.get("rvol"),
                                 "vol_p": _vp.get("value"),
@@ -428,6 +447,12 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                                 "vol_d": deliv_ratio_batch(cur, [symbol]).get(symbol),
                                 "vol_ad": _f(_ad.get("up_vol_pct")),
                                 "vol_ad_label": _ad.get("label"),
+                                "has_profile": _has_profile,
+                                "source": "intraday" if _has_profile else ("eod" if _eod else None),
+                                "eod_ratio": (_eod or {}).get("ratio"),
+                                "eod_asof": (_eod or {}).get("asof"),
+                                "eod_window": (_eod or {}).get("window"),
+                                "eod_basis": (_eod or {}).get("basis"),
                             }
                         except Exception as e:
                             log.warning(f"vol_canon failed {symbol}: {e}")
