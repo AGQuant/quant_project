@@ -1049,6 +1049,9 @@ function secTape(d){
     tiles += '<div class="g-tile well-up"><div class="g-tl">DELIVERY</div><div class="g-tv '+(last.deliv_pct>=avg?'up':'dn')+'">'+last.deliv_pct.toFixed(1)+'%</div><div class="g-ts">'+win.length+'-day avg '+avg.toFixed(1)+'% · '+esc(dmy(last.d))+'</div></div>'; }
   else tiles += '<div class="g-tile well-up"><div class="g-tl">DELIVERY</div><div class="g-tv mu">—</div><div class="g-ts">no delivery series</div></div>';
   if(num(vc.vol_r)) tiles += '<div class="g-tile well-up"><div class="g-tl">RVOL TODAY</div><div class="g-tv '+(vc.vol_r>=1?'up':'')+'">'+vc.vol_r.toFixed(2)+'×</div><div class="g-ts">'+(num(vc.vol_p)?'yesterday '+vc.vol_p.toFixed(2)+'×':'')+(vc.vol_p_asof?' · '+esc(String(vc.vol_p_asof).slice(0,10)):'')+'</div></div>';
+  /* cc#1631: no intraday RVOL (non-futures name) -> the END-OF-DAY ratio under its own label, never
+     called RVOL TODAY: it says whether the last session ran heavy, not what is happening now. */
+  else if(num(vc.eod_ratio)) tiles += '<div class="g-tile well-up"><div class="g-tl">VOLUME (EOD)</div><div class="g-tv '+(vc.eod_ratio>=1?'up':'')+'">'+vc.eod_ratio.toFixed(2)+'×</div><div class="g-ts">vs '+(num(vc.eod_window)?vc.eod_window:21)+'-session avg'+(vc.eod_asof?' · as of '+esc(dmy(String(vc.eod_asof).slice(0,10))):'')+'</div></div>';
   else tiles += '<div class="g-tile well-up"><div class="g-tl">RVOL TODAY</div><div class="g-tv mu">—</div><div class="g-ts">no volume canon</div></div>';
   var bd = vol.biggest_day;
   if(bd && bd.d) tiles += '<div class="g-tile well-up" data-bigday="1" role="button" aria-pressed="'+TAPE.big+'" style="cursor:pointer'+(TAPE.big?';outline:1px solid var(--gold,#D4AF37)':'')+'"><div class="g-tl">BIGGEST DAY</div><div class="g-tv '+(String(bd.direction).toUpperCase()==='UP'?'up':'dn')+'">'+esc(dmy(bd.d))+'</div><div class="g-ts">'+volFmt(bd.v)+' · '+esc(String(bd.direction||'').toLowerCase())+' day · tap to mark</div></div>';
@@ -1067,7 +1070,7 @@ function secTape(d){
   var ctas = '<div class="g-ctas" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
     + '<a class="tag gd" style="text-align:center;justify-content:center" href="/m/check?sym='+sym+'#tc">Run Trade Check →</a>'
     + '<a class="tag gd" style="text-align:center;justify-content:center" href="/m/check?sym='+sym+'#ic">Run Investment Check →</a></div>';
-  return head+'<section class="slab" id="g-tape">'+chart+tiles+pivots+checks+ctas+'<div class="g-asof">'+(vc.vol_p_asof?'volume canon as of '+esc(vc.vol_p_asof)+' · ':'')+(pv.pivot_date?'pivots '+esc(pv.pivot_date):'')+'</div></section>';
+  return head+'<section class="slab" id="g-tape">'+chart+tiles+pivots+checks+ctas+'<div class="g-asof">'+(vc.vol_p_asof?'volume canon as of '+esc(vc.vol_p_asof)+' · ':(vc.eod_asof?'volume (EOD) as of '+esc(vc.eod_asof)+' · ':''))+(pv.pivot_date?'pivots '+esc(pv.pivot_date):'')+'</div></section>';
 }
 function repaintTape(){ var el = document.getElementById('g-tape'); if(!el || !STATE.co) return; el.outerHTML = secTape(STATE.co).replace(/^[\s\S]*?(<section)/, '$1'); }
 function renderSections(d){ return secGrowth(d)+secValue(d)+secMomentum(d)+secPeers(d)+secResults(d)+secFinancials(d)+secHolders(d)+secTape(d); }
