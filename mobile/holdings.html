@@ -6,6 +6,9 @@
 <title>My Portfolio · Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
 <script src="/scorr_card_common.js"></script>
 <script src="/scorr_card_strip.js"></script>
 <script src="/scorr_chart_card.js"></script>
@@ -13,7 +16,17 @@
 <script src="/results_card.js"></script>
 <script src="/scorr_cockpit_card.js"></script>
 </head>
-<body>
+<body data-theme="goldnight">
+<!-- cc#1645 P5: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap).
+     holdings.html previously had no scorr_themes.css link at all. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
+     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
+     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+var __r1644=({dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<!-- cc#1645 P5: shared appshell header (VARIANT B). Existing .head strip below is untouched. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">My Portfolio</span></div><div class="as-slot"></div></div>
 <div class="screen">
   <div class="head"><h1>My Portfolio</h1><div class="s" id="sub">loading…</div></div>
   <div class="tot" id="tot" style="display:none">
