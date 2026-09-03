@@ -44,16 +44,25 @@
      dark-theme text colours on a near-white surface. The gate is the fall-through, not taste.
      The stored key is never rewritten by omission: a phone that already holds 'goldday' keeps
      holding it, and simply renders goldnight until the day that theme ships. */
+  /* cc#1636 (founder 02-Sep): all FOUR token sets are real choices now, and this menu no longer
+     writes storage or the body attribute itself - it calls window.SCORR_THEME.set (the resolver in
+     pwa_endpoints APP_THEME_RESOLVE_JS), the one path that validates, stores, applies and announces
+     scorr:theme. The local fallback mirrors that contract for a page whose head lost the resolver. */
   var THEMES = [
     { k: 'goldnight', label: 'Gold Night', ic: '◆' },
-    { k: 'dark',      label: 'Dark Aqua',  ic: '◇' }
+    { k: 'dark',      label: 'Dark',       ic: '◇' },
+    { k: 'aquawhite', label: 'Aqua White', ic: '○' },
+    { k: 'goldday',   label: 'Gold Day',   ic: '◈' }
   ];
-  var THEME_OK = { goldnight: 1, dark: 1 };
+  var THEME_OK = { goldnight: 1, dark: 1, aquawhite: 1, goldday: 1 };
 
   function storedTheme() {
+    var T = window.SCORR_THEME; if (T && T.get) return T.get();
     try { return localStorage.getItem('scorr_theme'); } catch (e) { return null; }
   }
   function applyTheme(k) {
+    var T = window.SCORR_THEME; if (T && T.set) { T.set(k); return; }
+    try { localStorage.setItem('scorr_theme', k); } catch (e) {}
     document.body.setAttribute('data-theme', THEME_OK[k] ? k : 'goldnight');
   }
 
@@ -82,8 +91,7 @@
     Array.prototype.forEach.call(menu.querySelectorAll('.as-th'), function (b) {
       b.onclick = function () {
         var k = b.getAttribute('data-k');
-        try { localStorage.setItem('scorr_theme', k); } catch (e) {}
-        /* APPLIED IN PLACE, no reload. The themes are pure CSS custom properties on <body>, so
+        /* APPLIED IN PLACE, no reload, through the one set path (applyTheme -> SCORR_THEME.set). The themes are pure CSS custom properties on <body>, so
            swapping the attribute repaints everything that reads them. A reload here would cost a
            full refetch of the page's data to change a colour, and on the digest that is the whole
            morning read. */
