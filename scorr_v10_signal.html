@@ -1203,11 +1203,11 @@ var QB_SORT_GETTERS = {
   SYMBOL: function(r){ return (r.symbol || '').toUpperCase(); },
   CMP:    function(r){ return r.cmp; },
   DAY:    function(r){ return r.day_pct; },
-  SECDAY: function(r){ return r.sector_day; },
+  BASIS:  function(r){ return r.basis; },   /* cc#1650: SEC DAY -> BASIS, the number the card is split and ranked on */
   OI:     function(r){ return r.oi_chg_pct; },
   VOLR:   function(r){ return r.rvol; },   /* cc#1462: Vol R, same shared derivation as every deck */
 };
-var QB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, DAY: -1, SECDAY: -1, OI: -1, VOLR: -1 };
+var QB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, DAY: -1, BASIS: -1, OI: -1, VOLR: -1 };
 var QB_SHEET = { k: null };
 
 function qbPool(k){
@@ -1234,13 +1234,13 @@ function qbTable(rows, k){
   /* cc#1462: Vol R joins beside OI Δ% (the volume-family end of the row) — 6 columns. */
   return '<table class="butbl qbtbl"><thead><tr>'
     + qbTh('SYMBOL', 'SYMBOL', k) + qbTh('CMP', 'CMP', k) + qbTh('DAY%', 'DAY', k)
-    + qbTh('SEC DAY', 'SECDAY', k) + qbTh('OI Δ%', 'OI', k) + qbTh('Vol R', 'VOLR', k)
+    + qbTh('BASIS', 'BASIS', k) + qbTh('OI Δ%', 'OI', k) + qbTh('Vol R', 'VOLR', k)
     + '</tr></thead><tbody>'
     + rows.map(function(r){
         return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
           + '<td>' + (r.cmp != null ? num(r.cmp) : '—') + '</td>'
           + buNum(r.day_pct, 2, '%', true)
-          + buNum(r.sector_day, 2, '%', true)
+          + buNum(r.basis, 2, '%', true)
           + buNum(r.oi_chg_pct, 1, '%', true)
           + (r.rvol == null ? '<td>—</td>'
              : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
@@ -1253,10 +1253,10 @@ function qbGuide(){
      carries it in plain language. Reuses the generic vfSheet shell — no second sheet build. */
   vfSheet('<div class="vfsh">How to read Quality Bullish · Basis</div><div class="vfg">'
     + '<p><b>The idea.</b> A short list of stocks where the tape, the trend and the futures market all agree. Every name here passed FIVE checks — the checks pick the names, the columns describe them.</p>'
-    + '<p><b>The five checks.</b> 1) Over the last 50 five-minute ticks, 60%+ of the traded volume was on rising ticks — buyers doing the volume. 2) The stock is UP today. 3) It is up over the last month. 4) Its own sector is up this month too. 5) Its futures trade at a premium to the stock (Basis Positive card) or a discount (Basis Negative card). Names are ordered by the size of that premium/discount.</p>'
+    + '<p><b>The five checks.</b> 1) Over the last 50 five-minute ticks, 60%+ of the traded volume was on rising ticks — buyers doing the volume. 2) The stock is UP today. 3) It is up over the last month. 4) Its own sector is up this month too. 5) Its futures trade at a premium to the stock (Basis Positive card) or a discount (Basis Negative card).</p>'
     + '<p><b>CMP.</b> The futures price at the last tick — the same price frame the Futures Buildup card uses.</p>'
     + '<p><b>DAY%.</b> Price change vs yesterday’s close.</p>'
-    + '<p><b>SEC DAY.</b> The stock’s own sector peers’ average move today — is the whole group moving, or just this name.</p>'
+    + '<p><b>BASIS.</b> Futures price minus the stock price, as a % of the stock. Positive = futures trade at a premium (traders paying up to be long). Negative = a discount. Names are ordered by the size of this number.</p>'
     + '<p><b>OI Δ%.</b> Open-interest change day-over-day, the same formula the Futures Buildup card shows — rising OI with a rising price is fresh money, not short-covering.</p>'
     + '<p><b>Vol R.</b> Today\'s volume so far vs the average volume by the SAME time of day over the last 21 sessions. 2.00x means twice the typical pace. Blank while a symbol\'s profile is still building.</p>'
     + '<p><b>Honesty.</b> A card with no rows means nothing qualifies right now — basis flips with market conditions, and zero is the market’s answer, not a bug.</p>'
