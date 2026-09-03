@@ -347,6 +347,10 @@ PWA_JS = """
     // so these must not also leak into the More sheet as duplicates of /m/alerts and /m/trades.
     // Placed after V8 as trading-signal-adjacent — a reasonable default, not founder-locked;
     // flagged back on the card for repositioning if wanted. Icons: the app's established glyphs.
+    // cc#1585 partial reverse (founder 02-Sep 22:52, room 4763 / 4764): Alerts STAYS in the top
+    // nav. cc#1609 + cc#1585 push 97aea84 had removed this entry; it is restored verbatim at its old
+    // position. The V8 header Alerts tab from cc#1585 coexists with it. WoT stays out (unchanged).
+    ['/alerts', '\\u25ec', 'Alerts', 'd'],
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
     // /dashboard#digest). Nav removal only; no route changed, nothing retired.
