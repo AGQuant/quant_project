@@ -52,9 +52,11 @@
     { k: 'goldnight', label: 'Gold Night', ic: '◆' },
     { k: 'dark',      label: 'Dark',       ic: '◇' },
     { k: 'aquawhite', label: 'Aqua White', ic: '○' },
-    { k: 'goldday',   label: 'Gold Day',   ic: '◈' }
+    { k: 'goldday',   label: 'Gold Day',   ic: '◈' },
+    { k: 'blush',     label: 'Blush',      ic: '❀' },   /* cc#1637 */
+    { k: 'rosenight', label: 'Rose Night', ic: '✿' }
   ];
-  var THEME_OK = { goldnight: 1, dark: 1, aquawhite: 1, goldday: 1 };
+  var THEME_OK = { goldnight: 1, dark: 1, aquawhite: 1, goldday: 1, blush: 1, rosenight: 1 };
 
   function storedTheme() {
     var T = window.SCORR_THEME; if (T && T.get) return T.get();
