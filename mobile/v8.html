@@ -42,6 +42,13 @@ body{ --field:#0A0A0C; }
      pass; named here rather than silently left alone or silently tokenised. */
 }
 #v8p *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* cc#1656 P2: card padding, two steps up. Shell classes (.slab/.slab.dense/.pressed) come from
+   the SHARED scorr_theme_r5.css and other pages use them too, so the bump is scoped under #v8p
+   (specificity (1,0,1) beats the shared (0,1,0) regardless of source order) rather than edited at
+   the source. Delta +5px each side, matching the literal --space-13/15 -> --space-18/20 example. */
+#v8p .slab{padding:var(--space-18) var(--space-20)}
+#v8p .slab.dense{padding:var(--space-15) var(--space-18)}
+#v8p .pressed{padding:var(--space-19) var(--space-20)}
 #v8p .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 #v8p .up{color:var(--up)} #v8p .dn{color:var(--down)} #v8p .mu{color:var(--mute)} #v8p .gd{color:var(--gold)}
 #v8p .top{display:flex;align-items:center;justify-content:space-between;padding:14px 0 10px}
@@ -63,7 +70,7 @@ body{ --field:#0A0A0C; }
 #v8p .seg{display:flex;gap:4px;padding:4px;background:var(--well);border:1px solid var(--line);border-radius:9px}
 #v8p .seg button{flex:1;border:0;background:transparent;color:var(--mute);font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;padding:8px 6px;border-radius:6px;cursor:pointer}
 #v8p .seg button.on{background:var(--gold);color:var(--sunk);box-shadow:0 2px 0 var(--gold-lo)}
-#v8p .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:700;padding:5px 9px;border:1px solid var(--line);background:var(--well);color:var(--mute);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer}
+#v8p .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:700;padding:5px var(--space-13);border:1px solid var(--line);background:var(--well);color:var(--mute);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer}   /* cc#1656 P2: horizontal padding one step (9->13); vertical unchanged, still inside a 44px tap target */
 #v8p .chip.ok{color:var(--up);border-color:rgba(47,212,139,.35);background:var(--up-d)}
 #v8p .chip.bad{color:var(--down);border-color:rgba(255,92,108,.35);background:var(--down-d)}
 #v8p .chip.gd{color:var(--gold);border-color:rgba(212,175,55,.4);background:var(--gold-d)}
@@ -79,38 +86,38 @@ body{ --field:#0A0A0C; }
 #v8p .hero .gword.bull{color:var(--up);text-shadow:0 0 28px rgba(47,212,139,.35)}
 #v8p .hero .sub{color:var(--mute);font-size:13px;margin-bottom:12px}
 #v8p .hero .sub b{color:var(--chalk);font-family:var(--mono)}
-#v8p .checks{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px}
-#v8p .ck{padding:8px 6px 7px;text-align:center;border:1px solid var(--line);background:var(--well)}
+#v8p .checks{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-10);margin:var(--space-16) 0}   /* cc#1656 P2: gap one step (6->10), the mood bar's own --space-16 above/below */
+#v8p .ck{padding:var(--space-13) var(--space-11) var(--space-12);text-align:center;border:1px solid var(--line);background:var(--well)}   /* cc#1656 P2: inner padding two steps (8/6/7 -> 13/11/12) */
 #v8p .ck .cl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute)}
 #v8p .ck .cv{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px}
 #v8p .ck.bad{border-color:rgba(255,92,108,.35)} #v8p .ck.bad .cv{color:var(--down)}
 #v8p .ck.ok{border-color:rgba(47,212,139,.35)} #v8p .ck.ok .cv{color:var(--up)}
-#v8p .slots{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-#v8p .slot .l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute);margin-bottom:5px}
+#v8p .slots{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:var(--space-16)}   /* cc#1656 P2: --space-16 above the labels */
+#v8p .slot .l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute);margin-bottom:var(--space-10)}   /* cc#1656 P2: --space-10 between label and bar */
 #v8p .slot .l b{color:var(--chalk);font-size:13px;letter-spacing:0}
 #v8p .sbar{height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
 #v8p .sbar i{display:block;height:100%}
 #v8p .sbar.buy i{background:linear-gradient(90deg,var(--up),var(--up-d))} #v8p .sbar.sell i{background:linear-gradient(90deg,var(--down),var(--down-d))}
-#v8p .hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+#v8p .hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:var(--space-14);font-family:var(--mono);font-size:10.5px;color:var(--dim)}   /* cc#1656 P2: --space-14 above the footer line */
 /* 2a · KPI wells (.well-up from the shared sheet) + filter chips */
-#v8p .kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
-#v8p .kw{padding:10px 10px 9px}
+#v8p .kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-12);margin-bottom:10px}   /* cc#1656 P2: gap between tiles one step (8->12) */
+#v8p .kw{padding:var(--space-15) var(--space-15) var(--space-14)}   /* cc#1656 P2: padding two steps (10/10/9 -> 15/15/14) */
 #v8p .kw .kl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--mute)}
 #v8p .kw .kn{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px;letter-spacing:-.3px}
-#v8p .kw .ks{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:1px}
-#v8p .filters{display:flex;gap:6px;margin:8px 0 10px;overflow-x:auto;scrollbar-width:none}
+#v8p .kw .ks{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:var(--space-7)}   /* cc#1656 P2: --space-6 more below the number (1px -> 7px) */
+#v8p .filters{display:flex;gap:var(--space-10);margin:var(--space-16) 0 var(--space-18);overflow-x:auto;scrollbar-width:none}   /* cc#1656 P2: row gap one step (6->10), row-to-row two steps (8/10 -> 16/18) */
 #v8p .filters::-webkit-scrollbar{display:none}
 #v8p .filters .chip{flex:none}
 /* 2 · OPEN POSITIONS — rows are .slab.dense from the shared sheet; inner names prefixed (see top) */
 #v8p .plist{display:flex;flex-direction:column;gap:var(--space-16)}   /* cc#1656 P1: gap between position cards 8 -> 16 (two steps) */
-#v8p .prow{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center}
+#v8p .prow{display:grid;grid-template-columns:1fr auto;gap:var(--space-10) var(--space-14);align-items:center}   /* cc#1656 P2: header row items gap one step (6/10 -> 10/14) */
 #v8p .prow .psym{display:flex;align-items:center;gap:7px;font-weight:800;font-size:15px;letter-spacing:.2px;flex-wrap:wrap}
 #v8p .prow .psym .tag{margin-left:2px}
 #v8p .prow .pnl{font-family:var(--mono);font-size:16px;font-weight:800;text-align:right;letter-spacing:-.2px}
-#v8p .prow .pmeta{grid-column:1 / span 2;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 12px;font-family:var(--mono);font-size:11px;color:var(--mute)}
+#v8p .prow .pmeta{grid-column:1 / span 2;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 12px;font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:var(--space-8)}   /* cc#1656 P2: --space-8 between the header and the price line */
 #v8p .prow .pmeta b{color:var(--chalk);font-weight:600}
 #v8p .prow .pmeta .age{margin-left:auto;color:var(--dim)}
-#v8p .trk{grid-column:1 / span 2;position:relative;height:6px;margin-top:2px;background:var(--well);border:1px solid var(--line)}
+#v8p .trk{grid-column:1 / span 2;position:relative;height:6px;margin-top:var(--space-8);margin-bottom:var(--space-12);background:var(--well);border:1px solid var(--line)}   /* cc#1656 P2: --space-8 above (info line to rail), --space-12 below */
 #v8p .trk .tfill{position:absolute;top:0;bottom:0;left:0}
 #v8p .trk.long .tfill{background:var(--up)} #v8p .trk.short .tfill{background:var(--down)}
 #v8p .trk .cmp{position:absolute;top:-4px;width:2px;height:12px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
