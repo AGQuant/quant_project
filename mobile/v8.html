@@ -35,7 +35,11 @@ body{ --field:#0A0A0C; }
   --body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;
   --mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
   color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45;
-  max-width:430px;margin:0 auto;padding:0 12px 96px;
+  max-width:430px;margin:0 auto;padding:0 var(--space-16) 104px;
+  /* cc#1656 P1: side gutter 12->16 (one step). Bottom clearance 96->104 stays a raw px bump -- it
+     is a functional bottom-nav clearance value, not on the ramp at either end (max rung is 80),
+     and adding a one-off token for it felt like the wrong kind of ramp growth for a single-page
+     pass; named here rather than silently left alone or silently tokenised. */
 }
 #v8p *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 #v8p .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -48,7 +52,7 @@ body{ --field:#0A0A0C; }
 #v8p .live .dot.off{background:var(--dim);box-shadow:none}
 #v8p .live .pill{border:1px solid var(--line);padding:3px 8px;color:var(--up);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 #v8p .live .pill.stale{color:var(--amber)}
-#v8p .sect{display:flex;align-items:center;gap:10px;margin:22px 0 10px;font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center}
+#v8p .sect{display:flex;align-items:center;gap:10px;margin:var(--space-28) 0 var(--space-12);font-family:var(--display);font-size:12px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold);transform:skewX(-6deg);transform-origin:left center}   /* cc#1656 P1: card-to-eyebrow 22/10 -> 28/12 */
 #v8p .sect::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--gold-lo),transparent)}
 #v8p .sect .n{white-space:nowrap;text-transform:none;font-family:var(--mono);color:var(--mute);letter-spacing:0;transform:none;font-size:11px}
 #v8p .sect .r{white-space:nowrap;text-transform:none;margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:0;transform:skewX(6deg)}
@@ -98,7 +102,7 @@ body{ --field:#0A0A0C; }
 #v8p .filters::-webkit-scrollbar{display:none}
 #v8p .filters .chip{flex:none}
 /* 2 · OPEN POSITIONS — rows are .slab.dense from the shared sheet; inner names prefixed (see top) */
-#v8p .plist{display:flex;flex-direction:column;gap:8px}
+#v8p .plist{display:flex;flex-direction:column;gap:var(--space-16)}   /* cc#1656 P1: gap between position cards 8 -> 16 (two steps) */
 #v8p .prow{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center}
 #v8p .prow .psym{display:flex;align-items:center;gap:7px;font-weight:800;font-size:15px;letter-spacing:.2px;flex-wrap:wrap}
 #v8p .prow .psym .tag{margin-left:2px}
