@@ -1006,26 +1006,40 @@ def _levels_verdict(intr, delivery, price_chg, cmp_px):
 
 
 def _ad_21d(cur, sym):
-    """cc#445 fix_5: 21-day Accumulation/Distribution — up-day volume vs down-day volume balance."""
-    cur.execute("""SELECT close, volume FROM raw_prices WHERE symbol=%s AND close IS NOT NULL
+    """cc#445 fix_5: 21-day Accumulation/Distribution — up-day volume vs down-day volume balance.
+    cc#1653 item 3: also returns `bars` — the SAME 21 rows this loop already reduces over, as
+    {d,v,up,close} — so a caller (the Analysis card) can draw the shared ScorrADBars() chart
+    without a second query. Read-path only: no new table, no new column, just keeping the
+    per-row detail this loop used to discard after folding it into up_vol/dn_vol.
+    A flat day (close == prev close) adds to neither up_vol nor dn_vol, matching the original
+    up_pct maths unchanged; its bar is still emitted (marked `up: False`/down-coloured, since the
+    shared chart has no third "flat" bucket) — a cosmetic edge case, not a maths one: the bar's
+    own colour can disagree with the tally on a flat day, but up_pct itself never counts it either
+    way, exactly as before this change."""
+    cur.execute("""SELECT price_date, close, volume FROM raw_prices WHERE symbol=%s AND close IS NOT NULL
                    ORDER BY price_date DESC LIMIT 22""", (sym,))
-    rows = [(_f(r[0]), _f(r[1]) or 0.0) for r in cur.fetchall()][::-1]
+    rows = [(r[0], _f(r[1]), _f(r[2]) or 0.0) for r in cur.fetchall()][::-1]
     if len(rows) < 3:
         return None
     up_vol = dn_vol = 0.0
+    bars = []
     for i in range(1, len(rows)):
-        if rows[i][0] is None or rows[i - 1][0] is None:
+        d_i, close_i, vol_i = rows[i]
+        _d_prev, close_prev, _v_prev = rows[i - 1]
+        if close_i is None or close_prev is None:
             continue
-        if rows[i][0] > rows[i - 1][0]:
-            up_vol += rows[i][1]
-        elif rows[i][0] < rows[i - 1][0]:
-            dn_vol += rows[i][1]
+        is_up = close_i > close_prev
+        if is_up:
+            up_vol += vol_i
+        elif close_i < close_prev:
+            dn_vol += vol_i
+        bars.append({"d": str(d_i), "v": vol_i, "up": bool(is_up), "close": close_i})
     tot = up_vol + dn_vol
     if tot <= 0:
         return None
     up_pct = round(up_vol / tot * 100.0, 0)
     label = "Accumulation" if up_pct >= 55 else "Distribution" if up_pct <= 45 else "Neutral"
-    return {"up_vol_pct": up_pct, "label": label, "days": len(rows) - 1}
+    return {"up_vol_pct": up_pct, "label": label, "days": len(rows) - 1, "bars": bars}
 
 
 def _recent3d_vol_ratio(cur, sym) -> Optional[float]:
