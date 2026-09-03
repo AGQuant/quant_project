@@ -341,6 +341,7 @@ body{background:var(--field-night);font-family:'Space Grotesk',sans-serif;color:
 .vfg{font-size:var(--type-125);line-height:1.6;color:var(--chalk)}
 .vfg p{margin:0 0 var(--space-9)}
 .vfg b{color:var(--aqua)}
+.vfg .mu{color:var(--muted)}
 </style>
 </head>
 <body data-theme="goldnight" class="as-shell">
@@ -589,6 +590,39 @@ function oiUnavail(name, why){
     + '<div class="unavail">' + esc(why) + '</div></div></div>';
 }
 
+/* cc#1648 item 1: callWall / putWall / wallsMerged (plus the pieces the WALLS read-sheet block
+   needs — ceDead/peDead, hasCh, thCls) lifted verbatim out of oiCard's own computation into one
+   place, so the chart and the Max Pain read-sheet can never disagree on which strike is which
+   wall. oiCard below now reads all of this off oiWalls(oi) instead of computing it twice. */
+function oiWalls(oi){
+  var rows = oi.strikes || [];
+  var peDead = oi.one_sided === 'PE_MISSING', ceDead = oi.one_sided === 'CE_MISSING';
+  var hasCh = rows.some(function(r){ return r.ce_chg != null || r.pe_chg != null; });
+  var maxCe = Math.max.apply(null, rows.map(function(r){ return r.call_oi || 0; })) || 1;
+  var maxPe = Math.max.apply(null, rows.map(function(r){ return r.put_oi || 0; })) || 1;
+  var thCls = { ce: Math.max(10000, .005 * maxCe), pe: Math.max(10000, .005 * maxPe) };
+  var callWall = rows.reduce(function(a, b){ return (b.call_oi || 0) > (a.call_oi || 0) ? b : a; }, rows[0]);
+  var putWall  = rows.reduce(function(a, b){ return (b.put_oi  || 0) > (a.put_oi  || 0) ? b : a; }, rows[0]);
+  var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall);
+  var wallsMerged = (cwI >= 0 && cwI === pwI && !ceDead && !peDead);
+  return { rows:rows, ceDead:ceDead, peDead:peDead, hasCh:hasCh, thCls:thCls,
+           callWall:callWall, putWall:putWall, cwI:cwI, pwI:pwI, wallsMerged:wallsMerged };
+}
+/* cc#1648: promoted out of oiCard's own closure (unchanged body, hasCh now an explicit param
+   instead of a closed-over local) so oiGuide's WALLS block can call the identical function. */
+function wallWord(hasCh, w, key, th){
+  if(!hasCh || !w || w[key] == null) return '';
+  return w[key] >= th ? ' · building' : (w[key] <= -th ? ' · fading' : '');
+}
+/* cc#1648: promoted out of oiCard's own IIFE (unchanged body) so oiGuide's HONESTY block can
+   print the SAME short "dd-Mon HH:MM" stamp the card's own header uses, instead of chainAsOf's
+   longer "OI as of YYYY-MM-DD HH:MM IST" form. */
+function chainTickShort(tick){
+  var t = String(tick || '');
+  if(t.length < 16) return chainAsOf(tick).txt;
+  var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return parseInt(t.slice(8, 10), 10) + '-' + (M[parseInt(t.slice(5, 7), 10) - 1] || '') + ' ' + t.slice(11, 16);
+}
 /* ── the histogram, spec 6055 section 7 ─────────────────────────────────────────────────── */
 function oiCard(name, oi, mp){
   if(!oi || oi.status === 'no_data' || !(oi.strikes || []).length)
@@ -597,8 +631,11 @@ function oiCard(name, oi, mp){
   /* cc#1354 · one-sided tick (26-Aug: NIFTY PE feed gap). The server flags it; the card
      keeps drawing the side that exists, suppresses the dead side's WALL tag, axis label and
      footer value (they would be fabricated — the wall reduce() lands on rows[0] when a side
-     is all zeros), and states the gap in one line. Identical in both oiCard twins. */
-  var peDead = oi.one_sided === 'PE_MISSING', ceDead = oi.one_sided === 'CE_MISSING';
+     is all zeros), and states the gap in one line. Identical in both oiCard twins.
+     cc#1648: peDead/ceDead/hasCh/thCls/callWall/putWall now come off the shared oiWalls(oi) —
+     same computation, just no longer duplicated between this card and the read-sheet. */
+  var W = oiWalls(oi), peDead = W.peDead, ceDead = W.ceDead, hasCh = W.hasCh, thCls = W.thCls,
+      callWall = W.callWall, putWall = W.putWall;
   /* cc#1355 · change since open + PCR (session_log 32043). Bar HEIGHT stays the OI level;
      BRIGHTNESS carries the change: building = full + glow, quiet = .55, unwinding = .35. A bar
      with no delta (no 09:20 baseline row, or a side dead in either tick) keeps the stylesheet
@@ -606,11 +643,9 @@ function oiCard(name, oi, mp){
      a threshold chosen from live data (26-Aug session: median |chg| 325 = noise, top real mover
      42.5k, walls at 55L): label th = max(25k, 2% of side max OI), classify th = max(10k, 0.5%). */
   var CE_COL = 'var(--heat)', PE_COL = 'var(--volt)';
-  var hasCh = rows.some(function(r){ return r.ce_chg != null || r.pe_chg != null; });
   var maxCe = Math.max.apply(null, rows.map(function(r){ return r.call_oi || 0; })) || 1;
   var maxPe = Math.max.apply(null, rows.map(function(r){ return r.put_oi || 0; })) || 1;
   var thLab = { ce: Math.max(25000, .02 * maxCe), pe: Math.max(25000, .02 * maxPe) };
-  var thCls = { ce: Math.max(10000, .005 * maxCe), pe: Math.max(10000, .005 * maxPe) };
   var bri = function(chg, th, glow){
     if(!hasCh || chg == null) return '';
     if(chg >= th)  return 'opacity:1;box-shadow:0 0 8px ' + glow + ';';
@@ -620,8 +655,6 @@ function oiCard(name, oi, mp){
   var fCh = function(v){ var a = Math.abs(v), s = v > 0 ? '+' : '-';
     return s + (a >= 1e5 ? (a / 1e5).toFixed(1) + 'L' : a >= 1e3 ? Math.round(a / 1e3) + 'k' : String(a)); };
   var peak = Math.max.apply(null, rows.map(function(r){ return Math.max(r.call_oi || 0, r.put_oi || 0); })) || 1;
-  var callWall = rows.reduce(function(a, b){ return (b.call_oi || 0) > (a.call_oi || 0) ? b : a; }, rows[0]);
-  var putWall  = rows.reduce(function(a, b){ return (b.put_oi  || 0) > (a.put_oi  || 0) ? b : a; }, rows[0]);
   var cols = rows.map(function(r){
     var isMp = (mpStrike != null && Number(r.strike) === mpStrike);
     return '<div class="oic' + (isMp ? ' mp' : '') + '" title="' + r.strike + '">'
@@ -653,13 +686,10 @@ function oiCard(name, oi, mp){
   /* the two wall tags, placed on their own columns. The x of column i is the centre of its share
      of the track, which is (i + 0.5) / count — not i / count, or every tag would sit a half-column
      left of the bar it names. */
-  var cwI = rows.indexOf(callWall), pwI = rows.indexOf(putWall), tags = '';
+  var cwI = W.cwI, pwI = W.pwI, tags = '';
   var colPct = function(i){ return (100 * (i + 0.5) / rows.length).toFixed(2); };
-  /* cc#1355 · one word of change on the wall itself, and delta labels on the top movers */
-  var wallWord = function(w, key, th){
-    if(!hasCh || !w || w[key] == null) return '';
-    return w[key] >= th ? ' · building' : (w[key] <= -th ? ' · fading' : '');
-  };
+  /* cc#1355 · one word of change on the wall itself, and delta labels on the top movers.
+     cc#1648: wallWord is now the module-level version above (same body, hasCh passed in). */
   /* cc#1468 put MAX PAIN on the top strip with a two-rung collision rule against the call wall;
      cc#1471 moves the PUT WALL word-tag up too — ONE unified top row — so the rule generalises.
      Tags place in order CALL WALL → MAX PAIN → PUT WALL: a tag landing within the page's 18%
@@ -687,14 +717,14 @@ function oiCard(name, oi, mp){
      verified on BANKNIFTY 28-Aug: 18.7L CE and 18.7L PE both at 57,500, the founder's
      "everything on one bar" screenshot — the two tags merge into one CALL+PUT WALL tag instead
      of the collision rule silently dropping one of them. */
-  var wallsMerged = (cwI >= 0 && cwI === pwI && !ceDead && !peDead);
+  var wallsMerged = W.wallsMerged;
   if(wallsMerged){
     placeTop(cwI, 'bw', '<span style="color:var(--heat)">CALL</span>+<span style="color:var(--volt)">PUT</span> WALL');
   } else {
-    placeTop(ceDead ? -1 : cwI, 'cw', 'CALL WALL' + wallWord(callWall, 'ce_chg', thCls.ce));
+    placeTop(ceDead ? -1 : cwI, 'cw', 'CALL WALL' + wallWord(hasCh, callWall, 'ce_chg', thCls.ce));
   }
   placeTop(mpI, 'mpw', 'MAX PAIN');
-  if(!wallsMerged) placeTop(peDead ? -1 : pwI, 'pw', 'PUT WALL' + wallWord(putWall, 'pe_chg', thCls.pe));
+  if(!wallsMerged) placeTop(peDead ? -1 : pwI, 'pw', 'PUT WALL' + wallWord(hasCh, putWall, 'pe_chg', thCls.pe));
   if(hasCh){
     [['ce_chg', thLab.ce, 'ce'], ['pe_chg', thLab.pe, 'pe']].forEach(function(sd){
       rows.map(function(r, i){ return { i: i, c: r[sd[0]] }; })
@@ -737,13 +767,10 @@ function oiCard(name, oi, mp){
   /* cc#1361 · short stamp (founder 08:43) — falls back to the long chainAsOf text only when the
      tick is missing entirely. cc#1468: the '· vs 09:20' baseline segment is GONE from the stamp
      — the founder finds it confusing — so it reads '28-Aug 15:35 · PCR 1.10'. Only the TEXT is
-     removed: baseline_tick and the brightness encoding it drives on the bars are untouched. */
-  var aoTxt = (function(){
-    var t = String(oi.chain_tick || '');
-    if(t.length < 16) return ao.txt;
-    var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return parseInt(t.slice(8, 10), 10) + '-' + (M[parseInt(t.slice(5, 7), 10) - 1] || '') + ' ' + t.slice(11, 16);
-  })()
+     removed: baseline_tick and the brightness encoding it drives on the bars are untouched.
+     cc#1648: the IIFE moved to the module-level chainTickShort() above (same body), so the read
+     -sheet's HONESTY block can print the identical stamp. */
+  var aoTxt = chainTickShort(oi.chain_tick)
     + (oi.pcr != null ? ' · PCR ' + Number(oi.pcr).toFixed(2) : '');
   var story = '';
   if(hasCh){
@@ -806,7 +833,9 @@ function oiCard(name, oi, mp){
        line instead of the date/PCR being squeezed into fragments. */
     + '<div class="vfhd oihd"><h3>Max Pain ' + esc(name) + '</h3><span class="sp"></span>'
     + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>'
-    + '<button type="button" class="vfib" onclick="oiGuide()" aria-label="How to read this card">i</button></div>'
+    /* cc#1648: the i button now opens a LIVE READ keyed to this card (N/BANKNIFTY -> B), not the
+       static glossary oiGuide() used to be. */
+    + '<button type="button" class="vfib" onclick="oiGuide(\'' + (name === 'BANKNIFTY' ? 'B' : 'N') + '\')" aria-label="How to read this card">i</button></div>'
     + '<div class="oib">' + cols + spotLine + tags + '</div>'
     + spotLb
     + xs
@@ -816,23 +845,79 @@ function oiCard(name, oi, mp){
     + '</div></div>';
 }
 
-/* cc#1468 · Max Pain's how-to-read sheet — the one vfSheet shell, same as Buildup/Basis/Flow.
-   The baseline/09:20 concept gets ONE clause (the founder had its stamp text removed as
-   confusing — re-explaining it at length here would rebuild the confusion one level down). */
-function oiGuide(){
-  vfSheet('<div class="vfsh">How to read Max Pain</div><div class="vfg">'
-    + '<p><b>The bars.</b> One column per strike. Call OI grows upward in red, put OI grows '
-    + 'downward in green — the taller the bar, the more open contracts at that strike. Bar '
-    + 'brightness shows change since the morning\'s opening levels.</p>'
-    + '<p><b>MAX PAIN.</b> The amber bar and tag. The strike where an expiry right now would pay '
-    + 'option holders the least — the point of least total payout by option writers.</p>'
-    + '<p><b>CALL WALL / PUT WALL.</b> The single biggest open-interest strike on the call side '
-    + 'and on the put side. When both sit on ONE strike the tag reads CALL+PUT WALL.</p>'
-    + '<p><b>Spot.</b> The dashed line — where the index trades now, or the previous close when '
-    + 'the live feed is off. The label under it says which.</p>'
-    + '<p><b>PCR.</b> Put-call ratio: total put OI ÷ total call OI. Above 1 means more put '
-    + 'contracts are open than calls.</p>'
-    + '</div>');
+/* cc#1648 · Max Pain's (i) sheet is no longer a static glossary — it is a LIVE READ, built each
+   tap from the SAME card payload oiCard() draws from (oiWalls(oi) for the walls, mp for max
+   pain, oi.pcr/oi.spot/oi.chain_tick directly), never a re-derivation and never a hardcoded
+   number. Data-honesty doctrine: a read describes positioning, never predicts, and a missing
+   input drops its whole block rather than guessing. One line of definition survives at the very
+   bottom, italic, everything else above it is plain-words positioning. */
+function oiGuide(key){
+  var oi = D.oi[key], mp = key === 'B' ? D.mpB : D.mp, name = key === 'B' ? 'BANKNIFTY' : 'NIFTY';
+  var body = '<div class="vfsh">Max Pain ' + esc(name) + ' — the read</div><div class="vfg">';
+  if(!oi || !(oi.strikes || []).length){
+    vfSheet(body + '<p class="mu">No option chain for this expiry yet — nothing to read.</p></div>');
+    return;
+  }
+  var W = oiWalls(oi);
+  var mpStrike = (mp && mp.status === 'ok') ? Number(mp.max_pain_strike) : null;
+  var spot = oi.spot != null ? Number(oi.spot) : null;
+  var basisNote = (oi.spot_basis !== 'live') ? ' (spot = previous close, feed off).' : '';
+
+  /* BLOCK 1 · MAX PAIN — needs mpStrike + spot. "Equal" reads within one strike step so a
+     max-pain strike one row off from spot (routine chain granularity) does not falsely claim a
+     pull in either direction. */
+  if(mpStrike != null && spot != null){
+    var step = (W.rows.length > 1) ? Math.abs(Number(W.rows[1].strike) - Number(W.rows[0].strike)) : 0;
+    var diff = Math.abs(mpStrike - spot);
+    if(step > 0 && diff <= step){
+      body += '<p><b>Max pain ' + num(mpStrike) + ' is at spot.</b> Writers are already where they want to be. '
+        + 'Expect the index to be held near ' + num(mpStrike) + ' unless fresh positions build.' + basisNote + '</p>';
+    } else if(mpStrike > spot){
+      body += '<p><b>Max pain ' + num(mpStrike) + ' sits ' + num(diff) + ' points above spot ' + num(spot) + '.</b> '
+        + 'Option writers make the most if the index expires here. That is a pull upward — the market may drift toward '
+        + num(mpStrike) + ' as expiry nears.' + basisNote + '</p>';
+    } else {
+      body += '<p><b>Max pain ' + num(mpStrike) + ' sits ' + num(diff) + ' points below spot ' + num(spot) + '.</b> '
+        + 'Option writers make the most if the index expires here. That is a pull downward — the market may drift toward '
+        + num(mpStrike) + ' as expiry nears.' + basisNote + '</p>';
+    }
+  }
+
+  /* BLOCK 2 · WALLS — same merged/split rule oiCard draws with, same wallWord() building/fading
+     word. A dead side (one_sided) drops its own line rather than naming a fabricated wall. */
+  if(W.wallsMerged){
+    var mv = num(W.callWall.strike);
+    body += '<p><b>Call and put wall both at ' + mv + '.</b> Writers on both sides want expiry here — a pin. '
+      + 'Expect a tight range around ' + mv + '; a close outside it forces one side to cover and the move can be sharp.</p>';
+  } else {
+    if(!W.ceDead && W.cwI >= 0){
+      var cw = num(W.callWall.strike);
+      body += '<p><b>Call wall ' + cw + wallWord(W.hasCh, W.callWall, 'ce_chg', W.thCls.ce) + '</b> — the ceiling. '
+        + 'Heavy call writing here; the index tends to stall below it. A close above ' + cw
+        + ' makes call writers cover, and that can push it up fast.</p>';
+    }
+    if(!W.peDead && W.pwI >= 0){
+      var pw = num(W.putWall.strike);
+      body += '<p><b>Put wall ' + pw + wallWord(W.hasCh, W.putWall, 'pe_chg', W.thCls.pe) + '</b> — the floor. '
+        + 'Heavy put writing here; support sits at ' + pw + '. A close below it makes put writers cover, and that can push it down fast.</p>';
+    }
+  }
+
+  /* BLOCK 3 · PCR — needs oi.pcr. */
+  if(oi.pcr != null){
+    var pcrV = Number(oi.pcr).toFixed(2);
+    var pcrRead = Number(oi.pcr) >= 1.2 ? 'More puts than calls are open — put writers are confident of support. Leans bullish.'
+                : Number(oi.pcr) <= 0.8 ? 'More calls than puts are open — call writers are confident of a ceiling. Leans cautious.'
+                : 'Puts and calls are balanced. No lean from positioning.';
+    body += '<p><b>PCR ' + pcrV + '.</b> ' + pcrRead + '</p>';
+  }
+
+  /* BLOCK 4 · HONESTY — always last, muted, present even when every block above was dropped. */
+  body += '<p class="mu">This is where option writers are positioned as of ' + esc(chainTickShort(oi.chain_tick))
+    + ' — not a forecast. Walls move when writers move. Read it again after the next tick.</p>';
+
+  body += '<p style="font-style:italic">Max pain = the strike where option holders collectively lose the most at expiry.</p>';
+  vfSheet(body + '</div>');
 }
 
 /* ── the pivot ladder ───────────────────────────────────────────────────────────────────── */
