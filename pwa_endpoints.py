@@ -2320,6 +2320,20 @@ def pwa_scorr_chart_card_js():
     return Response(SCORR_CHART_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
+# cc#1634: the shared notification bell (repo root scorr_bell.js), read once at import like the
+# chart card above; linked by main.py _MOBILE_HEAD with the build stamp, cc#1060 rule.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_bell.js"), "r", encoding="utf-8") as _sb_f:
+        SCORR_BELL_JS = _sb_f.read()
+except Exception:
+    SCORR_BELL_JS = "/* scorr_bell.js unavailable */"
+
+
+@router.get("/scorr_bell.js")
+def pwa_scorr_bell_js():
+    return Response(SCORR_BELL_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
 # cc#789: shared C·A·R·D quick-nav strip — SINGLE SOURCE. Was defined inside v8_dashboard.html with a
 # divergent inline copy on the GVM page (the A-button drift the founder reported). Source of truth is
 # scorr_card_strip.js (repo root), read once at import and injected site-wide (main.py _MOBILE_HEAD),
