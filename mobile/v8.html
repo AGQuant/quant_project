@@ -86,13 +86,13 @@ body{ --field:#0A0A0C; }
 #v8p .hero .gword.bull{color:var(--up);text-shadow:0 0 28px rgba(47,212,139,.35)}
 #v8p .hero .sub{color:var(--mute);font-size:13px;margin-bottom:12px}
 #v8p .hero .sub b{color:var(--chalk);font-family:var(--mono)}
-#v8p .checks{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-10);margin:var(--space-12) 0}   /* cc#1656 P2: gap one step (6->10). Margin corrected in P3: this is not the mood bar (see .moodbar below) - kept a modest bump rather than the literal --space-16, which belongs to .moodbar alone. */
-#v8p .moodbar{height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);border-radius:var(--radius-4);margin:var(--space-16) 0}   /* cc#1656 P3: THIS is the actual mood bar (JS-rendered, previously a bare inline-styled div with no class) - --space-16 above/below per P2, plus a calm radius-4 per P3(a). No literal full-height left-edge rail was found anywhere in this file or the shared shell CSS after a targeted search (border-left, box-shadow); P3(a)'s wording most likely describes cc#1646's digest rail (same sprint), not this page - flagged in cc_task_logs rather than inventing an element that does not exist today. */
-#v8p .ck{padding:var(--space-13) var(--space-11) var(--space-12);text-align:center;border:1px solid var(--line);background:var(--well)}   /* cc#1656 P2: inner padding two steps (8/6/7 -> 13/11/12) */
-#v8p .ck .cl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute)}
-#v8p .ck .cv{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px}
-#v8p .ck.bad{border-color:color-mix(in srgb, var(--down) 55%, var(--line))} #v8p .ck.bad .cv{color:var(--down)}   /* cc#1656 P3: box border calms, number stays fully coloured */
-#v8p .ck.ok{border-color:color-mix(in srgb, var(--up) 55%, var(--line))} #v8p .ck.ok .cv{color:var(--up)}
+#v8p .checks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-9);margin:var(--space-12) 0}   /* cc#1659 item 2: gap one step DOWN from 1656's --space-10 (10->9, the same magnitude as 1656's own one-step 6->10) + minmax(0,1fr) so the tracks can shrink below content instead of overflowing the row. */
+#v8p .moodbar{height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);border-radius:var(--radius-4);margin:var(--space-16) 0}   /* cc#1656 P3: THIS is the actual mood bar (JS-rendered, previously a bare inline-styled div with no class) - --space-16 above/below per P2, plus a calm radius-4 per P3(a). No literal full-height left-edge rail was found anywhere in this file or the shared shell CSS after a targeted search (border-left, box-shadow); P3(a)'s wording most likely describes cc#1646's digest rail (same sprint), not this page - flagged in cc_task_logs rather than inventing an element that does not exist today. cc#1659: also reused verbatim as PAGE 2's "evidence bar" (renderMood() prints the same markup twice). */
+#v8p .ck{padding:var(--space-11) var(--space-9) var(--space-10);text-align:center;border:1px solid var(--edge);background:var(--well);min-width:0}   /* cc#1659 item 2: padding back ONE step from the original 8/6/7 (1656 went two steps to 13/11/12; one step here is +3 each side, half of 1656's own +5 two-step delta) -- 11/9/10. min-width:0 lets the box shrink inside the minmax(0,1fr) track instead of forcing overflow. Border colour var(--edge) per spec fallback (was var(--line)). */
+#v8p .ck .cl{font-family:var(--mono);font-size:9.5px;letter-spacing:.8px;color:var(--mute);white-space:nowrap}   /* cc#1659: letter-spacing 1.2->.8px per spec's named fallback (measured tight at 360px, see .cv note below) */
+#v8p .ck .cv{font-family:var(--mono);font-size:15px;font-weight:800;margin-top:2px;white-space:nowrap;letter-spacing:-.3px}   /* cc#1659: MEASURED headless (JetBrains Mono, real webfont, Playwright) at 360px content-width 328px with "-3.01%" (MONTH, the spec's named worst case): with grid minmax+min-width:0 + the padding/gap above but WITHOUT this letter-spacing, value text was 54.19px against a 54.75px inner box -- 0.56px slack, too thin to trust across devices. -.3px letter-spacing on .cv (not named in the spec's two remedies, which target border colour and the LABEL only -- neither of those touches the value's own width) widens the margin to 2.36px at 360px / 9.86px at 390px. Number size (15px/800) is unchanged, only tracking. */
+#v8p .ck.bad{border-color:color-mix(in srgb, var(--down) 55%, var(--edge))} #v8p .ck.bad .cv{color:var(--down)}   /* cc#1656 P3: box border calms, number stays fully coloured. cc#1659: mixed into var(--edge) now, matching the base .ck border swap. */
+#v8p .ck.ok{border-color:color-mix(in srgb, var(--up) 55%, var(--edge))} #v8p .ck.ok .cv{color:var(--up)}
 #v8p .slots{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:var(--space-16)}   /* cc#1656 P2: --space-16 above the labels */
 #v8p .slot .l{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute);margin-bottom:var(--space-10)}   /* cc#1656 P2: --space-10 between label and bar */
 #v8p .slot .l b{color:var(--chalk);font-size:13px;letter-spacing:0}
@@ -100,6 +100,18 @@ body{ --field:#0A0A0C; }
 #v8p .sbar i{display:block;height:100%}
 #v8p .sbar.buy i{background:linear-gradient(90deg,var(--up),var(--up-d))} #v8p .sbar.sell i{background:linear-gradient(90deg,var(--down),var(--down-d))}
 #v8p .hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:var(--space-14);font-family:var(--mono);font-size:10.5px;color:var(--dim)}   /* cc#1656 P2: --space-14 above the footer line */
+/* 1b · MARKET MOOD deck (cc#1659): 2-page swipe (Mood | Evidence), same gesture as home.html's
+   .swipe-t/.dots decks (cc#1350 scroll-snap-stop:always) - not a third dialect. This page has no
+   bare .swipe/.swipe-t/.dots collision in the shared sheet (checked), so these are unprefixed like
+   home.html's; the PAGE class is .mpg (not the shared sheet's bare .c, which this file's own top
+   comment says to avoid - a bare .c rule from mobile_app.css would add unwanted padding/border). */
+#v8p .swipe{margin-bottom:0}
+#v8p .swipe-t{display:flex;align-items:flex-start;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+#v8p .swipe-t::-webkit-scrollbar{display:none}
+#v8p .swipe-t > .mpg{flex:0 0 100%;min-width:0;scroll-snap-align:center;scroll-snap-stop:always;cursor:pointer}
+#v8p .dots{display:flex;justify-content:center;gap:var(--space-6);margin-top:var(--space-7)}
+#v8p .dots i{width:5px;height:5px;border-radius:50%;background:var(--line);transition:.2s}
+#v8p .dots i.on{background:var(--gold);width:16px;border-radius:var(--radius-3)}
 /* 2a · KPI wells (.well-up from the shared sheet) + filter chips */
 #v8p .kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-12);margin-bottom:10px}   /* cc#1656 P2: gap between tiles one step (8->12) */
 #v8p .kw{padding:var(--space-15) var(--space-15) var(--space-14)}   /* cc#1656 P2: padding two steps (10/10/9 -> 15/15/14) */
@@ -343,21 +355,51 @@ function renderMood(){
   var passed = checks.length - fails, barCol = cls==='bear' ? 'var(--down)' : cls==='bull' ? 'var(--up)' : 'var(--gold)';
   var barW = checks.length ? Math.round(passed / checks.length * 100) : 0;
   var breadth = (adA != null && adD != null) ? 'A '+adA+' / D '+adD : esc(m.nifty_source||'');
-  el.setAttribute('role', 'button'); el.setAttribute('data-mood-open', '1'); el.setAttribute('title', 'Tap for the gate rules'); el.style.cursor = 'pointer';
   var adrCk = checks.filter(function(c){ return c.filter==='ADR'; })[0];
   if(adrCk && num(adrCk.value)) breadth += ' · ADR '+adrCk.value.toFixed(2);
   if(ad.adr_date) breadth += ' · '+esc(ad.adr_date);
-  el.innerHTML =
-    '<div class="eyebrow"><span>Market gate</span><span>'+esc(String(m.checked_at||''))+'</span></div>'
+  /* cc#1659: the card is now a 2-page swipe deck (Mood | Evidence). data-mood-open/role/title move
+     from the outer #sec-mood section onto EACH page div instead of staying on the section itself --
+     the dots row sits OUTSIDE both page divs (siblings of .swipe-t, same as home.html's book deck),
+     so a dot tap never also bubbles into a data-mood-open ancestor and fires moodOpen(). Tapping
+     inside either page still opens the gate sheet exactly as the single-card version did; the ADR
+     box's own data-mood-adr still narrows the sheet to the ADR section (line ~1139, unchanged). */
+  var moodBarHtml = '<div class="moodbar"><i style="display:block;height:100%;width:'+Math.max(barW, cls ? 8 : 0)+'%;background:'+barCol+'"></i></div>';
+  var pageMood =
+      '<div class="mpg" role="button" data-mood-open="1" title="Tap for the gate rules">'
+    + '<div class="eyebrow"><span>Market gate</span><span>'+esc(String(m.checked_at||''))+'</span></div>'
     + '<div class="gword '+cls+'">'+esc(mood)+'</div>'
-    + '<div class="moodbar"><i style="display:block;height:100%;width:'+Math.max(barW, cls ? 8 : 0)+'%;background:'+barCol+'"></i></div>'
+    + moodBarHtml
     + '<div class="sub">'+sentence+'</div>'
-    + '<div class="eyebrow" data-mood-fails="1" style="margin-top:12px"><span>'+fails+' of '+checks.length+' checks failed</span><span>evidence</span></div>'
+    + moodFoot(m)
+    + '</div>';
+  var pageEvidence =
+      '<div class="mpg" role="button" data-mood-open="1" title="Tap for the gate rules">'
+    + '<div class="eyebrow" data-mood-fails="1"><span>'+fails+' of '+checks.length+' checks failed</span><span>evidence</span></div>'
+    + moodBarHtml
     + '<div class="checks">'+ck+'</div>'
     + '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'
     + '<div class="foot"><span>'+breadth+'</span><span style="color:var(--gold)">rules →</span></div>'
-    + moodFoot(m);
+    + '</div>';
+  el.innerHTML =
+    '<div class="swipe"><div class="swipe-t" id="moodTrack">'
+    + pageMood + pageEvidence
+    + '</div><div class="dots" id="moodDots"><i class="on"></i><i></i></div></div>';
+  /* cc#1659: bound via addEventListener, not an inline onscroll="" attribute -- this whole script
+     runs inside one IIFE (unlike home.html's, which is not wrapped), so an inline handler would
+     look up moodDots() on window and fail. Re-bound every render since innerHTML above just
+     replaced the node. */
+  var mt = document.getElementById('moodTrack'); if (mt) mt.addEventListener('scroll', moodDots);
   if(r) r.textContent = String(m.checked_at||'');
+}
+/* cc#1659: dot indicator for the mood deck, same shape as home.html's heroDots() (indicator only,
+   no tap-to-jump -- unlike bookDots(), this card's whole page is already a tap target for the gate
+   sheet, so a second, different tap behaviour on the dots themselves would be a mixed signal). */
+function moodDots(){
+  var tr = document.getElementById('moodTrack'), dots = document.getElementById('moodDots');
+  if (!tr || !dots) return;
+  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
+  Array.prototype.forEach.call(dots.children, function(el, j){ el.className = (j === i ? 'on' : ''); });
 }
 /* cc#1634: ONE footer line on the hero card carries what the header corner used to say:
    "gate <date> · market open · LIVE HH:MM" in session, "gate <date> · market closed · HH:MM"
