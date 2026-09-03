@@ -8,6 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
 <script src="/scorr_card_common.js"></script>
 <!-- cc#1322: the shared news row (cc#1129) is no longer used on this page -- LIVE NEWS, its only
      consumer here, moved to /m/v10 (scorr_v10_signal.html), which now loads /scorr_news_row.js
@@ -1547,6 +1549,13 @@ if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Se
 var __r1644=({dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
 /* cc#1629: the OS status bar takes the resolved theme's field colour, so it is not a separate strip */
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<!-- cc#1645 P5b: shared appshell header (VARIANT B), for GLASS parity with V8/GVM/Check/Alerts
+     ("Home ... all show the same SCORR header" -- the card's own acceptance line). P2-P5 scoped
+     Home out of their per-push file lists (it already had data-theme+boot from an earlier card),
+     but the card's own verify step (one shell include per page, none on login.html) and GLASS
+     line both name Home, so it gets the header here. Existing .head strip (own wordmark + the
+     dead .tswitch control, cc#1644-confirmed unreachable) is untouched, just pushed below. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Home</span></div><div class="as-slot"></div></div>
 <div class="screen">
   <div class="head" style="display:flex;align-items:center;justify-content:space-between">
     <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>
