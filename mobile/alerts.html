@@ -21,7 +21,9 @@
 .ia-top{display:flex;align-items:flex-end;justify-content:space-between;padding:16px 14px 10px}
 .ia-h1{font-family:var(--display,inherit);font-size:24px;font-weight:800;letter-spacing:.3px;line-height:1;color:var(--chalk,var(--txt))}
 .ia-h1 small{display:block;font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--gold);margin-top:6px;text-transform:uppercase;white-space:nowrap;font-weight:600}
-.ia-r{font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap}
+/* cc#1667: .ia-r (the header counts/as-of line) is REMOVED -- its element is gone from the shell
+   slot, both JS writers below now target #ia-foot instead. */
+body.ia-scope .as-pg .t{white-space:nowrap}   /* cc#1667: TRADE ALERTS stays on one line now that the slot no longer pushes it */
 .ia-pressed{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:12px 12px 10px}
 .ia-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
 .ia-stats>div{padding:6px 4px;text-align:center}
@@ -126,7 +128,7 @@
 .al-go[disabled]{opacity:.5}
 </style>
 </head>
-<body data-theme="goldnight">
+<body data-theme="goldnight" class="ia-scope">
 <!-- cc#1645 P2: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap).
      Sets data-theme before first paint so the page never flashes goldnight on another theme. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
@@ -144,7 +146,10 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
      alerts has no bell -- it does (data-scorr-bell was already in .ia-top); moved it here to
      match every other nav page rather than following the "no bell" branch, logged in
      cc_task_logs task 1661. -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Trade Alerts</span></div><div class="as-slot"><div class="ia-r" id="ia-r">loading…</div><span data-scorr-bell></span></div></div>
+<!-- cc#1667: the ia-r counts/as-of line is gone from the shell slot -- counts already live on the
+     filter chips, as-of now lives in #ia-foot at the bottom of the page (data honesty: the stamp
+     stays visible, just not crowding the header). Bell keeps the slot alone. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Trade Alerts</span></div><div class="as-slot"><span data-scorr-bell></span></div></div>
 <!--
   cc#1620 — IDEAS (APP_ALERTS_IDEAS_V1, session_log 37072). The Alerts tab is the APPROVED BOOK
   (WOT_APPROVAL_SURFACE_V1 36394) shown as curated idea cards. Newest first (36394): the cc#1506
@@ -195,16 +200,17 @@ function pctCls(v){ return v == null ? 'mu' : (v > 0 ? 'up' : (v < 0 ? 'dn' : 'm
    payload's stats (computed server-side on live cards), the honesty line under it ─────────── */
 function renderTop(){
   var d = IA.data, c = (d && d.counts) || {}, s = (d && d.stats) || {};
-  $('ia-r').innerHTML = d
-    ? esc((c.all || 0) + ' ideas · ' + (c.live || 0) + ' live · ' + (c.waiting || 0) + ' waiting') + '<br>' + esc('as of ' + (d.as_of_ist || '—') + (d.price_basis === 'CLOSE' ? ' · last close' : ''))
-    : (IA.err ? 'could not load' : 'loading…');
   $('ia-stats').innerHTML = '<div class="ia-stats">'
     + '<div><div class="ia-k">LIVE</div><div class="ia-v">' + (s.live != null ? s.live : '—') + '</div></div>'
     + '<div><div class="ia-k">WINNING</div><div class="ia-v ' + (s.winning ? 'up' : '') + '">' + (s.winning != null ? s.winning : '—') + '</div></div>'
     + '<div><div class="ia-k">AVG SINCE</div><div class="ia-v ' + pctCls(s.avg_since_pct) + '">' + pctS(s.avg_since_pct, 1) + '</div></div>'
     + '<div><div class="ia-k">BEST</div><div class="ia-v ' + pctCls(s.best_pct) + '">' + pctS(s.best_pct, 1) + '</div></div>'
     + '</div><div class="ia-hon">' + esc((d && d.honesty) || 'Every idea here was handpicked and approved by hand. Prices and P&L are live since approval.') + '</div>';
-  $('ia-foot').textContent = 'Ideas are the approved book. Prices live. Nothing lands here before it is approved by hand.';
+  /* cc#1667: the as-of stamp moved here from the header's #ia-r line (counts stay on the filter
+     chips, which already show All/Live/Waiting/Closed with their own numbers). */
+  $('ia-foot').textContent = d
+    ? 'Ideas are the approved book. Prices live. Nothing lands here before it is approved by hand. As of ' + (d.as_of_ist || '—') + ' IST' + (d.price_basis === 'CLOSE' ? ' · last close' : '') + '.'
+    : (IA.err ? 'Could not load.' : 'Loading…');
 }
 
 function renderFilters(){
@@ -355,7 +361,7 @@ function load(){
   fetchWithTimeout(IA_URL).then(function(r){ return r.json(); }).then(function(d){
     if (!d || d.error) throw new Error((d && d.error) || 'empty reply');
     IA.data = d; IA.err = null; render();
-  }).catch(function(e){ IA.err = e.message || 'load failed'; if (!IA.data) render(); else $('ia-r').textContent = 'refresh failed · showing ' + (IA.data.as_of_ist || 'earlier'); });
+  }).catch(function(e){ IA.err = e.message || 'load failed'; if (!IA.data) render(); else $('ia-foot').textContent = 'Refresh failed · showing ' + (IA.data.as_of_ist || 'earlier') + '.'; });
 }
 function ideaById(id){ return ((IA.data && IA.data.ideas) || []).filter(function(c){ return String(c.id) === String(id); })[0]; }
 function cardErr(id, msg){
