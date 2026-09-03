@@ -54,9 +54,10 @@
     { k: 'aquawhite', label: 'Aqua White', ic: '○' },
     { k: 'goldday',   label: 'Gold Day',   ic: '◈' },
     { k: 'blush',     label: 'Blush',      ic: '❀' },   /* cc#1637 */
-    { k: 'rosenight', label: 'Rose Night', ic: '✿' }
+    { k: 'rosenight', label: 'Rose Night', ic: '✿' },
+    { k: 'rosewall',  label: 'Rose Wall',  ic: '❉' }
   ];
-  var THEME_OK = { goldnight: 1, dark: 1, aquawhite: 1, goldday: 1, blush: 1, rosenight: 1 };
+  var THEME_OK = { goldnight: 1, dark: 1, aquawhite: 1, goldday: 1, blush: 1, rosenight: 1, rosewall: 1 };
 
   function storedTheme() {
     var T = window.SCORR_THEME; if (T && T.get) return T.get();
