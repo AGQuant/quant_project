@@ -334,3 +334,19 @@ body[data-theme="ainight"]{ --glow-line:rgba(53,224,255,.35); --glow-num:rgba(53
  * /m/* scope hook (added to <body> at runtime by that already-shared script; not something this
  * card introduces). Net target: one row, about 52px, then content. */
 body.mcards .as-hdr{ padding-top:var(--space-8); padding-bottom:var(--space-8); }
+
+/* cc#1661 P2 · the four nav pages (V8, GVM, Check, Alerts). Each carries a BESPOKE page-local
+ * header strip, not the generic `.head > h1` pattern P3's "rest" pages use, so each gets its own
+ * targeted rule rather than one shared selector pretending they are the same shape. GVM needs no
+ * rule at all -- its top row (.g-search) was never a title, it stays exactly as it was, first row
+ * under the shell (its bell moved to .as-slot in the page markup, not by CSS).
+ *   V8:     .top held the page's own "V8" wordmark + the bell -- title hidden, bell moved by markup.
+ *   Check:  .c-top held "CHECK" + the live-status text + the bell -- title hidden, the other two
+ *           moved to .as-slot by markup (the search input below, .c-search, is untouched).
+ *   Alerts: .ia-top held "Trade Alerts" + the as-of line + the bell (the card spec assumed no
+ *           bell here; it was already in the markup -- moved to match every other nav page,
+ *           logged in cc_task_logs task 1661) -- now holds only the title, hidden whole so no
+ *           leftover padding remains. */
+#v8p .top,
+#ckp .c-top,
+.ia-top{ display:none; }
