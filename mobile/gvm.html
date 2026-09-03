@@ -19,10 +19,21 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
 <!-- cc#1591: this page's styles live in /static/mobile_app.css (mobile_endpoints.py MOBILE_CSS,
      section "GVM v2"), on the cc#897 precedent, so the theme ratchet measures one place. -->
 </head>
-<body>
+<body data-theme="goldnight">
+<!-- cc#1645 P2: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap). -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
+     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
+     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+var __r1644=({dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<!-- cc#1645 P2: shared appshell header (VARIANT B). Existing search bar below is untouched. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">GVM</span></div><div class="as-slot"></div></div>
 <div id="gvp">
   <div class="g-search" style="display:flex;align-items:center;gap:8px">
     <div class="g-sbox" style="flex:1;min-width:0"><span class="g-ic">◈</span><input id="g-q" type="search" placeholder="Search a company" autocomplete="off" autocapitalize="characters" aria-label="Search a company"><span class="g-k">ANY STOCK</span></div>

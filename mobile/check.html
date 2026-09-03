@@ -18,6 +18,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
 <script src="/scorr_card_common.js"></script>
 </head>
 <body data-theme="goldnight">
@@ -25,6 +27,8 @@
      goldday is kept and not used (cc#1119). -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
 var __r1644=({dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');}catch(e){}})();</script>
+<!-- cc#1645 P2: shared appshell header (VARIANT B). Existing .c-top strip below is untouched. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Check</span></div><div class="as-slot"></div></div>
 <div id="ckp">
   <div class="c-top"><div class="c-brand">CHE<b>CK</b></div><div style="display:flex;align-items:center;gap:10px"><div class="c-live" id="c-live"></div><span data-scorr-bell></span></div></div>
   <div class="c-modes" id="c-modes" role="tablist"></div>
