@@ -1555,13 +1555,10 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
       <button type="button" data-t="goldday" title="Gold Day · white-golden" aria-label="Gold day theme">&#9671;</button>
       <button type="button" data-t="goldnight" title="Gold Night · black-gold" aria-label="Gold night theme">&#9672;</button>
     </div>
-    <!-- cc#984: session clock AND feed freshness, stacked right. Two different truths — the
-         market can be open while the tape is dead, which is exactly what happened on 10-Aug
-         (first tick of the day at 10:40) with nothing on this screen saying so. -->
-    <div class="hdr-r">
-      <div class="s" id="sess">loading…</div>
-      <span id="feedrail"></span>
-    </div>
+    <!-- cc#1634 (founder 02-Sep 22:55): the session clock + feed rail left this corner. Both
+         truths now sit on the first hero card's own as-of line (cc#984's two-truths rule kept:
+         market status AND feed freshness, side by side). The corner is the shared bell. -->
+    <span data-scorr-bell></span>
   </div>
 
   <div class="body" id="body"><div class="loading">Loading your dashboard…</div></div>
@@ -4893,17 +4890,17 @@ function renderHome(d, pv){
     }
   }
 
-  document.getElementById('sess').textContent = d.session.label;
+  /* cc#1634: the session label no longer paints in the header; it folds into hero card 1's as-of
+     line below (HOME_SESS_LINE). The poll gate still reads the server flag off this payload. */
   /* cc#1411: the poll gate reads the SERVER's own market_open flag off this same payload — the
-     flag whose label ("Market open/closed · HH:MM IST") just painted one line above. The client
+     flag whose label ("Market open/closed · HH:MM IST") used to paint in the header. The client
      never derives open/closed from the phone's clock (the cc#984 rule, applied to the timer). */
   HOME_POLL.marketOpen = !!(d.session && d.session.market_open);
   HOME_POLL.lastFetch = Date.now();
   /* cc#984: feed freshness beside the clock. Server-computed — the client renders it, it never
      works it out. A payload without `feed` (cached shell mid-deploy) simply shows nothing rather
      than guessing a state. */
-  var fr = document.getElementById('feedrail');
-  if (fr) fr.innerHTML = railHtml(d.feed);
+  HOME_SESS_LINE = [d.session && d.session.label, d.feed && d.feed.label ? String(d.feed.label).toLowerCase() : null].filter(Boolean).join(' · ');
 
   var h = '';
 
@@ -4966,7 +4963,9 @@ function renderHome(d, pv){
   }
   h += '<div class="swipe"><div class="swipe-t" id="heroTrack" onscroll="heroDots()">'
     + '<div class="c"><div class="chd"><div class="t">The market today</div>'
-    + '<div class="rgt">' + esc(hero.as_of || '') + '</div></div>'
+    /* cc#1634: market status + feed freshness live HERE now, on the card's own as-of line, in
+       place of the header corner. Falls back to the hero's own as-of when the payload has none. */
+    + '<div class="rgt">' + esc(HOME_SESS_LINE || hero.as_of || '') + '</div></div>'
     /* cc#1352: word and why share one flex row (.hero-verdict); the enhancer's fail meter is
        inserted after .hero-why and wraps to its own full-width line via the CSS above. */
     + '<div class="hero-verdict"><div class="hero-mood" style="color:' + moodColor(hero.mood) + '">' + moodLetters(hero.mood || '--') + '</div>'
@@ -5296,6 +5295,7 @@ function renderHome(d, pv){
    NO refresh spinner (scope 6, CC's call): the session clock, feed rail and every figure
    repaint in place — that movement IS the acknowledgement, kept quiet per the card. */
 var HOME_POLL = { h: null, inflight: false, ms: 5 * 60 * 1000, marketOpen: false, lastFetch: 0 };
+var HOME_SESS_LINE = '';   /* cc#1634: "Market open · HH:MM IST · feed live" for hero card 1's as-of line */
 function homeRefresh(){
   if (HOME_POLL.inflight) return;                     /* scope 4: a slow network skips the tick,
                                                          never stacks a second request */
@@ -5347,7 +5347,7 @@ Promise.all([
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
     + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-  document.getElementById('sess').textContent = 'failed to load';
+  HOME_SESS_LINE = '';   /* cc#1634: nothing to fold into the hero line on a failed load */
 });
 </script>
 </body>

@@ -153,7 +153,7 @@ body{ --field:#0A0A0C; }
 </head>
 <body>
 <div id="v8p">
-  <div class="top"><div class="brand">V<b>8</b></div><div class="live"><span class="dot off" id="tdot"></span><span id="tclock">V8</span> <span class="pill" id="tpill">loading</span></div></div>
+  <div class="top"><div class="brand">V<b>8</b></div><span data-scorr-bell></span></div>
   <div class="sect">Market mood <span class="r" id="mood-r"></span></div>
   <section class="pressed hero" id="sec-mood" aria-label="Market mood gate"><div class="empty">Loading the market gate…</div></section>
   <div class="sect">Open positions <span class="n" id="open-n"></span><span class="r" id="open-r"></span></div>
@@ -329,8 +329,17 @@ function renderMood(){
     + '<div class="checks" style="margin-top:10px">'+ck+'</div>'
     + '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'
     + '<div class="foot"><span>'+breadth+'</span><span style="color:var(--gold)">rules →</span></div>'
-    + asofSession(STATE.fetchedAt, 'gate '+String(m.checked_at||'')+' · Nifty D/W/M vs prev close');
+    + moodFoot(m);
   if(r) r.textContent = String(m.checked_at||'');
+}
+/* cc#1634: ONE footer line on the hero card carries what the header corner used to say:
+   "gate <date> · market open · LIVE HH:MM" in session, "gate <date> · market closed · HH:MM"
+   after 15:30 (sessionStamp, never LIVE on a closed market). The Nifty-basis words moved into
+   the rules sheet where they are explained. */
+function moodFoot(m){
+  var st = sessionStamp(STATE.fetchedAt), open = marketOpen();
+  var when = String(st.txt || '').replace(/^close\s*·\s*/i, '');
+  return '<div class="asof'+(st.amber?' stale':'')+'">'+esc('gate '+String(m.checked_at||'')+' · market '+(open ? 'open' : 'closed')+(when ? ' · '+when : ''))+'</div>';
 }
 /* cc#1628 · the gate sheet. Plain words for each rule, built from the payload's filter name,
    required threshold, value and pass flag - the numbers are the same ones on the card. */
@@ -1045,15 +1054,9 @@ function renderFunnel(){
   el.innerHTML = h;
 }
 function renderTop(){
-  var d = istNow(), open = marketOpen();
-  document.getElementById('tdot').className = 'dot' + (open?'':' off');
-  document.getElementById('tclock').textContent = (open ? 'Market open' : 'Market closed') + ' · ' + hhmm(d) + ' IST';
-  var bk = STATE.book, pill = document.getElementById('tpill');
-  if(bk && bk.as_of){
-    var st = scorrAsofStamp(bk.as_of);
-    pill.textContent = st.txt ? 'Book ' + st.txt : 'Book';
-    pill.className = 'pill' + (st.amber ? ' stale' : '');
-  } else { pill.textContent = 'Book not loaded'; pill.className = 'pill stale'; }
+  /* cc#1634: the header corner is the shared bell now. Market open / closed + time sits on the
+     Market Mood footer (moodFoot), and the book stamp on the Open Positions caption (cc#1629). */
+  var bk = STATE.book;
   var fn = document.getElementById('foot-note'), dl = STATE.daylog;
   var capTxt = (dl && num(dl.capital_base)) ? ' Capital '+inr(dl.capital_base)+'.' : '';
   var eraTxt = (bk && bk.era_block && bk.era_block.era_label) ? ' '+bk.era_block.era_label+'.' : '';
