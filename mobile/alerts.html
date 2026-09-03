@@ -142,7 +142,7 @@
 
   <div class="ia-top">
     <div class="ia-h1">Ideas<small>Curated · Equity &amp; Futures</small></div>
-    <div class="ia-r" id="ia-r">loading…</div>
+    <div style="display:flex;align-items:center;gap:10px"><div class="ia-r" id="ia-r">loading…</div><span data-scorr-bell></span></div>
   </div>
 
   <div class="body">
@@ -328,6 +328,8 @@ function renderList(){
   if (wait.length) h += '<div class="ia-sect">Waiting for price <span class="r">' + wait.length + (wait.length === 1 ? ' idea' : ' ideas') + '</span></div>' + wait.map(card).join('');
   if (!all.length) h = '<div class="empty"><b>' + (IA.filter === 'all' ? 'No ideas yet' : 'Nothing under ' + esc(FILTERS.filter(function(f){ return f.k === IA.filter; })[0].l)) + '</b>' + (IA.filter === 'all' ? 'An idea lands here once it is approved by hand.' : 'Try another filter.') + '</div>';
   $('ia-list').innerHTML = h;
+  /* cc#1634: the bell deep-links here as #ia-<id>; land on that card once it exists */
+  if (/^#ia-\d+$/.test(location.hash || '')){ var tgt = document.querySelector(location.hash); if (tgt){ tgt.scrollIntoView({block: 'center'}); location.hash = ''; } }
 }
 
 function render(){ renderTop(); renderFilters(); renderList(); }
@@ -486,6 +488,8 @@ function alSubmit(){
       fail(e.message);
     });
 }
+/* cc#1634: the bell's "+ New alert" opens the same New Alert flow this page owns */
+if (location.hash === '#new'){ location.hash = ''; setTimeout(alOpen, 0); }
 </script>
 </body>
 </html>
