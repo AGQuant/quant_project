@@ -552,8 +552,10 @@ function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m ? 
    session, 28px pitch, zero gridline, today gold, older bars fade left, snapped to the newest end
    on load), a DAILY | WEEKLY | MONTHLY toggle (client-side sums of the SAME daily rows via
    daylogRows - no second endpoint), headline tiles that follow the toggle, a tap tooltip per bar,
-   and the y-scale = max |net| of the VISIBLE window, recomputed when the scroll settles and stated
-   in the footer. Footer status after 15:30 IST reads close · HH:MM (asofSession, cc#1621). */
+   and ONE fixed y-scale per view = max |net| across the WHOLE era (every row of that view, not
+   the scrolled-into-view window), computed once at render and stated in the footer; scrolling only
+   updates the "N of M in view" count (cc#1625). Footer status after 15:30 IST reads close · HH:MM
+   (asofSession, cc#1621). */
 var DAY_PITCH = 28, DAY_TIP = null;
 function dayRowsForView(){
   var rows = daylogRows(DAY_VIEW).slice().reverse();   /* API is newest first; draw oldest -> newest */
@@ -596,6 +598,10 @@ function renderDay(){
     + '<div style="text-align:right"><div class="dlbl">'+esc(tiles[1][0])+'</div><div class="dbig '+sgn(tiles[1][1])+'">'+inr(tiles[1][1])+'</div><div class="dlbl" style="letter-spacing:.3px;text-transform:none">'+esc(tiles[1][2])+'</div></div></div>';
   var pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64);
   var W = Math.max(rows.length * pitch, 10), H = 150, BASE = 78, MAXH = 60, bw = pitch * 0.62;
+  /* cc#1625: the scale is fixed ONCE from the whole era of this view. Every bar, whatever is on
+     screen, is drawn against this same number, so equal heights always mean equal rupees. */
+  var maxAbs = 0; for(var q=0;q<rows.length;q++){ var av = num(rows[q].net_pnl) ? Math.abs(rows[q].net_pnl) : 0; if(av > maxAbs) maxAbs = av; }
+  var scaleTxt = maxAbs ? 'scale ±'+inr(maxAbs) : 'scale ±—';
   var svg = '<svg data-dbars="1" viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" style="display:block;height:'+H+'px;width:'+W+'px;min-width:100%" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="'+BASE+'" x2="'+W+'" y2="'+BASE+'" stroke="var(--line)" stroke-width="1"/>';
   var lastMonth = '', lastLab = -9;
   for(var k=0;k<rows.length;k++){
@@ -603,7 +609,8 @@ function renderDay(){
     var x = (k*pitch + (pitch-bw)/2).toFixed(1);
     var fill = isCur ? 'var(--gold)' : (v>=0 ? 'var(--up)' : 'var(--down)');
     var op = isCur ? 1 : (0.45 + 0.50*(k/Math.max(1,rows.length-1))).toFixed(2);
-    svg += '<rect data-dbar="'+k+'" x="'+x+'" y="'+BASE+'" width="'+bw.toFixed(1)+'" height="1" fill="'+fill+'" opacity="'+op+'" style="cursor:pointer"/>';
+    var bh = maxAbs ? Math.max(1, Math.abs(v)/maxAbs*MAXH) : 1;
+    svg += '<rect data-dbar="'+k+'" x="'+x+'" y="'+(v>=0 ? BASE-bh : BASE).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+fill+'" opacity="'+op+'" style="cursor:pointer"/>';
     var mo = String(r.date).slice(0, 7), lab = '';
     /* daily: the first session of each month is named (3 Aug), then every fifth bar shows its day
        number, never closer than two bars to the last label so the tail cannot collide */
@@ -619,31 +626,26 @@ function renderDay(){
   svg += '</svg>';
   var strip = '<div style="position:relative"><div data-day-scroll="1" style="overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;position:relative">'
     + '<div style="position:relative;width:'+W+'px;min-width:100%">'+svg+'<div data-day-tip="1" style="display:none;position:absolute;top:8px;padding:5px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--chalk);white-space:nowrap;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.4)"></div></div></div>'
-    + '<div data-day-scale="1" style="position:absolute;left:0;top:0;padding:2px 6px;background:var(--panel);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:9px;color:var(--mute);pointer-events:none">scale ±—</div></div>';
+    + '<div data-day-scale="1" style="position:absolute;left:0;top:0;padding:2px 6px;background:var(--panel);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:9px;color:var(--mute);pointer-events:none">'+scaleTxt+'</div></div>';
   var lastRow = rows[rows.length-1];
   var note = (DAY_VIEW === 'daily' && !dayIsCurrent(lastRow)) ? '<div class="tbl-note">No exit booked today yet, so today reads ₹0. The last bar is '+esc(dmy(lastRow.date))+'.</div>' : '';
-  el.innerHTML = seg + head + strip + '<div class="dp-foot"><span>'+esc(dayBarLabel(rows[0]))+' → '+esc(dayBarLabel(lastRow))+'</span><span data-day-scaletxt="1"></span></div>' + note
+  el.innerHTML = seg + head + strip + '<div class="dp-foot"><span>'+esc(dayBarLabel(rows[0]))+' → '+esc(dayBarLabel(lastRow))+'</span><span data-day-scaletxt="1" data-day-scaleval="'+esc(scaleTxt)+'"></span></div>' + note
     + asofSession(STATE.fetchedAt, 'era · '+daylogSince(dl).toLowerCase()+(DAY_VIEW === 'daily' && num(lastRow.closed) ? ' · '+lastRow.closed+' closed on last day' : ''));
   var sc = el.querySelector('[data-day-scroll]');
   sc.scrollLeft = sc.scrollWidth;   /* snap to the newest end */
-  dayRescale();
+  dayInView();
   var t = null;
-  sc.addEventListener('scroll', function(){ clearTimeout(t); t = setTimeout(dayRescale, 120); });
+  sc.addEventListener('scroll', function(){ clearTimeout(t); t = setTimeout(dayInView, 120); });
 }
-/* y-scale = max |net| among the bars inside the visible window (scroll end), stated in the footer */
-function dayRescale(){
-  var el = document.getElementById('sec-day'), sc = el && el.querySelector('[data-day-scroll]'), svg = el && el.querySelector('[data-dbars]'); if(!sc || !svg) return;
-  var rows = dayRowsForView(), pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64), BASE = 78, MAXH = 60;
+/* cc#1625: scrolling never touches the scale or the bars. The only thing that follows the scroll
+   is the honest "N of M <unit> in view" count in the footer; the scale number is the one fixed
+   at render from the whole era and is read back from the footer's data attribute. */
+function dayInView(){
+  var el = document.getElementById('sec-day'), sc = el && el.querySelector('[data-day-scroll]'); if(!sc) return;
+  var rows = dayRowsForView(), pitch = DAY_VIEW === 'daily' ? DAY_PITCH : (DAY_VIEW === 'weekly' ? 44 : 64);
   var from = Math.max(0, Math.floor(sc.scrollLeft / pitch)), to = Math.min(rows.length-1, Math.ceil((sc.scrollLeft + sc.clientWidth) / pitch));
-  var maxAbs = 0; for(var i=from;i<=to;i++){ var v = num(rows[i] && rows[i].net_pnl) ? Math.abs(rows[i].net_pnl) : 0; if(v > maxAbs) maxAbs = v; }
-  var bars = svg.querySelectorAll('[data-dbar]');
-  Array.prototype.forEach.call(bars, function(b){
-    var k = +b.getAttribute('data-dbar'), v = num(rows[k] && rows[k].net_pnl) ? rows[k].net_pnl : 0, h = maxAbs ? Math.max(1, Math.abs(v)/maxAbs*MAXH) : 1;
-    b.setAttribute('height', h.toFixed(1)); b.setAttribute('y', (v>=0 ? BASE-h : BASE).toFixed(1));
-  });
-  var txt = maxAbs ? 'scale ±'+inr(maxAbs) : 'scale ±—';
-  var sl = el.querySelector('[data-day-scale]'); if(sl) sl.textContent = txt;
-  var st = el.querySelector('[data-day-scaletxt]'); if(st) st.textContent = txt+' · '+(to-from+1)+' of '+rows.length+' in view';
+  var unit = DAY_VIEW === 'daily' ? 'sessions' : DAY_VIEW === 'weekly' ? 'weeks' : 'months';
+  var st = el.querySelector('[data-day-scaletxt]'); if(st) st.textContent = (st.getAttribute('data-day-scaleval') || 'scale ±—')+' · '+(to-from+1)+' of '+rows.length+' '+unit+' in view';
 }
 function dayTip(k){
   var el = document.getElementById('sec-day'), tip = el && el.querySelector('[data-day-tip]'), svg = el && el.querySelector('[data-dbars]'); if(!tip || !svg) return;
