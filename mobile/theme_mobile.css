@@ -136,6 +136,59 @@
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .tool,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .tool{ color:var(--ink); }
 
+
+/* cc#1643 · LIGHT-SET SHELL RELEASE (founder screenshot 03-Sep 17:24 IST: The Book and My
+ * Portfolio cards render black with unreadable dark ink on goldday/aquawhite/blush/rosewall,
+ * while the plain .c/.card/.m cards cc#1640 fixed are correctly light). Different bug, same
+ * family: scorr_theme_r5.css declares .slab, .pressed{ --panel:#17171B; --line:#2A2A31;
+ * --chalk:#F5F2EA; --mute:#8A8A93; --field:#0A0A0C; --well:#131316 } directly ON the shell
+ * classes, unprefixed, at (0,1,0). A custom property declared on the element always beats one
+ * inherited from body[data-theme=X], whatever theme is active, so every shell card painted the
+ * Gold Night literals on every theme - the cc#1090 depth-system ruling that the shell colour
+ * "travels with the shell, not the theme" for GOLD NIGHT never anticipated a light set adopting
+ * the shell. This block scopes that ruling to the DARK sets only, per the card: it repoints the
+ * shell's five internal names to the theme's own tokens on the four light sets, first capturing
+ * them under --shell-* on body (custom properties are shadowed by nearer declarations, so the
+ * shell rule would otherwise keep winning even against a same-name override on .slab itself),
+ * then explicit background/border-color faces so no var(--x, #literal) fallback can win either.
+ * --sunk is NOT touched at the --shell layer for a different reason: R5 stopped declaring it on
+ * the shell entirely (founder ruling 2 sent --gold-lo/--gold-hi/--sunk to the theme), so it
+ * already inherits the theme's real --sunk on the three complete light sets; goldday alone has
+ * no --sunk (legacy incomplete set, cc#1185: report, do not fix) and falls to R5's own literal
+ * fallback - --hi stands in for it here so .pressed has a face on goldday too, uniformly applied
+ * to all four sets for consistency rather than as a goldday-only patch. Dark sets (dark,
+ * goldnight, rosenight, ainight) match no selector below. Nothing here touches P&L. */
+body[data-theme="aquawhite"], body[data-theme="blush"], body[data-theme="goldday"], body[data-theme="rosewall"]{
+  --shell-panel:var(--panel); --shell-line:var(--edge); --shell-chalk:var(--ink); --shell-mute:var(--muted);
+  --shell-well:var(--hi); --shell-field:var(--field); --shell-sunk:var(--hi);
+}
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .pressed{
+  --panel:var(--shell-panel); --line:var(--shell-line); --chalk:var(--shell-chalk); --mute:var(--shell-mute);
+  --well:var(--shell-well); --field:var(--shell-field); --sunk:var(--shell-sunk);
+}
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .slab{ background:var(--panel); border-color:var(--line); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .pressed{ background:var(--sunk); border-color:var(--line); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .well-up,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .well-up,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .well-up,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .well-up{ background:var(--well); }
+/* known legacy gap (cc#1185: report, do not fix): goldday has no --gold-lo, so .slab/.slab.dense's
+ * ledge (box-shadow 0 Npx 0 0 var(--gold-lo, #7A6320)) falls to the R5 gold literal on goldday.
+ * The founder screenshot shows this ledge and it is acceptable; left untouched, out of scope. */
+
 /* cc#1637 · ROSE WALL on-field colours (37303 rosewall_03sep). A dark wall and a light card cannot
  * share one --muted (measured 2.1 on the wall vs 9.0 on the card), so this set carries two extra
  * tokens for the few things that sit ON the wall: section eyebrows and their right text, page
