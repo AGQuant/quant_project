@@ -1370,7 +1370,7 @@ NAV_REGISTRY = {
     # bar — a retail screen must never sit on the professional web nav (16915). "nav-mobile" is
     # the registry saying which bar an entry actually appears on, so the registry cannot claim a
     # desktop destination that the desktop never renders.
-    "/m/intel":      ("Intel (mobile)",       "nav-mobile"),
+    "/m/intel":      ("Intel (mobile)",       "grid-tile"),   # cc#1638: out of the nav, Home grid tile next to Custom Alert
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),
