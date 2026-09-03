@@ -120,7 +120,7 @@
 if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
      applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
      White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
-document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight'||t==='aquawhite'||t==='goldday'||t==='blush'||t==='rosenight'||t==='rosewall'||t==='ainight')?t:'goldnight');})();</script>
+var __r1644=({dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');})();</script>
 <div class="phone">
 <!-- APP_QA_R4 P5 · SHELL VARIANT B (section page), ref design_refs/scorr_appshell_R1.html @ a20ae0d.
      gvm2 IS a section, so the GVM tab lights volt (ref rule 3) — unlike the two tool pages. The
