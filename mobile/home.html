@@ -5209,6 +5209,10 @@ function renderHome(d, pv){
          16915 exception as Dashboard / AICIO below. The bottom-nav WoT (/m/trades, display only)
          is untouched. Glyph is a ballot tick so it never reads as the Alerts flag. */
     + '<a class="tool slab dense" href="/trades"><span>\u2611</span>Wall of Trades</a>'
+      /* cc#1635 (founder 02-Sep 22:59): Custom Alert as its own tile beside Wall of Trades. It opens
+         the SAME New Alert flow the Alerts page + button used to open - the page reads #new and
+         calls its own alOpen() (cc#1634) - so creation moved out of that page without a rebuild. */
+    + '<a class="tool slab dense" href="/m/alerts#new"><span>\uff0b</span>Custom Alert</a>'
     + '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
     + '<a class="tool slab dense" href="/m/screeners"><span>\u2637</span>Screeners</a>'
     + '<a class="tool slab dense" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'

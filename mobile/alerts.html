@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Ideas · Alerts</title>
+<title>Trade Alerts</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
@@ -96,10 +96,6 @@
    page-local CSS, not shared. The + button: the app has NO existing floating-action convention
    (checked before inventing — closest is the chip/sheet grammar), so a chat-style compose
    button pinned above the bar is used, sized 52px against the 44px tap floor. */
-.al-fab{position:fixed;right:16px;bottom:calc(74px + env(safe-area-inset-bottom,0px));z-index:70;
-  width:52px;height:52px;border-radius:50%;border:var(--bw-1) solid var(--line2);cursor:pointer;
-  background:var(--panel,#161F33);color:var(--txt,#E9EEFB);font-size:26px;line-height:1;
-  display:flex;align-items:center;justify-content:center;box-shadow:0 8px 22px rgba(0,0,0,.35)}
 .al-veil{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
 .al-sheet{position:fixed;left:0;right:0;bottom:0;max-height:82vh;display:flex;flex-direction:column;z-index:81;
   background:var(--panel,#161F33);border-top:var(--bw-1) solid var(--line);
@@ -141,7 +137,7 @@
 <div class="screen">
 
   <div class="ia-top">
-    <div class="ia-h1">Ideas<small>Curated · Equity &amp; Futures</small></div>
+    <div class="ia-h1">Trade Alerts<small>Curated · Equity &amp; Futures</small></div>
     <div style="display:flex;align-items:center;gap:10px"><div class="ia-r" id="ia-r">loading…</div><span data-scorr-bell></span></div>
   </div>
 
@@ -153,7 +149,9 @@
   </div>
 </div>
 
-<button class="al-fab" id="alFab" aria-label="New alert" onclick="alOpen()">＋</button>
+<!-- cc#1635 (founder 02-Sep 22:59): the + New Alert button left this page. Creation now starts from
+     the Custom Alert tile on the Home grid (and the bell popover), both landing here as #new, which
+     opens the same alOpen() flow below. Nothing about the flow itself changed. -->
 
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>

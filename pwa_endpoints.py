@@ -420,7 +420,7 @@ PWA_JS = """
     // cc#1506: the Alerts feed (trade alerts, 34521). cc#1535: Alerts left the PRIMARY bar for
     // the home grid tile 1; this entry stays so the More sheet still reaches it (rule 2987 —
     // nothing stranded).
-    ['/m/alerts', '\\u25ec', 'Alerts (mobile)', 'm'],
+    ['/m/alerts', '\\u25ec', 'Trade Alerts (mobile)', 'm'],
     // cc#1535: Wall of Trades takes the freed PRIMARY slot, labelled WoT on the bar (shortLabel
     // strips the suffix). Same \\u2637\\ufe0e glyph as the grid tile it vacated.
     ['/m/trades', '\\u2637\\ufe0e', 'WoT (mobile)', 'm'],
