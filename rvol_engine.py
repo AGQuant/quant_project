@@ -193,9 +193,23 @@ def live_rvol(cur, symbol):
 def _day_ratios(cur, symbols, day):
     """One query for `day`: per symbol, cumulative-aware total ÷ profile at that symbol's own
     last-bar slot. Returns {symbol: ratio-or-None}. MIN_SESSIONS gates sufficiency, same as
-    live_rvol; missing bars/profile → None, never fabricated."""
+    live_rvol; missing bars/profile → None, never fabricated.
+
+    cc#1649 P1 READ-SIDE FALLBACK: a starved close slot (fyers_eq often ends 15:10/15:15 on a
+    given symbol-day, and the profile's own 15:15+ slots are themselves thin — see the module's
+    root-cause notes) used to mean an automatic None even though the symbol has 20+ full sessions
+    of history. If the profile at the last-bar slot is under MIN_SESSIONS, this walks BACK through
+    that SAME symbol's own bars (already fetched, already ordered) to the latest earlier slot
+    whose profile clears MIN_SESSIONS, and re-runs _cum_total on the truncated series (bars at or
+    before that slot only) — the ratio becomes "pace up to that earlier slot", honestly, not a
+    fabricated full-day number. No change to the stored profile, no change to MIN_SESSIONS.
+    Returns None only when NO slot in the symbol's own bars — the last one or any earlier one —
+    clears MIN_SESSIONS. Logs once per symbol-day to ops_log (category rvol, title
+    rvol_slot_fallback) with from_slot/to_slot when the fallback actually fires, so the read
+    stays honest and auditable rather than silently different from what a naive read would show."""
     cur.execute("""
-        SELECT q.symbol, array_agg(q.volume ORDER BY q.ts) AS vols, MAX(q.ts)::time AS slot
+        SELECT q.symbol, array_agg(q.ts::time ORDER BY q.ts) AS slots,
+               array_agg(q.volume ORDER BY q.ts) AS vols
         FROM (
             SELECT DISTINCT ON (symbol, ts) symbol, ts, volume FROM intraday_prices
             WHERE symbol = ANY(%s) AND source IN ('fyers_eq','fyers_hist') AND ts::date = %s
@@ -205,17 +219,35 @@ def _day_ratios(cur, symbols, day):
     rows = cur.fetchall()
     if not rows:
         return {}
-    slots = {r[0]: r[2] for r in rows}
     cur.execute("""SELECT symbol, slot_time, avg_cum_vol, sessions_used FROM rvol_profiles
                    WHERE symbol = ANY(%s)""", ([r[0] for r in rows],))
-    prof = {(p[0], p[1]): (float(p[2]) if p[2] is not None else None, int(p[3] or 0))
-            for p in cur.fetchall()}
+    prof_by_sym = {}
+    for sym, slot_time, avg_cum_vol, sessions_used in cur.fetchall():
+        prof_by_sym.setdefault(sym, {})[slot_time] = (
+            float(avg_cum_vol) if avg_cum_vol is not None else None, int(sessions_used or 0))
     out = {}
-    for sym, vols, slot in rows:
-        total = _cum_total([float(v or 0) for v in vols])
-        avg, sess = prof.get((sym, slots[sym]), (None, 0))
-        out[sym] = (round(total / avg, 2)
-                    if (avg and avg > 0 and sess >= MIN_SESSIONS and total > 0) else None)
+    for sym, slots_list, vols in rows:
+        vols_f = [float(v or 0) for v in vols]
+        profs = prof_by_sym.get(sym, {})
+        last_slot = slots_list[-1]
+        avg, sess = profs.get(last_slot, (None, 0))
+        use_bars = vols_f
+        if not (avg and avg > 0 and sess >= MIN_SESSIONS):
+            fallback_slot = None
+            for i in range(len(slots_list) - 1, -1, -1):
+                a, s = profs.get(slots_list[i], (None, 0))
+                if a and a > 0 and s >= MIN_SESSIONS:
+                    fallback_slot, avg, sess = slots_list[i], a, s
+                    use_bars = vols_f[:i + 1]
+                    break
+            if fallback_slot is None:
+                out[sym] = None
+                continue
+            _ops_log(cur, "rvol", "rvol_slot_fallback",
+                     {"symbol": sym, "day": str(day), "from_slot": str(last_slot)[:8],
+                      "to_slot": str(fallback_slot)[:8]})
+        total = _cum_total(use_bars)
+        out[sym] = round(total / avg, 2) if (avg and avg > 0 and total > 0) else None
     return out
 
 
