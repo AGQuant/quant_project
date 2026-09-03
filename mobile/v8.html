@@ -416,7 +416,11 @@ function applyFilter(rows){
   return rows.filter(function(p){ return m[0]==='side' ? p.side===m[1] : (p.basket||'?')===m.slice(1).join(':'); });
 }
 /* Track geometry only (no P&L): 0 = stop, 1 = target for both sides. `progress` for the CMP
-   marker is the endpoint's own field; the entry marker uses the same normalisation locally. */
+   marker is the endpoint's own field; the entry marker uses the same normalisation locally.
+   cc#1629: the FILL is the distance travelled from ENTRY to CMP - a band from the entry tick to
+   the gold CMP marker (toward target when winning, back toward stop when losing) - never a fill
+   from the stop end, which painted every winning trade near target as an almost full solid bar
+   (SUZLON short: stop-to-CMP read 90%; entry-to-CMP is a 36% band from 54% to 90%). */
 function trkFrac(v, p){
   var t = p.target, sl = p.stop_loss;
   if(!num(v) || !num(t) || !num(sl) || t===sl) return null;
@@ -513,7 +517,7 @@ function posRow(p){
   var fz = trkFrac(p.entry_price, p), fc = num(p.progress) ? Math.max(0, Math.min(1, p.progress)) : trkFrac(p.cmp, p);
   var trk = (fc==null)
     ? '<div class="trk none" title="no target or stop on this position"></div>'
-    : '<div class="trk '+sl+'"><i class="tfill" style="width:'+Math.round(fc*100)+'%"></i>'+(fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')+'<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i></div>';
+    : '<div class="trk '+sl+'"><i class="tfill" style="left:'+Math.round(Math.min(fz==null?fc:fz, fc)*100)+'%;width:'+Math.round(Math.abs(fc-(fz==null?fc:fz))*100)+'%"></i>'+(fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')+'<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i></div>';
   var cmpTxt = num(p.cmp) ? px(p.cmp) : '—';
   return '<div class="slab dense prow" data-side="'+sl+'" data-basket="'+esc(p.basket||'')+'">'+
     '<div class="psym">'+esc(p.symbol)+' '+mkFlag(p)+'<span class="tag '+sl+'">'+esc(side||'—')+'</span>'+bkTag(p)+'</div>'+
@@ -534,11 +538,13 @@ function renderOpen(){
   renderMarkerChips(rows);          // cc#1610: counts over the side/basket-filtered rows
   rows = applyMarkers(rows);        // OR among markers, AND with the chips above
   if(!all.length){
-    el.innerHTML = '<div class="slab dense empty">No open positions right now. The engine enters only when a stock clears all 9 checks and a slot is free.</div>'+asofLine(bk.as_of);
+    el.innerHTML = '<div class="slab dense empty">No open positions right now. The engine enters only when a stock clears all 9 checks and a slot is free.</div>'+asofSession(bk.as_of);
     return;
   }
   var show = openAll ? rows : rows.slice(0, OPEN_LIMIT);
-  el.innerHTML = show.map(posRow).join('') + asofLine(bk.as_of, 'book · CMP '+(rows[0].cmp_at||''));
+  /* cc#1629: the caption gets clear air under the last track (it read as sitting on the bar), and
+     uses the session stamp so a closed market says close · HH:MM, never LIVE (cc#1611 / 1621 rule) */
+  el.innerHTML = show.map(posRow).join('') + asofSession(bk.as_of, 'book · CMP '+(rows[0].cmp_at||'')).replace('class="asof', 'style="margin-top:14px" class="asof');
   if(rows.length > OPEN_LIMIT) more.innerHTML = '<span class="chip" data-open-toggle="1">'+(openAll ? 'Show fewer ▴' : 'Show all '+rows.length+' ▾')+'</span>';
 }
 /* ── top bar ──────────────────────────────────────────────────────────────────────────── */
