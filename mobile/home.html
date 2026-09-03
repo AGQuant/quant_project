@@ -5203,6 +5203,13 @@ function renderHome(d, pv){
          (the cc#1526 rationale, transferred). Wall of Trades left the grid for the bottom nav
          (labelled WoT), so it has no tile here; nothing else in the grid changes order. */
       '<a class="tool slab dense" href="/m/alerts"><span>\u25ec</span>Alerts</a>'
+      /* cc#1633 (founder 02-Sep 22:48): Wall of Trades is back on the grid as tile 2, right after
+         Alerts, because the grid is the founder's daily path and the approval surface had no
+         entry point here. It opens the WEB wall (/trades, the cc#1609 approve / dismiss surface,
+         the same page the V8 header tab embeds) - one WoT view, two entry points - under the same
+         16915 exception as Dashboard / AICIO below. The bottom-nav WoT (/m/trades, display only)
+         is untouched. Glyph is a ballot tick so it never reads as the Alerts flag. */
+    + '<a class="tool slab dense" href="/trades"><span>\u2611</span>Wall of Trades</a>'
     + '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
     + '<a class="tool slab dense" href="/m/screeners"><span>\u2637</span>Screeners</a>'
     + '<a class="tool slab dense" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'
