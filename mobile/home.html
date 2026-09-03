@@ -1555,21 +1555,14 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
      but the card's own verify step (one shell include per page, none on login.html) and GLASS
      line both name Home, so it gets the header here. Existing .head strip (own wordmark + the
      dead .tswitch control, cc#1644-confirmed unreachable) is untouched, just pushed below. -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Home</span></div><div class="as-slot"></div></div>
+<!-- cc#1661 P1: ONE header row. Home previously carried its own wordmark row (SCORR + the dead
+     cc#1636 .tswitch, CSS-disabled since before this card, plus the bell) on top of the cc#1645
+     P5b shell row -- two headers, per the founder's 04-Sep 10:07/10:25 screenshots. That row is
+     deleted (not hidden); the bell is the only thing from it that survives, moved into the
+     shell's own .as-slot. The .tswitch markup carried no visible/reachable control (confirmed
+     CSS-disabled, cc#1644-era) so nothing functional is lost by removing it along with the row. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Home</span></div><div class="as-slot"><span data-scorr-bell></span></div></div>
 <div class="screen">
-  <div class="head" style="display:flex;align-items:center;justify-content:space-between">
-    <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>
-    <div class="tswitch" id="tsw" role="group" aria-label="Theme">
-      <button type="button" data-t="dark" title="Dark · Telemetry" aria-label="Dark theme">&#9670;</button>
-      <button type="button" data-t="goldday" title="Gold Day · white-golden" aria-label="Gold day theme">&#9671;</button>
-      <button type="button" data-t="goldnight" title="Gold Night · black-gold" aria-label="Gold night theme">&#9672;</button>
-    </div>
-    <!-- cc#1634 (founder 02-Sep 22:55): the session clock + feed rail left this corner. Both
-         truths now sit on the first hero card's own as-of line (cc#984's two-truths rule kept:
-         market status AND feed freshness, side by side). The corner is the shared bell. -->
-    <span data-scorr-bell></span>
-  </div>
-
   <div class="body" id="body"><div class="loading">Loading your dashboard…</div></div>
 </div>
 

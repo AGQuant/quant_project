@@ -324,3 +324,13 @@ body[data-theme="ainight"]{ --glow-line:rgba(53,224,255,.35); --glow-num:rgba(53
 :root:root:not([data-theme="light"]) body[data-theme="ainight"] .ix .v{ text-shadow:var(--glow-8) var(--glow-num); }
 :root:root:not([data-theme="light"]) body[data-theme="ainight"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="ainight"] .as-nav{ background:var(--nav-bg); }
+
+/* cc#1661 · ONE HEADER ROW EVERYWHERE (supersedes cc#1658, unclaimed). Founder 04-Sep 10:07 +
+ * 10:25 IST: SCORR showed twice on Home, and every cc#1645-migrated page carried the new shared
+ * .as-hdr ABOVE its own pre-existing page-local title strip -- two headers stacked, not one.
+ * HEADER HEIGHT (applies to every push of this card, landed once here): the shared shell row's
+ * own padding (scorr_appshell.css .as-hdr{padding:12px 14px}) is trimmed top/bottom only on the
+ * app, leaving side padding untouched -- body.mcards is scorr_card_common.js's own established
+ * /m/* scope hook (added to <body> at runtime by that already-shared script; not something this
+ * card introduces). Net target: one row, about 52px, then content. */
+body.mcards .as-hdr{ padding-top:var(--space-8); padding-bottom:var(--space-8); }
