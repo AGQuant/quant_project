@@ -254,7 +254,15 @@ function emptyBox(id, words){
    breadth line and the gate footer. No carousel, no swipe, no dots. Every number is the same
    payload as before (market_mood + book); nothing re-derived. What survives from cc#1621 is the
    closed-market pill: footer status after 15:30 IST reads "close · HH:MM", never LIVE
-   (sessionStamp / asofSession, same rule as cc#1611 / 1607). */
+   (sessionStamp / asofSession, same rule as cc#1611 / 1607).
+   cc#1628: ADR is a STRIP, not a boxed number - a two-colour split bar in the ADR cell (green =
+   advances share, red = declines share) with A / D under it and the ratio as the value; DAY /
+   WEEK / MONTH stay boxed numbers (single-direction moves, not ratios). The whole card is
+   tappable and opens a bottom sheet (moodOpen: grab handle, X, Esc, scrim - the cc#1593 / 1618
+   pattern) with the four rules in plain words, the ADR strip larger with the full counts, slot
+   usage by basket from the open book, and the gate timestamp / source line. Tapping the ADR
+   strip itself jumps to the ADR part of the sheet. Nothing re-derived: every figure is the
+   market_mood payload plus STATE.book.positions. */
 function sessionStamp(asof){
   /* the shared stamp says LIVE HH:MM while the page is fresh; on a closed market the honest word
      is close, with the same time */
@@ -279,9 +287,17 @@ function renderMood(){
   var bk = STATE.book || {}, usedL = bk.long && num(bk.long.n) ? bk.long.n : null, usedS = bk.short && num(bk.short.n) ? bk.short.n : null;
   var B = m.buy_slots, S = m.sell_slots;
   var LBL = {'ADR':'ADR','Nifty Day':'DAY','Nifty Week':'WEEK','Nifty Month':'MONTH'};
+  var ad = m.adr_detail || {}, adA = num(ad.advances) ? ad.advances : null, adD = num(ad.declines) ? ad.declines : null;
+  var adShare = (adA != null && adD != null && adA + adD > 0) ? Math.round(adA / (adA + adD) * 100) : null;
+  function adrStrip(h){   /* green = advances share, red = the rest; null share = empty well */
+    return '<div class="sbar" style="height:'+h+'px;background:'+(adShare == null ? 'var(--well)' : 'var(--down)')+'"><i style="width:'+(adShare == null ? 0 : adShare)+'%;background:var(--up)"></i></div>';
+  }
   var ck = checks.map(function(c){
     var ind = c.indeterminate || !num(c.value);
     var v = ind ? '—' : (c.filter==='ADR' ? c.value.toFixed(2) : pct(c.value, 2));
+    if(c.filter === 'ADR') return '<div class="ck '+(ind?'':(c.pass?'ok':'bad'))+'" data-mood-adr="1" title="'+esc(c.required||'')+'" style="padding:8px 6px 6px"><div class="cl">ADR</div><div class="cv">'+v+'</div>'
+      + '<div style="margin:5px 0 3px">'+adrStrip(6)+'</div>'
+      + '<div style="font-family:var(--mono);font-size:9px;color:var(--mute);white-space:nowrap">'+(adShare == null ? 'no count' : 'A '+adA+' / D '+adD)+'</div></div>';
     return '<div class="ck '+(ind?'':(c.pass?'ok':'bad'))+'" title="'+esc(c.required||'')+'"><div class="cl">'+esc(LBL[c.filter]||c.filter)+'</div><div class="cv">'+v+'</div></div>';
   }).join('');
   function slot(name, used, total, kind){
@@ -292,10 +308,10 @@ function renderMood(){
   var sentence = mode + ' ' + (num(usedL) && num(usedS)
     ? '<b>'+usedL+' of '+(num(B)?B:'—')+'</b> buy slots, <b>'+usedS+' of '+(num(S)?S:'—')+'</b> sell slots in use.'
     : 'Slots: <b>'+(num(B)?B:'—')+'</b> buy, <b>'+(num(S)?S:'—')+'</b> sell.');
-  var ad = m.adr_detail || {};
   var passed = checks.length - fails, barCol = cls==='bear' ? 'var(--down)' : cls==='bull' ? 'var(--up)' : 'var(--gold)';
   var barW = checks.length ? Math.round(passed / checks.length * 100) : 0;
-  var breadth = (num(ad.advances)&&num(ad.declines)) ? 'A '+ad.advances+' / D '+ad.declines : esc(m.nifty_source||'');
+  var breadth = (adA != null && adD != null) ? 'A '+adA+' / D '+adD : esc(m.nifty_source||'');
+  el.setAttribute('role', 'button'); el.setAttribute('data-mood-open', '1'); el.setAttribute('title', 'Tap for the gate rules'); el.style.cursor = 'pointer';
   var adrCk = checks.filter(function(c){ return c.filter==='ADR'; })[0];
   if(adrCk && num(adrCk.value)) breadth += ' · ADR '+adrCk.value.toFixed(2);
   if(ad.adr_date) breadth += ' · '+esc(ad.adr_date);
@@ -307,10 +323,68 @@ function renderMood(){
     + '<div class="eyebrow" data-mood-fails="1" style="margin-top:12px"><span>'+fails+' of '+checks.length+' checks failed</span><span>evidence</span></div>'
     + '<div class="checks" style="margin-top:10px">'+ck+'</div>'
     + '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'
-    + '<div class="foot"><span>'+breadth+'</span></div>'
+    + '<div class="foot"><span>'+breadth+'</span><span style="color:var(--gold)">rules →</span></div>'
     + asofSession(STATE.fetchedAt, 'gate '+String(m.checked_at||'')+' · Nifty D/W/M vs prev close');
   if(r) r.textContent = String(m.checked_at||'');
 }
+/* cc#1628 · the gate sheet. Plain words for each rule, built from the payload's filter name,
+   required threshold, value and pass flag - the numbers are the same ones on the card. */
+var MOOD_RULE = { 'ADR':'Advances divided by declines', 'Nifty Day':'Nifty on the day versus the previous close',
+                  'Nifty Week':'Nifty on the week versus the previous close', 'Nifty Month':'Nifty on the month versus the previous close' };
+function moodReq(req){ var m = /^(>=|>|<=|<)\s*([\-\d.]+)/.exec(String(req||'').trim()); if(!m) return req ? 'must be '+req : ''; var w = {'>=':'must be %s or more','>':'must be above %s','<=':'must be %s or less','<':'must be below %s'}[m[1]]; return w.replace('%s', m[2]); }
+function moodSheetHtml(){
+  var m = STATE.mood || {}, checks = m.checks || [], ad = m.adr_detail || {};
+  var adA = num(ad.advances) ? ad.advances : null, adD = num(ad.declines) ? ad.declines : null, adU = num(ad.unchanged) ? ad.unchanged : null;
+  var adShare = (adA != null && adD != null && adA + adD > 0) ? Math.round(adA / (adA + adD) * 100) : null;
+  var mood = String(m.mood||'—'), cls = /bear/i.test(mood) ? 'bear' : /bull/i.test(mood) ? 'bull' : '';
+  var tag = function(ok, ind){ return '<span class="tag '+(ind ? '' : ok ? 'long' : 'short')+'" style="margin-left:6px">'+(ind ? 'NO READING' : ok ? 'PASS' : 'FAIL')+'</span>'; };
+  var rows = checks.map(function(c){
+    var ind = c.indeterminate || !num(c.value), v = ind ? 'no reading yet' : (c.filter==='ADR' ? c.value.toFixed(2) : pct(c.value, 2));
+    var name = c.filter === 'ADR' ? 'Breadth' : String(c.filter||'').replace(/^Nifty /, '');
+    return '<div class="slab dense" style="margin:0 14px 8px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-family:var(--mono);font-size:12px;letter-spacing:1px">'+esc(name.toUpperCase())+'</b>'+tag(!!c.pass, ind)+'</div>'
+      + '<div style="font-size:13px;color:var(--chalk);margin-top:4px;line-height:1.45">'+esc((MOOD_RULE[c.filter] || c.filter)+' '+moodReq(c.required))+'. Today <b style="font-family:var(--mono)">'+esc(v)+'</b>. '+(ind ? 'Not counted.' : c.pass ? 'Pass.' : 'Fail.')+'</div></div>';
+  }).join('');
+  var bk = STATE.book || {}, pos = bk.positions || [], by = {L:{}, S:{}};
+  pos.forEach(function(p){ var k = String(p.side||'').toUpperCase() === 'SHORT' ? 'S' : 'L', b = p.basket_label || p.basket || '?'; by[k][b] = (by[k][b] || 0) + 1; });
+  var list = function(o){ var ks = Object.keys(o).sort(function(a, b){ return o[b] - o[a]; }); return ks.length ? ks.map(function(k){ return esc(k)+' <b style="font-family:var(--mono)">'+o[k]+'</b>'; }).join(' · ') : 'none open'; };
+  var usedL = Object.keys(by.L).reduce(function(t, k){ return t + by.L[k]; }, 0), usedS = Object.keys(by.S).reduce(function(t, k){ return t + by.S[k]; }, 0);
+  var B = m.buy_slots, S = m.sell_slots;
+  var slotRow = function(name, used, total, kind, who){
+    var w = (num(total) && total > 0) ? Math.max(0, Math.min(100, Math.round(used/total*100))) : 0;
+    return '<div class="slab dense" style="margin:0 14px 8px"><div class="slot"><div class="l"><span>'+name+'</span><b>'+used+' / '+(num(total)?total:'—')+'</b></div><div class="sbar '+kind+'"><i style="width:'+w+'%"></i></div></div><div style="font-size:12px;color:var(--mute);margin-top:6px">'+who+'</div></div>';
+  };
+  var st = sessionStamp(STATE.fetchedAt);
+  var head = '<div style="position:sticky;top:0;background:var(--panel,#0E1526);z-index:2;border-bottom:1px solid var(--line)">'
+    + '<div style="width:36px;height:4px;border-radius:2px;background:var(--line);margin:10px auto 6px"></div>'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 14px 10px"><div><div class="eyebrow" style="font-family:var(--mono);font-size:10.5px;letter-spacing:2px;color:var(--mute);text-transform:uppercase">Market gate · '+esc(String(m.checked_at||''))+'</div><div style="font-family:var(--display);font-size:26px;line-height:1.1;margin-top:2px" class="gword '+cls+'">'+esc(mood)+'</div></div>'
+    + '<button type="button" data-mood-close="1" aria-label="Close" style="background:transparent;border:1px solid var(--line);color:var(--chalk);width:36px;height:36px;border-radius:8px;font-size:18px;cursor:pointer">×</button></div></div>';
+  var sec = function(t){ return '<div style="padding:14px 14px 8px;font-family:var(--mono);font-size:10.5px;letter-spacing:2px;color:var(--mute);text-transform:uppercase">'+t+'</div>'; };
+  var adr = '<div id="v8-mood-adr" class="slab dense" style="margin:0 14px 8px"><div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:var(--mute)">ADVANCES vs DECLINES</span><b style="font-family:var(--mono);font-size:15px">ADR '+(num(m.checks && (checks.filter(function(c){ return c.filter==='ADR'; })[0]||{}).value) ? checks.filter(function(c){ return c.filter==='ADR'; })[0].value.toFixed(2) : '—')+'</b></div>'
+    + '<div class="sbar" style="height:14px;margin:8px 0 6px;background:'+(adShare == null ? 'var(--well)' : 'var(--down)')+'"><i style="width:'+(adShare == null ? 0 : adShare)+'%;background:var(--up)"></i></div>'
+    + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px"><span class="up">'+(adA == null ? '—' : adA+' advancing')+'</span><span class="dn">'+(adD == null ? '—' : adD+' declining')+'</span></div>'
+    + '<div style="font-size:12px;color:var(--mute);margin-top:6px">'+(adShare == null ? 'No count for this session yet.' : adShare+'% of counted stocks were up'+(adU != null ? ', '+adU+' unchanged' : '')+'.')+(ad.adr_date ? ' Counted '+esc(ad.adr_date)+'.' : '')+(ad.source ? ' Source '+esc(String(ad.source).replace(/_/g, ' '))+'.' : '')+'</div></div>';
+  var foot = '<div style="padding:8px 14px 22px;font-family:var(--mono);font-size:10px;color:var(--dim);line-height:1.6">gate computed '+esc(String(m.checked_at||''))+(m.breadth_source ? ' · breadth '+esc(String(m.breadth_source).replace(/_/g, ' ')) : '')+(m.nifty_source ? ' · Nifty '+esc(String(m.nifty_source).replace(/_/g, ' ')) : '')+(m.slot_note ? ' · '+esc(m.slot_note) : '')+(st.txt ? ' · '+esc(st.txt) : '')+'</div>';
+  return head + sec((num(m.fails) ? m.fails : checks.filter(function(c){ return !c.pass; }).length)+' of '+checks.length+' checks failed') + rows
+    + sec('Breadth') + adr
+    + sec('Slots in use') + slotRow('BUY SLOTS', usedL, B, 'buy', 'Long positions: '+list(by.L)) + slotRow('SELL SLOTS', usedS, S, 'sell', 'Short positions: '+list(by.S))
+    + foot;
+}
+function moodOpen(jump){
+  if(!STATE.mood || !STATE.mood.checks) return;
+  var ov = document.getElementById('v8-mood-ov');
+  if(!ov){
+    ov = document.createElement('div'); ov.id = 'v8-mood-ov';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(4,8,18,.62);display:flex;align-items:flex-end';
+    ov.innerHTML = '<div id="v8-mood-sheet" role="dialog" aria-modal="true" aria-label="Market gate rules" style="width:100%;max-height:92vh;overflow:auto;background:var(--panel,#0E1526);color:var(--txt,#fff);border-top:1px solid var(--line);border-radius:16px 16px 0 0"></div>';
+    ov.addEventListener('click', function(e){ if(e.target === ov || e.target.closest('[data-mood-close]')) moodClose(); });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'flex';
+  document.getElementById('v8-mood-sheet').innerHTML = moodSheetHtml();
+  document.body.style.overflow = 'hidden';
+  if(jump === 'adr'){ var a = document.getElementById('v8-mood-adr'); if(a && a.scrollIntoView) a.scrollIntoView({block:'start'}); }
+}
+function moodClose(){ var ov = document.getElementById('v8-mood-ov'); if(ov) ov.style.display = 'none'; document.body.style.overflow = ''; }
 /* ── 2 · OPEN POSITIONS ──────────────────────────────────────────────────────────────── */
 var OPEN_LIMIT = 8, openAll = false, openFilter = 'all';
 function kpiWell(label, val, cls, sub){ return '<div class="kw well-up"><div class="kl">'+label+'</div><div class="kn '+cls+'">'+val+'</div><div class="ks">'+sub+'</div></div>'; }
@@ -750,7 +824,7 @@ function daylogRetry(){
   var sh = document.getElementById('v8-daylog-sheet'); if(sh) sh.innerHTML = '<div class="empty" style="margin:14px">Loading the day log\u2026</div>';
   getJ(URLS.daylog).then(function(d){ STATE.daylog = d; renderDay(); daylogOpen(); }).catch(function(){ STATE.daylog = null; daylogOpen(); });
 }
-document.addEventListener('keydown', function(e){ if(e.key === 'Escape') daylogClose(); });
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ daylogClose(); moodClose(); } });
 /* ── 5 · CLOSED ──────────────────────────────────────────────────────────────────────── */
 /* Wells read the canon keys straight off /api/mobile/v8book (rule 13): realised is NET of
    brokerage, wins = TARGET, losses = SL, win_rate on decided. Nothing is re-added on the page. */
@@ -1021,6 +1095,7 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var fb = e.target.closest('[data-fn-basket]'); if(fb){ fnBasket = fb.getAttribute('data-fn-basket'); renderFunnel(); return; }
   var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); return; }
   var fs = e.target.closest('[data-fn-sym]'); if(fs){ location.href = '/m/check#tc?sym=' + encodeURIComponent(fs.getAttribute('data-fn-sym')); return; }   /* cc#1614: row -> Trade Check */
+  var mo = e.target.closest('[data-mood-open]'); if(mo){ moodOpen(e.target.closest('[data-mood-adr]') ? 'adr' : null); return; }   /* cc#1628: card -> gate sheet */
 });
 load();
 setInterval(function(){ if(document.visibilityState === 'visible') load(); }, 300000);
