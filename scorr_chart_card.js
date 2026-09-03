@@ -122,11 +122,12 @@ var _full = false;                // cc#779: fullscreen state
   var _ov = _readOv();
   var FIB_RATIOS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100, 123.6];   // cc#668 ladder (0=swing low, 100=high, 123.6=extension)
   var FIB_ZLINE = { breakout: "#0a9e63", resist: "#0a9e63", strength: "#12864f", decision: "#8a94ad", weak: "#dd3a4a", breakdown: "#dd3a4a" };
-  /* cc#988: with the grid gone the fib lines are the only horizontals left, so they carry more
-     visual weight than they used to. Dropping them to 55% alpha lets the candles read first
-     without losing a level. Applied to the FIB lines only — pivots keep full strength, because a
-     pivot is a decision level and the fib ladder is context. */
-  var FIB_LINE_ALPHA = 0.55;
+  /* cc#988 (superseded by cc#1651, see below): with the grid gone the fib lines were the only
+     horizontals left, so they were dropped to 55% alpha. cc#1490 then brought the grid back,
+     which is the state cc#1651 now amends: grid is visible only while Fib is off (cc#1651). Fib
+     lines are solid at .85 so they read as the level ladder once the grid is gone (cc#1651) —
+     FIB_LINE_ALPHA (.55, dashed) had no other caller, so it is removed rather than left dead. */
+  var FIB_LINE_ALPHA_SOLID = 0.85;
   function _alpha(hex, a) {
     var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
     if (!m) return hex;   // already rgba, or a name — leave it rather than mangle it
@@ -622,6 +623,7 @@ var _full = false;                // cc#779: fullscreen state
     _paintChrome();
     if (kind === "gvm") { _applyGvm(); }
     else if (kind === "channel") { _applyChannel(); }
+    else if (kind === "fib") { _applyGrid(); _applyOverlays(); }   // cc#1651: grid follows Fib only
     else { _applyOverlays(); }
   }
 
@@ -843,6 +845,14 @@ var _full = false;                // cc#779: fullscreen state
       _ilLines.push(_series.createPriceLine({ price: +_vpocLast, color: VPOC_COL, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "" }));
     }
   }
+  // cc#1651: grid is visible only while Fib is off. Fib's eight solid ladder lines plus the faint
+  // background grid together read as clutter (founder: "too many lines make image clumsy"), so the
+  // grid drops out for the duration Fib is on and returns the moment it is off. Pivot/Channel/GVM
+  // never touch this — the founder named fib only.
+  function _applyGrid() {
+    if (!_chart) return;
+    _chart.applyOptions({ grid: { horzLines: { visible: !_ov.fib, color: _pal().grid } } });
+  }
   // cc#730/#750: pivot + fib overlays. Pivot LEVELS + fib LINES are native price lines (they track the
   // scale); cc#750 removes the pivot AXIS badges (they collided with the price ticks + CMP tag) in favour
   // of a compact top-left chip strip, and adds fib ZONE tint bands with right-inside labels (an HTML layer
@@ -883,8 +893,8 @@ var _full = false;                // cc#779: fullscreen state
         var rng = hi - lo;
         _fibBand = { lo: lo, rng: rng };   // cc#750: drive the tint bands off the SAME swing as the lines
         FIB_RATIOS.forEach(function (r) {
-          var col = _alpha(FIB_ZLINE[_fibZoneKey(r)] || "#8a94ad", FIB_LINE_ALPHA);   // cc#988
-          _priceLines.push(_series.createPriceLine({ price: lo + rng * r / 100, color: col, lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: "" }));
+          var col = _alpha(FIB_ZLINE[_fibZoneKey(r)] || "#8a94ad", FIB_LINE_ALPHA_SOLID);   // cc#1651: solid, not dashed
+          _priceLines.push(_series.createPriceLine({ price: lo + rng * r / 100, color: col, lineWidth: 1, lineStyle: 0, axisLabelVisible: false, title: "" }));
         });
       }
     }
@@ -1220,7 +1230,10 @@ var _full = false;                // cc#779: fullscreen state
         layout: { background: { color: "transparent" }, textColor: p.mut },
         /* cc#1490 (session_log 34228) REVERSES cc#988: faint horizontal gridlines are BACK ON
            (founder 30-Aug, matching the external Gold-chart reference). vertLines stay off.
-           p.grid — the per-theme token cc#988 deliberately kept — is exactly what colours them. */
+           p.grid — the per-theme token cc#988 deliberately kept — is exactly what colours them.
+           cc#1651: grid is visible only while Fib is off. This initial value is corrected below
+           by _applyGrid() the instant the chart exists, so a chart opened with Fib remembered on
+           (localStorage) never shows a grid at first paint. */
         grid: { vertLines: { visible: false }, horzLines: { visible: true, color: p.grid } },
         localization: { locale: "en-IN", timeFormatter: _istCross },
         timeScale: { timeVisible: isIntraday, borderVisible: false, tickMarkFormatter: _istTick },
@@ -1230,6 +1243,7 @@ var _full = false;                // cc#779: fullscreen state
       var s = c.addCandlestickSeries({ upColor: "#0a9e63", downColor: "#dd3a4a", borderVisible: false, wickUpColor: "#0a9e63", wickDownColor: "#dd3a4a" });
       s.setData(data); c.timeScale().fitContent();
       _chart = c; _series = s; _lastData = data;
+      _applyGrid();       // cc#1651: correct the grid for the CURRENT _ov.fib before first paint
       _setHL(data);
       _applyOverlays();   // cc#730: draw pivot + fib price lines for the freshly loaded timeframe
       _applyIntradayLevels();   // cc#807: flat VWAP + VPOC session levels (5m only; no-op on EOD TFs)
