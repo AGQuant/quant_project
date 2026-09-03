@@ -7,6 +7,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
 <script src="/scorr_card_common.js"></script>
 <style>
 /* cc#1620 — APP_ALERTS_IDEAS_V1 (session_log 37072; design ref design_refs/scorr_mobile_alerts_R1.html).
@@ -124,7 +126,20 @@
 .al-go[disabled]{opacity:.5}
 </style>
 </head>
-<body>
+<body data-theme="goldnight">
+<!-- cc#1645 P2: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap).
+     Sets data-theme before first paint so the page never flashes goldnight on another theme. -->
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+/* read for continuity, ignored while the sprint gate stands — see the note above */
+if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
+     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
+     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+var __r1644=({dark:'ainight',goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
+/* cc#1629: the OS status bar takes the resolved theme's field colour, so it is not a separate strip */
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<!-- cc#1645 P2: the shared appshell header (VARIANT B, section page). Existing top strip below
+     is untouched, just pushed under this. -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Trade Alerts</span></div><div class="as-slot"></div></div>
 <!--
   cc#1620 — IDEAS (APP_ALERTS_IDEAS_V1, session_log 37072). The Alerts tab is the APPROVED BOOK
   (WOT_APPROVAL_SURFACE_V1 36394) shown as curated idea cards. Newest first (36394): the cc#1506
