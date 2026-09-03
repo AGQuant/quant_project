@@ -20,7 +20,9 @@ if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Se
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight')?t:'goldnight');
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <!-- cc#1645 P3: shared appshell header (VARIANT B). Existing #secp content below is untouched. -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Sectors</span></div><div class="as-slot"></div></div>
+<!-- cc#1661 P3: #sc-r (the right-aligned status text) moves into .as-slot; the title/subtitle row
+     below gets class="head" so the shared theme_mobile.css rule hides it (it had no class before). -->
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Sectors</span></div><div class="as-slot"><div id="sc-r" style="font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap"></div></div></div>
 <!--
   cc#1623 — APP_SECTOR_PAGE_V1 (session_log 37158; design ref design_refs/scorr_mobile_sector_R1.html).
   ONE source for every number on the list: /api/sector/rotation (cc#827 merge layer, GVM is the
@@ -30,9 +32,8 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   tokens via the shared sheets; all sizing inline (this file sits at 0 on the theme ratchet).
 -->
 <div class="screen" id="secp">
-  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:16px 14px 10px">
+  <div class="head as-hide" style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:16px 14px 10px">
     <div><div style="font-family:var(--display,inherit);font-size:24px;font-weight:800;line-height:1;color:var(--chalk,var(--txt))">Sectors</div><div id="sc-sub" style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--gold);margin-top:6px;text-transform:uppercase">loading…</div></div>
-    <div id="sc-r" style="font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap"></div>
   </div>
   <div class="body">
     <div id="sc-rot"></div>
