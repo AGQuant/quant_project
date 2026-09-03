@@ -312,7 +312,7 @@ function bmRowHtml(b, opts){
   if(num(b.rank) && num(b.peer_n)) sub.push('rank '+b.rank+' of '+b.peer_n);
   if(opts && opts.sub) sub = [opts.sub].concat(num(b.rank) && num(b.peer_n) ? ['rank '+b.rank+' of '+b.peer_n] : []);
   var cls = (opts && opts.signed && num(b.company)) ? (b.company > 0 ? ' up' : b.company < 0 ? ' dn' : '') : '';
-  return '<div class="g-bm" data-bmkey="'+esc(b.key||'')+'"><div class="g-bk">'+esc((opts && opts.label) || plainLabel(b))+'</div><div class="g-bsub">'+esc(sub.join(' · ')||'no peer read')+'</div>'+
+  return '<div class="g-bm" data-bmkey="'+esc(b.key||'')+'" role="button" title="Top 10 peers on this check" style="cursor:pointer"><div class="g-bk">'+esc((opts && opts.label) || plainLabel(b))+'</div><div class="g-bsub">'+esc(sub.join(' · ')||'no peer read')+'</div>'+
          '<div class="g-bval"><b class="'+cls+'">'+esc(bmSelf(b))+'</b>'+rtChip(b.rating)+'</div>'+(opts && opts.track===false ? '' : peerTrack(b))+'</div>';
 }
 var LEGEND = '<div class="g-legend"><span><i style="background:var(--gold)"></i>this company</span><span><i style="background:var(--mute)"></i>peer median</span><span><i style="background:rgba(138,138,147,.25)"></i>peer range</span></div>';
@@ -361,10 +361,15 @@ function gridBox(b){
     + '<span><span style="display:block;font-family:var(--mono);font-size:13px;font-weight:800;letter-spacing:-.2px;white-space:nowrap;color:'+t.fg+'">'+esc(bmSelf(b))+'</span>'
     + '<span style="display:block;font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(med ? 'peers '+med : 'no peer read')+'</span></span></button>';
 }
-/* P4 · tap a box -> the parameter sheet: COMPANY value (in its tone) · PEER MEDIAN · rank of N ·
-   rating chip, then the peer ladder from benchmark[].peers sorted best-first (direction from
-   beats_peer against the median when the builder did not state higher_is_better), the company
-   row marked gold. The app rows had no sheet before this card; the box is the first tap-through. */
+/* cc#1630 · THE PARAMETER SHEET, one component for every benchmark row, momentum tile and grid
+   box (it began as cc#1618 P4's grid-box sheet). Title = the plain name + "top 10 in <segment>";
+   COMPANY / PEER MEDIAN / RANK; then a horizontal bar per symbol for the top 10 of the row's own
+   peers[] (the builder ships every same-segment peer with a value, best first in the row's own
+   direction - higher_is_better from the payload, else inferred from beats_peer, else the PE /
+   price-book rule), value in the row's unit, GVM chip from the payload ladder[] by symbol. The
+   company's bar is gold; outside the top 10 it is drawn as an 11th "you are here" row with its
+   real rank. Tap a peer bar -> that symbol's GVM page (go(), the Peers card's own navigation).
+   Footer: peers counted + score date. Grab handle, X, Esc, scrim, DONE. Nothing re-derived. */
 function paramSheetClose(){ var w = document.getElementById('g-psheet'); if(w) w.remove(); }
 function paramSheetOpen(key){
   var d = STATE.co, b = d ? bmRow(d, key) : null; if(!b) return;
@@ -374,29 +379,49 @@ function paramSheetOpen(key){
           : (b.beats_peer != null && num(b.company) && num(b.peer_median) && b.company !== b.peer_median) ? ((b.company > b.peer_median) === (b.beats_peer === true))
           : !/^(pe|fwd_pe|hist_pe|sector_pe|pb)$/.test(b.key||'');
   var peers = (b.peers||[]).filter(function(x){ return x && num(x.value); }).slice().sort(function(x, y){ return hib ? y.value - x.value : x.value - y.value; });
-  var me = STATE.sym, seen = peers.some(function(x){ return x.symbol === me; });
+  var me = STATE.sym, meIdx = -1; peers.forEach(function(x, i){ if(x.symbol === me && meIdx < 0) meIdx = i; });
+  var top = peers.slice(0, 10), meIn = meIdx >= 0 && meIdx < 10;
+  var extra = (!meIn && meIdx >= 0) ? peers[meIdx] : null;   /* the 11th "you are here" row */
+  var gvmBy = {}; (d.ladder||[]).forEach(function(r){ if(r && r.symbol) gvmBy[r.symbol] = r.gvm; });
   var fmt = function(v){ return bmSelf({company:v, unit:b.unit, key:b.key}); };
+  var maxAbs = 0; top.concat(extra ? [extra] : []).forEach(function(x){ if(Math.abs(x.value) > maxAbs) maxAbs = Math.abs(x.value); });
+  var bar = function(x, i, isMe){
+    var w = maxAbs ? Math.max(2, Math.abs(x.value)/maxAbs*100) : 0, g = gvmBy[x.symbol];
+    return '<div '+(isMe ? '' : 'data-peer-go="'+esc(x.symbol)+'" role="button" ')+'style="display:grid;grid-template-columns:24px 92px 1fr auto;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-family:var(--mono);font-size:11.5px;cursor:'+(isMe ? 'default' : 'pointer')+';'+(isMe ? 'background:var(--gold-d, var(--well));color:var(--gold);font-weight:800;border:1px solid var(--gold)' : 'color:var(--chalk);border-bottom:1px solid var(--line)')+'">'
+      + '<span style="color:'+(isMe ? 'var(--gold)' : 'var(--dim)')+'">'+(i+1)+'</span>'
+      + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.symbol)+(num(g) ? ' <span style="font-size:9px;padding:1px 4px;border:1px solid var(--line);border-radius:4px;color:var(--mute)">'+g.toFixed(1)+'</span>' : '')+'</span>'
+      + '<span style="height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)"><i style="display:block;height:100%;width:'+w.toFixed(0)+'%;background:'+(isMe ? 'var(--gold)' : (x.value < 0 ? 'var(--down)' : 'var(--mute)'))+'"></i></span>'
+      + '<span style="min-width:52px;text-align:right">'+esc(fmt(x.value))+'</span></div>';
+  };
   var kv = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px">'
     + '<div style="padding:8px;background:var(--well);border:1px solid '+t.bd+';border-radius:8px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">COMPANY</div><div style="font-family:var(--mono);font-size:16px;font-weight:800;color:'+t.fg+'">'+esc(bmSelf(b))+'</div></div>'
     + '<div style="padding:8px;background:var(--well);border:1px solid var(--line);border-radius:8px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">PEER MEDIAN</div><div style="font-family:var(--mono);font-size:16px;font-weight:800;color:var(--chalk)">'+esc(bmPeerTxt(b) || '—')+'</div></div>'
     + '<div style="padding:8px;background:var(--well);border:1px solid var(--line);border-radius:8px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">RANK</div><div style="font-family:var(--mono);font-size:16px;font-weight:800;color:var(--chalk)">'+(num(b.rank) ? b.rank+'<span style="font-size:10px;color:var(--mute)"> of '+(b.peer_n||peers.length)+'</span>' : '—')+'</div></div></div>';
   var read = b.beats_peer === true ? 'Better than the peer median.' : b.beats_peer === false ? 'Behind the peer median.' : 'No peer read on this one.';
   read += hib ? ' Higher is better here.' : ' Lower is better here.';
-  var lad = peers.length ? '<div style="margin-top:14px;font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)">PEER LADDER · BEST FIRST</div>'
-    + '<div style="margin-top:4px">'+peers.map(function(x, i){ var isMe = x.symbol === me; return '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-radius:6px;font-family:var(--mono);font-size:11.5px;'+(isMe ? 'background:var(--gold-d, var(--well));color:var(--gold);font-weight:800;border:1px solid var(--gold)' : 'color:var(--chalk);border-bottom:1px solid var(--line)')+'"><span><span style="display:inline-block;width:22px;color:'+(isMe ? 'var(--gold)' : 'var(--dim)')+'">'+(i+1)+'</span>'+esc(x.symbol)+'</span><span>'+esc(fmt(x.value))+'</span></div>'; }).join('')+'</div>'
-    + (seen ? '' : '<div class="g-note">This company is not in the ladder list the report carried.</div>')
+  var seg = d.segment || (d.extras && d.extras.segment_ctx && d.extras.segment_ctx.segment) || 'segment';
+  var lad = top.length ? '<div style="margin-top:14px;font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)">TOP '+top.length+' IN '+esc(String(seg).toUpperCase())+' · BEST FIRST</div>'
+    + '<div style="margin-top:4px">'+top.map(function(x, i){ return bar(x, i, x.symbol === me); }).join('')
+    + (extra ? '<div style="margin:8px 0 2px;font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--gold)">YOU ARE HERE · RANK '+(num(b.rank) ? b.rank : meIdx+1)+' OF '+(num(b.peer_n) ? b.peer_n : peers.length)+'</div>'+bar(extra, meIdx, true) : '')+'</div>'
+    + (meIdx < 0 ? '<div class="g-note">This company has no value on this check, so it is not in the ladder.</div>' : '')
     : '<div class="g-empty">No peer ladder for this check.</div>';
+  var foot = '<div class="g-asof" style="margin-top:10px">'+peers.length+' peer'+(peers.length===1?'':'s')+' with a value · score as of '+esc(d.score_date||'—')+'</div>';
   var el = document.createElement('div'); el.id = 'g-psheet';
   el.innerHTML = '<div data-ps-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80"></div>'
-    + '<div style="position:fixed;left:0;right:0;bottom:0;max-height:84vh;display:flex;flex-direction:column;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0">'
+    + '<div role="dialog" aria-modal="true" aria-label="'+esc(lbl)+' peers" style="position:fixed;left:0;right:0;bottom:0;max-height:84vh;display:flex;flex-direction:column;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0">'
     + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 4px;flex-shrink:0"></div>'
     + '<div style="overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px))">'
-    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--gold)">'+({G:'GROWTH',V:'VALUE',M:'MOMENTUM'}[b.pillar]||'')+' · '+esc(STATE.sym||'')+'</div><div style="font-family:var(--body);font-weight:800;font-size:16px;color:var(--chalk);margin-top:2px">'+esc(lbl)+'</div></div>'+rtChip(b.rating)+'</div>'
-    + kv + '<div class="g-note">'+esc(read)+'</div>' + lad
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--gold)">'+({G:'GROWTH',V:'VALUE',M:'MOMENTUM'}[b.pillar]||'')+' · '+esc(STATE.sym||'')+'</div><div style="font-family:var(--body);font-weight:800;font-size:16px;color:var(--chalk);margin-top:2px">'+esc(lbl)+' · top 10 in '+esc(seg)+'</div></div>'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0">'+rtChip(b.rating)+'<button type="button" data-ps-close="1" aria-label="Close" style="background:transparent;border:1px solid var(--line);color:var(--chalk);width:32px;height:32px;border-radius:8px;font-size:16px;cursor:pointer">×</button></div></div>'
+    + kv + '<div class="g-note">'+esc(read)+'</div>' + lad + foot
     + '<button type="button" data-ps-close="1" style="width:100%;min-height:44px;margin-top:16px;border-radius:12px;border:0;background:var(--gold);color:var(--well);font-family:var(--mono);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer">DONE</button></div></div>';
   document.body.appendChild(el);
-  el.addEventListener('click', function(e){ if(e.target.closest('[data-ps-close]')) paramSheetClose(); });
+  el.addEventListener('click', function(e){
+    if(e.target.closest('[data-ps-close]')){ paramSheetClose(); return; }
+    var pg = e.target.closest('[data-peer-go]'); if(pg){ paramSheetClose(); go(pg.getAttribute('data-peer-go')); }
+  });
 }
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') paramSheetClose(); });
 var GRID_LEGEND = '<div class="g-legend" style="flex-wrap:wrap;gap:8px 14px"><span><i style="background:var(--up)"></i>better than peers</span><span><i style="background:var(--down)"></i>behind peers</span><span><i style="background:var(--line)"></i>no peer read</span><span>lower wins on PE and price / book · chip = rating</span></div>';
 function gridHtml(d){
   var groups = gridRows(d), n = 0, h = '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">';
@@ -488,7 +513,7 @@ function tile(label, b, opts){
   var sub = [];
   if(num(b.peer_median)) sub.push('peers '+(b.peer_median<0?'−':'+')+Math.abs(b.peer_median).toFixed(Math.abs(b.peer_median)>=20?0:1)+'%');
   if(num(b.rank) && num(b.peer_n)) sub.push(opts.rankOf ? 'rank '+b.rank+' of '+b.peer_n : 'rank '+b.rank);
-  return '<div class="g-tile well-up"><div class="g-tl">'+label+'</div><div class="g-tv '+cls+'">'+(num(v)?(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(sub.join(' · ')||'no peer read')+'</div></div>';
+  return '<div class="g-tile well-up" data-bmkey="'+esc(b.key||'')+'" role="button" style="cursor:pointer"><div class="g-tl">'+label+'</div><div class="g-tv '+cls+'">'+(num(v)?(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(sub.join(' · ')||'no peer read')+'</div></div>';
 }
 function momWords(b, key){
   if(!b || !num(b.company)) return null;
@@ -1276,6 +1301,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
   var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); refreshPillars(); return; }   /* cc#1618 */
   var gb = e.target.closest('[data-gbox]'); if(gb){ paramSheetOpen(gb.getAttribute('data-gbox')); return; }   /* cc#1618 P4 */
+  var bm = e.target.closest('[data-bmkey]'); if(bm){ paramSheetOpen(bm.getAttribute('data-bmkey')); return; }   /* cc#1630: rows + tiles */
   var fm = e.target.closest('[data-flag-more]'); if(fm){ flagSheetOpen(fm.getAttribute('data-flag-more')); return; }   /* cc#1619 P3 */
   var fl = e.target.closest('[data-flag]'); if(fl){ flagGo(fl.getAttribute('data-flag')); return; }   /* cc#1619 P4 */
   if(e.target.closest('[data-ratio-filter]')){ ratioSheetOpen(); return; }   /* cc#1617 P4 */
