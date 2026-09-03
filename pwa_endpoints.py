@@ -2497,9 +2497,9 @@ except Exception:
 # this returns untouched. Setting one would ACTIVATE the theme blocks on a web page that was never
 # built for them, which is a visible break, so the guard is the first thing it checks.
 APP_THEME_RESOLVE_JS = """(function(){
-  var ALLOWED={goldnight:1,dark:1};
+  var ALLOWED={goldnight:1,dark:1,aquawhite:1,goldday:1};   /* cc#1636: all four token sets in scorr_themes.css are real choices */
   var DEFAULT='goldnight';
-  var PREVIEW={aqua_white:'aquawhite',aquawhite:'aquawhite'};
+  var PREVIEW={aqua_white:'aquawhite',aquawhite:'aquawhite',gold_day:'goldday',goldday:'goldday',gold_night:'goldnight',goldnight:'goldnight',dark:'dark'};   /* ?theme= stays a one-load preview, never stored */
   function stored(){try{return localStorage.getItem('scorr_theme');}catch(e){return null;}}
   function previewed(){
     try{var m=/[?&]theme=([\\w-]+)/.exec(location.search);
@@ -2518,12 +2518,26 @@ APP_THEME_RESOLVE_JS = """(function(){
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);
   else apply();
-  /* Applied twice on purpose. scorr_appshell.js writes the same attribute from its own switcher
-     wiring, and the two run close enough together that the order is not guaranteed. In the normal
-     case both writes are the same value so the second is invisible; in the preview case the load
-     write is what makes the preview survive. */
+  /* Applied twice on purpose: the page-inline boots write the same attribute before first paint,
+     and in the preview case the load write is what makes the preview survive. Since cc#1636 every
+     switcher (the logo menu in scorr_card_common.js, the app-shell menu) goes through set() below,
+     so there is ONE write path that stores; the boots only mirror what is stored. */
   window.addEventListener('load',apply);
-  window.SCORR_THEME={allowed:ALLOWED,def:DEFAULT,preview:PREVIEW,resolve:resolve};
+  /* cc#1636: the one set path. Validates, stores under the key the resolver reads, applies live on
+     any body that carries data-theme, and announces scorr:theme (same event scorr_theme_boot.js
+     dispatches on the web) so a page with its own canvas can repaint. */
+  var NAMES=[['goldnight','Gold Night'],['dark','Dark'],['aquawhite','Aqua White'],['goldday','Gold Day']];
+  function get(){var b=document.body;var t=b&&b.getAttribute('data-theme');return (t&&ALLOWED[t])?t:resolve();}
+  function set(k){
+    if(!ALLOWED[k])return get();
+    try{localStorage.setItem('scorr_theme',k);}catch(e){}
+    var b=document.body;if(b&&b.hasAttribute('data-theme'))b.setAttribute('data-theme',k);
+    /* the OS status bar follows the new field (cc#1629 meta), so a light theme does not sit under a black strip */
+    try{var mc=document.querySelector('meta[name="theme-color"]');if(mc&&b){var fc=getComputedStyle(b).getPropertyValue('--field').trim();if(fc)mc.content=fc;}}catch(e){}
+    try{window.dispatchEvent(new CustomEvent('scorr:theme',{detail:{theme:k}}));}catch(e){}
+    return k;
+  }
+  window.SCORR_THEME={allowed:ALLOWED,def:DEFAULT,preview:PREVIEW,resolve:resolve,list:NAMES,get:get,set:set};
 })();"""
 
 

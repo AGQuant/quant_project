@@ -1541,10 +1541,10 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
      Kept as the R4 parse-time pattern: first statement inside <body>, before first paint. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
 /* read for continuity, ignored while the sprint gate stands — see the note above */
-if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
-     applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
-     White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
-document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');
+if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
+     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
+     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight'||t==='aquawhite'||t==='goldday')?t:'goldnight');
 /* cc#1629: the OS status bar takes the resolved theme's field colour, so it is not a separate strip */
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <div class="screen">
