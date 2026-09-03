@@ -350,3 +350,25 @@ body.mcards .as-hdr{ padding-top:var(--space-8); padding-bottom:var(--space-8); 
 #v8p .top,
 #ckp .c-top,
 .ia-top{ display:none; }
+
+/* cc#1661 P3 · the rest (trade_wall, intel, sector, screeners, models, qb, results, positions,
+ * holdings, fpc): all now share the SAME generic shape -- a `.head` wrapper holding only a title
+ * (h1) and an optional subtitle (.s), nothing else worth keeping. None of these ten pages had a
+ * bell of their own. models.html/qb.html each carried a SECOND wordmark link (duplicating the
+ * shell's .as-wm) inside their own .head -- removed by markup, not by this rule, so it cannot
+ * come back if the rule is ever lifted. sector.html's title row had no class at all before this
+ * card (a bare inline-styled div) and its own right-aligned status text (#sc-r, no bell on this
+ * page) -- #sc-r moved into .as-slot by markup, and the row given class="head as-hide" so this
+ * reaches it too.
+ *
+ * NOT a bare `.head{display:none}`: theme_mobile.css is APP-ONLY but loads on /preview/* too
+ * (cc#1193), and twelve previews/*.html files carry their OWN class="head" with no .as-hdr shell
+ * above it at all -- a page-agnostic .head rule would have blanked every preview screen's only
+ * header. Each of the ten pages' `.head` gets a second, page-scoped marker class instead
+ * (as-hide), added only where the shell replaces it, so a bare .head anywhere else -- previews
+ * included -- is untouched. Hiding the whole wrapper (not just its children) is simpler than
+ * hiding h1/.s separately and zeroing padding after -- a display:none element has no box to
+ * leave a band behind. scorr_digest_mobile.html is NOT in this list: it was already
+ * single-headed before this card (an original as-shell reference page, cc#1126's two-row
+ * design), confirmed unchanged. */
+.as-hide{ display:none; }
