@@ -510,6 +510,14 @@ function SectorSearch({allSectors}) {
       .then(r=>r.json()).then(dd=>{ setBrief(dd); setLoading(false); }).catch(()=>setLoading(false));
   };
 
+  // cc#1592: the app's Advance/Decline sector chips link here as /sector?segment=<name> (the same
+  // field name /api/sector/brief and <SectorBrief segment=> already use). Pre-pick it once the
+  // names are known; an unknown or missing value leaves the page exactly as it was.
+  useEffect(()=>{
+    try{ const q=new URLSearchParams(location.search).get("segment"); if(!q || selected) return;
+         const hit=names.find(n=>n===q) || names.find(n=>n.toLowerCase()===q.trim().toLowerCase()); if(hit) pick(hit); }catch(e){}
+  },[names]);
+
   const stocks = useMemo(()=>{
     const c = (brief && brief.constituents) || [];
     return [...c].sort((a,b)=>(b.gvm_score==null?-Infinity:b.gvm_score)-(a.gvm_score==null?-Infinity:a.gvm_score));
