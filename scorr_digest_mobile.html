@@ -2469,7 +2469,7 @@ async function boot(){
   })();
 
   const bias=(mr.bias||'—').toUpperCase();
-  const railC=/BULL/.test(bias)?'var(--volt)':/CAUT/.test(bias)?'var(--amber)':'var(--muted)';
+  const railC=/BULL/.test(bias)?'var(--volt)':/BEAR/.test(bias)?'var(--heat)':'var(--amber)';   /* cc#1646 item 1: BEAR now reads --heat (it fell through to --muted before); CAUT and any other bias fold into --amber, same as CAUT alone did before */
 
   /* cc#1190: the yrRows builder is DELETED with the card it fed. Its cc#1096 D3 BSE-code
      resolution is not lost — result_analysis_v2 is keyed on NSE symbols, so there is no numeric
