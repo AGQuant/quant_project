@@ -52,6 +52,95 @@
  * Same prefix and specificity as the body rule in scorr_theme_r5.css; this sheet loads later. */
 :root:root:not([data-theme="light"]) body{ background-color:var(--field); }
 
+/* cc#1645 P1 · LEGACY TOKEN BRIDGE (APP SHELL + THEME LAYER ON EVERY /m/* PAGE — Fable Room).
+ * ROOT CAUSE: APP_THEME_RESOLVE_JS (pwa_endpoints.py) sets body[data-theme] and is the one
+ * authority for theme selection, but it is a no-op on any page whose <body> never carries that
+ * attribute at all — and even on a page that DOES carry it, the four visible sets it feeds only
+ * reach content that reads the 17 contract names directly. Most page content never does: it reads
+ * the OLDER mobile_app.css names instead (.screen,.bnav's --bg/--panel/--txt/--mut/--grn/--red/
+ * --blu/--cyan…) or a NEWER page-scoped family (#gvp / #ckp / #v8p's --well/--chalk/--mute/--gold/
+ * --up/--down…). Both are hardcoded literals baked into mobile_app.css and each page's own inline
+ * <style>, so switching the theme moves nothing under them. This is why the founder's screenshot
+ * showed V8 still gold on AI Night: the switch worked, the content simply never listened.
+ *
+ * TWO-STEP BRIDGE, not a direct re-declare: `.screen{--panel:var(--panel)}` is self-referential
+ * and CSS drops it as invalid (home.html hit this first, cc#1077/APP_QA_R4 P2). Step one aliases
+ * the 17 contract names to `--t-*` names on body[data-theme] (a different name to read FROM);
+ * step two re-declares each legacy name on whichever selector currently hardcodes it, reading the
+ * `--t-*` alias. Pattern lifted verbatim from home.html's own already-shipped bridge (same repo,
+ * mobile/home.html's inline <style>) — not reinvented here.
+ *
+ * SCOPE — WIDER THAN THE LITERAL "mobile_app.css names" LINE, LOGGED RATHER THAN SILENTLY
+ * NARROWED OR WIDENED (matching cc_task_logs). Read literally, the card's P1 line is one rule on
+ * body[data-theme] aliasing only the .screen,.bnav family. Ported that literally, home/models/qb-
+ * shaped pages are fixed and nothing else is: gvm.html, check.html and v8.html wrap their content
+ * in #gvp / #ckp / #v8p — an ID selector at specificity (1,0,0), which beats .screen,.bnav's
+ * (0,1,0) regardless of source order. Those three pages' own hardcoded palette wins over ANY
+ * class/attribute-level bridge, bridged or not — and GVM/Check/V8 are the card's own root_cause
+ * examples. So this block bridges both legacy families the app actually has, off the SAME --t-*
+ * aliases — one alias step feeding two re-declare steps, not a second independent bridge.
+ *
+ * DELIBERATELY LEFT UNBRIDGED: --grn-d (older family) and --up-d/--down-d/--amber-d (newer
+ * family) — P&L wash colours. Win/loss hue barely moves across the eight sets (every set's
+ * --win/--loss is some shade of green/red), so a wash pinned to goldnight's literal green/red is
+ * a minor, tolerable mismatch elsewhere. home.html's own shipped bridge already makes this exact
+ * call for --grn-d (never re-declared there either) — matched here, not reconsidered. --amber and
+ * --aqua (newer family): no equivalent in the 17-key contract, nothing to alias them to, left as
+ * the page's own fixed literal, same as today.
+ *
+ * BRIDGED HERE EVEN THOUGH THE OLDER FAMILY'S OWN PRECEDENT SKIPS ITS EQUIVALENT: --gold-d.
+ * --gold IS bridged — it carries the app's BRAND identity, and brand hue swings hard across sets
+ * (gold, cyan, teal, pink), so a --gold-d wash left pinned to goldnight's literal
+ * rgba(212,175,55,.12) would pair a re-skinned brand-coloured label against a background wash
+ * that stayed gold underneath it — a more visible defect than leaving --gold alone. color-mix()
+ * reproduces the exact same 12%-alpha wash goldnight has today (D4AF37 at 12% = today's literal,
+ * byte-for-byte) and scales the same 12% against whichever brand hue the selected set carries.
+ * Not a new technique in this family: mobile_endpoints.py's #gvp already uses color-mix (cc#1632).
+ *
+ * v8.html ALSO hardcodes --field/--panel/--sunk/--gold-lo/--gold-hi directly on #v8p itself (its
+ * own inline <style>, not this file) — three contract-named keys re-declared as page-local
+ * literals. #gvp/#ckp never do this (they read --field/--panel/--sunk through prefixed g- and c-
+ * aliases instead, so those two already inherit the real theme value with nothing shadowing
+ * it). #v8p is the one exception, bridged below with the alias step extended to --sunk/--gold-lo/
+ * --gold-hi — additive only; goldnight resolves every one of the three to the value it already
+ * carries, so home.html/models.html/qb.html read nothing new from the alias rule.
+ *
+ * GOLDNIGHT CHECK, name by name (today's literal → today's contract value): --well #131316 =
+ * --panel #131316 (exact) · --chalk #F5F2EA = --ink #F5F2EA (exact) · --line #2A2A31 vs --edge
+ * #2A2A32 (1-unit rounding, pre-existing, not introduced here) · --gold #D4AF37 = --brand #D4AF37
+ * (exact) · --mute #8A8A93 vs --muted #8E8A7E (small pre-existing drift between the app's own gray
+ * and the contract's gray, not introduced by this bridge; --dim converges onto the same --muted
+ * alias, matching the --mut/--dim convergence home.html's own bridge already established for the
+ * older family) · --gold-d: color-mix reproduces the literal exactly (worked out above) · --up
+ * #2FD48B vs --win #3DD68C: a real, visible delta — GVM/Check/V8's green was never updated to the
+ * platform's canonical P&L green (the one home/models/qb already show), so bridging it corrects
+ * toward the one green the rest of the app uses, not a regression away from a canonical value ·
+ * --down #FF5C6C = --loss #FF5C6C (exact).
+ */
+body[data-theme]{
+  --t-field:var(--field); --t-panel:var(--panel); --t-hi:var(--hi); --t-edge:var(--edge);
+  --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
+  --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
+  --t-sunk:var(--sunk); --t-gold-lo:var(--gold-lo); --t-gold-hi:var(--gold-hi);
+}
+.screen,.bnav{
+  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
+  --line:var(--t-edge); --line2:var(--t-edge);
+  --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
+  --grn:var(--t-win); --red:var(--t-loss);
+  --blu:var(--t-accent); --cyan:var(--t-brand);
+}
+#gvp,#ckp,#v8p{
+  --well:var(--t-panel); --chalk:var(--t-ink); --mute:var(--t-muted); --dim:var(--t-muted);
+  --line:var(--t-edge); --gold:var(--t-brand);
+  --gold-d:color-mix(in srgb, var(--t-brand) 12%, transparent);
+  --up:var(--t-win); --down:var(--t-loss);
+}
+#v8p{
+  --field:var(--t-field); --panel:var(--t-panel); --sunk:var(--t-sunk);
+  --gold-lo:var(--t-gold-lo); --gold-hi:var(--t-gold-hi);
+}
+
 /* cc#1640 · LIGHT-SET RELEASE (founder screenshot 03-Sep 16:57 IST: dark ink on a navy card).
  * scorr_theme_r5.css gates its whole dark skin on :root:root:not([data-theme="light"]). On the app
  * the theme attribute lives on <body>, never on <html>, and no set is named "light", so that gate
