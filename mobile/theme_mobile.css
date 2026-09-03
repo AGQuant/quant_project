@@ -52,6 +52,84 @@
  * Same prefix and specificity as the body rule in scorr_theme_r5.css; this sheet loads later. */
 :root:root:not([data-theme="light"]) body{ background-color:var(--field); }
 
+/* cc#1640 · LIGHT-SET RELEASE (founder screenshot 03-Sep 16:57 IST: dark ink on a navy card).
+ * scorr_theme_r5.css gates its whole dark skin on :root:root:not([data-theme="light"]). On the app
+ * the theme attribute lives on <body>, never on <html>, and no set is named "light", so that gate
+ * is ALWAYS true here: the navy R5 panel, the #0A101E nav, the chalk titles and the aqua eyebrows
+ * land on the four LIGHT sets too. This block releases aquawhite, blush, goldday and rosewall from
+ * the R5 COLOURS only. Geometry (cut corner, zero radius, clip-path) is not touched. Every value is
+ * a contract token that scorr_themes.css declares on body[data-theme=X], so it resolves to the
+ * set's own panel, edge, ink, muted, brand and glow; no raw colour, no raw length. The shared
+ * sheet is not edited (SHARED_CSS_RULE_V1). The dark sets (dark, goldnight, rosenight) match no
+ * selector below and render exactly as before.
+ *
+ * CASCADE. Each rule carries the shared prefix plus body[data-theme=X], so a one-class rule sits
+ * at (0,5,1) against the R5 rule's (0,4,0), and .bn.on / .as-bn.on at (0,6,1) with !important
+ * against R5's (0,5,0) with !important. ORDER IS LOAD-BEARING: this block sits BEFORE the cc#1637
+ * rosewall block below, whose .sect / .chd .t / .bnav / .bn rules share this specificity and must
+ * keep winning by source order. Rosewall is left out of the nav rules here for the same reason:
+ * cc#1637 already paints its nav with --nav-bg. */
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .m,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .m,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .m,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .m{ background:var(--panel); border-color:var(--edge); color:var(--ink); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .chd .t,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .card-hd .t,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .chd .t,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .card-hd .t,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .chd .t,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .card-hd .t,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .chd .t,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .card-hd .t{ color:var(--ink); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .sect,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .sect,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .sect,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .sect{ color:var(--brand); text-shadow:var(--glow-10) var(--brandglow); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bnav,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-nav,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .bnav,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .as-nav,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .bnav,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-nav{ background:var(--panel); border-top-color:var(--edge); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bn,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-bn,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .bn,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .as-bn,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .bn,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-bn{ color:var(--muted); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .as-bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-bn.on{ color:var(--brand) !important; text-shadow:var(--glow-10) var(--brandglow); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bn.on::before,
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-bn.on::before,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .bn.on::before,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .as-bn.on::before,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .bn.on::before,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-bn.on::before{ background:var(--brand); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .pressed{ border-color:var(--edge); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .well,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .well,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .well,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .well{ box-shadow:0 var(--space-2) 0 0 var(--edge); }
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .tool span,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .tool span,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .tool span,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .tool span{ color:var(--brand); text-shadow:var(--glow-10) var(--brandglow); }
+
 /* cc#1637 · ROSE WALL on-field colours (37303 rosewall_03sep). A dark wall and a light card cannot
  * share one --muted (measured 2.1 on the wall vs 9.0 on the card), so this set carries two extra
  * tokens for the few things that sit ON the wall: section eyebrows and their right text, page
