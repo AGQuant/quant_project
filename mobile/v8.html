@@ -130,12 +130,33 @@ body{ --field:#0A0A0C; }
 #v8p .prow .pmeta{grid-column:1 / span 2;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 12px;font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:var(--space-8)}   /* cc#1656 P2: --space-8 between the header and the price line */
 #v8p .prow .pmeta b{color:var(--chalk);font-weight:600}
 #v8p .prow .pmeta .age{margin-left:auto;color:var(--dim)}
-#v8p .trk{grid-column:1 / span 2;position:relative;height:6px;margin-top:var(--space-8);margin-bottom:var(--space-12);background:var(--well);border:1px solid var(--line)}   /* cc#1656 P2: --space-8 above (info line to rail), --space-12 below */
+/* cc#1660: rail grows from a bare 6px fill bar to SL/entry/CMP/target on the bar. Axis is now
+   RAW PRICE, low->high, left->right, for BOTH long and short (trkAxis/trkFrac below) -- the old
+   axis put SL at the left end unconditionally by direction; this one never mirrors, so the
+   reader never has to flip. Fill colour comes from the row's own unrealised P&L sign (pnl-win /
+   pnl-loss / pnl-flat), not from side -- .trk.long/.trk.short classes are gone from the rail
+   (the .tag on .psym still carries the side word). End caps are a soft gradient wash, not text:
+   the SL end always reads var(--down) (this file's loss colour; spec named --loss, same token
+   family, kept the page's own established --up/--down naming instead of a second, slightly
+   different green/red pair on one page), the TARGET end always var(--up), on whichever physical
+   side (l/r) that mark actually lands. */
+#v8p .trk{grid-column:1 / span 2;position:relative;height:10px;margin-top:var(--space-18);margin-bottom:var(--space-16);background:var(--well);border:1px solid var(--line);border-radius:2px}   /* cc#1660: footprint budget -- old margin-top(8)+height(6)+margin-bottom(12)=26px; new 18+10+16=44px, exactly the spec's +18px cap. Tick labels sit at top:-15px (3px clearance inside the 18px margin); end labels sit at bottom:-14px (2px clearance inside the 16px margin) -- both measured, not eyeballed, see cc_task_logs. */
 #v8p .trk .tfill{position:absolute;top:0;bottom:0;left:0}
-#v8p .trk.long .tfill{background:var(--up)} #v8p .trk.short .tfill{background:var(--down)}
-#v8p .trk .cmp{position:absolute;top:-4px;width:2px;height:12px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
-#v8p .trk .z{position:absolute;top:-4px;width:1px;height:12px;background:var(--dim)}
+#v8p .trk.pnl-win .tfill{background:var(--up)} #v8p .trk.pnl-loss .tfill{background:var(--down)} #v8p .trk.pnl-flat .tfill{background:var(--mute)}
+#v8p .trk .cap{position:absolute;top:0;bottom:0;width:26%;pointer-events:none}
+#v8p .trk .cap.l{left:0} #v8p .trk .cap.r{right:0}
+#v8p .trk .cap.sl.l{background:linear-gradient(90deg,color-mix(in srgb, var(--down) 55%, transparent),transparent)}
+#v8p .trk .cap.sl.r{background:linear-gradient(270deg,color-mix(in srgb, var(--down) 55%, transparent),transparent)}
+#v8p .trk .cap.tgt.l{background:linear-gradient(90deg,color-mix(in srgb, var(--up) 55%, transparent),transparent)}
+#v8p .trk .cap.tgt.r{background:linear-gradient(270deg,color-mix(in srgb, var(--up) 55%, transparent),transparent)}
+#v8p .trk .cmp{position:absolute;top:-4px;width:2px;height:18px;background:var(--gold);box-shadow:0 0 6px var(--gold);z-index:2}
+#v8p .trk .z{position:absolute;top:-4px;width:1px;height:18px;background:var(--dim);z-index:2}
 #v8p .trk.none{border-style:dashed;background:transparent}
+#v8p .trk .lbl{position:absolute;font-family:var(--mono);font-size:var(--type-8);letter-spacing:.3px;white-space:nowrap;z-index:3}
+#v8p .trk .lbl.end{bottom:-14px;color:var(--dim)}
+#v8p .trk .lbl.end.l{left:0} #v8p .trk .lbl.end.r{right:0}
+#v8p .trk .lbl.tick{top:-15px}
+#v8p .trk .lbl.tick.entry{color:var(--mute)} #v8p .trk .lbl.tick.cmp{color:var(--gold)} #v8p .trk .lbl.tick.combo{color:var(--mute)}
 #v8p .vmore{display:flex;justify-content:center;margin-top:10px}
 #v8p .vmore .chip{padding:8px 14px}
 /* sectors: the table lives under #v8p with a page-local class so mobile_app.css bare rules stay clear */
@@ -498,19 +519,55 @@ function applyFilter(rows){
   var m = openFilter.split(':');
   return rows.filter(function(p){ return m[0]==='side' ? p.side===m[1] : (p.basket||'?')===m.slice(1).join(':'); });
 }
-/* Track geometry only (no P&L): 0 = stop, 1 = target for both sides. `progress` for the CMP
-   marker is the endpoint's own field; the entry marker uses the same normalisation locally.
-   cc#1629: the FILL is the distance travelled from ENTRY to CMP - a band from the entry tick to
-   the gold CMP marker (toward target when winning, back toward stop when losing) - never a fill
-   from the stop end, which painted every winning trade near target as an almost full solid bar
-   (SUZLON short: stop-to-CMP read 90%; entry-to-CMP is a 36% band from 54% to 90%). */
-function trkFrac(v, p){
+/* Track geometry only (no P&L). cc#1660 item 1: the axis is RAW PRICE, low->high, left->right,
+   for BOTH long and short -- never mirrored by side. Before this the axis put SL at frac 0 (left)
+   unconditionally, via a side-specific span/trav formula; that made a short's physical layout the
+   MIRROR of a long's (SL always left, TARGET always right, regardless of which one is actually
+   the lower price), so the reader had to flip reading direction per side. Now trkAxis() fixes
+   lo/hi from min/max(target, stop_loss) once, and trkFrac() is the same 0..1 clamp for every mark
+   (SL, TARGET, ENTRY, CMP) against that one axis -- direction is carried only by which physical
+   end (l/r) SL vs TARGET land on (posRow works this out per row) and by the fill's P&L colour,
+   never by the axis itself.
+   cc#1629 (kept): the FILL is the distance travelled from ENTRY to CMP - a band from the entry
+   tick to the gold CMP marker (toward target when winning, back toward stop when losing) - never
+   a fill from the stop end, which painted every winning trade near target as an almost full solid
+   bar (SUZLON short: stop-to-CMP read 90%; entry-to-CMP is a 36% band from 54% to 90%). */
+function trkAxis(p){
   var t = p.target, sl = p.stop_loss;
-  if(!num(v) || !num(t) || !num(sl) || t===sl) return null;
-  var short = p.side==='SHORT';
-  var span = short ? (sl - t) : (t - sl), trav = short ? (sl - v) : (v - sl);
-  if(!span) return null;
-  return Math.max(0, Math.min(1, trav/span));
+  if(!num(t) || !num(sl) || t===sl) return null;
+  var lo = Math.min(t, sl), hi = Math.max(t, sl);
+  return { lo:lo, hi:hi, span:hi-lo };
+}
+function trkFrac(v, ax){
+  if(!num(v) || !ax) return null;
+  return Math.max(0, Math.min(1, (v - ax.lo) / ax.span));
+}
+/* cc#1660 item 2: the four mono end/tick labels. End labels (SL, TARGET) sit BELOW the track at
+   their own physical end (whichever side trkAxis put them on); tick labels (ENTRY, CMP) sit ABOVE
+   at their own fraction, price only where the tag is implied by colour/position -- except the two
+   NAMED remedies below still carry a short tag, per spec ("their prices" alongside SL/TGT/ENTRY/
+   CMP). Collision rule: if entry and cmp fall within 12% of the track width, drop both individual
+   tick labels for ONE combined "entry -> cmp" label at their midpoint, so text never overlaps.
+   Near either edge (<=15% or >=85% of the track), a tick label anchors to that edge and grows
+   inward instead of centering, so it can never bleed off the card. */
+function trkTickStyle(f){
+  if(f <= 0.15) return 'left:0;text-align:left';
+  if(f >= 0.85) return 'left:100%;transform:translateX(-100%);text-align:right';
+  return 'left:'+Math.round(f*100)+'%;transform:translateX(-50%);text-align:center';
+}
+function trkLabels(p, fz, fc, slEnd, tgtEnd){
+  var slPx = px(p.stop_loss), tgtPx = px(p.target), enPx = px(p.entry_price), cmpPx = num(p.cmp) ? px(p.cmp) : '—';
+  var bottom = '<i class="lbl end '+slEnd+'">SL '+slPx+'</i><i class="lbl end '+tgtEnd+'">TGT '+tgtPx+'</i>';
+  var top;
+  if(fz == null){
+    top = '<i class="lbl tick cmp" style="'+trkTickStyle(fc)+'">CMP '+cmpPx+'</i>';
+  } else if(Math.abs(fc - fz) < 0.12){
+    top = '<i class="lbl tick combo" style="'+trkTickStyle((fz+fc)/2)+'">'+enPx+' → '+cmpPx+'</i>';
+  } else {
+    top = '<i class="lbl tick entry" style="'+trkTickStyle(fz)+'">ENTRY '+enPx+'</i>'
+        + '<i class="lbl tick cmp" style="'+trkTickStyle(fc)+'">CMP '+cmpPx+'</i>';
+  }
+  return bottom + top;
 }
 /* held time from entry_ts (naive IST string, cc#844: compare with IST wall-clock, no offset) */
 function heldLabel(p){
@@ -597,16 +654,39 @@ function renderMarkerChips(rows){
 function bkTag(p){ var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'); return l ? '<span class="tag bk">'+esc(l.toUpperCase())+'</span>' : ''; }
 function posRow(p){
   var side = (p.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
-  var fz = trkFrac(p.entry_price, p), fc = num(p.progress) ? Math.max(0, Math.min(1, p.progress)) : trkFrac(p.cmp, p);
-  var trk = (fc==null)
-    ? '<div class="trk none" title="no target or stop on this position"></div>'
-    : '<div class="trk '+sl+'"><i class="tfill" style="left:'+Math.round(Math.min(fz==null?fc:fz, fc)*100)+'%;width:'+Math.round(Math.abs(fc-(fz==null?fc:fz))*100)+'%"></i>'+(fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')+'<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i></div>';
+  var ax = trkAxis(p);
+  /* cc#1660: p.progress is NOT used any more. It is a server field (mobile_ext.py) computed
+     "0 = stop, 1 = target, same reading for a long and a short" -- exactly the OLD direction-
+     normalized axis this card replaces. Reusing it under the new raw-price axis would put a
+     short's CMP tick at the wrong physical end (its 1=target no longer means frac=1 once target
+     can be the LOW end). do_not_touch covers "P&L maths, position data", so the backend field is
+     left as-is for whatever else may read it; the client now always derives both marks straight
+     from the raw prices already on the row (p.entry_price, p.cmp) via the new trkAxis/trkFrac,
+     which is strictly simpler and needs no server change. */
+  var fz = ax ? trkFrac(p.entry_price, ax) : null;
+  var fc = ax ? trkFrac(p.cmp, ax) : null;
+  var trk;
+  if(ax == null || fc == null){
+    trk = '<div class="trk none" title="no target or stop on this position"></div>';
+  } else {
+    var slFrac = trkFrac(p.stop_loss, ax), slEnd = slFrac <= 0.5 ? 'l' : 'r', tgtEnd = slEnd === 'l' ? 'r' : 'l';
+    var pnl = num(p.unrealised) ? p.unrealised : null, pnlCls = pnl == null ? 'flat' : (pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'flat');
+    var fillFrom = (fz == null ? fc : fz);
+    trk = '<div class="trk pnl-'+pnlCls+'">'
+      + '<i class="cap sl '+slEnd+'"></i><i class="cap tgt '+tgtEnd+'"></i>'
+      + '<i class="tfill" style="left:'+Math.round(Math.min(fillFrom, fc)*100)+'%;width:'+Math.round(Math.abs(fc-fillFrom)*100)+'%"></i>'
+      + (fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')
+      + '<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i>'
+      + trkLabels(p, fz, fc, slEnd, tgtEnd)
+      + '</div>';
+  }
   var cmpTxt = num(p.cmp) ? px(p.cmp) : '—';
   return '<div class="slab dense prow" data-side="'+sl+'" data-basket="'+esc(p.basket||'')+'">'+
     '<div class="psym">'+esc(p.symbol)+' '+mkFlag(p)+'<span class="tag '+sl+'">'+esc(side||'—')+'</span>'+bkTag(p)+'</div>'+
     '<div class="pnl '+sgn(p.unrealised)+'">'+inr(p.unrealised)+'</div>'+
+    /* cc#1660 item 4: the tgt/sl half of this line is gone -- both numbers are on the bar now. */
     '<div class="pmeta"><span>'+px(p.entry_price)+' → <b>'+cmpTxt+'</b>'+(p.cmp_is_live===false?' <span class="mu">(last close)</span>':'')+'</span>'+
-    '<span>tgt '+px(p.target)+' · sl '+px(p.stop_loss)+'</span><span class="age">'+heldLabel(p)+'</span></div>'+trk+'</div>';
+    '<span class="age">'+heldLabel(p)+'</span></div>'+trk+'</div>';
 }
 function renderOpen(){
   var bk = STATE.book, el = document.getElementById('sec-open'), more = document.getElementById('open-more');
