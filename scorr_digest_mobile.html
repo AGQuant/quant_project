@@ -587,6 +587,7 @@ html,body{overflow-x:hidden;max-width:100%}
 .nwchip.dn{background:color-mix(in srgb, var(--loss) 12%, transparent);color:var(--heat);border:var(--bw-1) solid color-mix(in srgb, var(--loss) 30%, transparent)}
 .nwchip.hi{background:color-mix(in srgb, var(--loss) 12%, transparent);color:var(--heat);border:var(--bw-1) solid color-mix(in srgb, var(--loss) 30%, transparent)}
 .nwchip.nt{background:color-mix(in srgb, var(--ink) 6%, transparent);color:var(--chalk);border:var(--bw-1) solid var(--edge)}
+.nwchip.am{background:color-mix(in srgb, var(--label) 12%, transparent);color:var(--label);border:var(--bw-1) solid color-mix(in srgb, var(--label) 30%, transparent)}   /* cc#1666 item 3: CAUTIOUS traffic-light amber */
 /* cc#1428: sentiment banner shrunk to roughly half its prior visual footprint — the MEDIUM IMPACT
    chip below it (.nwchip without .sent) is untouched, per do_not_touch. Literal half of the base
    8px/2px/7px would be 4px/1px/3.5px; 4px sits below any reasonable legible floor for a phone
@@ -1694,7 +1695,7 @@ function nwChip(v, kind){
   var t = String(v).toUpperCase();
   var cls = kind === 'impact'
     ? (t === 'HIGH' ? 'hi' : 'nt')
-    : (t === 'BULLISH' ? 'up' : (t === 'BEARISH' ? 'dn' : 'nt'));
+    : (t === 'BULLISH' ? 'up' : (t === 'BEARISH' ? 'dn' : (t === 'CAUTIOUS' ? 'am' : 'nt')));   /* cc#1666 item 3: CAUTIOUS gets its own amber, was folded into nt */
   // cc#1428: 'sent' is a SIZE marker only (see .nwchip.sent below) — the impact chip's own size/
   // markup is untouched, only the sentiment banner shrinks.
   if (kind === 'sentiment') cls += ' sent';

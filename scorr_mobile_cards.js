@@ -276,32 +276,25 @@
     /* V8-card treatment (founder 21:5x), applied to EVERY mood word on the page (the home
        carousel has two: the checks scoreboard and the MARKET MOOD / PCR card, founder 23:33).
        Word in chalk, sentiment on the rail. */
-    /* cc#1122 item 3: a page that styles its OWN mood word is left alone. .hero-mood is
-       mobile/home.html's element and that page now sets its size and case in its own scope, as
-       the card requires. Without this guard the two fight and the shared file wins on
-       !important — and worse, it wins INTERMITTENTLY: cc#1118's sweep wraps each letter in a
-       .mlt span, so on the first paint .hero-mood has children and never matches the leaf test
-       below, but a later in-page re-render emits the plain word, matches, and the mood word
-       silently jumps from the page's size to this file's 42px. Same cross-page collision
-       mechanism as cc#1108, one file over. */
+    /* cc#1666: OPT-IN, not content-match. This is the SIXTH time a leaf element whose text
+       happens to equal a mood word got blown up to 42px by this sweep, uninvited (cc#1108,
+       cc#1122 x2, cc#1351, cc#1356, now Intel's .tag.neut, a digest news-sheet sentiment chip
+       and the Analysis delivery label — three MORE small pills matched in one sweep, founder
+       screenshots 04-Sep 09:16/09:40/10:40). Five prior fixes each added one more exclusion to a
+       blacklist that content alone can never fully enumerate — a future small pill whose text is
+       literally "Bearish" hits the same bug on day one. The match is now an explicit opt-in
+       class, .mood-hero, added by a page that WANTS this treatment and has no sizing of its own
+       (there are none today: Digest's hero word (.skew, its own 36px) and V8's gate word (.gword,
+       its own 56px, no !important) both already size themselves without this sweep's help, so
+       .r5-mood only ever raised them to a smaller 42px than they already draw at — losing that
+       is a strict improvement, not a regression, confirmed by reading both files' own CSS before
+       this change). Nothing carries .mood-hero yet; a future page opts in explicitly instead of
+       being matched by accident. */
     var moodEls = [];
     for (var i2 = 0; i2 < all.length; i2++) {
       var e2 = all[i2];
-      /* cc#1351 · .bkside is the Index Book direction badge (cc#1349, mobile/home.html). Its text
-         is literally 'Bullish'/'Bearish', it is a leaf, so this sweep matched it, blew it up to
-         42px, railed its card and inflated every number leaf inside — the founder's 27-Aug 07:44
-         screenshot. Fourth occurrence of the content-match collision (cc#1108, cc#1122 x2, now
-         this); same fix as .hero-mood: an element that styles its own word is skipped by class. */
-      /* cc#1356 · .pmood is hero card 2's own mood block (MARKET MOOD · PCR, mobile/home.html).
-         Its word ('Greed'/'Fear'...) is a leaf, so this sweep matched it and re-applied the OLD
-         16-Aug spacious treatment — 42px word, rail, number inflation — over the top of the
-         HERO_COMPACT_V1 styling (session_log 32026), and the stretched card 2 dragged card 1 tall
-         with it (#heroTrack is align-items:stretch). The compact ruling supersedes the old one, so
-         the card styles its own word in its own scope, same rule as .hero-mood and .bkside.
-         Fifth occurrence of the content-match collision. closest() because the guard must also
-         cover any child the page wraps the word in later. */
-      if (e2.classList && (e2.classList.contains('hero-mood') || e2.classList.contains('bkside'))) continue;
-      if (e2.closest && e2.closest('.pmood')) continue;
+      if (!(e2.classList && e2.classList.contains('mood-hero'))
+          && !(e2.closest && e2.closest('.mood-hero'))) continue;
       if (e2.children.length === 0 && MOODS.test((e2.textContent || '').trim())) moodEls.push(e2);
     }
     for (var im = 0; im < moodEls.length; im++) {
