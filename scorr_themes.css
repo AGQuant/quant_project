@@ -223,3 +223,13 @@ body[data-theme="rosenight"]{--field:#0F0A0D;--panel:#1A1216;--hi:#241820;--edge
  --railgrad:linear-gradient(90deg,#FF6B9D,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
  --gold-lo:#7A2F4C;--gold-hi:#FFB3CC;--sunk:#0C0709}
+/* cc#1637 amend (37303 rosewall_03sep, founder 03-Sep 07:55): ROSE WALL - dark pink wall, light pink
+   cards; the founder-preferred direction. The 17 contract keys here, copied by code. The set's two
+   on-field tokens (--on-field, --on-field-muted) and --nav-bg are NOT contract keys, so they live in
+   the scoped rosewall block in mobile/theme_mobile.css, keeping every other set 17/17 complete. */
+body[data-theme="rosewall"]{--field:#B8355F;--panel:#FFEAF1;--hi:#FFDDE8;--edge:#F2B9CC;
+ --ink:#2A0F1C;--muted:#5E3347;--brand:#7A0C3D;--brandglow:rgba(122,12,61,.25);--accent:#7A0C3D;
+ --label:#8C1F4E;--win:#0F6B3F;--loss:#A3161C;
+ --railgrad:linear-gradient(90deg,#FFF1F5,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.05) 0 2px,transparent 2px 9px);
+ --gold-lo:#7A0C3D;--gold-hi:#FFFFFF;--sunk:#FFF6F9}

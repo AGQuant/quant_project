@@ -51,3 +51,27 @@
  * Only background-color: the grain (background-image) stays exactly as the shared sheet draws it.
  * Same prefix and specificity as the body rule in scorr_theme_r5.css; this sheet loads later. */
 :root:root:not([data-theme="light"]) body{ background-color:var(--field); }
+
+/* cc#1637 · ROSE WALL on-field colours (37303 rosewall_03sep). A dark wall and a light card cannot
+ * share one --muted (measured 2.1 on the wall vs 9.0 on the card), so this set carries two extra
+ * tokens for the few things that sit ON the wall: section eyebrows and their right text, page
+ * footers, the top brand line, the bottom nav. Everything inside a card keeps the dark ink from
+ * scorr_themes.css. Colour only, no hide rules. Values copied from the log row, not retyped; the
+ * chip fix below reads the set's own tokens. Every rule carries the shared sheet's prefix so it
+ * outranks the R5 rules for .sect and the #0A101E bottom nav at equal-or-lower specificity. */
+body[data-theme="rosewall"]{ --on-field:#FFF1F5; --on-field-muted:#FFD0DE; --nav-bg:#8E1A48; }
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .sect,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .head h1,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .chd .t{ color:var(--on-field); }
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .sect .r,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .head .s,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .asof,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .g-asof,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .ia-foot,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .foot{ color:var(--on-field-muted); }
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .bnav{ background:var(--nav-bg); border-top-color:var(--edge); }
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .bn{ color:var(--on-field-muted); }
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .bn.on{ color:var(--on-field) !important; }
+/* known nit from the row: the active chip's dark fill went dark-on-dark here - a light fill instead */
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .chip.on,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .chip.gd{ background:var(--sunk); color:var(--brand); border-color:var(--gold-lo); }
