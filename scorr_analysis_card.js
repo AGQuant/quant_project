@@ -190,6 +190,24 @@
       h+=secLbl('Volume');
       if(vp==null&&adp==null&&!(rv&&rv.rvol!=null)){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
       else{ h+=_volTilesHtml(E,M); }
+      // (2b) cc#1653 item 3: 21-day ACCUMULATION / DISTRIBUTION bars, above the Delivery box —
+      // the SAME drawing gvm.html's Tape card uses (window.ScorrADBars, scorr_card_common.js),
+      // fed by the SAME E.ad_21d payload the ACCUM volume tile above already reads (deriv_metrics
+      // ._ad_21d now also returns `bars` — read-path only, no new table). This card is read-only:
+      // opts is omitted, so no bar is picked and BIGGEST DAY is never outlined (item 4 — kept
+      // only because the shared helper degrades to that for free when opts is absent, not built
+      // specially for this card). total_return_pct is computed here from the bars' own `close`
+      // values (first vs last of the window) since deriv_metrics does not carry a separate
+      // 21-day price-change field the way GVM's own volume extras do.
+      const _adBars=(E.ad_21d&&E.ad_21d.bars)||null;
+      h+=secLbl('Accumulation / Distribution');
+      if(_adBars&&_adBars.length){
+        const _adFirst=_adBars[0],_adLast=_adBars[_adBars.length-1];
+        const _adRet=(_adBars.length>1&&_adFirst.close)?Math.round((_adLast.close/_adFirst.close-1)*1000)/10:null;
+        h+=window.ScorrADBars({bars:_adBars,verdict:E.ad_21d.label||'',up_vol_pct:E.ad_21d.up_vol_pct,total_return_pct:_adRet});
+      } else {
+        h+=boxd('<span style="color:var(--mut);font-size:12px">no per-session volume for this symbol</span>');
+      }
       // (3) DELIVERY — deliv% vs own 21d avg + conviction/churn + 30d sparkline
       const dv=E.delivery||{};
       h+=secLbl('Delivery');

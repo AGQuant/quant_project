@@ -1562,3 +1562,67 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
     (document.head || document.documentElement).appendChild(st2);
   } catch (e) {}
 })();
+
+/* ── cc#1653 items 2-3: SHARED 21-DAY ACCUMULATION/DISTRIBUTION BARS ──────────────────────────
+   Ported VERBATIM from mobile/gvm.html's tapeChart(vol) (cc#1616) — same drawing, same markup,
+   same caption/tip/note shape — so gvm's own Tape card renders pixel-identical before and after
+   this extraction (gvm.html's own tapeChart body is deleted; secTape() now calls this). The one
+   real change: TAPE.pick / TAPE.big (gvm's own module-level tap state) become opts.pick /
+   opts.big, an explicit argument instead of an ambient global — a caller that doesn't want tap
+   interactivity (the Analysis card) simply omits opts and gets the same chart with no bar picked
+   and BIGGEST DAY unmarked. The data-vbar/data-bigday attributes stay in the markup either way,
+   so a host page CAN wire the same click delegation gvm.html already has if it wants to — this
+   function never touches a DOM event listener itself.
+
+   esc/num/dmy/volFmt below are PRIVATE to this IIFE, not published. gvm.html's own num() is a
+   boolean type-check and this FILE's own num() (in the API above) is a formatter — same name,
+   different contract — so this function carries its own copies rather than risk resolving
+   someone else's differently-shaped global of the same name.
+
+   Founder said "30 day"; the underlying data is 21 sessions (deriv_metrics._ad_21d) — rendered
+   and labelled as 21/n, never relabelled to 30. */
+(function () {
+  if (window.ScorrADBars) return;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function num(v){ return typeof v === 'number' && isFinite(v); }
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m ? (+m[3])+' '+MON[+m[2]-1] : String(iso||''); }
+  function volFmt(v){ if(!num(v)) return '—'; return v >= 1e6 ? (v/1e6).toFixed(2)+'M' : v >= 1e3 ? Math.round(v/1e3)+'k' : String(Math.round(v)); }
+
+  window.ScorrADBars = function (vol, opts) {
+    opts = opts || {};
+    var bars = (vol && vol.bars) || [];
+    if(!bars.length) return '<div class="g-empty">No volume bars for this symbol yet.</div>';
+    var n = bars.length, W = 360, H = 120, T = 8, B = 18, L = 2, R = 2, iw = W - L - R, ih = H - T - B, slot = iw / n, bw = Math.max(3, slot * 0.66);
+    var maxV = 0, sumV = 0, up = 0, dn = 0;
+    bars.forEach(function(b){ var v = num(b.v) ? b.v : 0; if(v > maxV) maxV = v; sumV += v; if(b.up) up++; else dn++; });
+    var avg = n ? sumV / n : 0, yAvg = T + ih * (1 - (maxV ? avg / maxV : 0));
+    var big = vol.biggest_day && vol.biggest_day.d;
+    var svg = '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" aria-label="21-day up and down day volume">';
+    svg += '<line x1="'+L+'" y1="'+(T+ih)+'" x2="'+(W-R)+'" y2="'+(T+ih)+'" stroke="var(--line)" stroke-width="1"/>';
+    for(var k=0;k<n;k++){
+      var b = bars[k], v = num(b.v) ? b.v : 0, h = maxV ? Math.max(1, v / maxV * ih) : 1;
+      var x = L + k*slot + (slot-bw)/2, y = T + ih - h, last = (k === n-1);
+      var op = last ? 1 : (0.45 + 0.45 * (k / Math.max(1, n-1))).toFixed(2);
+      var isBig = opts.big && big && b.d === big, picked = opts.pick === k;
+      svg += '<rect data-vbar="'+k+'" x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" rx="1.5" fill="'+(b.up?'var(--up,#2FD48B)':'var(--down,#FF5C6C)')+'" opacity="'+op+'"'
+        + ((isBig || picked) ? ' stroke="var(--gold,#D4AF37)" stroke-width="1.5"' : '') + ' style="cursor:pointer"/>';
+    }
+    if(avg > 0) svg += '<line x1="'+L+'" y1="'+yAvg.toFixed(1)+'" x2="'+(W-R)+'" y2="'+yAvg.toFixed(1)+'" stroke="var(--mute)" stroke-width="1" stroke-dasharray="2 3" opacity=".8"/>';
+    var xs = [0, Math.floor((n-1)/2), n-1].filter(function(v,i,a){ return a.indexOf(v) === i; });
+    xs.forEach(function(k2, i){ svg += '<text x="'+(L + k2*slot + slot/2).toFixed(1)+'" y="'+(H-5)+'" text-anchor="'+(i===0?'start':(i===xs.length-1?'end':'middle'))+'" font-family="var(--mono)" font-size="9" fill="var(--dim)">'+esc(dmy(bars[k2].d))+'</text>'; });
+    svg += '</svg>';
+    var vw = String(vol.verdict || '').toUpperCase(), vcls = vw === 'ACCUMULATION' ? 'up' : vw === 'DISTRIBUTION' ? 'dn' : 'mu';
+    var cap = '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;margin-top:6px">'
+      + '<span><span class="up">'+up+' up</span> · <span class="dn">'+dn+' down</span>'+(num(vol.up_vol_pct)?' · '+Math.round(vol.up_vol_pct)+'% up-day volume':'')+(vw?' · <b class="'+vcls+'">'+esc(vw)+'</b>':'')+'</span>'
+      + '<span class="'+(num(vol.total_return_pct)?(vol.total_return_pct>=0?'up':'dn'):'mu')+'">'+(num(vol.total_return_pct)?(vol.total_return_pct>=0?'+':'')+vol.total_return_pct.toFixed(1)+'% price in '+n+'d':'')+'</span></div>';
+    var tip = '';
+    if(opts.pick != null && bars[opts.pick]){
+      var pb = bars[opts.pick], prev = opts.pick > 0 ? bars[opts.pick-1] : null;
+      var dpct = (prev && num(prev.close) && num(pb.close) && prev.close) ? (pb.close/prev.close - 1)*100 : null;
+      tip = '<div class="well-up" style="margin-top:6px;padding:7px 10px;font-family:var(--mono);font-size:11px;display:flex;justify-content:space-between;gap:8px"><span>'+esc(dmy(pb.d))+'</span><span>vol '+volFmt(pb.v)+'</span><span class="'+(pb.up?'up':'dn')+'">'+(dpct==null?(pb.up?'up day':'down day'):(dpct>=0?'+':'')+dpct.toFixed(2)+'%')+'</span></div>';
+    }
+    var note = n < 21 ? '<div class="g-asof">'+n+' of 21 sessions · '+(avg?'avg volume '+volFmt(avg):'')+'</div>' : '<div class="g-asof">'+n+' sessions · dotted line = '+n+'-day average volume '+volFmt(avg)+'</div>';
+    return '<div class="g-lbl" style="margin-top:0;margin-bottom:4px">VOLUME · '+n+'-DAY ACCUMULATION / DISTRIBUTION</div>' + svg + cap + tip + note;
+  };
+})();
