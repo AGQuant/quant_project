@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A0A0C">
 <title>Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
@@ -48,6 +49,10 @@ body[data-theme]{
   --grn:var(--t-win); --red:var(--t-loss);
   --blu:var(--t-accent); --cyan:var(--t-brand);
 }
+/* cc#1629: the wrapper no longer re-paints the field flat over the body. theme_mobile.css paints
+   <body> in this theme's --field with the R5 grain, so the field is one continuous grained ground
+   from the status bar to the bottom nav instead of a flat band inside a grained one. */
+.screen{background:transparent}
 /* the switch — ref .tswitch, 34x30 buttons, right of the wordmark */
 /* APP_QA_R5 P1: the switch is HIDDEN, not removed. Markup and JS stay in place so the return
    next build is deleting this one declaration rather than rebuilding the control. */
@@ -1539,7 +1544,9 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
      applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
      White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
-document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');})();</script>
+document.body.setAttribute('data-theme',(t==='dark'||t==='goldnight')?t:'goldnight');
+/* cc#1629: the OS status bar takes the resolved theme's field colour, so it is not a separate strip */
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <div class="screen">
   <div class="head" style="display:flex;align-items:center;justify-content:space-between">
     <h1>Sc<span style="color:var(--grn)">o</span>rr</h1>

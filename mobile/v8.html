@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A0A0C">
 <title>V8 · Scorr</title>
 <link rel="stylesheet" href="/static/mobile_app.css">
 <script src="/scorr_card_common.js"></script>
@@ -17,6 +18,10 @@
    Inner class names avoid the bare classes the shared sheets already declare (.v .c .g .m .bar
    .fill .word .row .sym .meta .more .big .pos .kv): a bare rule from mobile_app.css would add
    its own padding/border to them. So: .cl/.cv, .gword, .sbar, and prefixed names below. */
+/* cc#1629: the page FIELD lives on <body> too, so the shared app sheet (theme_mobile.css) paints
+   the whole scroll body in GOLD NIGHT with its grain - one continuous ground from the status bar
+   (theme-color meta above, same value) to the bottom, no petrol band behind the wrapper. */
+body{ --field:#0A0A0C; }
 #v8p{
   --field:#0A0A0C; --panel:#17171B; --well:#131316; --sunk:#0C0C0F;
   --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
