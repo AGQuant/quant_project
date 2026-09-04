@@ -1400,7 +1400,10 @@ NAV_REGISTRY = {
     # /alerts page (Alerts leads, WoT adjacent). Both remain injected + PROTECTED above.
     "/m/trades":     ("Wall of Trades (mobile)", "bottom-nav"),   # cc#1535: WoT slot
     "/trades":       ("Wall of Trades (web)",    "v8-tab"),   # cc#1609: V8 header tab (Wall of Trades), off the top nav
-    "/alerts":       ("Alerts (web)",            "nav"),   # cc#1585 partial reverse (founder 02-Sep): back in the top nav; the V8 tab coexists
+    # cc#1694 (founder 04-Sep 20:48 IST): out of the top nav again — "already displayed in V8".
+    # Route, _PWA_INJECT_PATHS and PROTECTED unchanged; still loads by typed URL and as the V8
+    # hub's Alerts tab, same v8-tab pattern as /trades and /digest below.
+    "/alerts":       ("Alerts (web) · V8 hub Alerts tab", "v8-tab"),   # cc#1585 -> cc#1694
     "/inv-scanner":  ("Invest Scan",              "nav"),   # cc#1286
     # /m/login is a page, not a destination — it is reached by being logged out, never by tapping
     # a nav item, so it carries no NAV entry and is not PROTECTED. Recorded here so the registry
