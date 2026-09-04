@@ -69,6 +69,11 @@
      --mast is a masthead that stays near-black in BOTH themes on purpose - a contract can hold a
      token that does not flip, and pretending it flips would be worse than naming it here. */
   --mast         : #060B16;
+  /* cc#1679: text painted directly on the Global Indices heat tile's OWN solid fill (the darkest
+     green/red step, or the darkest neutral for a flat/no-data tile) — not on the page ground, so
+     it does not flip with the page theme. Same --mast precedent: declared once here, never
+     redeclared under light, so it stays white in both. */
+  --heat-on      : #FFFFFF;
   --hover        : rgba(148,166,210,.05);
   --flagbg       : rgba(255,92,108,.05);
   /* cc#1203 push 17: text sitting ON an accent fill. v15 puts it on green and on cyan, both
