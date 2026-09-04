@@ -8541,13 +8541,23 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-wrap .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:idxpdot 2s infinite}
 .tc13-wrap .stats{display:flex;gap:14px;margin-left:auto;font:500 11px var(--f-m);color:var(--tx3);flex-wrap:wrap;align-items:center}
 .tc13-wrap .stats b{color:var(--tx2);font-weight:600}
-.tc13-wrap .rcard{background:var(--well);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+/* cc#1684: renamed from .rcard -- that class name collides with the shared Results Card modal's
+   OWN unscoped .rcard{max-width:620px;width:100%} rule, injected site-wide by RESULTS_CARD_JS
+   (pwa_endpoints.py, cc#573). CSS cascades per-property: since this rule never set width/max-width,
+   the injected rule was the ONLY one touching those properties for any .rcard element on the page,
+   so it silently capped both TC13 book cards at ~620px regardless of this selector's own higher
+   specificity. Confirmed with a real scripted Chromium render (not a CSS-only one, which is how
+   cc#1600 missed it): before RESULTS_CARD_JS executes the card measures full width; after, it
+   collapses to exactly 620px computed max-width. .tc13-card is page-unique -- do not reuse .rcard
+   for anything new anywhere on this page. */
+.tc13-wrap .tc13-card{background:var(--well);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 /* cc#1544 P1: founder screenshot 1-Sep showed the Open Book table cut off mid-column ('SL |
-   TA...') — .rcard's overflow:hidden was clipping any row whose natural nowrap width exceeded
-   the box (an auto-layout table's width:100% is a suggestion Chrome overrides once min-content
-   is wider — confirmed live). Fix follows #pane-index's OWN established convention (cc#1168)
-   instead of inventing a new one: a .tbl-scroll div is now the real horizontal-scroll boundary
-   inside .rcard (which keeps overflow:hidden purely for its rounded corners), .tbl-hold gives
+   TA...') — .tc13-card's (then still named .rcard, renamed cc#1684) overflow:hidden was clipping
+   any row whose natural nowrap width exceeded the box (an auto-layout table's width:100% is a
+   suggestion Chrome overrides once min-content is wider — confirmed live). Fix follows
+   #pane-index's OWN established convention (cc#1168) instead of inventing a new one: a
+   .tbl-scroll div is now the real horizontal-scroll boundary inside .tc13-card (which keeps
+   overflow:hidden purely for its rounded corners), .tbl-hold gives
    the fade-edge affordance, .scrollhint gives the text one, both driven by live measurement
    (tc13MarkScroll) — never by a width guess, and both go quiet once a table fits or the reader
    has scrolled to the end. */
@@ -8624,7 +8634,9 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   }
 
   // cc#1530 (TC_SCANNER_R1_V1): the R1 renderers. Open Book first, Closed Book second, each in
-  // the mock's .sh + .rcard/.tbl grammar (scoped under .tc13-wrap). The proximity rail is the
+  // the mock's .sh + .tc13-card/.tbl grammar (scoped under .tc13-wrap; .tc13-card was named
+  // .rcard until cc#1684 renamed it away from the shared Results Card modal's own class). The
+  // proximity rail is the
   // mock's prox() VERBATIM — side-aware: SELL runs Target..SL, BUY runs SL..Target, dot at
   // clamp((cmp-lo)/(hi-lo)*100, 0, 100). closedStats() above is unchanged and still feeds the
   // Closed Book stat chips (the spec's own instruction).
@@ -8641,6 +8653,20 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     var mo=parseInt(t.slice(5,7),10);
     return parseInt(t.slice(8,10),10)+' '+(M[mo-1]||'');
+  }
+  // cc#1684 (revives cc#1600 scope): ENTRY TIME + DAYS HELD for the Open Book, both derived
+  // client-side from entry_ts (already served by /api/tc-scanner/holds, no endpoint change).
+  function eTime(ts){
+    if(!ts) return '—';
+    var t=String(ts);
+    return t.length>=16 ? t.slice(11,16) : '—';   // 'YYYY-MM-DD HH:MM:SS' -> 'HH:MM'
+  }
+  function daysHeld(entryTs){
+    if(!entryTs) return '—';
+    var e=new Date(String(entryTs).replace(' ','T'));
+    if(isNaN(e.getTime())) return '—';
+    var d=Math.floor((new Date()-e)/86400000);
+    return d<0 ? '—' : (d===0 ? 'today' : d+'d');
   }
   function pnlTxt(v){ return v!=null?((v>=0?'+':'')+v+'%'):'—'; }
   function cl2(v){ return v==null?'':(v>0?'pos':(v<0?'neg':'flat')); }
@@ -8662,8 +8688,10 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td>'+n2(r.sl)+'</td>'
         +'<td>'+n2(r.cmp)+'</td>'
         +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
-        +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="8">No open TC13 positions</td></tr>';
+        +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td>'
+        +'<td>'+eTime(r.entry_ts)+'</td>'
+        +'<td>'+daysHeld(r.entry_ts)+'</td></tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="10">No open TC13 positions</td></tr>';
     return '<section><div class="sh"><h2>Open Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
@@ -8672,8 +8700,8 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<div class="stats"><span>Open <b>'+rows.length+'</b></span>'
       +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">Date</label>'
       +'<input type="date" id="tc13Date" value="'+esc(dateStr||'')+'"></span></div></div>'
-      +'<div class="rcard"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
-      +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th>SL &middot; Target</th></tr></thead>'
+      +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
+      +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th>SL &middot; Target</th><th>Entry Time</th><th>Days Held</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
   }
 
@@ -8698,7 +8726,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<span>WR <b>'+(stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
       +'<span>Net <b class="'+cl2(stats.net_pts_pct)+'">'
         +(stats.closed?((stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%'):'—')+'</b></span></div></div>'
-      +'<div class="rcard"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
+      +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
       +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th>Date</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
   }
@@ -8706,8 +8734,8 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // cc#1544: same measurement convention as #pane-index's idxMarkScroll (cc#1168) — the clipped/
   // hint classes are driven by scrollWidth vs clientWidth, never a width guess, and go quiet the
   // moment a table fits or the reader has scrolled to the end. A local copy because TC13's
-  // sections use .rcard/<section>, not #pane-index's .card, so the hint lookup is section-scoped
-  // here instead of card-scoped.
+  // sections use .tc13-card/<section> (cc#1684: renamed from .rcard), not #pane-index's .card, so
+  // the hint lookup is section-scoped here instead of card-scoped.
   function tc13MarkScroll(host){
     if(!host) return;
     host.querySelectorAll('.tbl-hold').forEach(function(hold){
