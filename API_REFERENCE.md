@@ -175,6 +175,9 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | GET | `/api/qb/rebalance_log` | raw rebalance/EOD-check log (one row per trading night) |
 | GET | `/api/qb/rebalance_history` | cc#1703: same log, classified — rebalance / stop exit / cash move rows only by default, nightly-check noise hidden behind a count; real IN/OUT symbols + a stock-only HELD count (bees excluded) |
 | GET | `/api/qb/registry` | registry |
+| GET | `/api/qb/gated_rebalances` | cc#1704: {basket: {due, n_candidates}} for every basket whose latest rebalance is still awaiting a founder confirm — powers the card pill |
+| POST | `/api/qb/rebalance/confirm` | cc#1704: buy a gated rebalance's stored candidates (admin-token gated; never called by CC against a live basket) |
+| POST | `/api/qb/rebalance/skip` | cc#1704: dismiss a gated rebalance's candidates, no buy (admin-token gated) |
 
 ### GVM — `gvm_nightly.py`, `gvm_report_endpoints.py`, `gvm_market_endpoints.py`, `gvm_universe_pivots.py`
 | Method | Path | Description |

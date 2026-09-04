@@ -17,6 +17,10 @@ Endpoints (all /api/qb/*):
   GET  /api/qb/rebalance_history    — cc#1703: same log, classified (rebalance/stop exit/cash
                                        move shown by default, nightly checks behind a count)
   GET  /api/qb/registry             — basket registry
+  GET  /api/qb/gated_rebalances     — cc#1704: {basket: {due, n_candidates}} for every basket
+                                       still awaiting a founder confirm — powers the card pill
+  POST /api/qb/rebalance/confirm    — cc#1704: buy a gated rebalance's stored candidates
+  POST /api/qb/rebalance/skip       — cc#1704: dismiss a gated rebalance's candidates, no buy
 """
 
 from fastapi import APIRouter, HTTPException, Header
