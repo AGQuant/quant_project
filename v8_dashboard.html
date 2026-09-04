@@ -2891,6 +2891,32 @@ function futRowFor(sym){
   for(let i=0;i<FUTBOOK.positions.length;i++){if(FUTBOOK.positions[i].symbol===sym)return FUTBOOK.positions[i];}
   return null;
 }
+// cc#1674 V8_PNL_CANON_V1: ONE server-side query backs every filtered Realised/Win-Loss figure on
+// the KPI row — GET /api/v8/book_canon?side=&basket=&fut_cut=. Same lazy-cached-per-combination
+// shape as FUTBOOK above: a request fires at most once per (side,basket,fut_cut) triple for the
+// life of the page, and a resolved fetch re-renders panel0 so the dash the caller sees while
+// loading is replaced by the real figure without the caller having to poll.
+let BOOK_CANON_CACHE={}, BOOK_CANON_LOADING={};
+function _bookCanonKey(side,basket,futCut){ return (side||'ALL')+'|'+(basket||'ALL')+'|'+(futCut||''); }
+function loadBookCanon(side,basket,futCut){
+  const key=_bookCanonKey(side,basket,futCut);
+  if(BOOK_CANON_CACHE[key])return BOOK_CANON_CACHE[key];
+  if(!BOOK_CANON_LOADING[key]){
+    BOOK_CANON_LOADING[key]=true;
+    const qs=[];
+    if(side)qs.push('side='+encodeURIComponent(side));
+    if(basket)qs.push('basket='+encodeURIComponent(basket));
+    if(futCut)qs.push('fut_cut='+encodeURIComponent(futCut));
+    getJSON(API_BASE+'/api/v8/book_canon'+(qs.length?'?'+qs.join('&'):''))
+      .then(out=>{ BOOK_CANON_CACHE[key]=out; })
+      .catch(e=>{ BOOK_CANON_CACHE[key]={error:String(e&&e.message||e)}; })
+      .finally(()=>{
+        delete BOOK_CANON_LOADING[key];
+        const el=document.getElementById('panel0'); if(el)el.innerHTML=renderMaster();
+      });
+  }
+  return null;   // not yet resolved this call — caller shows the loading dash
+}
 function _masterBasketReconcile(){
   if(MASTER_BASKET==='all')return;
   const p=cache.paper,allOpen=(p&&p.open_positions)||[];
@@ -3374,42 +3400,51 @@ function renderMaster(){
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
   const netUnreal=unreal-open.length*BROKERAGE_PER_TRADE;
   // cc#129 bug_2: Realised + Win/Loss cards also cascade with the Long/Short filter.
-  // 'all' uses the authoritative summary totals; long/short recompute from the
-  // already-fetched recent_trades (closed) on that side.
   // cc#880: the basket filter cascades into these cards for the SAME reason the direction filter
   // already did. Showing one basket's open rows under the whole book's realised P&L is the cc#817
   // class of error — filtered rows sitting beneath an unfiltered headline, with nothing saying so.
-  // The API summary is authoritative only when BOTH filters are off; any filter recomputes.
-  // cc#1019: in FUTURES view the realised book is the FUT-PRICED book — trades that closed on or
-  // after the cutover — so it is ALWAYS recomputed from recent_trades (fresh-era, a superset of it)
-  // and never read off the all-time `sum`. Win/Loss uses the canonical result classifier
-  // (TARGET / SL), matching the equity `sum`, not a pnl-sign split. With no cutover served yet the
-  // figures are dashes, not zeros: "we cannot tell you" and "nothing has closed" are different
-  // statements and must not print the same. Equity/All view is untouched below.
+  // The API summary is authoritative only when BOTH filters are off AND the view is Equity.
+  //
+  // cc#1674 V8_PNL_CANON_V1 (rule 13): every filtered figure below now comes from ONE server-side
+  // query (v8_book_canon.book_canon, GET /api/v8/book_canon) instead of being recomputed here from
+  // `recent_trades` — a display list CAPPED at 100 rows. That recompute understated (and could
+  // sign-flip) the real figure the moment a filter's true trade count exceeded what fit in the cap
+  // — measured 04-Sep: Long read -2,67,746 on the newest 47 of its rows in the capped list while
+  // the full 73-trade Long book was +2,38,336. Win/Loss is TARGET/SL in every view now too (the
+  // `pnl>0` classifier that used to run in the filtered branch is gone — it disagreed with the
+  // canon by up to 14 points on some baskets, per basket_records()' own docstring). FUTURES view
+  // (cc#1019) had the identical LIMIT-100 exposure and is fixed the same way, via fut_cut.
   let totalClosedPnl,netClosed,winsTxt,lossTxt;
   const _futView=(MASTER_BASIS==='futures');
   if(_futView&&!_futCut()){
+    // No futures cutover served yet: "we cannot tell you", not a zero. Same dash as before.
     totalClosedPnl=null;netClosed=null;winsTxt='--';lossTxt='--';
-  }else if(_futView){
-    const cl=((p&&p.recent_trades)||[]).filter(_futBookTrade)
-      .filter(x=>MASTER_SIDE==='all'||(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase())
-      .filter(x=>MASTER_BASKET==='all'||(x.basket||'')===MASTER_BASKET);
-    totalClosedPnl=cl.reduce((a,x)=>a+Number(x.pnl||0),0);netClosed=netPnl(totalClosedPnl,cl.length);
-    winsTxt=cl.filter(x=>x.result==='TARGET').length;lossTxt=cl.filter(x=>x.result==='SL').length;
-  }else if(MASTER_SIDE==='all'&&MASTER_BASKET==='all'){
+  }else if(!_futView&&MASTER_SIDE==='all'&&MASTER_BASKET==='all'){
     // cc#999: totalClosedPnl is the GROSS shown in the sub-line, and netPnl() subtracts brokerage to
     // get the net headline. sum.total_pnl is the canon REALISED (already net of brokerage, cc#970), so
     // feeding it here deducted the Rs.500/trade TWICE — the card read Rs 4,30,990 when the canon net is
     // Rs 4,52,490 (gross 4,73,990 − brokerage 21,500 ONCE). Use sum.gross_pnl so netPnl derives the
     // true net, matching the mobile Home Closed Book (which already showed the canon net correctly).
+    // Unchanged by this card: the unfiltered Equity view already reads the canon (main.py's own
+    // /api/paper/status summary is itself book_canon-derived), just via a different round trip.
     totalClosedPnl=Number(sum.gross_pnl||0);netClosed=netPnl(totalClosedPnl,sum.trades||0);
     winsTxt=sum.wins??'--';lossTxt=sum.losses??'--';
   }else{
-    const cl=((p&&p.recent_trades)||[])
-      .filter(x=>MASTER_SIDE==='all'||(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase())
-      .filter(x=>MASTER_BASKET==='all'||(x.basket||'')===MASTER_BASKET);
-    totalClosedPnl=cl.reduce((a,x)=>a+Number(x.pnl||0),0);netClosed=netPnl(totalClosedPnl,cl.length);
-    winsTxt=cl.filter(x=>Number(x.pnl||0)>0).length;lossTxt=cl.filter(x=>Number(x.pnl||0)<=0).length;
+    // Every OTHER combination — any side/basket filter in Equity, or ANY Futures view (filtered
+    // or not) — reads the canon, filtered server-side. loadBookCanon() is a lazy, cached, once-
+    // per-combination fetch (the FUTBOOK pattern above); a still-loading combination shows the
+    // same dash the "no cutover" branch above uses, never a stale or wrong number.
+    const _cSide=MASTER_SIDE==='all'?null:MASTER_SIDE;
+    const _cBasket=MASTER_BASKET==='all'?null:MASTER_BASKET;
+    const _cFutCut=_futView?_futCut():null;
+    const _canon=loadBookCanon(_cSide,_cBasket,_cFutCut);
+    if(!_canon||_canon.error){
+      totalClosedPnl=null;netClosed=null;winsTxt='--';lossTxt='--';
+    }else{
+      totalClosedPnl=Number(_canon.gross||0);
+      netClosed=(_canon.realised==null)?null:Number(_canon.realised);
+      winsTxt=_canon.wins??'--';lossTxt=_canon.losses??'--';
+    }
   }
   const secMap=(cache.metricsAll||[]).reduce((acc,x)=>{
     if(!x.segment)return acc;if(!acc[x.segment])acc[x.segment]={segment:x.segment,stocks:0,sum:0,top_stock:'',top_val:-999,sw:null,sm:null};
@@ -5629,7 +5664,14 @@ async function loadAll(){
       try{if(window.ScorrCardStrip)window.ScorrCardStrip.setFutures(cache.metricsAll||[]);}catch(e){}
       renderMasterPanels();
     }),
-    run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
+    run('paper',()=>getJSON(EP.paper),()=>{
+      // cc#1674: the book_canon cache is per (side,basket,fut_cut) and never expires on its own —
+      // clear it on every fresh paper poll so a filtered KPI figure ages at the SAME cadence as
+      // the unfiltered one (sum.gross_pnl, read fresh off this same payload) rather than freezing
+      // at whatever it was the moment a filter was first selected.
+      BOOK_CANON_CACHE={};BOOK_CANON_LOADING={};
+      renderMasterPanels();if(cache.mood)renderMood(cache.mood);
+    }),   // cc#310: refresh mood slots once paper lands
     run('segmentDay',()=>getJSON(EP.segmentDay),()=>{renderMasterPanels();}),   // cc#429: Sector Day % for Open Positions
     run('tcScores',()=>getJSON(EP.tcScoreLatest),()=>{renderMasterPanels();}),  // cc#1542: TC % column
     run('adrHistory',()=>getJSON(EP.adrHistory),()=>{if(cache.mood)renderMood(cache.mood);loadAdrChart();}),   // cc#443/#448: ADR trend row + popout chart

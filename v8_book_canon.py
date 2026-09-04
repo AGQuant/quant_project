@@ -117,16 +117,39 @@ def _cutover(cur):
     return row[0] if row and row[0] else None
 
 
-def book_canon(conn, era: str = "fresh") -> dict:
+def book_canon(conn, era: str = "fresh", side: str = None, basket: str = None,
+               fut_cut: str = None) -> dict:
     """The canonical book. `era='all'` drops the DATE bound only — retired baskets are excluded
     either way, because rule 13 says they vanish from all P&L displays completely, including
     history. An all-era payload carries era='all' so the surface can label it.
+
+    cc#1674: `side` ('LONG'|'SHORT') and `basket` (exact slug) are OPTIONAL server-side filters —
+    a WHERE clause added to the SAME two queries below, over the SAME full fresh-era ledger. This
+    is the fix for rule 13's own violation on the Dashboard KPI row: a filtered view was being
+    recomputed client-side from the LIMIT-100 `recent_trades` display list, which understates (or
+    sign-flips) the real figure the instant a filter selects trades older than the newest 100.
+    side/basket are echoed back in the payload so the surface can label what it is showing.
+
+    `fut_cut` (a timestamp string, or None) is the SAME fix for the Dashboard's FUTURES view,
+    which has the identical LIMIT-100 exposure on `recent_trades.filter(_futBookTrade)`. It adds
+    ONE extra bound to the closed-book query only: closed_at >= fut_cut (a trade belongs to the
+    futures book by EXIT, not entry — v8_endpoints.py's FUT_BOOK_CUTOVER_V1/cc#1019 doctrine,
+    app_config.v8_fut_book_cutover_ts). It composes with the fresh-era entry_ts bound rather than
+    replacing it — the futures cutover (14-Aug) is always after the fresh-era one (18-Jul), so the
+    two bounds together reproduce exactly the set the client-side filter intended. Unrealised is
+    untouched here — that comes from the separate /api/v8/futures_book endpoint, which already
+    prices OPEN positions on the futures convention; this parameter is realised-only.
     """
+    side = (side or "").strip().upper() or None
+    if side not in (None, "LONG", "SHORT"):
+        side = None   # an unrecognised value is treated as no filter, never a silent empty set
+    basket = (basket or "").strip() or None
+    fut_cut = (fut_cut or "").strip() or None
     with conn.cursor() as cur:
         retired, missing = retired_baskets(cur)
         guard_full_ledger(cur, era)          # cc#1604: era=all raises while the ledger is suspended
         cutover = None if era == "all" else _cutover(cur)
-        p = {"cut": cutover, "retired": retired}
+        p = {"cut": cutover, "retired": retired, "side": side, "basket": basket, "fut_cut": fut_cut}
 
         # ── OPEN book: unrealised, split by side, with capital deployed per side ──────────────
         cur.execute("""
@@ -153,6 +176,8 @@ def book_canon(conn, era: str = "fresh") -> dict:
             WHERE p.status = 'OPEN'
               AND (%(cut)s::timestamp IS NULL OR p.entry_ts >= %(cut)s::timestamp)
               AND NOT (p.basket = ANY(%(retired)s))
+              AND (%(side)s::text IS NULL OR UPPER(p.side) = %(side)s)
+              AND (%(basket)s::text IS NULL OR p.basket = %(basket)s)
         """, p)
         ob = _rows(cur)[0]
 
@@ -171,6 +196,9 @@ def book_canon(conn, era: str = "fresh") -> dict:
             FROM v8_paper_trades
             WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp)
               AND NOT (basket = ANY(%(retired)s))
+              AND (%(side)s::text IS NULL OR UPPER(side) = %(side)s)
+              AND (%(basket)s::text IS NULL OR basket = %(basket)s)
+              AND (%(fut_cut)s::timestamp IS NULL OR closed_at >= %(fut_cut)s::timestamp)
         """, p)
         cb = _rows(cur)[0]
 
@@ -205,6 +233,11 @@ def book_canon(conn, era: str = "fresh") -> dict:
     payload = {
         "canon": "V8_PNL_CANON_V1",
         "era": era,
+        # cc#1674: echoed back so the surface can label which filtered view this figure is. All
+        # three None on the unfiltered canon — unchanged shape from before this card.
+        "side": side,
+        "basket": basket,
+        "fut_cut": fut_cut,
         "cutover": str(cutover) if cutover else None,
         "retired_baskets": retired,
         "registry_key": RETIRED_KEY,
@@ -283,18 +316,23 @@ def basket_records(conn, era: str = "fresh") -> dict:
 
 
 @router.get("/api/v8/book_canon")
-def api_book_canon(era: str = "fresh"):
+def api_book_canon(era: str = "fresh", side: str = None, basket: str = None, fut_cut: str = None):
     """The one book endpoint. Every surface reads this; none recompute.
 
     era=fresh (default) — the canonical book, rule 13.
     era=all             — history. The DATE bound is dropped, retired baskets are STILL excluded,
                           and the payload says era='all' so the surface can label it as history.
+    side=LONG|SHORT, basket=<slug> — cc#1674: optional server-side filters on the SAME formula,
+                          so a filtered Dashboard KPI view is never recomputed client-side from a
+                          capped display list again (the exact bug this card fixed).
+    fut_cut=<timestamp> — cc#1674: the SAME fix for the Dashboard's Futures view (closed_at bound,
+                          not entry_ts) — see book_canon()'s own docstring.
     """
     era = "all" if str(era).lower() == "all" else "fresh"
     try:
         with _conn() as conn:
             try:
-                out = book_canon(conn, era=era)
+                out = book_canon(conn, era=era, side=side, basket=basket, fut_cut=fut_cut)
             except FullLedgerSuspended as fs:
                 # cc#1604: refused, not served. No aggregate in the body.
                 return JSONResponse(status_code=410, content=fs.payload)
