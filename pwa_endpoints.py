@@ -341,6 +341,9 @@ PWA_JS = """
     // below moved WITH the entry each one precedes; none rewritten, none dropped.
     ['/', '\\u2302', 'Home'],
     ['/dashboard', '\\u26a1', 'V8'],
+    // cc#1695 (founder 04-Sep 20:50 IST "display trade check tab after v8"): Check moves here,
+    // directly after V8. Was after Adaptive Dashboard; label kept exactly ('Check', not renamed).
+    ['/check', '\\u2713', 'Check'],
     // cc#1536 (founder 31-Aug): Alerts (approve surface, NEW desktop page) + Wall of Trades
     // (display) as ADJACENT desktop tabs, Alerts leading (the cc#1526 approve-surface-leads
     // precedent). Both 'd'-flagged: the mobile placements are cc#1535's (grid tile / bottom nav),
@@ -350,7 +353,10 @@ PWA_JS = """
     // cc#1585 partial reverse (founder 02-Sep 22:52, room 4763 / 4764): Alerts STAYS in the top
     // nav. cc#1609 + cc#1585 push 97aea84 had removed this entry; it is restored verbatim at its old
     // position. The V8 header Alerts tab from cc#1585 coexists with it. WoT stays out (unchanged).
-    ['/alerts', '\\u25ec', 'Alerts', 'd'],
+    // cc#1694 (founder 04-Sep 20:48 IST "hide Alert tab from nav, its already displayed in V8"):
+    // the entry is REMOVED from the top nav again. Route, _PWA_INJECT_PATHS and PROTECTED are
+    // UNCHANGED — /alerts still loads by typed URL and as the V8 hub's Alerts tab, same as the
+    // cc#822 TC Scanner/Digest precedent below. Was: ['/alerts', '\\u25ec', 'Alerts', 'd'],
     // cc#822 (founder 02-Aug): TC Scanner and Digest REMOVED from the nav. Both are V8 tabs, not
     // pages — they stay live and reachable via the V8 tab bar and as deep links (/dashboard#tcscan,
     // /dashboard#digest). Nav removal only; no route changed, nothing retired.
@@ -361,7 +367,6 @@ PWA_JS = """
     ['/sector', '\\u2297', 'Sector'],
     ['/quant-basket', '\\u25eb', 'QB'],
     ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],
-    ['/check', '\\u2713', 'Check'],
     // cc#824 (founder 02-Aug): Screeners — the 8 predefined screens as a standing destination.
     // ONE entry, added ONCE. This array renders in two form factors (desktop top bar and the mobile
     // "More" sheet), so a single entry appears in both automatically — a second entry would double
