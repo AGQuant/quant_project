@@ -3288,6 +3288,49 @@ function renderHeroPositions(){
    front (cc#1384's own rule: "no loading flicker on switch" means a tap on the toggle must never
    trigger a fetch), bars=0 is the cc#949 DAILY sentinel -- the lightest payload the endpoint
    offers, this card needs one open row per leg, not a 360-bar intraday series. */
+/* cc#1673 (founder 04-Sep 09:21 IST): the card leaves the swipe deck entirely when NEITHER index
+   has an open OPTION leg — V10_DISPLAY_OPTIONS_ONLY_V1 (36703): this card shows the option leg
+   only, so "open position" here means an open OPT, never a FUT-only book. A fetch ERROR is NOT
+   "no position" — an unknown book must stay visible in its existing error/empty state rather than
+   be hidden as if it were flat (data-honesty).
+
+   ON A TIMER, NOT JUST AT LOAD (scope item 3's own question, answered by reading further than the
+   call site): loadHeroPositions() has exactly one call site (inside renderHome()), but renderHome()
+   itself re-runs every 5 minutes while the market is open (HOME_POLL, homeRefresh()) AND on every
+   run it replaces #body.innerHTML wholesale — the fresh markup always includes Card 4 again
+   (heroCardPositions() is unconditional in that template), so a position opening mid-session
+   already gets its card back via the next poll's full repaint, before this function even runs.
+   This function's OWN re-add branch is therefore a belt to that braces, for a call outside a full
+   renderHome() rebuild — cheap, and correct either way. Its hide branch is the one doing real work
+   every cycle: it removes the card again, moments after each repaint hands it back, for as long as
+   both books stay flat. */
+function syncHeroPositionsCardVisibility(){
+  var track = document.getElementById('heroTrack'), dots = document.getElementById('heroDots');
+  if (!track || !dots) return;
+  var n = POS.data.NIFTY50, b = POS.data.BANKNIFTY;
+  var niftyFlat = !!(n && !n.error && !n.opt);
+  var bnfFlat = !!(b && !b.error && !b.opt);
+  var hide = niftyFlat && bnfFlat;
+  var card = document.getElementById('heroCardPositions');
+  if (hide && card){
+    var idx = Array.prototype.indexOf.call(track.children, card);
+    var w = track.clientWidth;
+    /* clamp BEFORE removing: the strip must never end a tick showing a blank trailing page */
+    var onRemovedCard = Math.round(track.scrollLeft / Math.max(1, w)) === idx;
+    card.remove();
+    if (dots.children[idx]) dots.children[idx].remove();
+    if (onRemovedCard) track.scrollLeft = Math.max(0, (track.children.length - 1) * w);
+  } else if (!hide && !card){
+    /* a position has opened since the card was hidden -- rebuild it at index 3 (its build-time
+       position: Card1 + heroCard2 + heroCard3 + this one), plus its dot, matching heroDotsHtml's
+       original markup ('' class -- heroDots() below assigns .on by scroll position, same as every
+       other dot). */
+    track.insertAdjacentHTML('beforeend', heroCardPositions());
+    dots.insertAdjacentHTML('beforeend', '<i></i>');
+  }
+  heroDots(); glitterSync();
+  requestAnimationFrame(syncHeroCardHeights);
+}
 function loadHeroPositions(){
   function leg(symKey){
     return fetchWithTimeout('/api/mobile/v10chart?symbol=' + symKey + '&bars=0')
@@ -3322,7 +3365,10 @@ function loadHeroPositions(){
       else if (open.NIFTY50 && open.BANKNIFTY && total.BANKNIFTY > total.NIFTY50) POS.sym = 'BANKNIFTY';
       /* neither open, or an exact tie → the existing NIFTY50 default stands */
     }
-    renderHeroPositions();
+    /* cc#1673: card presence decided BEFORE the render call — if it hides, #heroPositionsBody no
+       longer exists and there is nothing for renderHeroPositions() to fill. */
+    syncHeroPositionsCardVisibility();
+    if (document.getElementById('heroCardPositions')) renderHeroPositions();
   });
 }
 
@@ -4679,7 +4725,9 @@ function heroCard3(d){
    so it carries the shared CTA-floor margin again (#heroTrack > .c > .c2body{margin-bottom:
    var(--space-14)}, cc#1391) — the nth-child(4) override below no longer zeroes it. */
 function heroCardPositions(d){
-  return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Index Positions</div>'
+  /* cc#1673: id added so syncHeroPositionsCardVisibility() can find/remove/re-add this ONE card
+     without touching Cards 1-3, which carry no id of their own and are never hidden. */
+  return '<div class="c" id="heroCardPositions"><div class="c2body"><div class="chd"><div class="t">Index Positions</div>'
     + '<div class="rgt pstg" id="heroPositionsToggle">' + posToggleHtml() + '</div></div>'
     + '<div id="heroPositionsBody"><div class="unavail">Loading&hellip;</div></div>'
     + '</div>'
