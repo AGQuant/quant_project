@@ -127,20 +127,31 @@ router = APIRouter(prefix="/api/pcr", tags=["pcr"])
 
 
 def latest_pcr(cur, underlying="NIFTY"):
-    """(pcr, basis, as_of) — basis LIVE when today has an intraday bar, else EOD."""
+    """(pcr, basis, as_of) — the LATEST pcr_intraday bar for `underlying`, whatever its date.
+
+    cc#1670 (founder 04-Sep): the old query filtered `ts::date = today`, so on any tick before
+    the day's FIRST 5-min bar landed (session open, or a feed gap) this fell straight to the
+    pcr_daily EOD row and printed yesterday's number as "EOD" -- even though pcr_intraday still
+    held yesterday's perfectly good last bar. Data-honesty is "show the newest real reading with
+    its real timestamp", not "show today's reading or nothing" -- so the date filter is gone.
+
+    basis: 'LIVE' when the returned bar is stamped TODAY and it is 09:15-15:30 IST on a weekday
+           (cc#1576's session window); 'LAST' for any other real intraday bar (yesterday's close
+           tick, or a today bar read outside the session); 'DAILY' only when pcr_intraday has NO
+           rows at all for this underlying and the pcr_daily EOD table is the fallback -- as_of
+           there is the bare price_date (no fabricated time)."""
     cur.execute("""
         SELECT pcr_total, ts FROM pcr_intraday
         WHERE underlying=%s AND pcr_total IS NOT NULL
-          AND ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
         ORDER BY ts DESC LIMIT 1
     """, (underlying,))
     r = cur.fetchone()
     if r and r[0] is not None:
-        # cc#1576 (Fable 4642): LIVE only inside the session; after 15:30 IST the basis is CLOSE.
         from datetime import datetime as _dt, timedelta as _td, timezone as _tz, time as _time
         _now = _dt.now(_tz(_td(hours=5, minutes=30)))
         _open = (_now.weekday() < 5 and _time(9, 15) <= _now.time() <= _time(15, 30))
-        return _f(r[0]), ("LIVE" if _open else "CLOSE"), r[1].strftime("%Y-%m-%d %H:%M")
+        _is_today = r[1].date() == _now.date()
+        return _f(r[0]), ("LIVE" if (_is_today and _open) else "LAST"), r[1].strftime("%Y-%m-%d %H:%M")
     cur.execute("""
         SELECT pcr, price_date FROM pcr_daily
         WHERE underlying=%s AND pcr IS NOT NULL
@@ -148,7 +159,7 @@ def latest_pcr(cur, underlying="NIFTY"):
     """, (underlying,))
     r = cur.fetchone()
     if r and r[0] is not None:
-        return _f(r[0]), "EOD", str(r[1])
+        return _f(r[0]), "DAILY", str(r[1])
     return None, None, None
 
 

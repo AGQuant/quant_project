@@ -4504,29 +4504,44 @@ function pcrGaugeSvg(pcrRaw, mood){
     + ' aria-label="PCR gauge' + (hasPcr ? ', ' + Number(pcrRaw).toFixed(2) : ', no data') + '">'
     + bands + needle + ticks + '</svg></div>';
 }
+/* cc#1670 (founder 04-Sep 09:20 IST): the ' · <as-of>' suffix for the pcite line, off hero.pcr_as_of.
+   hero.pcr_basis DAILY means the server had no pcr_intraday bar at all and fell back to pcr_daily —
+   as_of there is a bare 'YYYY-MM-DD' with no time (never a fabricated one), so scorrAsofStamp
+   (which needs a real HH:MM) is not the right tool for that branch; it is formatted here as
+   'DD MON' instead. Every other basis (LIVE / LAST) has a real bar timestamp and goes straight
+   through the ONE shared stamp formatter every app table uses. No PCR EOD wording survives either
+   path -- absent as_of renders nothing, same as scorrAsofStamp's own empty-input rule. */
+function pcrAsOfSuffix(hero){
+  var asOf = hero.pcr_as_of;
+  if (!asOf) return '';
+  if (hero.pcr_basis === 'DAILY' || String(asOf).length <= 10) {
+    var md = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(asOf));
+    if (!md) return '';
+    var MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    return ' · ' + parseInt(md[3], 10) + ' ' + MON[parseInt(md[2], 10) - 1];
+  }
+  var st = window.scorrAsofStamp ? scorrAsofStamp(asOf) : {txt: '', amber: false};
+  if (!st.txt) return '';
+  return ' · ' + (st.amber
+    ? '<span style="color:var(--amber,#F5B94A)">' + esc(st.txt) + '</span>'
+    : esc(st.txt));
+}
 function pcrMood(hero){
   var m = hero.pcr_mood;
   if (!m || !m.label || hero.pcr == null) return '';   // no PCR / no composer = no label, never a guess
   return '<div class="pmood"><div class="pw" style="color:' + pcrTok(m.label_colour) + '">' + esc(m.label) + '</div>'
     + pcrGaugeSvg(hero.pcr, m)
-    /* cc#1140 · AS-OF HONESTY. The label states what it is showing: during the session
-       "PCR 0.94 · 10:30 LIVE", outside it "PCR 0.68 · 08-19 EOD". The number and its basis come
-       from the SAME payload object, so the card cannot render a live-looking figure without
-       saying which bar it is. A bar older than 15 minutes during the session is shown WITH its
-       time and tagged STALE rather than passed off as current — the server sets that flag using
-       the pcr_guard convention; nothing is judged here.
+    /* cc#1140/cc#1670 · AS-OF HONESTY, via the ONE shared stamp formatter. The label states what
+       it is showing: "PCR 0.94 · LIVE · 10:30" in session, "PCR 0.68 · 3 SEP 15:35" for a real
+       bar from another time, never the word EOD (founder 04-Sep 09:20: "do not mention EOD; show
+       the timestamp of the PCR"). hero.pcr_as_of is the reading's OWN timestamp — the same object
+       the number came from, so the card cannot render a live-looking figure without saying which
+       bar it is. Amber/stale styling comes from scorrAsofStamp's own >10-min-in-session rule
+       (APP_TABLE_ASOF_STAMP_V1, session_log 34535) — the SAME rule every other app table stamp
+       uses, not a second one hand-rolled here.
        cc#1379: this line is UNCHANGED by the gauge — still the real, unscaled PCR, never the
        gauge's x100 display value. */
-    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2))
-    + (hero.pcr_basis === 'LIVE'
-        ? (hero.pcr_asof ? ' · ' + esc(hero.pcr_asof) : '')
-          + (hero.pcr_stale ? ' · <span style="color:var(--amber,#FF9F45)">STALE</span>' : ' · LIVE')
-        /* cc#1576 (Fable 4642): after the close the pill reads "close" with the last bar time —
-           never LIVE on a closed market. The server decides the basis; nothing is timed here. */
-        : hero.pcr_basis === 'CLOSE'
-        ? (hero.pcr_asof ? ' · last ' + esc(hero.pcr_asof) : '') + ' · close'
-        : (hero.pcr_date ? ' · ' + esc(String(hero.pcr_date).slice(5)) + ' EOD' : ''))
-    + '</div>'
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + pcrAsOfSuffix(hero) + '</div>'
     /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
        ("High put cover while Nifty is down 1.4% on the week"); a missing week input says so
        ("week return unavailable"). Both strings are the composer's — nothing is worded here. */

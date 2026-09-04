@@ -344,7 +344,14 @@ def _internals(cur) -> Dict[str, Any]:
             fresh = in_session and age is not None and age <= _LIVE_MAX_AGE_MIN
             pcr_live = pcr_live or fresh
             row["date"] = str(as_of)[11:16] + " IST" + (" · live" if fresh else " · last tick")
-        else:
+        elif basis == "LAST":
+            # cc#1670: a real pcr_intraday bar, just not from today's open session (yesterday's
+            # last tick, or today's bar read outside 09:15-15:30) — a genuine reading with its own
+            # time, not a daily close row. Was previously unreachable: latest_pcr() only ever
+            # returned LIVE or a same-day-only-else-EOD basis, so this case fell into the "else"
+            # daily branch below and got mislabelled "prev close" on a real intraday bar.
+            row["date"] = str(as_of)[11:16] + " IST" + (" · " + _dmy(as_of) if str(as_of)[:10] != str(today) else "") + " · last tick"
+        else:   # DAILY: as_of is a bare date, never a fabricated time
             row["date"] = ("close · " if str(as_of) == str(today) else "prev close · ") + _dmy(as_of)
         row["note"] = "as of " + row["date"]
         # cc#1568: the mood word on the tile comes from the ONE composer (pcr_mood.py, session_log
@@ -354,8 +361,9 @@ def _internals(cur) -> Dict[str, Any]:
         except Exception:
             row["mood"] = None
         pcr_rows.append(row)
-    # pcr_daily quality flags ride along for the daily-basis rows only (they describe that row).
-    if pcr_rows and pcr_rows[0]["basis"] != "LIVE":
+    # pcr_daily quality flags ride along for the daily-basis rows only (they describe THAT row —
+    # cc#1670: a LAST row is sourced from pcr_intraday, not pcr_daily, so it must not carry these).
+    if pcr_rows and pcr_rows[0]["basis"] == "DAILY":
         cur.execute("""SELECT underlying, quality, quality_note FROM pcr_daily
                        WHERE price_date=(SELECT MAX(price_date) FROM pcr_daily)""")
         q = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
