@@ -61,9 +61,6 @@ INDEXES = ["NIFTY50", "BANKNIFTY"]
 # and the amber note is built from THAT result rather than from a constant that has to be
 # remembered. A hardcoded list is exactly what went stale here.
 
-RESULT_KEYWORDS = r"(profit|loss|revenue|income|Q1|results|rises|narrows|falls)"
-RESULT_WINDOW_HOURS = 20
-
 
 def _conn():
     return psycopg2.connect(_DB)
@@ -429,8 +426,9 @@ def _internals(cur) -> Dict[str, Any]:
 #
 # SO THE NAME IT IS, and the evidence supports it without a gap: company_name is populated on
 # 2,470 of 2,470 rows — zero nulls. Every BSE-only reporter therefore has something honest to
-# show. The ticker is KEPT in the payload untouched, because the news match in
-# _yesterday_results keys on it against mentioned_symbols and that must not change.
+# show. The ticker is KEPT in the payload untouched -- cc#1690: _yesterday_results (which keyed
+# this ticker against polished_news.mentioned_symbols) is gone, but _reporting_today below still
+# reads _label the same way and the ticker stays load-bearing there.
 _BSE_CODE_RE = None
 
 
@@ -577,11 +575,6 @@ def _news(cur, category: str, limit: int = 20) -> List[Dict[str, Any]]:
     return out
 
 
-# ── 07 YESTERDAY'S RESULTS · SCORED — the strict three-condition match ────────────────────────
-_BULL = r"(rises|jumps|surges|beats|narrows|record|expands|grows|up \d)"
-_BEAR = r"(falls|drops|slumps|misses|widens|declines|loss|down \d)"
-
-
 def _prev_trading_date(cur, ref=None):
     """cc#1109: the previous TRADING day, not CURRENT_DATE - 1.
 
@@ -606,64 +599,11 @@ def _prev_trading_date(cur, ref=None):
     return (ref or _ist_now().date()) - timedelta(days=1)
 
 
-def _yesterday_results(cur, basis) -> Dict[str, Any]:
-    cur.execute("""SELECT UPPER(e.ticker), e.company_name, s.market_cap
-                   FROM earnings_calendar e
-                   LEFT JOIN screener_raw s ON s.nse_code = UPPER(e.ticker)
-                   WHERE e.ex_date = %s
-                   ORDER BY s.market_cap DESC NULLS LAST LIMIT 10""", (basis,))
-    top = []
-    for r in cur.fetchall():
-        lbl, is_sym = _label(r[0], r[1])
-        top.append({"ticker": r[0], "company": r[1], "market_cap": _f(r[2]),
-                    "label": lbl, "is_symbol": is_sym})
-    cur.execute("SELECT COUNT(*) FROM earnings_calendar WHERE ex_date = %s", (basis,))
-    total = cur.fetchone()[0]
-
-    out, tally = [], {"bullish": 0, "cautious": 0, "neutral": 0, "pending": 0}
-    for c in top:
-        # ALL THREE conditions, together. See the module docstring for the verified failures that
-        # any looser rule produces.
-        cur.execute("""SELECT headline_clean, COALESCE(summary, full_summary), published_time
-                       FROM polished_news
-                       WHERE %s = ANY(mentioned_symbols)
-                         AND headline_clean ~* %s
-                         AND published_time >= NOW() - make_interval(hours => %s)
-                       ORDER BY published_time DESC LIMIT 1""",
-                    (c["ticker"], RESULT_KEYWORDS, RESULT_WINDOW_HOURS))
-        n = cur.fetchone()
-        if not n:
-            tally["pending"] += 1
-            out.append({**c, "headline": None, "summary": None, "read": "PENDING",
-                        "pending_reason": "Reported — summary not yet on the desk"})
-            continue
-        head = n[0] or ""
-        import re as _re
-        bull = bool(_re.search(_BULL, head, _re.I))
-        bear = bool(_re.search(_BEAR, head, _re.I))
-        read = "BULLISH" if (bull and not bear) else ("CAUTIOUS" if bear else "NEUTRAL")
-        tally["bullish" if read == "BULLISH" else "cautious" if read == "CAUTIOUS" else "neutral"] += 1
-        out.append({**c, "headline": head, "summary": n[1], "read": read,
-                    "published": n[2].isoformat() if n[2] else None})
-
-    cur.execute("SELECT COUNT(DISTINCT symbol) FROM result_analysis_v2")
-    l2 = cur.fetchone()[0]
-    return {"companies": out, "reported_total": total, "tally": tally, "l2_count": l2,
-            "tier": "STATIC",
-            # cc#1109: the page states which session this scored, so an empty Monday reads as
-            # "Friday had none" and never as "today had none".
-            "basis_date": basis.isoformat(),
-            "match_rule": ("ticker in mentioned_symbols AND result-shaped headline AND published "
-                           f"within {RESULT_WINDOW_HOURS}h — all three, or the row shows PENDING"),
-            "read": (f"{tally['bullish']} bullish · {tally['cautious']} cautious · "
-                     f"{tally['neutral']} neutral · {tally['pending']} awaiting desk")}
-
-
 # ── cc#1190 · LATEST RESULT ANALYSIS ──────────────────────────────────────────────────────────
 # The mobile digest's results card reads earnings_calendar for one session and matches it against
 # news headlines, so on a thin day it says "Top 2 of 2 · 2 awaiting desk" and shows nothing worth
 # reading. result_analysis_v2 holds 633 rows of written analysis. This builds a payload from
-# THAT, as a NEW key. _yesterday_results is not touched and the web page keeps reading it.
+# THAT, as a NEW key. cc#1690: _yesterday_results is now GONE -- the web page reads this key too.
 #
 # cc#1414 · THE DECK IS NO LONGER RA2-ONLY. This SQL still supplies the written-analysis half,
 # unchanged; _RESULTS_L1_SQL below supplies the rest of the reported GVM universe as L1 rows, and
@@ -1171,9 +1111,10 @@ def build_digest(cur) -> Dict[str, Any]:
             # cc#1608: the merged, filterable feed the WEB What Moved section reads (Global folded
             # in). what_moved / what_moved_all / global_events above stay for the app decks.
             "news_feed": _news_feed(cur),
-            "yesterday_results": _yesterday_results(cur, prev_trading),
-            # cc#1190: ADDED beside yesterday_results, not in place of it. The web digest reads
-            # yesterday_results and is untouched by this card; the mobile deck reads this one.
+            # cc#1690: yesterday_results (the news-matched, mostly-PENDING renderer) is REMOVED, not
+            # kept beside this. Web section 07 now reads results_analysed too -- the same key the
+            # mobile Latest Result Analysis deck has read since cc#1190 -- so there is one Result
+            # Corner source, not two competing ones on the same payload.
             "results_analysed": _results_analysed(cur),
         },
         "prev_trading_date": prev_trading.isoformat(),   # cc#1109: for the page's date filters
