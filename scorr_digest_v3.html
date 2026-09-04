@@ -240,7 +240,20 @@ section{margin-top:26px}
 .rfoot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid var(--line);
   font-family:var(--f-m);font-size:10.5px;color:var(--tx3);background:var(--panel)}
 .rlink{margin-left:auto;color:var(--cy)}
-@media(max-width:700px){.rtab th:nth-child(2),.rtab td:nth-child(2){display:none}}
+/* cc#1690: RESULT CORNER — the old 4-col table's narrow-width column-hide rule is gone with it
+   (it targeted M-Cap specifically, which no longer exists as a figure). The wider table now relies
+   on the .rtab{overflow-x:auto} rule already in the 760px block above — a horizontal scroll inside
+   the card, never a column silently dropped. */
+.rtab th.vfsort{cursor:pointer;user-select:none}
+.rtab th.vfsort.on{color:var(--tx)}
+.rtdot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
+.rtdot.g{background:var(--gr)} .rtdot.a{background:var(--am)} .rtdot.r{background:var(--rd)}
+.rc-rbtn{font-family:var(--f-m);font-size:10px;font-weight:700;letter-spacing:.04em;
+  width:22px;height:22px;border-radius:5px;border:1px solid var(--line2);background:var(--panel);
+  color:var(--cy);cursor:pointer}
+.rc-rbtn:hover{background:rgba(34,211,238,.1);border-color:rgba(34,211,238,.4)}
+.rc-verdict{font-size:11.5px;color:var(--tx2);line-height:1.4;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:34ch}
 
 /* ── FOOT ──────────────────────────────────────── */
 .foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);
@@ -824,6 +837,9 @@ var FEED_PAGE=12;
 var _feedSecN='05';   // cc#1689: the section number secFeed was last drawn with -- feedRepaint()
                        // (chip clicks, "load more") re-renders #sec-feed alone and must reuse it,
                        // never a stale/refetched value from a fresh render()'s counter.
+var _rcSecN='07';     // cc#1690: same pattern for Result Corner -- rcRepaint() (sort clicks, load
+                       // more) re-renders #sec-results alone and must reuse the last full render's
+                       // number, never a stale/refetched default.
 function feedFresh(newest){
   if(!newest) return false;
   var d=new Date(String(newest).replace(' ','T')); if(isNaN(d)) return false;
@@ -924,28 +940,132 @@ document.addEventListener('click',function(e){
 });
 document.addEventListener('keydown',function(e){ if(e.key==='Enter'&&e.target&&e.target.classList&&e.target.classList.contains('frow')) feedOpen(Number(e.target.getAttribute('data-i'))); });
 
+/* cc#1690 · RESULT CORNER — replaces the old news-matched "Yesterday's Results · Scored" table
+   (3 rows, PENDING most days). Reads the SAME shared payload key the app Latest Result Analysis
+   deck reads, results_analysed (digest_v3._results_analysed, /api/digest/v3) -- no new endpoint,
+   no second query. See the cc#1690 P1 discovery post in cc_task_logs for the three real data-shape
+   findings this build is honest about:
+   (1) the compact VERDICT word (BULLISH/CAUTIOUS/NEUTRAL) does not exist in this payload any more
+       — RESULT_ROW_DOTS_ONLY_RULE_V1 (cc#1255, session_log 29663) retired it on purpose. The
+       VERDICT column here is the analyst/auto-verdict SENTENCE (c.verdict), the exact text the R
+       button shows, truncated to 2 lines with the full text on hover — that IS "the same text as
+       the app", since the app shows the identical field.
+   (2) SALES YoY and MARGIN vs LY are not on this payload for any row (L1's calc CTE computes a
+       margin delta and PAT YoY transiently to build the auto-verdict sentence, then discards both;
+       no sales/revenue YoY is computed anywhere in _results_analysed). Both columns render, both
+       read em dash for every row until a backend follow-up card exposes them — never fabricated.
+   (3) there is no market-cap FIGURE on this payload, only `tier` (LARGE/MID/SMALL, a rank bucket).
+       The TIER column is the honest substitute for "M-Cap"; the default sort's "then market cap
+       desc" clause falls back to the payload's own natural secondary order (written analysis
+       before computed rows, per _results_analysed's own out.sort() calls) for the same reason. */
+/* cc#1690 scope item 5: the SAME _sortTh/_sortByState mechanism the page family already uses
+   (v8_dashboard.html's Index Intel tables) — ported verbatim, not a second sort implementation.
+   nulls always sort last regardless of direction, never implying zero. */
+function _sortByState(list,state,getters){
+  if(!state||!state.key) return list;
+  var get=getters[state.key];
+  return list.slice().sort(function(a,b){
+    var av=get(a), bv=get(b);
+    if(av==null&&bv==null) return 0;
+    if(av==null) return 1;
+    if(bv==null) return -1;
+    if(typeof av==='string') return av.localeCompare(bv)*state.dir;
+    return (av-bv)*state.dir;
+  });
+}
+function _sortTh(label,key,state,onclickExpr){
+  var on=state&&state.key===key;
+  var arrow=on?(state.dir===1?' ▲':' ▼'):' ↕';
+  return '<th class="vfsort'+(on?' on':'')+'" onclick="'+onclickExpr+'">'+label+arrow+'</th>';
+}
+var RC_SORT={key:null,dir:1};
+var RC_PAGE=25, RC_SHOWN=RC_PAGE;
+var RC_TIER_RANK={LARGE:0,MID:1,SMALL:2};
+var RC_DOTCLS={green:'g',amber:'a',red:'r'};
+var RC_GETTERS={
+  DATE:   function(c){ return c.ex_date||null; },
+  TIER:   function(c){ return c.tier!=null ? RC_TIER_RANK[c.tier] : null; },
+  PAT:    function(c){ return (c.dot_inputs&&c.dot_inputs.pat_yoy!=null) ? c.dot_inputs.pat_yoy : null; },
+  VERDICT:function(c){ return c.verdict||null; }
+};
+function rcDateChip(c){
+  if(!c||!c.ex_date) return '—';
+  var d=new Date(c.ex_date+'T00:00:00'); if(isNaN(d.getTime())) return '—';
+  var mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  return '<span class="pill p-neu">'+d.getDate()+' '+mon+'</span>';
+}
+function rcDot(c){
+  var k=RC_DOTCLS[c&&c.dot];
+  if(!k) return '<span class="rtdot" style="background:transparent"></span>';
+  var title=c.dot_basis&&c.dot_basis!=='both'
+    ? (c.dot_basis==='peers'?'Dot from the peer comparison only — no run-rate estimate on file.'
+                             :'Dot from the estimate comparison only — no segment median available.')
+    : '';
+  return '<span class="rtdot '+k+'" title="'+esc(title)+'"></span>';
+}
+function rcPatYoy(c){
+  var v=c.dot_inputs&&c.dot_inputs.pat_yoy;
+  return v==null ? '—' : '<span class="'+(v>0?'pos':(v<0?'neg':'flat'))+'">'+(v>0?'+':'')+Number(v).toFixed(1)+'%</span>';
+}
+function rcSort(key){
+  if(RC_SORT.key===key) RC_SORT.dir*=-1; else { RC_SORT.key=key; RC_SORT.dir=1; }
+  RC_SHOWN=RC_PAGE;
+  rcRepaint();
+}
+function rcMore(){ RC_SHOWN+=RC_PAGE; rcRepaint(); }
+function rcRepaint(){
+  var s=((D||{}).sections||{}).results_analysed, host=document.getElementById('sec-results');
+  if(!s||!host) return;
+  host.outerHTML=secResults(s,_rcSecN);
+}
+function rcOpenCard(sym){
+  // cc#1690 do_not_touch: the R card component is consume-only. Same fallback the site's own
+  // scorr_result_corner.html C-A-R-D cluster uses for its own R button.
+  if(window.ScorrRCard&&ScorrRCard.open){ ScorrRCard.open(sym); return; }
+  location.href='/check?symbol='+encodeURIComponent(sym);
+}
+function rcTh(label,key){
+  return _sortTh(label,key,RC_SORT,"rcSort('"+key+"')");
+}
 function secResults(s,n){
   if(!s) return '';
-  var h = sh(n,"Yesterday's Results · Scored",s.tier||'STATIC',
-             (s.reported_total||0)+' REPORTED · TOP 10 BY MCAP');
-  h += '<div class="card"><table class="rtab"><thead><tr><th>Company</th><th class="r">M-Cap</th>'+
-       '<th>The quarter</th><th class="c">Read</th></tr></thead><tbody>';
-  h += (s.companies||[]).map(function(c){
-    var mc = c.market_cap==null?'—':(c.market_cap>=100000? (c.market_cap/100000).toFixed(2)+'L cr'
-             : (c.market_cap/1000).toFixed(1)+'k cr');
-    var body = c.headline
-      ? '<b>'+esc(c.headline)+'</b>'+(c.summary?'<span class="sub">'+esc(String(c.summary).slice(0,150))+'</span>':'')
-      : '<span class="pend">'+esc(c.pending_reason||'Reported — summary not yet on the desk')+'</span>';
-    var pm={BULLISH:'p-bull',CAUTIOUS:'p-cau',NEUTRAL:'p-neu',PENDING:'p-pend'};
-    return '<tr><td><span class="tk">'+esc(c.ticker)+'</span><span class="cn">'+esc(c.company||'')+'</span></td>'+
-           '<td class="r num">'+mc+'</td><td>'+body+'</td>'+
-           '<td class="c"><span class="pill '+(pm[c.read]||'p-neu')+'">'+esc(c.read)+'</span></td></tr>';
+  var all=(s.companies||[]);
+  // default order (no RC_SORT.key) is exactly the payload's own order — ex_date DESC, written
+  // analysis before computed rows, symbol — which already reads "result date desc" per scope
+  // item 3; a sort click overrides it via _sortByState, same mechanism the page family uses.
+  var sorted=_sortByState(all,RC_SORT,RC_GETTERS);
+  var shown=sorted.slice(0,RC_SHOWN);
+  // cc#1690: total / l2_rows / latest_polished all come straight off the payload -- never
+  // recomputed client-side when the server (digest_v3._results_analysed) already carries them.
+  var st=scorrAsofStamp(s.latest_polished);
+  var h='<div class="sh"><span class="snum">'+esc(n)+'</span><span class="st">Result Corner</span>'+
+        (st.txt?'<span class="asof" style="margin-left:0'+(st.amber?';color:var(--am)':'')+'">as of <b>'+esc(st.txt)+'</b></span>':'')+
+        '<span class="asof">'+(s.total||all.length)+' reported this quarter · '+(s.l2_rows||0)+' with detailed analysis</span></div>';
+  h += '<div class="card"><table class="rtab"><thead><tr>'+
+       '<th>Company</th>'+rcTh('Result Date','DATE')+rcTh('Tier','TIER')+
+       '<th class="r">Sales YoY</th>'+rcTh('PAT YoY','PAT')+'<th class="r">Margin vs LY</th>'+
+       rcTh('Verdict','VERDICT')+'<th class="c">Dot</th><th class="c">R</th>'+
+       '</tr></thead><tbody>';
+  h += shown.map(function(c){
+    return '<tr><td><span class="tk">'+esc(c.symbol||'')+'</span><span class="cn">'+esc(c.company||'')+'</span></td>'+
+           '<td>'+rcDateChip(c)+'</td>'+
+           '<td>'+(c.tier?'<span class="pill p-neu">'+esc(c.tier)+'</span>':'—')+'</td>'+
+           '<td class="r num">—</td>'+
+           '<td class="r num">'+rcPatYoy(c)+'</td>'+
+           '<td class="r num">—</td>'+
+           '<td><div class="rc-verdict" title="'+esc(c.verdict||'')+'">'+
+             (c.verdict?esc(c.verdict):'<span class="pend">'+(c.l2?'Written up, no computable verdict.':'Reported — analysis not yet on the desk')+'</span>')+
+           '</div></td>'+
+           '<td class="c">'+rcDot(c)+'</td>'+
+           '<td class="c"><button type="button" class="rc-rbtn" onclick="rcOpenCard(\''+esc(c.symbol)+'\')">R</button></td>'+
+           '</tr>';
   }).join('');
-  h += '</tbody></table><div class="rfoot"><span>'+esc(s.read||'')+'</span>'+
-       '<span class="rlink">L2 detailed analysis available for '+(s.l2_count||0)+' companies →</span></div>';
-  h += '<div class="eodnote">Match rule: '+esc(s.match_rule||'')+'</div>';
+  h += '</tbody></table>';
+  if(sorted.length>shown.length) h += '<div style="padding:10px 16px;border-top:1px solid var(--line);background:var(--panel)">'+
+       '<button type="button" class="rlink" style="background:none;border:0;cursor:pointer;font:inherit;color:var(--cy)" onclick="rcMore()">load more ↓ ('+shown.length+' of '+sorted.length+')</button></div>';
+  if(s.read) h += '<div class="rfoot"><span>'+esc(s.read)+'</span></div>';
   h += '</div>';
-  return '<section>'+h+'</section>';
+  return '<section id="sec-results">'+h+'</section>';
 }
 
 /* THE READ IS THE HERO, AND IT SITS AT THE TOP (cc#853 established this; cc#1521 R4 makes the
@@ -985,9 +1105,11 @@ function secHero(d){
   if(vx&&vx.price!=null) stats+=heroSeg('India VIX',num(vx.price,2),
         (vx.day_chg_pct!=null?(vx.day_chg_pct>0?'+':'')+Number(vx.day_chg_pct).toFixed(2)+'% on the day':''),'cy');
   var rep=(S.reporting_today||{});
+  // cc#1690: yesterday_results is gone -- the sub-line now cites results_analysed.total, the same
+  // "reported this quarter" count Result Corner's own header states, instead of a single session.
   if(rep.count!=null) stats+=heroSeg('Results today',String(rep.count),
-        ((S.yesterday_results||{}).reported_total!=null
-          ? (S.yesterday_results.reported_total+' reported yesterday') : ''));
+        ((S.results_analysed||{}).total!=null
+          ? (S.results_analysed.total+' reported this quarter') : ''));
 
   var body = (m.support||[]).length ? (m.support||[]).join(' · ') : (m.note||'');
   return '<div class="hero">'+
@@ -1165,15 +1287,16 @@ function render(d){
   var nLad=N(!!s.ladders), nInt=N(SHOW_INTERNALS && !!s.internals), nRep=N(!!s.reporting_today);
   var nFeed=N(!!s.news_feed);
   var nMoved=N(!s.news_feed && !!s.what_moved), nGlobal=N(!s.news_feed && !!s.global_events);
-  var nRes=N(!!s.yesterday_results);
+  var nRes=N(!!s.results_analysed);   // cc#1690: Result Corner reads results_analysed now, not yesterday_results
   if(s.news_feed) _feedSecN=nFeed;
+  if(s.results_analysed) _rcSecN=nRes;
   document.getElementById('digest').innerHTML =
     secHero(d) +
     secTape(s.global_tape) + secLadders(s.ladders,nLad) +
     (SHOW_INTERNALS ? secInternals(s.internals,nInt) : '') +
     secReporting(s.reporting_today,nRep) +
     (s.news_feed ? secFeed(s.news_feed,nFeed) : secNews(nMoved,'What Moved',s.what_moved) + secNews(nGlobal,'Global Events',s.global_events)) +   // cc#1608: one merged, filterable feed; the old pair only if the payload predates it
-    secResults(s.yesterday_results,nRes);
+    secResults(s.results_analysed,nRes);
   /* cc#1527: pill + clock live in the just-painted hero — stamp them now */
   var pill=document.getElementById('mktPill');
   if(pill){
@@ -1186,7 +1309,7 @@ function render(d){
   document.getElementById('footStats').textContent =
     ((t.tiles||[]).length+(t.eod_tiles||[]).length)+' global · '+
     ((s.ladders||{}).indexes||[]).length+' domestic · '+
-    ((s.yesterday_results||{}).reported_total||0)+' results';
+    ((s.results_analysed||{}).total||0)+' results';   // cc#1690: yesterday_results is gone
 }
 
 fetchWithTimeout('/api/digest/v3').then(function(r){return r.text();}).then(function(t){
