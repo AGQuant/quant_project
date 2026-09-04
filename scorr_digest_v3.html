@@ -131,6 +131,17 @@ section{margin-top:26px}
 .pos{color:var(--gr)} .neg{color:var(--rd)} .flat{color:var(--tx2)}
 .eodnote{padding:6px 11px;background:rgba(251,191,36,.05);border-top:1px solid var(--line);
   font-family:var(--f-m);font-size:9.5px;color:var(--am);letter-spacing:.02em}
+/* cc#1687: the POSITIVE n/total counter, right of the DAY | WEEK toggle. The number pair rides
+   the same big-mono rung as the hero tiles' headline value (.idxpx is 30px for a full index level
+   like "23,949.52"; this is a two-digit ratio, not an index level, so it gets its own slightly
+   smaller rung rather than reusing .idxpx verbatim — still unmistakably the "big number" register
+   next to .asof's small caption type). Colour rides the existing .pos/.neg tokens (var(--gr)/
+   var(--rd)) per scope item 3 — no new colour introduced. */
+.tapecnt{display:inline-flex;align-items:baseline;gap:6px;font-family:var(--f-m)}
+.tapecnt-lbl{font-size:9.5px;font-weight:600;letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
+.tapecnt-v{font-size:22px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.tapecnt-tot{font-size:13px;font-weight:500;color:var(--tx3)}
+.tapecnt-nd{font-size:9.5px;color:var(--tx3)}
 
 /* ── PIVOT LADDER ──────────────────────────────── */
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -490,6 +501,21 @@ function tapeRun(tiles,order){
   Object.keys(byCat).forEach(function(c){ if(cats.indexOf(c)<0) cats.push(c); });
   return cats.map(function(c){ return tapeTiles(byCat[c]); }).join('');
 }
+/* cc#1687: tallies EXACTLY the classification tapeTiles() already renders each tile with — same
+   signCls(v,inverted) call, same v = day_chg_pct or week_chg_pct per TAPE_LEVEL — so the counter
+   can never disagree with what is on screen (VIX counted by its INVERTED colour, per scope item 2:
+   "VIX down = positive"). A tile with no value on the active leg is excluded from pos/neg/total and
+   tallied separately as nodata. */
+function tapeCount(tiles){
+  var wk=(TAPE_LEVEL==='week'), pos=0, neg=0, flat=0, nodata=0;
+  tiles.forEach(function(t){
+    var v = wk ? t.week_chg_pct : t.day_chg_pct;
+    if(v==null){ nodata++; return; }
+    var c=signCls(v,t.inverted);
+    if(c==='pos') pos++; else if(c==='neg') neg++; else flat++;
+  });
+  return {pos:pos, total:pos+neg+flat, nodata:nodata};
+}
 function setTapeLevel(l){
   TAPE_LEVEL=(l==='week')?'week':'day';
   var s=((D||{}).sections||{}).global_tape; var host=document.getElementById('sec-tape');
@@ -507,10 +533,16 @@ function secTapeInner(s){
   /* R4 header keeps the honest live count — the badge says how many tiles are genuinely live.
      cc#1605: the DAY | WEEK seg sits right of the LIVE pill; the as-of caption follows the level —
      WEEK reads the same words the V8 Global Indices tab uses. */
+  var cnt = tapeCount(all);
+  var cntCls = (cnt.total>0 && (cnt.pos/cnt.total)>=0.5) ? 'pos' : 'neg';
+  var cntHtml = '<span class="tapecnt"><span class="tapecnt-lbl">Positive</span>'+
+    '<span class="tapecnt-v '+cntCls+'">'+cnt.pos+'</span><span class="tapecnt-tot">/'+cnt.total+'</span>'+
+    (cnt.nodata ? '<span class="tapecnt-nd">'+cnt.nodata+' no data</span>' : '')+'</span>';
   var h = '<div class="sh"><span class="snum">01</span><span class="st">Global Tape</span>'+
           '<span class="badge b-live"><span class="dot"></span>LIVE · '+live.length+' OF '+n+'</span>'+
           '<span class="tseg" role="tablist"><button type="button" role="tab" aria-selected="'+(!wk)+'"'+(wk?'':' class="on"')+' onclick="setTapeLevel(\'day\')">DAY</button>'+
           '<button type="button" role="tab" aria-selected="'+wk+'"'+(wk?' class="on"':'')+' onclick="setTapeLevel(\'week\')">WEEK</button></span>'+
+          cntHtml+
           '<span class="asof">'+(wk ? 'rolling 5 sessions · each symbol\'s own calendar'
                                     : 'as of <b>'+esc(s.freshest_tick? tIST(s.freshest_tick)+' IST' : '—')+'</b>')+'</span></div>';
   h += '<div class="card">';
