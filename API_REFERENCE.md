@@ -172,7 +172,8 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | POST | `/api/qb/fix_all_allocations` | fix all allocations |
 | GET | `/api/qb/positions` | open positions |
 | GET | `/api/qb/summary` | summary |
-| GET | `/api/qb/rebalance_log` | rebalance log |
+| GET | `/api/qb/rebalance_log` | raw rebalance/EOD-check log (one row per trading night) |
+| GET | `/api/qb/rebalance_history` | cc#1703: same log, classified — rebalance / stop exit / cash move rows only by default, nightly-check noise hidden behind a count; real IN/OUT symbols + a stock-only HELD count (bees excluded) |
 | GET | `/api/qb/registry` | registry |
 
 ### GVM — `gvm_nightly.py`, `gvm_report_endpoints.py`, `gvm_market_endpoints.py`, `gvm_universe_pivots.py`

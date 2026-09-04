@@ -13,7 +13,9 @@ Endpoints (all /api/qb/*):
   POST /api/qb/fix_all_allocations  — fix all 4 baskets at once
   GET  /api/qb/positions            — open/closed positions with P&L
   GET  /api/qb/summary              — basket summary (market value, unreal/real P&L)
-  GET  /api/qb/rebalance_log        — rebalance + EOD check history
+  GET  /api/qb/rebalance_log        — raw rebalance + EOD check history (one row per night)
+  GET  /api/qb/rebalance_history    — cc#1703: same log, classified (rebalance/stop exit/cash
+                                       move shown by default, nightly checks behind a count)
   GET  /api/qb/registry             — basket registry
 """
 
@@ -261,6 +263,143 @@ def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
         "SELECT rebalance_date, stocks_in, stocks_out, stocks_held, total_portfolio_value, actions, computed_at "
         "FROM quant_rebalance_log WHERE basket_name=%s ORDER BY computed_at DESC LIMIT %s",
         (basket_name, limit))
+
+
+_BEES = ("NIFTYBEES", "LIQUIDBEES")
+
+
+@router.get("/rebalance_history")
+def qb_rebalance_history(basket_name: str = "large_cap", limit: int = 300):
+    """cc#1703 (session_log 38966, founder 04-Sep screenshot "every row +0/-0"): the raw
+    /rebalance_log feed is one row PER NIGHT (an EOD stop-check runs every trading close, whether
+    or not anything happened) — that is the wall of zeros. This endpoint classifies each row
+    (REBALANCE / STOP EXIT / CASH MOVE / NIGHTLY CHECK), hides nightly-check noise behind a count
+    the page can toggle open, and reads real symbols + a stock-only HELD count instead of the raw
+    stocks_held column (which counts the NIFTYBEES cash-residual slot as a "stock").
+
+    do_not_touch respected: reads quant_rebalance_log + quant_paper_positions, writes nothing —
+    the engine/table this reads is untouched, this is a presentation layer over existing rows.
+    Additive: the raw /rebalance_log endpoint above is unchanged (mcp_dispatch.py's MCP tool reads
+    its raw shape) — this is a NEW endpoint, not a rewrite of that one."""
+    log_rows = api_query(
+        "SELECT rebalance_date, stocks_in, stocks_out, stocks_held, total_portfolio_value, "
+        "actions, computed_at FROM quant_rebalance_log WHERE basket_name=%s "
+        "ORDER BY rebalance_date DESC, computed_at DESC LIMIT %s",
+        (basket_name, limit))
+    if isinstance(log_rows, dict) and log_rows.get("error"):
+        return log_rows
+    positions = api_query(
+        "SELECT symbol, qty, entry_price, entry_date, exit_date, exit_price, status, notes "
+        "FROM quant_paper_positions WHERE basket_name=%s ORDER BY entry_date",
+        (basket_name,))
+    if isinstance(positions, dict) and positions.get("error"):
+        return positions
+    reg = api_query(
+        "SELECT rebalance_freq, next_rebalance FROM quant_basket_registry WHERE basket_name=%s",
+        (basket_name,), single=True) or {}
+    freq = reg.get("rebalance_freq") or "scheduled"
+
+    def dfmt(d):
+        return d.strftime("%d-%b") if d else "—"
+
+    def dfmt_json(v):
+        """actions is JSONB -> a date value inside it comes back as a plain "YYYY-MM-DD..."
+        string, never a python date. Parse just the date portion before formatting."""
+        if not v:
+            return "—"
+        try:
+            from datetime import datetime as _dt
+            return _dt.strptime(str(v)[:10], "%Y-%m-%d").strftime("%d-%b")
+        except Exception:
+            return str(v)[:10]
+
+    def held_asof(d):
+        """Stock-only (bees excluded) open count as of date d, from the position ledger — the
+        one honest source, independent of what a given log row's own stocks_held happened to
+        count that night."""
+        syms = [p["symbol"] for p in positions
+                if p["symbol"] not in _BEES and p["entry_date"] and p["entry_date"] <= d
+                and (p["exit_date"] is None or p["exit_date"] > d)]
+        return syms
+
+    stock_entries_after = lambda d: any(
+        p["symbol"] not in _BEES and p["entry_date"] and p["entry_date"] > d for p in positions)
+
+    def entries_on(d):
+        """New stock buys dated exactly d — real confirmed entries, not the gated proposal list.
+        Today every rebalance is still awaiting confirmation so this is always [], but a future
+        confirmed rebalance dated the same day as its was_due row must show up as IN, not blank
+        forever."""
+        return [p["symbol"] for p in positions
+                if p["symbol"] not in _BEES and p["entry_date"] == d]
+
+    value_by_date = {}
+    for r in log_rows:
+        d = r["rebalance_date"]
+        v = r.get("total_portfolio_value")
+        if v is not None and (d not in value_by_date or value_by_date[d] is None):
+            value_by_date[d] = v
+
+    rows = []
+    for r in log_rows:
+        d = r["rebalance_date"]
+        actions = r.get("actions") or {}
+        held_syms = held_asof(d)
+        base = {"date": str(d), "held": len(held_syms), "held_symbols": held_syms,
+                "value_after": r.get("total_portfolio_value")}
+        if "was_due" in actions:
+            exits = list(actions.get("exits_hs1") or []) + list(actions.get("exits_hs2") or [])
+            entries = list(actions.get("entries") or []) or entries_on(d)
+            entry_note = actions.get("entry_note") or ""
+            gated = "founder-confirmed" in entry_note.lower() and not entries and not stock_entries_after(d)
+            note = "{} due {}; exits {}; next {}".format(
+                freq, dfmt(d), (", ".join(exits) if exits else "none"),
+                dfmt_json(actions.get("advanced_to")))
+            if gated:
+                note += "; NEW ENTRIES AWAITING FOUNDER CONFIRMATION"
+            base.update(row_type="rebalance", action="Rebalance",
+                        **{"in": entries, "out": exits}, note=note, gated=gated)
+            rows.append(base)
+        else:
+            stocks_out = r.get("stocks_out") or 0
+            gvm_exits = actions.get("gvm_exits") or []
+            exited = [p for p in actions.get("positions") or []
+                      if str(p.get("status", "")).startswith("exited")]
+            if stocks_out > 0 or gvm_exits or exited:
+                out_syms = [p.get("symbol") for p in exited] or list(gvm_exits)
+                reasons = {p.get("symbol"): (p.get("exit_reason") or "GVM exit") for p in exited}
+                note = "stop hit: " + ", ".join(
+                    "{} ({})".format(s, reasons.get(s, "GVM exit")) for s in out_syms)
+                base.update(row_type="stop_exit", action="Stop exit",
+                            **{"in": [], "out": out_syms}, note=note, gated=False)
+            else:
+                base.update(row_type="nightly_check", action="Nightly check",
+                            **{"in": [], "out": []}, note="no changes", gated=False)
+            rows.append(base)
+
+    for p in positions:
+        if p["symbol"] not in _BEES:
+            continue
+        if p.get("entry_date"):
+            d = p["entry_date"]
+            note = (p.get("notes") or "").strip() or "{} units of {} — cash slot".format(p.get("qty"), p["symbol"])
+            rows.append({"date": str(d), "row_type": "cash_move", "action": "Cash move",
+                        "in": [p["symbol"]], "out": [], "held": len(held_asof(d)),
+                        "held_symbols": held_asof(d), "value_after": value_by_date.get(d),
+                        "note": note, "gated": False})
+        if p.get("exit_date"):
+            d = p["exit_date"]
+            rows.append({"date": str(d), "row_type": "cash_move", "action": "Cash move",
+                        "in": [], "out": [p["symbol"]], "held": len(held_asof(d)),
+                        "held_symbols": held_asof(d), "value_after": value_by_date.get(d),
+                        "note": "{} liquidated back to cash".format(p["symbol"]), "gated": False})
+
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    nightly = [r for r in rows if r["row_type"] == "nightly_check"]
+    visible = [r for r in rows if r["row_type"] != "nightly_check"]
+    return {"basket": basket_name, "rows": visible, "nightly_rows": nightly,
+            "nightly_count": len(nightly), "next_rebalance": reg.get("next_rebalance"),
+            "empty": len(rows) == 0}
 
 
 def _discretionary_baskets(cur):

@@ -154,6 +154,22 @@
 
   .msg{font-size:12px;color:var(--mut);padding:24px 20px;text-align:center}
   .err-msg{font-size:12px;color:var(--red);padding:24px 20px;text-align:center}
+
+  /* cc#1703: rebalance history sheet row types + gated-confirmation tag */
+  .rh-type{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;
+    text-transform:uppercase;padding:2px 7px;border-radius:5px;white-space:nowrap}
+  .rh-type.rebalance{background:rgba(124,131,253,.14);color:#8b93ff}
+  .rh-type.stop_exit{background:rgba(255,92,108,.12);color:var(--red)}
+  .rh-type.cash_move{background:rgba(90,160,255,.12);color:#5aa0ff}
+  .rh-gated{display:inline-block;margin-left:6px;font-size:9.5px;font-weight:800;
+    letter-spacing:.02em;padding:2px 7px;border-radius:5px;background:rgba(245,185,74,.14);
+    color:var(--amber);border:1px solid var(--amber-bd)}
+  .rh-toggle{display:block;margin:10px 20px 4px;font-size:11px;font-weight:600;color:var(--mut);
+    background:none;border:1px solid var(--line);border-radius:6px;padding:6px 10px;
+    cursor:pointer;text-align:left}
+  .rh-toggle:hover{color:var(--txt);border-color:var(--dim)}
+  .rh-sym{font-size:11px}
+  .rh-note{font-size:11px;color:var(--mut);white-space:normal;min-width:220px}
   @media(max-width:768px){
     body{font-size:12px}
     table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -634,23 +650,48 @@ async function showHoldings(body){
   }catch(e){body.innerHTML=`<div class="err-msg">Error: ${e.message}</div>`;}
 }
 
+// cc#1703 (QB Rebalance History, session_log 38966, founder 04-Sep "every row +0/-0"): the raw
+// log is one row per NIGHT — an EOD stop-check runs every trading close whether or not anything
+// happened, which is the wall of zeros the founder screenshotted. /api/qb/rebalance_history
+// classifies each row server-side (rebalance / stop exit / cash move / nightly check) and this
+// sheet shows only the first three by default, with a toggle to reveal the nightly noise.
+const RH_LABEL={rebalance:'Rebalance',stop_exit:'Stop exit',cash_move:'Cash move',nightly_check:'Nightly check'};
+let rhDefaultRows=[], rhNightly=[], rhShowNightly=false;
 async function showRebalance(body){
   try{
-    const data=await fetchWithTimeout(`/api/qb/rebalance_log?basket_name=${curBasket}&limit=10`).then(r=>r.json());
-    if(!Array.isArray(data)||!data.length){body.innerHTML='<div class="msg">No rebalance history yet. First rebalance: Large Cap + Mid Cap on 4 Jul 2026.</div>';return;}
-    body.innerHTML=`<div class="tbl-wrap"><table>
-      <thead><tr>
-        <th>Date</th><th>Stocks In</th><th>Stocks Out</th><th>Held</th><th>Portfolio Value</th>
-      </tr></thead>
-      <tbody>${data.map(r=>`<tr>
-        <td>${r.rebalance_date||'—'}</td>
-        <td class="pos">+${r.stocks_in||0}</td>
-        <td class="neg">−${r.stocks_out||0}</td>
-        <td>${r.stocks_held||0}</td>
-        <td>${r.total_portfolio_value!=null?'₹'+(+r.total_portfolio_value/100000).toFixed(2)+'L':'—'}</td>
-      </tr>`).join('')}</tbody>
-    </table></div>`;
+    const d=await fetchWithTimeout(`/api/qb/rebalance_history?basket_name=${curBasket}&limit=300`).then(r=>r.json());
+    if(d&&d.error){body.innerHTML=`<div class="err-msg">Error: ${esc(d.error)}</div>`;return;}
+    if(d.empty||(!Array.isArray(d.rows)||!d.rows.length)){
+      body.innerHTML=`<div class="msg">No rebalance yet — first due ${d.next_rebalance?(d.next_rebalance+'').split('T')[0]:'—'}.</div>`;
+      return;
+    }
+    rhDefaultRows=d.rows; rhNightly=d.nightly_rows||[]; rhShowNightly=false;
+    rhRender();
   }catch(e){body.innerHTML=`<div class="err-msg">Error: ${e.message}</div>`;}
+}
+function rhToggleNightly(){ rhShowNightly=!rhShowNightly; rhRender(); }
+function rhRender(){
+  const rows=rhShowNightly
+    ? rhDefaultRows.concat(rhNightly).sort((a,b)=>a.date<b.date?1:-1)
+    : rhDefaultRows;
+  document.getElementById('modal-body').innerHTML=rhTableHtml(rows)+
+    (rhNightly.length?`<button class="rh-toggle" onclick="rhToggleNightly()">${rhShowNightly?'hide':'show'} nightly checks (${rhNightly.length})</button>`:'');
+}
+function rhTableHtml(rows){
+  return `<div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>Date</th><th>Action</th><th>In</th><th>Out</th><th>Held</th><th>Value After</th><th>Note</th>
+    </tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td>${r.date}</td>
+      <td><span class="rh-type ${r.row_type}">${RH_LABEL[r.row_type]||r.row_type}</span>${r.gated?'<span class="rh-gated">awaiting confirmation</span>':''}</td>
+      <td class="rh-sym pos">${(r.in&&r.in.length)?'+'+esc(r.in.join(', ')):'—'}</td>
+      <td class="rh-sym neg">${(r.out&&r.out.length)?'−'+esc(r.out.join(', ')):'—'}</td>
+      <td title="${esc((r.held_symbols||[]).join(', '))}">${r.held!=null?r.held:'—'}</td>
+      <td>${r.value_after!=null?'₹'+(+r.value_after/100000).toFixed(2)+'L':'—'}</td>
+      <td class="rh-note">${esc(r.note||'—')}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
 }
 
 // cc#1298: per-symbol Buy/Sell ledger — every position this basket has EVER held, open or
