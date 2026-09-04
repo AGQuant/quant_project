@@ -67,6 +67,9 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 <script type="text/babel">
 const {useState,useEffect,useMemo,useRef} = React;
 
+// cc#1699 (founder 04-Sep screenshot, "hide G-V-M tab"): one flag, one line to restore.
+const SHOW_GVM_TAB = false;
+
 const C = {bg:"var(--bg)",card:"#fff",border:"var(--line)",accent:"#4D7CFE",green:"#2FD48B",red:"#FF5C6C",gold:"#F5B94A",orange:"#F5B94A",purple:"#9B7CFF",text:"var(--txt)",muted:"var(--mut)"};
 const VC = {"Excellent":"#2FD48B","Good":"#4D7CFE","Average":"#F5B94A","Weak":"#FF5C6C"};
 
@@ -612,7 +615,13 @@ function Loading() {
 function App() {
   const [d, setD] = useState(null);
   const [err, setE] = useState(null);
-  const [tab, setTab] = useState("themes");
+  const [tab, setTabRaw] = useState("themes");
+  // cc#1699: G.V.M is hidden but the state name might still say "gvm" from some future caller
+  // (a saved link, a programmatic setTab) — never let a hidden tab actually render; land on
+  // Rank Table instead, same as the flag being off in the first place. No dead hash state exists
+  // today (this page reads no hash/localStorage for `tab` at all — grepped, confirmed), so this
+  // is a defensive guard for a future caller, not a fix for an existing one.
+  const setTab = (id) => setTabRaw((id==="gvm" && !SHOW_GVM_TAB) ? "rank" : id);
   const [sel, setSel] = useState(null);
   useEffect(()=>{
     fetchWithTimeout("/api/sector/rotation").then(r=>r.json()).then(data=>{ data.error?setE(data.error):setD(data); }).catch(e=>setE(e.message));
@@ -620,7 +629,8 @@ function App() {
   if (err) return <div style={{padding:40,color:C.red,fontSize:13}}>⚠ {err}</div>;
   if (!d)  return <Loading/>;
   const stats = {buy:d.all.filter(r=>["Excellent","Good"].includes(r.verdict)).length,hi:d.all.filter(r=>r.gvm>=7).length,cold:d.all.filter(r=>r.gvm!=null&&r.gvm<6).length};
-  const TABS = [["themes","Themes"],["search","Sector Search"],["rank","Rank Table"],["gvm","G · V · M"]];
+  const TABS = [["themes","Themes"],["search","Sector Search"],["rank","Rank Table"],...(SHOW_GVM_TAB?[["gvm","G · V · M"]]:[])];
+  const effTab = (tab==="gvm" && !SHOW_GVM_TAB) ? "rank" : tab;
   return (
     <div style={{minHeight:"100vh",background:C.bg}}>
       <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
@@ -635,10 +645,10 @@ function App() {
       <Strip top5={d.top5} cold={d.bottom5} onSel={setSel}/>
       {sel && <div style={{padding:"12px 20px 0"}}><Detail row={sel} onClose={()=>setSel(null)}/></div>}
       <div style={{padding:"12px 20px 40px",maxWidth:1440,margin:"0 auto"}}>
-        {tab==="themes" && <ThemesSection/>}
-        {tab==="search" && <SectorSearch allSectors={d.all}/>}
-        {tab==="rank"   && <RankTab data={d.all} onSel={setSel}/>}
-        {tab==="gvm"    && <GVMTab  data={d.all} onSel={setSel}/>}
+        {effTab==="themes" && <ThemesSection/>}
+        {effTab==="search" && <SectorSearch allSectors={d.all}/>}
+        {effTab==="rank"   && <RankTab data={d.all} onSel={setSel}/>}
+        {SHOW_GVM_TAB && effTab==="gvm" && <GVMTab data={d.all} onSel={setSel}/>}
       </div>
     </div>
   );
