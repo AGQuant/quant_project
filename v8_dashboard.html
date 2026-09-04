@@ -5252,17 +5252,27 @@ function hsTableBlock(d){
     +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
+// cc#1679: the Tiles view drops the magnitude bands — every up tile takes the darkest green step,
+// every down tile the darkest red step. Sign decides colour now, not size of move. VIX inversion
+// needs no handling here: global_heatstrip._band() already bakes the inverted sign into day_band/
+// week_band server-side, so this just reads whichever band the server sent. The Table view
+// (hsCell) is untouched — it still reads HS_BAND[band] directly, full per-magnitude tint.
+function hsTileBand(band){
+  if(band==='up'||band==='up-strong')return'up-strong';
+  if(band==='down'||band==='down-strong')return'down-strong';
+  return'flat';   // zero-change or no-data tile: the darker of the two neutral steps, never blank
+}
 function hsTile(t,level){
   const chg = level==='week'? t.week_chg_pct : t.day_chg_pct;
   const band= level==='week'? t.week_band    : t.day_band;
-  const c=HS_BAND[band]||HS_BAND.none;
+  const c=HS_BAND[hsTileBand(band)];
   const asof = level==='week'
     ? (t.week_base_date? ('vs '+t.week_base_date+' · '+t.week_sessions+' sessions') : 'insufficient history')
     : (t.as_of_is_live? ('live · '+t.as_of) : ('EOD · '+t.as_of));
   const px = t.price==null?'--':Number(t.price).toLocaleString('en-IN',{maximumFractionDigits:2});
   return `<button class="hs-tile" data-sym="${escAttr(t.symbol)}"
       title="${escAttr(t.name)} · ${px} · ${asof}${t.inverted?' · inverted (up = risk-off)':''}"
-      style="background:${c.bg};border:1px solid ${c.fg}44;color:${c.fg}">
+      style="background:${c.bg};border:1px solid ${c.fg}44;color:var(--heat-on,#fff)">
       <span class="hs-nm">${escHtml(t.name||t.symbol)}</span>
       <span class="hs-ch">${hsPct(chg)}</span>
       <span class="hs-px">${px}</span>
