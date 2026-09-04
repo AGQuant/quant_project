@@ -55,6 +55,17 @@
   .al-eng{font:600 10px ui-monospace,monospace;color:var(--mut);border:1px solid var(--line2);
           border-radius:5px;padding:2px 6px;white-space:nowrap}
   .al-notes{white-space:normal;max-width:260px;font-size:12px;color:var(--mut);line-height:1.45}
+  /* cc#1693: TRIGGER's second muted line (the moved WHEN text) and the TC /100 cell -- .tc-buy/
+     .tc-sell/.tc-opp mirror v8_dashboard.html tcCell()'s own colouring (buy=green, sell=red, an
+     amber border when the winning card opposes the alert's own direction). */
+  .al-tag2{display:block;font-family:ui-monospace,monospace;font-size:9.5px;color:var(--dim);margin-top:2px}
+  .tc-num{font:800 13px ui-monospace,monospace}
+  .tc-band{display:inline-block;margin-left:6px;font-size:8.5px;font-weight:800;letter-spacing:.4px;
+           padding:1px 6px;border-radius:999px;border:1px solid transparent;cursor:help}
+  .tc-buy{color:var(--grn);background:rgba(47,212,139,.12)}
+  .tc-sell{color:var(--red);background:rgba(255,92,108,.12)}
+  .tc-opp{border-color:var(--amber)}
+  .th-asof{display:block;font-size:8.5px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--dim);margin-top:2px}
   .tw-btn{padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
           color:var(--txt);font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}
   .tw-btn:hover{border-color:var(--blu)}
@@ -123,8 +134,7 @@
   <div class="card">
     <div class="meta" id="meta">Loading…</div>
     <div class="scroll"><table id="tbl">
-      <thead><tr><th>Symbol</th><th>Dir</th><th>Status</th><th>Engine</th><th>Trigger</th>
-        <th>When</th><th>Notes</th><th>Action</th></tr></thead>
+      <thead id="thead"></thead>
       <tbody id="body"></tbody>
     </table></div>
   </div>
@@ -175,6 +185,30 @@
    convention instead. */
 var STATE = { alerts: [], status: 'all' };
 var TABS = ['all', 'pending', 'triggered', 'approved', 'dismissed'];
+/* cc#1693 (founder 04-Sep screenshot: "Hide When and Notes column and show only Action column
+   along with TC score replacing notes"). HIDE, not delete -- same shape as SHOW_VOL_TILES /
+   SHOW_GATE_CHIP (scorr_v10_signal.html). One line each to restore. WHEN's information is not
+   lost: it is already in ACTION for approved rows; for pending/triggered rows it moves into the
+   TRIGGER cell as a second muted line (row 217-241 origin unchanged). NOTES text is kept as a
+   title= tooltip on the SYMBOL cell so a founder note stays reachable on hover. */
+var SHOW_ALERT_WHEN = false;
+var SHOW_ALERT_NOTES = false;
+/* cc#1693: TC /100 -- the SAME per-symbol, side-aware score the V8 dashboard Open Positions TC
+   column reads, GET /api/trade-check/position-stars-v2 (tc_position_stars_v2.py). No new
+   endpoint or backend field (P1 discovery: the GATE was false) -- that endpoint already returns
+   every current symbol+side row with no params, so this page fetches it exactly the way
+   v8_dashboard.html does and looks it up client-side. Built as OWN {symbol|dir_side: item}, not
+   the raw LONG/SHORT-keyed dict the endpoint returns, so the lookup matches an alert's BUY/SELL
+   direction directly.
+   FIELD CORRECTED after checking the dashboard's own source, not just its label: v8_dashboard.html
+   L4039-4041 names this TC_BEST_OF_FOUR_V1 (cc#1603, founder 02-Sep 15:34) and states the column's
+   headline VALUE is best_any_score100 (best of the 4 cards, ANY direction) -- the position's own-
+   side card "rides along for the hover, never as the headline." A first pass here used the row's
+   own-direction score100 instead, on the reasoning that an alert is directional and best_any could
+   show the opposite side -- a real concern, but the founder already ruled the SAME concern the
+   SAME way for open positions (also directional), so matching "the same score the V8 dashboard TC
+   column shows" means best_any_score100 here too, with the own-side score as the hover detail. */
+var TC_MAP = {}, TC_ASOF = null;
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -191,6 +225,42 @@ function istStamp(ts){
   return i.getDate() + ' ' + mo + ' · ' + hh + ':' + mm;
 }
 function fmtPx(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', {maximumFractionDigits: 2}); }
+
+/* cc#1693: TC /100 cell, built to MATCH v8_dashboard.html's tcCell() exactly (same headline,
+   same cap, same tooltip shape) rather than reinvent it:
+     - number = best_any_score100 (best of 4 cards, any direction) -- the dashboard's own headline
+     - cap = best_any_bucket (e.g. "BUY-MOM"/"SELL-REV"), green if it starts BUY else red, an amber
+       border when it opposes the alert's own direction (best_any_opposes_position, precomputed
+       server-side against this exact symbol+dir_side row -- never recomputed here)
+     - the row's OWN-direction score (score100/verdict10, STRONG|VALID|WATCH|REJECT) rides in the
+       title= tooltip, exactly where the dashboard keeps its own-side detail ("never as the
+       headline"). The card's "STRONG/VALID tag if the dashboard shows one" is conditional, and the
+       dashboard does not actually surface tc_band anywhere (checked: computed, never read) -- the
+       bucket cap is what it shows, so that is what this matches.
+   Em dash when no row exists for that symbol+direction -- never 0, never invented. */
+function tcAlertCell(a){
+  var t = TC_MAP[a.symbol + '|' + a.direction];
+  if (!t || t.best_any_score100 == null) return '<td class="al-tag">—</td>';
+  var buy = String(t.best_any_bucket || '').indexOf('BUY') === 0;
+  var opp = !!t.best_any_opposes_position;
+  var sideTip = (t.score100 != null)
+    ? ('on this alert\'s side: ' + (t.verdict10 || '--') + ' ' + Number(t.score100).toFixed(0))
+    : 'on this alert\'s side: no card scored';
+  var cap = t.best_any_bucket
+    ? '<span class="tc-band ' + (buy ? 'tc-buy' : 'tc-sell') + (opp ? ' tc-opp' : '') + '" title="'
+      + (opp ? 'strongest card is against this alert\'s direction · ' : '') + esc(sideTip) + '">'
+      + esc(t.best_any_bucket) + '</span>'
+    : '';
+  return '<td title="' + esc(sideTip) + '"><span class="tc-num">' + Number(t.best_any_score100).toFixed(0) + '</span>' + cap + '</td>';
+}
+function theadHtml(){
+  var asof = scorrAsofStamp(TC_ASOF);
+  var tcHdr = 'TC /100' + (asof.txt ? '<span class="th-asof">as of ' + esc(asof.txt) + '</span>' : '');
+  return '<tr><th>Symbol</th><th>Dir</th><th>Status</th><th>Engine</th><th>Trigger</th>'
+    + (SHOW_ALERT_WHEN ? '<th>When</th>' : '')
+    + (SHOW_ALERT_NOTES ? '<th>Notes</th>' : '<th>' + tcHdr + '</th>')
+    + '<th>Action</th></tr>';
+}
 
 function tabsHtml(){
   var n = { all: STATE.alerts.length, pending: 0, triggered: 0, approved: 0, dismissed: 0 };
@@ -240,29 +310,36 @@ function rowHtml(a){
         + (a.cmp == null ? '' : ' · <a href="#" class="al-ovr" onclick="return overrideApprove(' + a.id + ', ' + Number(a.cmp) + ')" title="Founder override: approve before the trigger crosses; the record says so">Approve now</a>')
         + '</span></div>';
   }
+  /* cc#1693: WHEN's text is dropped as a column but not as information -- approved rows already
+     print it in ACTION ("Approved @ ... . date"), so it is skipped there; every other status
+     (pending/triggered/dismissed) gets the SAME computed `when` string as a second muted line
+     under TRIGGER, byte-identical to what the WHEN column used to show for that row. */
+  var trigSub = (st !== 'approved' && when) ? '<span class="al-tag2">' + esc(when) + '</span>' : '';
   return '<tr id="al-' + a.id + '">'
-    + '<td class="sym">' + esc(a.symbol) + '</td>'
+    + '<td class="sym"' + (a.notes ? ' title="' + esc(a.notes) + '"' : '') + '>' + esc(a.symbol) + '</td>'
     + '<td class="' + dirCls + '">' + esc(a.direction) + '</td>'
     + '<td><span class="al-st ' + esc(st) + '">' + esc(st.toUpperCase()) + '</span></td>'
     + '<td>' + (a.source_engine ? '<span class="al-eng">' + esc(a.source_engine) + '</span>' : '<span class="al-tag">manual</span>') + '</td>'
-    + '<td class="al-tag">' + esc(trig) + '</td>'
-    + '<td class="al-tag">' + esc(when) + '</td>'
-    + '<td class="al-notes">' + esc(a.notes || '') + '</td>'
+    + '<td class="al-tag">' + esc(trig) + trigSub + '</td>'
+    + (SHOW_ALERT_WHEN ? '<td class="al-tag">' + esc(when) + '</td>' : '')
+    + (SHOW_ALERT_NOTES ? '<td class="al-notes">' + esc(a.notes || '') + '</td>' : tcAlertCell(a))
     + '<td>' + act + '</td>'
     + '</tr>';
 }
 
 function render(){
   document.getElementById('tabsStatus').innerHTML = tabsHtml();
+  document.getElementById('thead').innerHTML = theadHtml();
   var view = STATE.status === 'all'
     ? STATE.alerts
     : STATE.alerts.filter(function(a){ return a.status === STATE.status; });
   document.getElementById('meta').textContent =
     'showing ' + view.length + ' of ' + STATE.alerts.length + ' alerts'
     + (STATE.status === 'all' ? '' : ' · ' + STATE.status) + ' · newest first';
+  var cols = 5 + (SHOW_ALERT_WHEN ? 1 : 0) + 2;   // symbol/dir/status/engine/trigger + when? + (tc-or-notes) + action
   document.getElementById('body').innerHTML = view.length
     ? view.map(rowHtml).join('')
-    : '<tr><td colspan="8" class="empty">No ' + (STATE.status === 'all' ? '' : STATE.status + ' ')
+    : '<tr><td colspan="' + cols + '" class="empty">No ' + (STATE.status === 'all' ? '' : STATE.status + ' ')
       + 'alerts.</td></tr>';
 }
 
@@ -342,7 +419,7 @@ function load(){
     .catch(function(e){
       document.getElementById('meta').textContent = 'Could not load alerts — ' + e.message;
       document.getElementById('body').innerHTML =
-        '<tr><td colspan="8" class="empty">Could not load alerts. '
+        '<tr><td colspan="7" class="empty">Could not load alerts. '
         + '<button class="tw-btn" onclick="load()">Retry</button></td></tr>';
     });
 }
@@ -350,6 +427,30 @@ load();
 /* the engine sweeps every 5 minutes (cc#1504); refresh on the same cadence so a just-triggered
    row does not wait on a manual reload. In-place, filter preserved. */
 setInterval(load, 300000);
+
+/* cc#1693: TC /100 -- a second, independent fetch of the SAME batch endpoint the V8 dashboard
+   reads (no params, returns every current symbol+side row). Failure here degrades every TC cell
+   to em dash (tcAlertCell already treats a missing TC_MAP entry that way) rather than blocking
+   the alerts list itself -- the two fetches are deliberately independent. */
+function loadTc(){
+  fetchWithTimeout('/api/trade-check/position-stars-v2')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var rows = d.rows || [];
+      var map = {}, asof = null;
+      rows.forEach(function(it){
+        if (!it || !it.symbol || !it.dir_side) return;
+        map[it.symbol + '|' + it.dir_side] = it;
+        if (it.computed_at && (!asof || it.computed_at > asof)) asof = it.computed_at;
+      });
+      TC_MAP = map; TC_ASOF = asof;
+      render();
+    })
+    .catch(function(){ /* TC_MAP stays whatever it was (empty on first load) -- every cell already
+                           degrades to em dash, never a broken render over a missing score feed */ });
+}
+loadTc();
+setInterval(loadTc, 300000);
 
 /* ══ create-alert flow — the app's cc#1507 form, desktop modal shell. Symbol search reuses
    /api/gvm/search (the app's ONE autocomplete); the server stays the validator of record. */

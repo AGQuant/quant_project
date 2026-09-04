@@ -322,6 +322,12 @@ loudly on anything not in its documented `KNOWN_EXCEPTIONS` (the four above), an
 | GET | `/api/intraday/dashboard` | intraday dashboard (replaces retired intraday_router) |
 | POST | `/api/intraday/tick` | intraday tick |
 
+### TC Position Stars v2 — `tc_position_stars_v2.py`
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/admin/run-position-stars-v2` | admin: run the four-bucket star batch (ticks on `v8_paper_positions` OPEN symbols) |
+| GET | `/api/trade-check/position-stars-v2` | latest four-bucket star per symbol+side, no params — returns EVERY current row as a flat `rows` list and a `stars` dict (`"symbol\|side"`, side=LONG/SHORT). Each row carries `score100`/`verdict10` (own-direction) and `best_any_score100`/`best_any_bucket`/`best_any_opposes_position` (best of 4 cards, any direction — TC_BEST_OF_FOUR_V1, cc#1603, the headline the V8 dashboard's Open Positions TC /100 column and cc#1693's Web Alerts TC /100 column both read) |
+
 ### Check — `check_endpoint.py`
 | Method | Path | Description |
 |---|---|---|
