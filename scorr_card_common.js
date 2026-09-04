@@ -1428,6 +1428,14 @@ window.scorrAsofStamp = function (asof) {
 // and TC_STRONG is already scored on the position's own side by construction (cc#1548:
 // run_tc_score_tick maps LONG->BUY, SHORT->SELL before scoring), so it can never disagree.
 //
+// cc#1682: fired.dma is NO LONGER side-filtered either. The old cc#1539 cross fired FOR the
+// position's own direction (an up-cross confirmed a LONG, a down-cross confirmed a SHORT), so
+// showing it only when it agreed with the row's side was the point. The new STATE marker answers a
+// different question — "where does this symbol's 5DMA sit relative to its 20DMA today" — which is
+// true or false independent of which way the position itself is held. The founder's own example
+// (04-Sep): HINDZINC and TCS are SHORT positions that still show a GREEN square. Filtering dma by
+// side would make that example impossible.
+//
 // ONE filtering step. The caller runs this ONCE per row and feeds the SAME filtered object into
 // BOTH ScorrMarkerFlagColor and ScorrMarkerFlagDetailHtml below — never filtered twice, never two
 // functions each guessing the rule their own way. If the flag is blank, the popover (should it
@@ -1436,10 +1444,9 @@ window.ScorrMarkerFlagFilter = function (fired, posSide) {
   fired = fired || {};
   var side = String(posSide || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG';   // COALESCE(side,'LONG')
   var starWant = (side === 'LONG') ? 'BUY' : 'SELL';
-  var dmaWant = (side === 'LONG') ? 'DMA_CROSS_UP' : 'DMA_CROSS_DOWN';
   return {
     stars: (fired.stars && fired.stars.direction === starWant) ? fired.stars : null,
-    dma: (fired.dma && fired.dma.direction === dmaWant) ? fired.dma : null,
+    dma: fired.dma || null,
     act: fired.act || null,
     tcs: fired.tcs || null
   };

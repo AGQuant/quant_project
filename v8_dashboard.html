@@ -2824,7 +2824,9 @@ function markerKeysFor(x){
   if(f.tcs)ks.add('tcs');
   if(f.stars)ks.add(f.stars.star_color==='BLUE'?'s1':'r1');
   if(f.act)ks.add('act');
-  if(f.dma)ks.add('dma');
+  // cc#1682: one key per STATE colour, not one 'dma' key — the chip row below is now two chips
+  // (5>20 / 5<20) and each must filter independently.
+  if(f.dma)ks.add(f.dma.star_color==='GREEN'?'dmaUp':'dmaDn');
   return ks;
 }
 function rowHasMarkerFilter(x){ if(!MASTER_MARKERS.size)return true; const ks=markerKeysFor(x); for(const k of MASTER_MARKERS){ if(ks.has(k))return true; } return false; }
@@ -3567,14 +3569,17 @@ function renderMaster(){
     const st=on?`background:${onTint};color:var(--txt);border:1px solid ${iconCol}`:'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
     return `<button type="button" class="mkq" onclick="setMasterMarker('${key}')" title="${tip.replace(/"/g,'&quot;')}" aria-pressed="${on}" style="${st};font:inherit;font-size:11px;font-weight:600;cursor:pointer;padding:5px 7px;border-radius:8px;transition:.15s;white-space:nowrap;min-height:34px;display:inline-flex;align-items:center;gap:4px"><span style="color:${iconCol};font-size:13px;line-height:1">${icon}</span>${title} <b style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-weight:800">${cnt}</b></button>`;
   };
-  const _dmaCol=(_mkCounts.dmaDn>_mkCounts.dmaUp)?'#f87171':'#0a9e63';
-  const _dmaTip=(_legLine('square','dma')||'5DMA cross')+' · up '+_mkCounts.dmaUp+' · down '+_mkCounts.dmaDn;
+  // cc#1682: ONE chip per DMA state colour, not one 'dma cross' chip — the founder's ask is a
+  // green count and a red count, independently clickable/clearable, matching every other family's
+  // OR-among-chosen / AND-with-side-basket rule (setMasterMarker toggles a Set entry either way).
+  const _dmaTip=_legLine('square','dma')||'5DMA above/below 20DMA';
   const markerGroup=`<div class="mkq-grp" style="display:flex;gap:4px;margin-left:auto;flex:0 1 auto;justify-content:flex-end">`
     + mchip('tcs','\u2605','#F5B94A','TC strong',_mkCounts.tcs,_legLine('amber','strong')||'TC strong','rgba(245,185,74,.16)')
     + mchip('s1','\u2605','#4d7cfe','S1 reversal',_mkCounts.s1,_legLine('blue')||'S1 reversal','rgba(77,124,254,.16)')
     + mchip('r1','\u2605','#f87171','R1 mirror',_mkCounts.r1,_legLine('red star')||'R1 mirror','rgba(248,113,113,.16)')
     + mchip('act','\u26a1','var(--txt)','Vol/OI spurt',_mkCounts.act,_legLine('\u26a1','volume')||'Volume/OI spurt','rgba(77,124,254,.12)')
-    + mchip('dma','\u25a0',_dmaCol,'5DMA cross',_mkCounts.dma,_dmaTip,(_dmaCol==='#f87171')?'rgba(248,113,113,.16)':'rgba(10,158,99,.16)')
+    + mchip('dmaUp','\u25a0','#0a9e63','5>20',_mkCounts.dmaUp,_dmaTip,'rgba(10,158,99,.16)')
+    + mchip('dmaDn','\u25a0','#f87171','5<20',_mkCounts.dmaDn,_dmaTip,'rgba(248,113,113,.16)')
     + `</div>`;
   // The basket chips and the marker group share ONE wrapping flex row; the group's flex-basis makes
   // it drop to its own line below ~1000px (inline, so the theme counter sees no new rule). With a single basket in view
@@ -4155,8 +4160,13 @@ async function loadPivotStars(){
     // cc#933: activity markers come back as their OWN list, because a symbol can carry a pivot
     // marker AND an activity marker at once — one merged map would drop the second.
     PIVOT_ACT={}; (d.activity||[]).forEach(a=>{PIVOT_ACT[a.symbol]=a;});
-    // cc#1539: the DMA-cross squares, third list for the same reason.
-    PIVOT_DMA={}; (d.dma_cross||[]).forEach(x=>{PIVOT_DMA[x.symbol]=x;});
+    // cc#1682: the DMA STATE squares, third list for the same reason. dma_state is the current
+    // endpoint key (dma_cross is kept as a one-release alias for the same list — read it as a
+    // fallback so this page never breaks mid-sprint). The endpoint's own field is `color`;
+    // star_color is added here as an alias so every OTHER reader of PIVOT_DMA/fired.dma on this
+    // page (the marker-count block below, the shared scorr_card_common.js filter/colour/detail
+    // functions) keeps its existing field name unchanged.
+    PIVOT_DMA={}; (d.dma_state||d.dma_cross||[]).forEach(x=>{PIVOT_DMA[x.symbol]=Object.assign({},x,{star_color:x.color});});
     // cc#1540: the amber TC_STRONG stars, fourth list.
     PIVOT_TCS={}; (d.tc_strong||[]).forEach(t=>{PIVOT_TCS[t.symbol]=t;});
     MK_LEGEND=d.legend||null;
@@ -4288,9 +4298,11 @@ function markerLegendPopover(){
     row('\u2605','#4d7cfe','Blue star \u2014 held reversal at S1')+
     row('\u2605','#f87171','Red star \u2014 mirror at R1')+
     row('\u26A1','inherit','Volume/OI spurt \u2014 volume >1.5x or OI >25% d/d')+
-    // cc#1539: two colours, one meaning-pair \u2014 a green square shows the up-cross glyph; the red
-    // mirror is stated in the text so the popover stays one row per marker family.
-    row('\u25A0','#0a9e63','Green/red square \u2014 fresh 5DMA cross above/below 20DMA');
+    // cc#1682: two colours, one meaning-pair \u2014 a green square shows the glyph in its own colour;
+    // the red state is stated in the text so the popover stays one row per marker family. STATE,
+    // not cross: every open card carries this square every day the relationship holds (supersedes
+    // cc#1539's fresh-cross-only wording).
+    row('\u25A0','#0a9e63','Green/red square \u2014 5DMA above/below 20DMA');
   // cc#1024: the shape-by-side footer is DELETED. No marker on the board changes shape by side
   // any more, so a footer explaining that rule would be explaining something that never happens.
   const footer='';

@@ -152,6 +152,7 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 | GET | `/api/v8/trades` | trades |
 | GET | `/api/v8/daylog` | Day Log: per-exit-date opened/closed/gross/brokerage/net rows + summary + `era_block`. Query: `era` (`fresh` default; `all` → **410** `full ledger suspended` while `app_config.v8_full_ledger_suspended` is true, cc#1604 V8_ERA_CUTOVER_ONLY_V1 36757), `view` (`equity` default / `futures`) |
 | GET | `/api/v8/daylog/series` | cc#1561 (`v8_daylog_extras.py`): the `/api/v8/daylog` payload folded into cumulative gross/net points by exit date, plus return facts (window_start = first exit day, table_start, trading/calendar days, capital, return_pct, cagr_pct null under 7 calendar days, cagr_note). Feeds the Day Log chart panel + Overall Return (i). Query: `view` |
+| GET | `/api/v8/pivot_star` | `v8_pivot_star.py`. Read-only, never writes. Four marker families on the OPEN paper book, LOG reads (never a live re-eval): `stars` (BLUE/RED pivot, `direction` BUY/SELL), `activity` (bolt, volume/OI), `dma_state` (cc#1682: STATE not cross — every open symbol's own square, `{symbol, color, dma5, dma20, data_date, note}`; `dma_cross` is a one-release alias returning the same list), `tc_strong` (amber, Trade Check). Plus `legend[]`, the one shared wording source both `/dashboard` and `/m/v8` render. Query: `star_date` (defaults to the latest session with rows) |
 
 ### V8 Futures — `v8_futures.py` (prefix `/api/v8/futures`)
 | Method | Path | Description |
