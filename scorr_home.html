@@ -981,7 +981,13 @@ if (window.self !== window.top || new URLSearchParams(location.search).has("embe
   const n = document.getElementById("scorr-nav"); if (n) n.style.display = "none";
 }
 </script>
-<!-- cc#100: canonical home (/) now loads PWA bootstrap -> mobile bottom-nav + canonical top-nav, same pattern as old /app -->
+<!-- cc#100/cc#1670: canonical home (/) gets the PWA bootstrap (canonical top-nav via
+     #scorr-nav + mobile bottom-nav) injected into <head> by main.py's auth_gate middleware
+     (do_pwa gate, cc#1595 head placement) -- NOT a page-local pwa.js script tag. Do not add
+     one to this file: the middleware's presence guard is a bare substring test on the whole
+     response body, not comment-aware, so writing that tag text ANYWHERE here (even inside a
+     comment) would make the guard think it is already present and skip injection entirely --
+     leaving the nav blank again, the exact regression this card fixed. -->
 <script src="/nav_toggle.js" defer></script>
 </body>
 </html>

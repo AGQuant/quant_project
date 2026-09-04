@@ -259,7 +259,12 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/trades",      # cc#991: Wall of Trades (web renderer)
                      "/alerts",      # cc#1536: Alerts (web renderer, the approve surface)
                      "/adaptive",   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
-                     "/room"}       # cc#1086: Fable Room viewer
+                     "/room",       # cc#1086: Fable Room viewer
+                     # cc#1670 P0: home (/) was never in this set, so do_pwa was False there and
+                     # pwa.js (the only code that populates #scorr-nav) never loaded — the founder
+                     # saw a blank 46px strip. NAV_REGISTRY below already lists "/" as carrying the
+                     # nav; this restores that claim. Regression traced to cc#1595 (9c79ec7).
+                     "/"}
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
 PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
