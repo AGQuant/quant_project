@@ -349,6 +349,11 @@ section{margin-top:26px}
 /* cc#846 DAILY DIGEST V3 — live bindings behind design_refs/scorr_digest_v3_R2.html.
    Read-only render. Content contract is session_log 965 v2.3; V3 is presentation only. */
 var D = null;
+/* cc#1689 (founder 04-Sep 20:31 IST screenshot: "hide internals, not req."): HIDE, not delete --
+   same shape as the mobile intel page's SHOW_VOL_TILES/SHOW_GATE_CHIP. Markup, fetches and the
+   READ computation in secInternals() keep running; render() below just does not call it when this
+   is false. One line to restore. */
+var SHOW_INTERNALS = false;
 
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
 function num(v,d){return v==null?'—':Number(v).toLocaleString('en-IN',{minimumFractionDigits:d||0,maximumFractionDigits:d||0});}
@@ -576,9 +581,9 @@ function refreshAges(){
 }
 setInterval(refreshAges,30000);
 
-function secLadders(s){
+function secLadders(s,n){
   if(!s) return '';
-  var h = sh('02','Index Ladders',s.tier||'EOD','pivots + last CMP');
+  var h = sh(n,'Index Ladders',s.tier||'EOD','pivots + last CMP');
   /* cc#1521 R4: the rung LIST becomes a horizontal PIVOT RAIL — the band spans the lowest to the
      highest rung, a tick per rung (PP in cyan), the CMP as a pulsing dot at its proportional
      position. Distances in the .idxfoot come from the rungs' OWN dist_pct values, never
@@ -692,9 +697,9 @@ function ladderLayout(){
 var _ladderRT=null;
 window.addEventListener('resize',function(){ clearTimeout(_ladderRT); _ladderRT=setTimeout(ladderLayout,120); });
 
-function secInternals(s){
+function secInternals(s,n){
   if(!s) return '';
-  var h = sh('03','Internals',s.tier||'LIVE','breadth + options positioning');
+  var h = sh(n,'Internals',s.tier||'LIVE','breadth + options positioning');
   /* cc#853 — R3 structure: a .three grid of standalone .card mini tiles, each with .mk label,
      one big .mv number, an .mn sentence and a bar/spark beneath. The shipped version emitted
      <div class="card"><div class="g2"> with .grouplab + .hstats, which is the HERO stat-strip
@@ -752,9 +757,9 @@ function secInternals(s){
 }
 
 
-function secReporting(s){
+function secReporting(s,n){
   if(!s) return '';
-  var h = sh('04','Reporting Today',s.tier||'STATIC','earnings_calendar');
+  var h = sh(n,'Reporting Today',s.tier||'STATIC','earnings_calendar');
   h += '<div class="card">';
   // cc#853: R3 chip markup is <span class="chip"><b>TICKER</b> Company</span> — the <b> is what
   // carries the cyan (.chip b{color:var(--cy)}). The old <span class="k">/<span class="d"> pair
@@ -816,6 +821,9 @@ function secNews(n,title,s,tier){
    otherwise a muted "as of DD Mon, HH:MM IST" — never LIVE on a stale desk. */
 var FEED={cat:'All',stance:'All',shown:12};
 var FEED_PAGE=12;
+var _feedSecN='05';   // cc#1689: the section number secFeed was last drawn with -- feedRepaint()
+                       // (chip clicks, "load more") re-renders #sec-feed alone and must reuse it,
+                       // never a stale/refetched value from a fresh render()'s counter.
 function feedFresh(newest){
   if(!newest) return false;
   var d=new Date(String(newest).replace(' ','T')); if(isNaN(d)) return false;
@@ -839,12 +847,12 @@ function feedChip(kind,key,label,cnt){
   var st=on?'background:rgba(var(--cy-rgb),.14);color:var(--cy);border:1px solid rgba(var(--cy-rgb),.45)':'background:var(--panel);color:var(--tx3);border:1px solid var(--line2)';
   return '<button type="button" class="fchip" data-kind="'+kind+'" data-key="'+esc(key)+'" aria-pressed="'+on+'" style="'+st+';font:600 10.5px var(--f-m);letter-spacing:.06em;padding:5px 10px;border-radius:999px;cursor:pointer;white-space:nowrap">'+esc(label)+(cnt!=null?' <b style="font-weight:700">'+cnt+'</b>':'')+'</button>';
 }
-function secFeed(s){
+function secFeed(s,n){
   if(!s) return '';
   var items=s.items||[], newest=s.newest_polished_at;
   var live=feedFresh(newest);
   var pill=live?badge('LIVE'):'<span class="asof" style="margin-left:0">as of <b>'+esc(newest?tIST(newest)+' IST':'—')+'</b></span>';
-  var h='<div class="sh"><span class="snum">05</span><span class="st">What Moved</span>'+pill+
+  var h='<div class="sh"><span class="snum">'+esc(n)+'</span><span class="st">What Moved</span>'+pill+
         '<span class="asof">polished desk · last '+(s.days||7)+' days · '+items.length+' stories</span></div>';
   // chips: categories from category_counts (busiest first) + stance buckets counted from the rows
   var cc=s.category_counts||{}; var cats=Object.keys(cc).sort(function(a,b){return cc[b]-cc[a]||a.localeCompare(b);});
@@ -873,7 +881,7 @@ function secFeed(s){
 function feedRepaint(){
   var s=((D||{}).sections||{}).news_feed, host=document.getElementById('sec-feed');
   if(!s||!host) return;
-  host.outerHTML=secFeed(s);
+  host.outerHTML=secFeed(s,_feedSecN);   // cc#1689: same persisted section number as the last full render
 }
 function feedMd(txt){   // the app's nwMd, ported: blank-line paragraphs, **bold**, line breaks
   var safe=esc(String(txt==null?'':txt));
@@ -916,9 +924,9 @@ document.addEventListener('click',function(e){
 });
 document.addEventListener('keydown',function(e){ if(e.key==='Enter'&&e.target&&e.target.classList&&e.target.classList.contains('frow')) feedOpen(Number(e.target.getAttribute('data-i'))); });
 
-function secResults(s){
+function secResults(s,n){
   if(!s) return '';
-  var h = sh('07',"Yesterday's Results · Scored",s.tier||'STATIC',
+  var h = sh(n,"Yesterday's Results · Scored",s.tier||'STATIC',
              (s.reported_total||0)+' REPORTED · TOP 10 BY MCAP');
   h += '<div class="card"><table class="rtab"><thead><tr><th>Company</th><th class="r">M-Cap</th>'+
        '<th>The quarter</th><th class="c">Read</th></tr></thead><tbody>';
@@ -1144,13 +1152,28 @@ function render(d){
   /* cc#1527: the dateline died with the head (the kick's date/generated line carries it), and
      the pill now lives INSIDE the hero markup — it is written after the paint below. */
   var s=d.sections||{};
-  // cc#853: R3 order — hero READ first, then 01..07. There is no section 08; Market Read IS the hero.
+  // cc#853: R3 order — hero READ first, then 01..NN. There is no section 08 by default; Market
+  // Read IS the hero.
+  // cc#1689: section numbers are a COUNTER over the sections that will actually render, not
+  // hardcoded literals — a hidden (SHOW_INTERNALS=false) or absent (no payload) section consumes
+  // no number, so the visible run always reads 01,02,03... with no gap and a later hide/show of
+  // any section needs no renumbering here. Global Tape stays a fixed "01" (secTapeInner draws its
+  // own header on the DAY/WEEK toggle re-render, outside this counter, and it is never hidden) --
+  // every section from Index Ladders onward draws its number from N().
+  var _n=1;   // Global Tape already claimed 01
+  function N(show){ if(!show) return null; _n++; return (_n<10?'0':'')+_n; }
+  var nLad=N(!!s.ladders), nInt=N(SHOW_INTERNALS && !!s.internals), nRep=N(!!s.reporting_today);
+  var nFeed=N(!!s.news_feed);
+  var nMoved=N(!s.news_feed && !!s.what_moved), nGlobal=N(!s.news_feed && !!s.global_events);
+  var nRes=N(!!s.yesterday_results);
+  if(s.news_feed) _feedSecN=nFeed;
   document.getElementById('digest').innerHTML =
     secHero(d) +
-    secTape(s.global_tape) + secLadders(s.ladders) + secInternals(s.internals) +
-    secReporting(s.reporting_today) +
-    (s.news_feed ? secFeed(s.news_feed) : secNews('05','What Moved',s.what_moved) + secNews('06','Global Events',s.global_events)) +   // cc#1608: one merged, filterable feed; the old pair only if the payload predates it
-    secResults(s.yesterday_results);
+    secTape(s.global_tape) + secLadders(s.ladders,nLad) +
+    (SHOW_INTERNALS ? secInternals(s.internals,nInt) : '') +
+    secReporting(s.reporting_today,nRep) +
+    (s.news_feed ? secFeed(s.news_feed,nFeed) : secNews(nMoved,'What Moved',s.what_moved) + secNews(nGlobal,'Global Events',s.global_events)) +   // cc#1608: one merged, filterable feed; the old pair only if the payload predates it
+    secResults(s.yesterday_results,nRes);
   /* cc#1527: pill + clock live in the just-painted hero — stamp them now */
   var pill=document.getElementById('mktPill');
   if(pill){
