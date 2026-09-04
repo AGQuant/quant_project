@@ -1246,6 +1246,19 @@ window.scorrAsofStamp = function (asof) {
   } else {
     boot();
   }
+
+  /* cc#1669: coordination hook for nav_toggle.js (cc#118/#311). The two hide mechanisms are
+     independent -- nav_toggle.js's own Show action only clears its own data-scorr-nav-hidden
+     gate, and never touches the .scorr-nav-off transform this script applies on scroll-down.
+     Tapping Show while scrolled past the nav's own height therefore left it invisible: the
+     max-height:0 gate lifted, but the element was still translateY(-100%) off-screen. This hook
+     lets nav_toggle.js clear BOTH states from one call, and re-anchors lastY to the reveal point
+     so the nav is not silently re-hidden until the person actually scrolls down again from here. */
+  window.__scorrScrollNavShow = function () {
+    collect();
+    apply(false);
+    lastY = window.pageYOffset || document.documentElement.scrollTop || 0;
+  };
 })();
 
 
