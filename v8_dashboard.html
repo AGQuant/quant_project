@@ -5018,9 +5018,11 @@ async function dlOpenChart(which,ctxKey){
   try{
     const [d]=await Promise.all([dlLoadSeries(),_dlEnsureChart()]);
     document.getElementById('dlChartTitle').textContent=`${_title} - since ${dlFmtD(d.window_start)} (${d.trading_days??0} trading days)`;
-    // Series switch inside the modal: the two chips re-emphasise without a refetch (cached series).
+    // cc#1678: pills switch which SINGLE series is drawn (no more faint second line). The chip
+    // click re-renders in place without a refetch (cached series).
     const chip=k=>`<span onclick="dlOpenChart('${k}')" style="cursor:pointer;padding:1px 7px;border-radius:999px;border:1px solid var(--line);${DL_FOCUS===k?'color:var(--txt);font-weight:700;background:var(--line)':'color:var(--dim)'}">${k==='net'?'Net':'Gross'}</span>`;
-    document.getElementById('dlChartSub').innerHTML=`${v8EraLabel(d.era_block)} · Cumulative by exit date · ${chip('net')} ${chip('gross')} · clicked series emphasised, other faint · Net is after Rs.500/closed trade brokerage`;
+    const _brokNote=DL_FOCUS==='net'?'Net is after Rs.500/closed trade brokerage':'Gross is before brokerage';
+    document.getElementById('dlChartSub').innerHTML=`${v8EraLabel(d.era_block)} · Cumulative by exit date · ${chip('net')} ${chip('gross')} · ${_brokNote}`;
     const pts=d.points||[];
     body.innerHTML=pts.length?'<canvas id="dlChartCv"></canvas>':'<div class="empty">No closed trades in window.</div>';
     if(pts.length)dlDrawChart(d);
@@ -5067,30 +5069,33 @@ function dlDrawChart(d){
   if(DL_CHART){try{DL_CHART.destroy();}catch(e){}DL_CHART=null;}
   const pts=d.points||[];
   const labels=pts.map(p=>p.date);
-  const net=pts.map(p=>p.net_cum),gross=pts.map(p=>p.gross_cum);
-  // Colour follows the SIGN of the latest cumulative value of the emphasised series (theme tokens,
+  // cc#1678: the pill picks ONE cumulative field — the founder does not want a second, fainter
+  // line for the series not selected. The other field is never put in the Chart.js datasets array.
+  const shownKey=DL_FOCUS==='net'?'net_cum':'gross_cum';
+  const shown=pts.map(p=>p[shownKey]);
+  const dayKey=DL_FOCUS==='net'?'net_day':'gross_day';
+  // Colour follows the SIGN of the latest cumulative value of the shown series (theme tokens,
   // never a raw hex): a book that is up draws green, a book that is down draws red.
-  const focusVals=DL_FOCUS==='net'?net:gross;
-  const lastV=focusVals.length?focusVals[focusVals.length-1]:0;
+  const lastV=shown.length?shown[shown.length-1]:0;
   const col=lastV<0?_dlTok('--red'):_dlTok('--grn');
   const faint=_dlTok('--mut');
   // The fill is the line colour at ~10% alpha. Only a 6-digit hex token can take the alpha suffix;
   // anything else (rgb(), a var() fallback) draws no fill rather than an invalid colour.
   const fillCol=/^#[0-9a-f]{6}$/i.test(col)?col+'1a':'transparent';
-  const mk=(label,vals,emph)=>({label,data:vals,borderColor:emph?col:faint,borderWidth:emph?2.5:1,
-    backgroundColor:emph?fillCol:'transparent',fill:emph,tension:.2,pointRadius:emph?2.5:0,
-    pointHoverRadius:4,pointBackgroundColor:emph?col:faint,spanGaps:true,order:emph?0:1});
   const byDate={};pts.forEach(p=>{byDate[p.date]=p;});
   DL_CHART=new Chart(cv.getContext('2d'),{
     type:'line',plugins:[_dlZeroPlugin],
-    data:{labels,datasets:[mk('Net',net,DL_FOCUS==='net'),mk('Gross',gross,DL_FOCUS!=='net')]},
+    data:{labels,datasets:[{label:DL_FOCUS==='net'?'Net':'Gross',data:shown,borderColor:col,borderWidth:2.5,
+      backgroundColor:fillCol,fill:true,tension:.2,pointRadius:2.5,pointHoverRadius:4,
+      pointBackgroundColor:col,spanGaps:true}]},
     options:{responsive:true,maintainAspectRatio:false,animation:false,
       interaction:{intersect:false,mode:'index'},
       plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index',
         callbacks:{title:items=>items.length?dlFmtD(items[0].label):'',
           label:()=>null,
+          // Shown series only — no cross-series row (cc#1678 scope 4).
           afterBody:items=>{const p=items.length?byDate[items[0].label]:null;if(!p)return[];
-            return['Day net: '+inr(p.net_day),'Cum net: '+inr(p.net_cum),'Cum gross: '+inr(p.gross_cum)];}}}},
+            return['Day '+DL_FOCUS+': '+inr(p[dayKey]),'Cum '+DL_FOCUS+': '+inr(p[shownKey])];}}}},
       scales:{x:{grid:{display:false,drawTicks:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:8,color:faint,font:{size:9},callback:(v,i)=>{const s=labels[i]||'';return s?dlFmtD(s).slice(0,6):'';}}},
         y:{grace:'10%',grid:{color:'rgba(138,148,166,.15)'},
            ticks:{maxTicksLimit:6,color:faint,font:{size:9},callback:v=>inr(v)}}}}});
