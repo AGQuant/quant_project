@@ -876,6 +876,11 @@ function intCard(key, label, val, col, sub, stale){
    iDots() and iWrap() survive as the internals deck's own names so every existing call site,
    including the onscroll= attribute in the markup, is untouched. DECKS holds the REAL card count
    per track, replacing the single IN_N. */
+/* cc#1689 DISPLAY_PARITY (founder 04-Sep 20:31 IST: "hide internals, not req."): same flag, same
+   shape, same shape of hide as SHOW_VOL_TILES/SHOW_GATE_CHIP on scorr_v10_signal.html -- markup,
+   fetches (loadInternals()'s /api/digest/internals/series call) and the payload computation stay;
+   only the INTERNALS card and its deckPark/loadInternals wiring do not run. One line to restore. */
+var SHOW_INTERNALS = false;
 var DECKS={}, DECK_TMR={};
 /* THE PITCH IS THE SLIDE WIDTH PLUS THE GAP, NOT clientWidth, and that was wrong before this card
    touched it. .iswipe-t is a flex row with gap:9px, so a slide advances by width+9 while the
@@ -2500,7 +2505,7 @@ async function boot(){
     <div style="font-size:9.5px;color:var(--chalk);font-family:'JetBrains Mono';margin-top:10px">the day's reference levels — the live position lives on <a class="plink" href="/m/v10">INDEX INTEL →</a></div>
   </div>
 
-  <div class="eyebrow">INTERNALS</div>
+  ${SHOW_INTERNALS ? `<div class="eyebrow">INTERNALS</div>
   <div class="card slab">
     ${(()=>{const cards=[
       intCard('adr', 'ADR', adr&&adr.adr!=null?Number(adr.adr).toFixed(2):'—',
@@ -2524,7 +2529,7 @@ async function boot(){
       return `<div class="iswipe"><div class="iswipe-t" id="itrack" onscroll="iWrap()">${set}${set}${set}</div><div class="idots" id="idots">${
         Array.from({length:DECKS.itrack},(_,i)=>`<i class="${i?'':'on'}"></i>`).join('')
       }</div></div>`;})()}
-  </div>
+  </div>` : ''}
 
   <div class="eyebrow">REPORTING TODAY</div>
   <div class="card slab">
