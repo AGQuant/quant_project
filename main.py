@@ -2098,6 +2098,11 @@ def paper_status():
     # (era) are kept unchanged for the fresh-book headline consumers.
     return {
         "open_positions": open_positions,
+        # cc#1674 (rule 13): DISPLAY LIST ONLY — capped at 100 for the table, never an aggregate
+        # source. A filtered Dashboard KPI view was recomputing Realised/Win-Loss client-side from
+        # this exact list and understating (or sign-flipping) the figure the moment a filter's
+        # true trade count exceeded 100. Every aggregate now comes from v8_book_canon.book_canon —
+        # GET /api/v8/book_canon?side=&basket=&fut_cut= — the one formula, never recomputed here.
         "recent_trades": api_query(
             f"SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts "
             f"FROM v8_paper_trades WHERE {era_clause} AND NOT (basket = ANY(%s)) "
