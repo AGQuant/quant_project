@@ -118,6 +118,47 @@ def _row(r):
     }
 
 
+def insert_qb_rebalance_alert(conn, basket_name, rebalance_date, candidates, portfolio_value=None):
+    """cc#1704 (QB Rebalance Gate Surfacing, session_log 38966): one Alerts-book row per gated
+    rebalance, so the founder sees "N candidates are waiting" without opening the QB page.
+
+    This is deliberately NOT run through create_alert()'s cmp_resolver gate above — that gate
+    exists because a price-cross alert on an unresolvable symbol would sit pending forever and
+    read as a working alert, but this isn't a price-cross alert at all: there is no single
+    trigger price for "a basket rebalance is due." symbol carries the top candidate (a real,
+    resolvable stock, so any generic symbol-aware rendering downstream still works); the honest
+    description lives in trigger_condition; kind='rebalance_due' is how a reader tells it apart
+    from a real price alert; notes carries the basket_name plainly.
+
+    Idempotent via trade_alerts_source_uniq (source_engine, source_ref, kind WHERE source_engine
+    IS NOT NULL) — calling this twice for the same basket+date is a no-op, never a duplicate
+    row, so a re-run of the nightly rebalance job can't spam the Alerts book."""
+    if not candidates:
+        return None
+    symbols = [c.get("symbol") for c in candidates if c.get("symbol")]
+    if not symbols:
+        return None
+    shown = ", ".join(symbols[:8]) + (" +{} more".format(len(symbols) - 8) if len(symbols) > 8 else "")
+    condition = "QB REBALANCE DUE — {} candidate(s): {}".format(len(symbols), shown)
+    source_ref = "{}:{}".format(basket_name, rebalance_date)
+    try:
+        _ensure_schema(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO trade_alerts (symbol, direction, trigger_price, trigger_condition,
+                                              notes, source_engine, source_ref, kind)
+                   VALUES (%s, 'BUY', %s, %s, %s, 'qb', %s, 'rebalance_due')
+                   ON CONFLICT (source_engine, source_ref, kind) WHERE source_engine IS NOT NULL
+                   DO NOTHING RETURNING id""",
+                (symbols[0], float(portfolio_value or 0), condition, basket_name, source_ref))
+            row = cur.fetchone()
+        conn.commit()
+        return row[0] if row else None
+    except Exception:
+        log.exception("insert_qb_rebalance_alert failed for %s %s", basket_name, rebalance_date)
+        return None
+
+
 def check_triggers(conn):
     """cc#1504 — the scheduled price-trigger pass. Called by scheduler.py's
     _bg_trade_alerts_check every 5 minutes during market hours; kept here so ONE file owns
