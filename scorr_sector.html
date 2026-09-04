@@ -85,6 +85,23 @@ const mcapFmt = v => { if(v==null) return "—"; v=Number(v); return v>=100000?(
 const clip = (s,n=28) => s&&s.length>n ? s.slice(0,n)+"…" : (s||"");
 const MEDALS = ["🥇","🥈","🥉"];
 
+// cc#1700 SEGMENT_SIZE_CLASS_V1: size_class ('LARGE'|'MID'|'SMALL'|null) -> a one-letter tag,
+// full word on hover, avg mcap on hover too (item 4: "pick one, state it" — hover chosen to keep
+// row height unchanged; the number is one title-attribute away, not hidden).
+const SIZE_WORD = {LARGE:"Large",MID:"Mid",SMALL:"Small"};
+const SIZE_CLR  = {LARGE:C.green,MID:C.gold,SMALL:C.muted};
+function sizeTag(row){
+  const cls = row.size_class;
+  if (!cls) return <span style={{fontSize:9,color:C.muted}}>—</span>;
+  const title = SIZE_WORD[cls]+" · #"+row.size_rank+" by avg mcap · ₹"+mcapFmt(row.avg_mcap);
+  return (
+    <span title={title} style={{display:"inline-block",fontSize:9,fontWeight:800,padding:"1px 6px",
+      borderRadius:5,border:`1px solid ${SIZE_CLR[cls]}`,color:SIZE_CLR[cls],cursor:"help"}}>
+      {cls[0]}
+    </span>
+  );
+}
+
 function Dots({row}) {
   const sigs = [row.gvm>=6.5,(row.gvm_change||0)>0,(row.inst_change||0)>0,(row.qoq_profit||0)>10,(row.annual_upside||0)>15];
   const labels = ["GVM≥6.5","GVMδ>0","Inst+","YoY>10%","Upside>15%"];
@@ -110,7 +127,7 @@ function RankCard({row, rank, isBottom}) {
         </span>
         <span style={{fontSize:19,fontWeight:900,color:sclr(row.gvm),fontFamily:"monospace",letterSpacing:"-1px"}}>{fmt(row.gvm,2)}</span>
       </div>
-      <div style={{fontSize:12,fontWeight:700,color:C.text,marginTop:5,lineHeight:1.3}}>{clip(row.segment,22)}</div>
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginTop:5,lineHeight:1.3}}>{clip(row.segment,22)} {sizeTag(row)}</div>
       <div style={{fontSize:10,color:C.muted,marginTop:3}}>GVM <b style={{color:row.gvm>=7?C.green:row.gvm>=6?C.orange:C.red}}>{fmt(row.gvm)}</b></div>
       <div style={{marginTop:4,display:"flex",flexDirection:"column",gap:2}}>
         {(row.top_stocks&&row.top_stocks.length?row.top_stocks:[{symbol:row.top_stock,day_ret:null}]).slice(0,2).map((p,j)=>(
@@ -148,6 +165,7 @@ function Strip({top5, cold, onSel}) {
         </div>
       </div>
       <div style={{fontSize:9,color:C.muted,marginTop:8}}>Ranked by GVM · segments with fewer than {5} companies are merged into their base family, or into Others – Diversified · hover a merged row to see what it absorbed</div>
+      <div style={{fontSize:9,color:C.muted,marginTop:3}}>SIZE = segment class by average member mcap (top 30 Large, next 30 Mid, rest Small). Not the size word inside a segment name.</div>
     </div>
   );
 }
@@ -315,13 +333,36 @@ function useSort(def, defDir="desc") {
 
 function RankTab({data, onSel}) {
   const {sortK, sortD, Th} = useSort("gvm");   // cc#827: GVM is the ranking
-  const rows = useMemo(()=>[...data].sort((a,b)=>{const av=a[sortK]??-Infinity,bv=b[sortK]??-Infinity;return sortD==="desc"?bv-av:av-bv;}),[data,sortK,sortD]);
+  // cc#1700: chip filter, client-side on size_class. Resets on reload (plain useState, no
+  // persistence) — default All, per the card's own scope item 3.
+  const [sizeFilter, setSizeFilter] = useState("");
+  const counts = useMemo(()=>{
+    const c = {LARGE:0, MID:0, SMALL:0};
+    data.forEach(r=>{ if (r.size_class) c[r.size_class]++; });
+    return c;
+  },[data]);
+  const filtered = useMemo(()=>sizeFilter ? data.filter(r=>r.size_class===sizeFilter) : data, [data,sizeFilter]);
+  const rows = useMemo(()=>[...filtered].sort((a,b)=>{const av=a[sortK]??-Infinity,bv=b[sortK]??-Infinity;return sortD==="desc"?bv-av:av-bv;}),[filtered,sortK,sortD]);
+  const CHIPS = [["","All",data.length],["LARGE","Large",counts.LARGE],["MID","Mid",counts.MID],["SMALL","Small",counts.SMALL]];
   return (
+    <div>
+      <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+        {CHIPS.map(([k,lbl,n])=>(
+          <button key={k||"all"} onClick={()=>setSizeFilter(k)}
+            style={{cursor:"pointer",borderRadius:6,fontSize:11,fontWeight:600,padding:"5px 10px",
+              border:`1px solid ${sizeFilter===k?C.accent:C.border}`,
+              background:sizeFilter===k?"rgba(77,124,254,.14)":"#fff",
+              color:sizeFilter===k?C.accent:C.muted}}>
+            {lbl} {n}
+          </button>
+        ))}
+      </div>
     <div style={{overflowX:"auto",background:C.card,border:`1px solid ${C.border}`,borderRadius:8}}>
       <table>
         <thead><tr>
           <th style={{width:32,textAlign:"center"}}>#</th>
           <Th k="segment" lbl="Segment"/>
+          <Th k="size_rank" lbl="Size" r/>
           <Th k="gvm" lbl="GVM" r/>
           <Th k="g_score" lbl="G" r/>
           <Th k="v_score" lbl="V" r/>
@@ -339,6 +380,7 @@ function RankTab({data, onSel}) {
             <tr key={r.segment} onClick={()=>onSel(r)} title={r.absorbed&&r.absorbed.length>1?("Merged: "+r.absorbed.join(" · ")):undefined} style={{background:(r.gvm!=null&&r.gvm<6)?"#fff5f5":undefined}}>
               <td className="mono" style={{textAlign:"center",color:C.muted,fontSize:11}}>{i+1}</td>
               <td style={{fontWeight:600,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis"}}>{clip(r.segment,30)}</td>
+              <td style={{textAlign:"center"}}>{sizeTag(r)}</td>
               <td className="mono" style={{textAlign:"right",color:r.gvm>=7?C.green:r.gvm>=6?C.orange:C.red}}>{fmt(r.gvm)}</td>
               <td className="mono" style={{textAlign:"right",color:C.green}}>{fmt(r.g_score)}</td>
               <td className="mono" style={{textAlign:"right",color:C.gold}}>{fmt(r.v_score)}</td>
@@ -360,6 +402,7 @@ function RankTab({data, onSel}) {
           ))}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }
