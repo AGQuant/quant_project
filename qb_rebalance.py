@@ -272,17 +272,60 @@ def _next_rebalance_date(cur_date: date, freq: str) -> date:
     return date(y, m, day)
 
 
+# cc#1704 QB_REBALANCE_GATE_SURFACING_V1 (session_log 38966, founder 04-Sep "why is everything
+# zero, no rebalancing in smallcap?"): the 6 baskets that have a real GVM/screener selection
+# engine (cc#553-560) — the finz_* committee-curated baskets deliberately have none and are not
+# in this map, so their gate behaviour (none) is unchanged.
+_CANDIDATE_ENGINES = {
+    "small_cap":      ("qb_smallcap_select", "propose_rebalance"),
+    "large_cap":      ("qb_composite_select", "propose_largecap"),
+    "mid_cap":        ("qb_composite_select", "propose_midcap"),
+    "alpha_multicap": ("qb_alpha_select", "propose_rebalance"),
+    "breakout_52w":   ("qb_breakout_select", "propose_rebalance"),
+    "contra_value":   ("qb_contra_select", "propose_rebalance"),
+}
+
+
+def _propose_candidates(basket_name, conn, as_of):
+    """cc#1704: call the basket's OWN already-shipped, READ-ONLY dry-run selection engine
+    (cc#553-560, already live at /api/qb/*/propose) to get the REAL entry candidates for a gated
+    rebalance — never a re-derived or guessed list, and never a new selection rule written here.
+    Returns (entries, rule_summary); (None, None) for a basket with no selection engine (the
+    entry gate stays exactly as it was before this card for those baskets) or on any engine
+    error — a candidate-computation failure must never break the exits/cadence bookkeeping this
+    function already does, so it is caught and logged, not raised."""
+    spec = _CANDIDATE_ENGINES.get(basket_name)
+    if not spec:
+        return None, None
+    mod_name, fn_name = spec
+    try:
+        import importlib
+        fn = getattr(importlib.import_module(mod_name), fn_name)
+        out = fn(conn=conn, as_of=as_of) or {}
+        entries = out.get("entries") or []
+        rules = out.get("rules") or {}
+        summary = rules.get("selection") or rules.get("sizing") or "the basket's own selection engine"
+        return entries, summary
+    except Exception as e:
+        log.warning(f"_propose_candidates {basket_name}: engine failed: {e}")
+        return None, None
+
+
 def run_scheduled_rebalance(conn, basket_name: str) -> Dict:
     """cc#439 fix_1: scheduled rebalance runner for one basket. SAFE by design — it processes the
-    EXIT + cadence + bookkeeping side of a rebalance and never auto-buys new stocks on a guessed
-    screen (the founder's GVM/ret_1y entry methodology is not encoded here, so auto-entering picks
-    into the ₹5L paper book would be unsafe). Steps:
+    EXIT + cadence + bookkeeping side of a rebalance and never auto-buys new stocks (execution
+    stays a founder-confirmed click — see POST /api/qb/rebalance/confirm in qb_endpoints.py, the
+    only path that can turn a candidate into a real position). Steps:
       1. run the EOD checker (mark-to-market + HS1/HS2 hard-stop exits),
       2. re-fix allocation + park the NIFTYBEES cash residual (established convention),
+      2b. cc#1704: for a basket with a selection engine, compute REAL entry candidates and store
+          them on this row (actions.entry_candidates, entry_status='awaiting_founder') so the
+          gate is visible everywhere the row is read — no more "0 in / 0 out" reading as nothing
+          happened when a real gated decision is actually sitting there. Also files one Alerts-
+          book row and one Fable Room post so the gate surfaces off the QB page too (cc#1704
+          scope 3) — best-effort, never blocks the log row itself.
       3. write a quant_rebalance_log row (exits, held count, portfolio value, entry-review note),
-      4. advance next_rebalance by the basket's rebalance_freq (kept in the future).
-    New-entry selection stays a founder-confirmed step; the log row surfaces the cap + ret_1y rule
-    so the qualifying picks can be reviewed at the surfaced rebalance."""
+      4. advance next_rebalance by the basket's rebalance_freq (kept in the future)."""
     import qb_eod_checker
     today = datetime.now(IST).date()
 
@@ -329,6 +372,20 @@ def run_scheduled_rebalance(conn, basket_name: str) -> Dict:
         "was_due": str(base), "advanced_to": str(new_next),
         "alloc_residual": (alloc or {}).get("residual"),
     }
+
+    # 2b) cc#1704: real candidates from this basket's own selection engine, stored on the row.
+    entries, rule_summary = _propose_candidates(basket_name, conn, today)
+    if entries is not None:
+        symbols = [e.get("symbol") for e in entries if e.get("symbol")]
+        preview = ", ".join(symbols[:5]) + (f" +{len(symbols) - 5} more" if len(symbols) > 5 else "")
+        actions["entry_candidates"] = entries
+        actions["entry_status"] = "awaiting_founder"
+        actions["entry_note"] = (
+            f"Exits + cadence processed. {len(symbols)} candidate(s) from {basket_name}'s own "
+            f"selection engine ({rule_summary}): {preview or 'none qualify right now'}. Buying "
+            f"them is a founder-confirmed step (POST /api/qb/rebalance/confirm), not automatic."
+        )
+
     with conn.cursor() as cur:
         cur.execute("INSERT INTO quant_rebalance_log "
                     "(basket_name, rebalance_date, stocks_in, stocks_out, stocks_held, "
@@ -338,6 +395,31 @@ def run_scheduled_rebalance(conn, basket_name: str) -> Dict:
                     "WHERE basket_name=%s", (new_next, basket_name))
     conn.commit()
 
+    # cc#1704 scope 3: surface the gate off the QB page too — an Alerts row (bell/wall/Alerts
+    # page) and one Fable Room post. Best-effort: this is presentation, never lets a posting
+    # failure roll back or mask the rebalance row that was already committed above.
+    if entries:
+        try:
+            import trade_alerts_endpoints
+            trade_alerts_endpoints.insert_qb_rebalance_alert(conn, basket_name, today, entries, pv)
+        except Exception as e:
+            log.warning(f"run_scheduled_rebalance {basket_name}: alert insert failed: {e}")
+        try:
+            preview = ", ".join(symbols[:10]) + (" ..." if len(symbols) > 10 else "")
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO cc_task_logs (task_id, actor, message) VALUES (1199, %s, %s)",
+                    ("qb_rebalance_engine",
+                     f"REBALANCE GATE: {basket_name} due {base}, {len(symbols)} candidate(s) "
+                     f"awaiting founder confirmation: {preview}. Confirm via POST "
+                     f"/api/qb/rebalance/confirm {{basket_name:'{basket_name}', "
+                     f"rebalance_date:'{today}'}} (admin-token gated) — approve/dismiss stays a "
+                     f"founder click, never auto-run."))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"run_scheduled_rebalance {basket_name}: fable room post failed: {e}")
+
     return {"status": "ok", "basket": basket_name, "exits": exits, "held": held,
             "portfolio_value": pv, "was_due": str(base), "advanced_to": str(new_next),
-            "cap_max_stocks": max_stocks}
+            "cap_max_stocks": max_stocks,
+            "entry_candidates": len(entries) if entries is not None else None}
