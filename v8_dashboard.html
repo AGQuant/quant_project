@@ -6630,7 +6630,7 @@ function rPerf(){
   return `<div class="card">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
       <div class="s">Live paper stats from v10_trades · option legs only (36703) · ${tot} closed option trades</div></div></div>
-    <div class="stat-grid">${cards}<div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(data.era_block)} &middot; closed trades by exit date, post&#8209;cutover era only</div><div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(cache.paper&&cache.paper.era_block)} &middot; V8 book, post&#8209;cutover era only</div></div>
+    <div class="stat-grid">${cards}<div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(p.era_block)} &middot; closed trades by exit date, post&#8209;cutover era only</div><div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(cache.paper&&cache.paper.era_block)} &middot; V8 book, post&#8209;cutover era only</div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
       ${seg(p.by_symbol,'By Symbol','SYMBOL')}   <!-- cc#1597: the BY LEG table is hidden (36703) -->
     </div>
