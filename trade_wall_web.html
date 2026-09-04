@@ -33,6 +33,17 @@
   /* cc#1295: three-level hierarchy — status (bigger, primary) -> instrument -> engine bucket. */
   .tabs.lvl1 .tab{font-size:13.5px;padding:9px 16px}
   .tabs.lvl3 .tab{font-size:11.5px;padding:6px 11px;min-height:32px}
+  /* cc#1691: two grouped rows instead of four stacked full-width ones. .tw-frow holds a pair of
+     labelled .tw-fgrp groups; wraps to more lines only when a group genuinely does not fit
+     (narrow phones), exactly two rows at 1180px+ per the card. The .tabs children keep their own
+     flex-wrap so a long chip list inside one group still wraps ONLY that group, never the row. */
+  .tw-frow{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+  .tw-fgrp{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-height:38px}
+  .tw-fgrp .tabs{margin:0;padding:0;overflow:visible}
+  .tw-flbl{font-family:ui-monospace,monospace;font-size:9.5px;font-weight:800;letter-spacing:.12em;
+           text-transform:uppercase;color:var(--dim);flex:none}
+  .tw-fsep{width:1px;align-self:stretch;background:var(--line);flex:none;min-height:24px}
+  @media(max-width:900px){.tw-fsep{display:none}}
   .ibtn{flex:0 0 auto;width:32px;height:32px;border-radius:50%;border:1px solid var(--line);
         background:var(--panel);color:var(--mut);font-size:13px;font-weight:800;cursor:pointer;
         display:inline-flex;align-items:center;justify-content:center;font-style:italic;font-family:Georgia,serif}
@@ -108,14 +119,35 @@
   <div class="sub" id="subline">Approved trades only. This page computes nothing of its own —
     it renders <b>/api/tradewall</b>, the same endpoint the app reads.</div>
 
-  <!-- level 1: status -->
-  <div class="tabs lvl1" id="tabsStatus"></div>
-  <!-- level 2: instrument -->
-  <div class="tabs" id="tabsInstrument"></div>
-  <!-- level 3: engine bucket -->
-  <div class="tabs lvl3" id="tabsBucket"></div>
-  <!-- cc#1609: level 4, open rows only — approval state -->
-  <div class="tabs lvl3" id="tabsState"></div>
+  <!-- cc#1691 (founder 04-Sep screenshot: "show filter box intuitively in 2 rows not take 4"):
+       the four level containers below are UNCHANGED — same ids, same classes, so render()'s
+       .innerHTML assignments (statusTabsHtml/instrumentTabsHtml/bucketTabsHtml/stateTabsHtml)
+       and every chip's onclick/state key are byte-identical to before. Only the wrapper markup
+       around them changed, from four stacked full-width divs to two grouped rows: row 1 =
+       BOOK (status) + INSTRUMENT, row 2 = ENGINE (bucket) + STATUS (approval state), a labelled
+       .tw-fgrp pair per row separated by a thin .tw-fsep rule. -->
+  <div class="tw-frow">
+    <div class="tw-fgrp"><span class="tw-flbl">Book</span>
+      <!-- level 1: status -->
+      <div class="tabs lvl1" id="tabsStatus"></div>
+    </div>
+    <span class="tw-fsep"></span>
+    <div class="tw-fgrp"><span class="tw-flbl">Instrument</span>
+      <!-- level 2: instrument -->
+      <div class="tabs" id="tabsInstrument"></div>
+    </div>
+  </div>
+  <div class="tw-frow">
+    <div class="tw-fgrp"><span class="tw-flbl">Engine</span>
+      <!-- level 3: engine bucket -->
+      <div class="tabs lvl3" id="tabsBucket"></div>
+    </div>
+    <span class="tw-fsep"></span>
+    <div class="tw-fgrp"><span class="tw-flbl">Status</span>
+      <!-- cc#1609: level 4, open rows only — approval state -->
+      <div class="tabs lvl3" id="tabsState"></div>
+    </div>
+  </div>
 
   <div class="card">
     <div class="meta" id="meta">Loading…</div>
