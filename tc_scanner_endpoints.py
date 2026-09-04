@@ -79,6 +79,9 @@ MRSI_SELL = (25.0, 50.0)
 ROOM_TO_LEVEL_MIN_FRAC = 0.5
 N_MINUS = 1               # pass >= evaluated - N_MINUS (12 of 13 at full evaluation)
 TOTAL_CHECKS = 13
+# cc#1685: named once, read by BOTH check_exits()'s own return dict and /api/scanners/tc/spec's
+# info-modal payload — same discipline as the constants above, one copy of the fact.
+EXIT_BASIS = "fyers_fut 5m bar high/low since entry; exit at the touched level, ts = bar ts (cc#1599)"
 
 
 def _conn():
@@ -296,8 +299,7 @@ def check_exits():
                            WHERE id=%s AND exit_reason='OPEN'""", (px, ts, hit, hid))
             closed += cur.rowcount
         conn.commit()
-    out = {"checked": len(rows), "closed": closed,
-           "basis": "fyers_fut 5m bar high/low since entry; exit at the touched level, ts = bar ts (cc#1599)"}
+    out = {"checked": len(rows), "closed": closed, "basis": EXIT_BASIS}
     if ambiguous:
         # Named, never guessed: target and SL first touched in the same 5-min bar.
         out["ambiguous_open"] = ambiguous
@@ -363,6 +365,8 @@ def tc_scanner_spec():
         "target_pct": TARGET_PCT * 100,
         "sl_pct": SL_PCT * 100,
         "target_sl_note": "stamped once at entry; SELL side is the mirror (target below entry, SL above)",
+        # cc#1685: the exit mechanism, same string check_exits() itself reports — one copy.
+        "exit_basis": EXIT_BASIS,
         "buy_checks": _check_defs("BUY"),
         "sell_checks": _check_defs("SELL"),
     }

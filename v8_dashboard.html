@@ -8663,11 +8663,35 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   border:1px solid var(--line2);background:var(--panel);color:var(--tx)}
 /* cc#1530: the pre-R1 tc13-* table/pill/stat rules are DELETED with the renderers that emitted
    them — the R1 grammar above is the one set of rules this box renders through now. */
+/* cc#1685: the (i) info sheet. Same SHAPE as scorr_intraday.html's .info-ov/.info-box shell (the
+   V1.1 gated screener's own sheet, already fixed for light theme) — reused as a PATTERN, not a
+   shared DOM node: that shell lives inside the tab's iframe, a different document, so this is a
+   fresh instance under the page's own tc13- names (cc#1684 lesson: never reuse a bare/borrowed
+   class name on this page). Content differs entirely — this describes TC13, not the score100
+   gated engine. Every colour is a theme token, no raw hex, same as the shell it mirrors. */
+.tc13-ibtn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+  border-radius:50%;border:1px solid var(--line2);color:var(--tx3);font:700 10px var(--f-m);
+  cursor:pointer;margin-left:2px;flex:none}
+.tc13-ibtn:hover{color:var(--cy);border-color:var(--cy)}
+.tc13-info-ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.6);z-index:11700;
+  align-items:center;justify-content:center;padding:20px}
+.tc13-info-ov.open{display:flex}
+.tc13-info-box{background:var(--panel);border:1px solid var(--line2);border-radius:12px;
+  max-width:480px;width:100%;padding:18px 20px;position:relative;max-height:85vh;overflow:auto}
+.tc13-info-close{position:absolute;top:11px;right:11px;width:26px;height:26px;border-radius:50%;
+  border:1px solid var(--line2);background:var(--panel2);color:var(--tx3);cursor:pointer;font-size:14px}
+.tc13-info-row{margin-bottom:11px}
+.tc13-info-k{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--tx3);margin-bottom:4px}
+.tc13-info-v{font-size:12.5px;line-height:1.55;color:var(--tx)}
+.tc13-info-src{margin-top:12px;color:var(--tx3);font-size:11px}
 </style>
 <script>
 (function(){
   'use strict';
   var _booted=false;
+  // cc#1685: the currently-rendered Open Book rows, so the info sheet's TARGET/SL example reads a
+  // REAL row on screen (never a typed number) — set once per render(), read when the sheet opens.
+  var _tc13OpenRows=[];
   function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&lt;','<':'&lt;','>':'&gt;'}[c]||c;});}
   function n2(v){return v==null?'—':Number(v).toFixed(2);}
   function pnlCls(v){return v==null?'':(v>=0?'tc13-pos':'tc13-neg');}
@@ -8755,6 +8779,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     return '<section><div class="sh"><h2>Open Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
+      +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
       +(live?'<span class="badge b-live"><span class="dot"></span>LIVE</span>'
             :'<span class="badge b-eng">'+esc(dateStr||'')+'</span>')
       +'<div class="stats"><span>Open <b>'+rows.length+'</b></span>'
@@ -8780,6 +8805,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     return '<section><div class="sh"><h2>Closed Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
+      +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
       +'<div class="stats">'
       +'<span>Closed <b>'+stats.closed+'</b></span>'
       +'<span>Wins <b>'+stats.wins+'</b></span>'
@@ -8816,6 +8842,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     var box=document.getElementById('tc13Box'); if(!box)return;
     var allRows=(d.buy||[]).concat(d.sell||[]);
     var openRows=allRows.filter(function(r){return r.exit_reason==='OPEN';});
+    _tc13OpenRows=openRows;   // cc#1685: latest render's open rows, for the info sheet's live example
     // cc#1599 scope 4/5: the Closed Book and its stat chips read the EXIT-date set the endpoint
     // now sends (closed_by_exit), so a hold entered weeks ago and closed today shows on today.
     // The Open Book stays keyed on the entry date. Older payloads without the key fall back to
@@ -8853,6 +8880,89 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   }
 
   window.tc13Boot=function(){ if(_booted)return; _booted=true; load(null); };
+
+  // cc#1685: the info sheet. Facts come from /api/scanners/tc/spec (tc_scanner_endpoints.py's own
+  // registry — cc#465's named constants, never a hand-typed number here) plus the CURRENTLY
+  // RENDERED first open row for the TARGET/SL worked example, so that number is always real, never
+  // guessed or stale. Fetched once and cached — a static engine spec has no reason to refetch on
+  // every open.
+  var _tc13SpecCache=null;
+  function tc13Spec(){
+    if(_tc13SpecCache)return Promise.resolve(_tc13SpecCache);
+    return (window.fetchWithTimeout||fetch)('/api/scanners/tc/spec').then(function(r){return r.json();})
+      .then(function(j){_tc13SpecCache=j;return j;}).catch(function(){return null;});
+  }
+  function _tc13InfoOv(){
+    var el=document.getElementById('tc13InfoOv');
+    if(el)return el;
+    el=document.createElement('div');
+    el.id='tc13InfoOv';
+    el.className='tc13-info-ov';
+    el.setAttribute('role','dialog');
+    el.setAttribute('aria-label','How the TC13 scanner works');
+    el.innerHTML='<div class="tc13-info-box" id="tc13InfoBox">'
+      +'<button class="tc13-info-close" onclick="tc13InfoClose()" aria-label="Close">&times;</button>'
+      +'<div id="tc13InfoBody"></div></div>';
+    el.addEventListener('click',function(e){ if(e.target===el)tc13InfoClose(); });
+    document.body.appendChild(el);
+    return el;
+  }
+  function _tc13Row(k,v){
+    return '<div class="tc13-info-row">'
+      +(k?'<div class="tc13-info-k">'+esc(k)+'</div>':'')
+      +'<div class="tc13-info-v">'+v+'</div></div>';
+  }
+  function _tc13Checks(side,checks){
+    return '<div class="tc13-info-k">'+esc(side)+' — 13 checks</div>'
+      +'<div class="tc13-info-v">'+checks.map(function(c){
+        return '<div style="margin:3px 0"><b>'+esc(c.id)+'</b> '+esc(c.label)+' — '+esc(c.rule)+'</div>';
+      }).join('')+'</div>';
+  }
+  function tc13InfoBody(spec){
+    if(!spec)return '<div class="tc13-info-v" style="color:var(--rd)">Rules unavailable — the spec endpoint did not answer.</div>';
+    var ex=_tc13OpenRows[0]||null;
+    var exLine;
+    if(ex && ex.entry_price!=null && ex.target!=null && ex.sl!=null){
+      exLine='Live example — <b>'+esc(ex.symbol)+'</b> ('+esc(ex.side)+'): entry '+n2(ex.entry_price)
+        +' &rarr; target '+n2(ex.target)+' / SL '+n2(ex.sl)+' ('+spec.target_pct+'% / -'+spec.sl_pct+'%).';
+    }else{
+      exLine='No open row to show a live example from right now.';
+    }
+    var parts=[];
+    parts.push(_tc13Row('The idea',
+      esc(spec.engine)+' — a binary pass/fail bucket over the full futures universe, one bucket per side.'));
+    parts.push(_tc13Row('Entry',
+      'Scanned every '+spec.cadence_min+' minutes over '+esc(spec.universe)+'. '+esc(spec.qualify_rule)+'. '
+      +esc(spec.null_handling)+'. '+esc(spec.latch_rule)+'. Entry price is '+esc(spec.entry_definition)+'.'));
+    parts.push(_tc13Row('Target / SL', exLine+' '+esc(spec.target_sl_note||'')));
+    parts.push(_tc13Row('Exit',
+      (spec.exit_basis?esc(spec.exit_basis)+'. ':'')
+      +'A row that shows TARGET or SL closed there; a row still marked OPEN has not touched either level yet.'));
+    parts.push(_tc13Row('P&L%',
+      '(exit price &minus; entry price) / entry price, sign-flipped for SELL — the same figure the P&amp;L% column shows.'));
+    parts.push(_tc13Checks('BUY',spec.buy_checks||[]));
+    parts.push(_tc13Checks('SELL',spec.sell_checks||[]));
+    parts.push('<div class="tc13-info-src">Research and measurement only — never a buy/sell instruction. '
+      +'Facts above are read live from the engine spec, not typed here.</div>');
+    return parts.join('');
+  }
+  window.tc13InfoOpen=function(){
+    var ov=_tc13InfoOv();
+    ov.classList.add('open');
+    var body=document.getElementById('tc13InfoBody');
+    body.innerHTML='<div class="tc13-info-v">Loading…</div>';
+    tc13Spec().then(function(spec){ body.innerHTML=tc13InfoBody(spec); });
+  };
+  window.tc13InfoClose=function(){
+    var ov=document.getElementById('tc13InfoOv');
+    if(ov)ov.classList.remove('open');
+  };
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){
+      var ov=document.getElementById('tc13InfoOv');
+      if(ov&&ov.classList.contains('open'))tc13InfoClose();
+    }
+  });
 
   // cc#1530 scope 4: the V1.1 screener frame sizes itself from the embedded page's own
   // postMessage ({type:'tcscan-resize', h}) — sent on load and after every height-changing
