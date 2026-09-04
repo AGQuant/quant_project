@@ -1,0 +1,87 @@
+<!doctype html>
+<html data-theme="goldnight"><head><meta charset="utf-8">
+<title>qb_card_R1 — Quant Basket card anatomy (QB_CARD_ANATOMY_V2, session_log 38962)</title>
+<style>
+:root{--bg:var(--scorr-bg,#0b0b0d);--card:var(--scorr-card,#141417);--line:var(--scorr-line,#26262b);--fg:var(--scorr-fg,#f2f2f2);--mut:var(--scorr-muted,#9a9aa3);--gold:var(--scorr-accent,#d4af37);--pos:var(--pl-pos,#22c55e);--neg:var(--pl-neg,#ef4444);--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+body{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;padding:24px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(280px,340px));gap:16px}
+.qbc{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--gold);border-radius:12px;padding:14px 16px}
+.hd{display:flex;align-items:center;gap:8px}
+.hd h3{margin:0;font-size:16px;font-weight:700}
+.tag{font:10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gold);border:1px solid var(--gold);border-radius:4px;padding:3px 6px}
+.acts{margin-left:auto;display:flex;gap:6px}
+.acts button{background:transparent;border:1px solid var(--line);color:var(--mut);border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:13px}
+.acts button:hover{color:var(--fg);border-color:var(--gold)}
+.dates{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0 10px}
+.k{font:10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.v{font:13px/1.3 var(--mono);color:var(--fg);margin-top:3px}
+.v a{color:var(--fg);text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
+.v a:hover{color:var(--gold)}
+.nums{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;border-top:1px solid var(--line);padding-top:10px}
+.n{font:18px/1.1 var(--mono);font-weight:600;margin-top:3px}
+.sub{font:11px/1 var(--mono);color:var(--mut);margin-top:3px}
+.pos{color:var(--pos)}.neg{color:var(--neg)}
+.ft{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--mut);font-size:12px}
+.pill{margin-left:auto;font:10px/1 var(--mono);border:1px solid var(--pos);color:var(--pos);border-radius:999px;padding:4px 8px}
+.note{margin-top:28px;color:var(--mut);font-size:12px;max-width:900px}
+</style></head><body>
+<div class="grid">
+
+<!-- CARD 1: a losing basket, real 04-Sep numbers -->
+<article class="qbc">
+  <div class="hd"><h3>Contra Value</h3><span class="tag">turn</span>
+    <div class="acts">
+      <button title="How this basket enters, exits and sizes" aria-label="info">i</button>
+      <button title="Performance vs Nifty 500" aria-label="chart">▤</button>
+      <button title="Copy symbols" aria-label="copy">⧉</button>
+    </div></div>
+  <div class="dates">
+    <div><div class="k">start</div><div class="v">07-Jul-2026</div></div>
+    <div><div class="k">last rebalance</div><div class="v"><a title="Open rebalance history">06-Aug-2026</a></div></div>
+    <div><div class="k">next rebalance</div><div class="v">06-Sep-2026</div></div>
+  </div>
+  <div class="nums">
+    <div><div class="k">basket value</div><div class="n">₹24,317</div><div class="sub">of ₹10,00,000</div></div>
+    <div><div class="k">p&amp;l</div><div class="n neg">−₹599</div><div class="sub neg">−2.40%</div></div>
+    <div><div class="k">alpha vs n500</div><div class="n neg">−5.48%</div><div class="sub">since start</div></div>
+  </div>
+  <div class="ft">1 position<span class="pill">No risk</span></div>
+</article>
+
+<!-- CARD 2: a winning basket -->
+<article class="qbc">
+  <div class="hd"><h3>52W Breakout</h3><span class="tag">confirmation</span>
+    <div class="acts"><button>i</button><button>▤</button><button>⧉</button></div></div>
+  <div class="dates">
+    <div><div class="k">start</div><div class="v">07-Jul-2026</div></div>
+    <div><div class="k">last rebalance</div><div class="v"><a>06-Aug-2026</a></div></div>
+    <div><div class="k">next rebalance</div><div class="v">06-Sep-2026</div></div>
+  </div>
+  <div class="nums">
+    <div><div class="k">basket value</div><div class="n">₹2.90L</div><div class="sub">of ₹10,00,000</div></div>
+    <div><div class="k">p&amp;l</div><div class="n pos">+₹20,932</div><div class="sub pos">+7.79%</div></div>
+    <div><div class="k">alpha vs n500</div><div class="n pos">+4.71%</div><div class="sub">since start</div></div>
+  </div>
+  <div class="ft">6 positions<span class="pill">No risk</span></div>
+</article>
+
+<!-- CARD 3: BT badge variant -->
+<article class="qbc">
+  <div class="hd"><h3>Alpha Multicap</h3><span class="tag">trend</span>
+    <div class="acts"><button>i</button><button>▤</button><button>⧉</button></div></div>
+  <div class="dates">
+    <div><div class="k">start</div><div class="v">07-Jul-2026</div></div>
+    <div><div class="k">last rebalance</div><div class="v"><a>06-Aug-2026</a></div></div>
+    <div><div class="k">next rebalance</div><div class="v">06-Sep-2026</div></div>
+  </div>
+  <div class="nums">
+    <div><div class="k">basket value</div><div class="n">₹4.29L</div><div class="sub">of ₹10,00,000</div></div>
+    <div><div class="k">p&amp;l</div><div class="n pos">+₹49,105</div><div class="sub pos">+9.82%</div></div>
+    <div><div class="k">alpha vs n500</div><div class="n pos">+6.74%</div><div class="sub">since start</div></div>
+  </div>
+  <div class="ft">13 positions<span class="pill">BT 34.1% CAGR</span></div>
+</article>
+
+</div>
+<p class="note">Locks: no strategy/entry/exit/HS text on the face. Dates row = start / last rebalance (dotted-underline link → history sheet) / next rebalance. Numbers row = basket value / P&amp;L (abs + %) / alpha vs N500, P&amp;L and alpha coloured by sign, value neutral. Footer = positions + existing risk pill. Actions: (i) → logic sheet, ▤ → performance-vs-benchmark modal, ⧉ → copy symbols (cc#1545). Start dates and "of ₹10,00,000" here are placeholders — CC reads them from qb_registry / qb_summary; every number on the real card comes from the payload.</p>
+</body></html>
