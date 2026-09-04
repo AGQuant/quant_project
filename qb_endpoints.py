@@ -21,7 +21,9 @@ Endpoints (all /api/qb/*):
 
 from fastapi import APIRouter, HTTPException, Header
 from typing import Optional
+from datetime import datetime
 import psycopg
+import json
 import os
 
 import qb_eod_checker
@@ -115,6 +117,134 @@ def qb_rebalance_due(x_admin_token: Optional[str] = Header(None)):
         for b in due:
             out.append(qb_rebalance.run_scheduled_rebalance(conn, basket_name=b))
     return {"due": len(out), "results": out}
+
+
+def _gated_row(cur, basket_name, rebalance_date):
+    """cc#1704: the ONE row a confirm/skip call acts on — the specific was_due row for this
+    basket+date still sitting entry_status='awaiting_founder'. Returns (actions_dict, id) or
+    (None, None). Shared by confirm + skip so both enforce the exact same "which row" and
+    "still actually gated" rule."""
+    cur.execute("""SELECT id, actions FROM quant_rebalance_log
+                   WHERE basket_name=%s AND rebalance_date=%s AND actions ? 'was_due'
+                   ORDER BY computed_at DESC LIMIT 1""", (basket_name, rebalance_date))
+    row = cur.fetchone()
+    if not row:
+        return None, None
+    return (row[1] or {}), row[0]
+
+
+@router.post("/rebalance/confirm")
+def qb_rebalance_confirm(basket_name: str, rebalance_date: str,
+                          x_admin_token: Optional[str] = Header(None)):
+    """cc#1704 P5 (QB_REBALANCE_GATE_SURFACING_V1, session_log 38966): execute a founder-
+    confirmed rebalance's stored candidates as real ₹5L paper positions.
+
+    GATE, stated on the card itself: CC implements this endpoint but does NOT call it against any
+    basket — only a founder action may. Admin-token gated like every other QB write endpoint in
+    this file (_check_admin), same convention as /eod_check, /rebalance_now etc.
+
+    Buys via compute_position_sizing (qb_rebalance.py) — the SAME sizing function the original
+    engine already trusts, not new sizing logic — priced off cmp_resolver.resolve_cmp_many (the
+    same batch price path list surfaces already use). A candidate already held (open position,
+    same symbol) is skipped rather than double-bought. After the new positions land,
+    fix_basket_overdeployment (also existing, already-used code) re-derives the allocation column
+    and tops up/adds the NIFTYBEES cash residual against the NEW deployed capital — the confirm
+    step does not hand-roll its own residual math."""
+    _check_admin(x_admin_token)
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            actions, row_id = _gated_row(cur, basket_name, rebalance_date)
+        if row_id is None:
+            raise HTTPException(404, f"no rebalance row for {basket_name} on {rebalance_date}")
+        if actions.get("entry_status") != "awaiting_founder":
+            raise HTTPException(409, f"entry_status is {actions.get('entry_status')!r} — "
+                                      "already confirmed/skipped, or this row never gated")
+        candidates = actions.get("entry_candidates") or []
+        symbols = [c.get("symbol") for c in candidates if c.get("symbol")]
+        if not symbols:
+            raise HTTPException(422, "no candidates on this row to buy")
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT capital, max_stocks FROM quant_basket_registry WHERE basket_name=%s",
+                        (basket_name,))
+            reg = cur.fetchone()
+            cur.execute("SELECT symbol FROM quant_paper_positions "
+                        "WHERE basket_name=%s AND status='open'", (basket_name,))
+            already_held = {r[0] for r in cur.fetchall()}
+        if not reg:
+            raise HTTPException(404, f"{basket_name} not in registry")
+        capital, max_stocks = float(reg[0]), int(reg[1])
+
+        to_buy = [s for s in symbols if s not in already_held]
+        already_skipped = [s for s in symbols if s in already_held]
+        if not to_buy:
+            raise HTTPException(409, f"every candidate ({', '.join(symbols)}) is already an open "
+                                      "position in this basket — nothing to buy")
+
+        import cmp_resolver
+        with conn.cursor() as cur:
+            price_map = cmp_resolver.resolve_cmp_many(cur, to_buy)
+        prices = {s: (price_map.get(s) or {}).get("cmp") for s in to_buy}
+
+        sizing = qb_rebalance.compute_position_sizing(capital, max_stocks, to_buy, prices)
+        today = datetime.now(qb_rebalance.IST).date()
+        bought = []
+        with conn.cursor() as cur:
+            for p in sizing["positions"]:
+                cur.execute("""INSERT INTO quant_paper_positions
+                    (basket_name, symbol, entry_price, entry_date, qty, allocation,
+                     current_price, current_value, pnl, pnl_pct, status, notes)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0,0,'open',%s)
+                    ON CONFLICT (basket_name, symbol, entry_date) DO NOTHING""",
+                    (basket_name, p["symbol"], p["cmp"], today, p["qty"], p["cost"],
+                     p["cmp"], p["cost"],
+                     f"cc#1704 rebalance confirm — candidates due {rebalance_date}"))
+                bought.append(p["symbol"])
+        conn.commit()
+
+        no_price = [s for s in to_buy if not prices.get(s)]
+        alloc = None
+        try:
+            alloc = qb_rebalance.fix_basket_overdeployment(conn, basket_name)
+        except Exception as e:
+            qb_rebalance.log.warning(f"qb_rebalance_confirm {basket_name}: allocation/residual fix failed: {e}")
+
+        actions["entry_status"] = "confirmed"
+        actions["confirmed_at"] = datetime.now(qb_rebalance.IST).isoformat()
+        actions["confirmed_symbols"] = bought
+        actions["confirmed_already_held_skipped"] = already_skipped
+        actions["confirmed_no_price_skipped"] = no_price
+        with conn.cursor() as cur:
+            cur.execute("UPDATE quant_rebalance_log SET actions=%s WHERE id=%s",
+                        (json.dumps(actions), row_id))
+        conn.commit()
+
+    return {"status": "ok", "basket": basket_name, "rebalance_date": rebalance_date,
+            "bought": bought, "already_held_skipped": already_skipped,
+            "no_price_skipped": no_price, "allocation_fix": alloc}
+
+
+@router.post("/rebalance/skip")
+def qb_rebalance_skip(basket_name: str, rebalance_date: str,
+                       x_admin_token: Optional[str] = Header(None)):
+    """cc#1704 P5: the Dismiss path — marks a gated rebalance's candidates skipped without buying
+    anything. Same GATE and admin-token convention as confirm above."""
+    _check_admin(x_admin_token)
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            actions, row_id = _gated_row(cur, basket_name, rebalance_date)
+            if row_id is None:
+                raise HTTPException(404, f"no rebalance row for {basket_name} on {rebalance_date}")
+            if actions.get("entry_status") != "awaiting_founder":
+                raise HTTPException(409, f"entry_status is {actions.get('entry_status')!r} — "
+                                          "already confirmed/skipped, or this row never gated")
+            actions["entry_status"] = "skipped_by_founder"
+            actions["skipped_at"] = datetime.now(qb_rebalance.IST).isoformat()
+            cur.execute("UPDATE quant_rebalance_log SET actions=%s WHERE id=%s",
+                        (json.dumps(actions), row_id))
+        conn.commit()
+    return {"status": "ok", "basket": basket_name, "rebalance_date": rebalance_date,
+            "entry_status": "skipped_by_founder"}
 
 
 @router.get("/nav")
