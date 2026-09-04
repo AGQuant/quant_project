@@ -1288,6 +1288,11 @@ window.scorrAsofStamp = function (asof) {
       return '<div>' + esc(t) + '</div>';
     }).join('') + '</div>';
   };
+  // cc#1675: exposed so ScorrMarkerFlagDetailHtml (below) can match a fired marker to ITS OWN
+  // legend line without a second, forkable copy of the array — "the same match against
+  // ScorrMarkerLegend's FALLBACK array" per the card. Attached to the function itself rather than
+  // a new global name.
+  window.ScorrMarkerLegend.FALLBACK = FALLBACK;
 })();
 
 
@@ -1453,13 +1458,34 @@ window.ScorrMarkerFlagColor = function (fired) {
   return '#4d7cfe';
 };
 
+// cc#1675 (founder 04-Sep screenshot): find `starters[i]`'s line among `lines` — a leading-token
+// match, not a substring search, so e.g. "Amber star" cannot accidentally match a line that only
+// MENTIONS an amber star in passing. Returns the matched line verbatim, or null when nothing in
+// `lines` starts with any of `starters` — a row with no match renders WITHOUT an interpretation
+// line rather than a typed sentence that could drift from the server copy (cc#1018/1024 rule).
+function _scorrMarkerLegendLine(lines, starters) {
+  if (!lines || !lines.length) return null;
+  for (var i = 0; i < lines.length; i++) {
+    var line = String(lines[i] || '');
+    for (var j = 0; j < starters.length; j++) {
+      if (line.toLowerCase().indexOf(starters[j].toLowerCase()) === 0) return line;
+    }
+  }
+  return null;
+}
 window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
-  // Builds the popover BODY (fired-marker rows + TC score + full legend) — the container/sheet
-  // chrome is each surface's own concern, not this function's. `tc` is {score_pct, verdict_class}
-  // or null (never fabricated — cc#1547 scope 3c: shown whenever data exists, regardless of amber).
+  // Builds the popover BODY — cc#1675: ONLY the fired-marker rows now, each with its own served
+  // legend line as the interpretation. The container/sheet chrome is each surface's own concern,
+  // not this function's. `tc` stays in the signature (both callers still pass it) but is IGNORED —
+  // the TC score already has its own /100 column on the same table row (the exact duplication the
+  // founder pointed at); the full generic legend dump is gone too, since every fired row now
+  // carries its own interpretation inline. ScorrMarkerLegend itself, and every OTHER caller of it,
+  // are untouched — only this popover stops dumping the whole thing.
   var esc = function (s) { return String(s == null ? '' : s)
     .replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
   fired = fired || {};
+  var lines = (legendLines && legendLines.length) ? legendLines
+            : (window.ScorrMarkerLegend ? window.ScorrMarkerLegend.FALLBACK : null);
   var rows = [];
   // Labels and colours are the SAME ones the four individual glyphs used before this card —
   // nothing renamed, nothing re-derived. The note text is each marker's own server-built fact
@@ -1468,50 +1494,30 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
   if (fired.stars) {
     var scol = fired.stars.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
     var slabel = fired.stars.star_color === 'BLUE' ? 'Blue star' : 'Red star';
-    rows.push({ glyph: '★', col: scol, label: slabel, note: fired.stars.note });
+    rows.push({ glyph: '★', col: scol, label: slabel, note: fired.stars.note,
+                interp: _scorrMarkerLegendLine(lines, [slabel]) });
   }
-  if (fired.act) rows.push({ glyph: '⚡', col: 'inherit', label: 'Volume/OI spurt', note: fired.act.note });
+  if (fired.act) rows.push({ glyph: '⚡', col: 'inherit', label: 'Volume/OI spurt', note: fired.act.note,
+                             interp: _scorrMarkerLegendLine(lines, ['⚡', 'Volume/OI spurt']) });
   if (fired.dma) {
     var dcol = fired.dma.star_color === 'GREEN' ? '#0a9e63' : '#f87171';
     var dlabel = fired.dma.star_color === 'GREEN' ? 'Green square' : 'Red square';
-    rows.push({ glyph: '■', col: dcol, label: dlabel, note: fired.dma.note });
+    rows.push({ glyph: '■', col: dcol, label: dlabel, note: fired.dma.note,
+                interp: _scorrMarkerLegendLine(lines, ['Green/red square']) });
   }
-  if (fired.tcs) rows.push({ glyph: '★', col: '#F5B94A', label: 'Amber star', note: fired.tcs.note });
+  if (fired.tcs) rows.push({ glyph: '★', col: '#F5B94A', label: 'Amber star', note: fired.tcs.note,
+                             interp: _scorrMarkerLegendLine(lines, ['Amber star']) });
 
-  var firedHtml = rows.length
-    ? rows.map(function (r) {
-        return '<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 0">'
-          + '<span style="color:' + r.col + ';font-size:13px;line-height:1.5;flex-shrink:0;width:16px;text-align:center">' + r.glyph + '</span>'
-          + '<span style="font-size:12px;line-height:1.45;color:var(--txt)"><b>' + esc(r.label) + '</b> — ' + esc(r.note || '') + '</span></div>';
-      }).join('')
-    : '<div style="font-size:12px;color:var(--mut)">No marker fired for this row today.</div>';
+  if (!rows.length) return '<div style="font-size:12px;color:var(--mut)">No marker fired for this row today.</div>';
 
-  // cc#1550: verdict_class is written (v8_pivot_star.py run_tc_score_tick) as
-  // "<VERDICT>[ (unweighted)] | <BUCKET>" — e.g. "VALID | SELL-MOM" or "VALID (unweighted) | SELL-MOM".
-  // The " | " separator never appears inside either piece, so a straight split is safe. Older ticks
-  // written before this shipped carry no " | " at all — bucketCode/bucketLabel then stay '' and the
-  // line falls back to exactly the pre-cc#1550 rendering (score + verdict, no bucket segment).
-  var TC_BUCKET_LABELS = { 'BUY-MOM': 'Buy Momentum', 'BUY-REV': 'Buy Reversal',
-                           'SELL-MOM': 'Sell Momentum', 'SELL-REV': 'Sell Reversal' };
-  var tcHtml;
-  if (tc && tc.score_pct != null) {
-    var vc = String(tc.verdict_class || '');
-    var pipeAt = vc.indexOf(' | ');
-    var verdictPart = pipeAt >= 0 ? vc.slice(0, pipeAt) : vc;
-    var bucketCode = pipeAt >= 0 ? vc.slice(pipeAt + 3) : '';
-    var bucketLabel = TC_BUCKET_LABELS[bucketCode] || bucketCode;
-    tcHtml = '<b>TC score:</b> ' + Number(tc.score_pct).toFixed(0) + '%'
-      + (verdictPart ? ' · ' + esc(verdictPart) : '')
-      + (bucketLabel ? ' · ' + esc(bucketLabel) : '');
-  } else {
-    tcHtml = '<span style="color:var(--mut)">TC score: no data yet</span>';
-  }
-
-  var legendHtml = window.ScorrMarkerLegend ? window.ScorrMarkerLegend(legendLines) : '';
-
-  return '<div>' + firedHtml + '</div>'
-    + '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line,#243049);font-size:12px">' + tcHtml + '</div>'
-    + '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line,#243049)">' + legendHtml + '</div>';
+  return rows.map(function (r) {
+    return '<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 0">'
+      + '<span style="color:' + r.col + ';font-size:13px;line-height:1.5;flex-shrink:0;width:16px;text-align:center">' + r.glyph + '</span>'
+      + '<span style="font-size:12px;line-height:1.45;color:var(--txt);display:block">'
+      + '<b>' + esc(r.label) + '</b> — ' + esc(r.note || '')
+      + (r.interp ? '<div style="color:var(--mut);margin-top:2px">' + esc(r.interp) + '</div>' : '')
+      + '</span></div>';
+  }).join('');
 };
 
 /* ── cc#1547: MARKER DETAIL SHEET (mobile) — one shared component, reuses the .scorr-ml hook ───
