@@ -237,6 +237,39 @@ def _merge_rows(rows):
     return merged
 
 
+# cc#1700 SEGMENT_SIZE_CLASS_V1 (session_log 38956, founder 04-Sep "top 30 by avg mcap large,
+# next 30 mid, remaining small"): band the MERGED (display) segments by average member mcap.
+def _add_size_class(rows):
+    """avg_mcap = total_mcap / stocks_count on the already-merged row fields — cc#834's own "full
+    membership" basis (result_corner.py), reused not reinvented: _merge_rows already sums
+    total_mcap and stocks_count across every raw segment a display segment absorbed, so this is
+    the SAME aggregation the merge already computed, not a second query. Rank 1-30 LARGE, 31-60
+    MID, rest SMALL. A row with no computable average (stocks_count 0 or total_mcap None) gets
+    size_class/size_rank None and sorts last — never guessed. mcap_n and mcap_total both read
+    stocks_count: sector_ratings carries no separate "members with a market cap" count at the row
+    level to split them (checked; result_corner.py's own split works from a per-stock universe
+    dict this endpoint does not have), so both UNIVERSE_DENOMINATOR_RULE numbers are equal today
+    rather than one of them being invented."""
+    for r in rows:
+        sc = r.get("stocks_count") or 0
+        tm = r.get("total_mcap")
+        r["avg_mcap"] = round(tm / sc) if (sc and tm is not None) else None
+        r["mcap_n"] = sc
+        r["mcap_total"] = sc
+    order = sorted(range(len(rows)),
+                    key=lambda i: (rows[i]["avg_mcap"] is None, -(rows[i]["avg_mcap"] or 0)))
+    rank = 1
+    for i in order:
+        if rows[i]["avg_mcap"] is None:
+            rows[i]["size_rank"] = None
+            rows[i]["size_class"] = None
+            continue
+        rows[i]["size_rank"] = rank
+        rows[i]["size_class"] = "LARGE" if rank <= 30 else "MID" if rank <= 60 else "SMALL"
+        rank += 1
+    return rows
+
+
 @router.get("/api/sector/rotation")
 def sector_rotation():
     try:
@@ -245,6 +278,7 @@ def sector_rotation():
             cols = [d[0] for d in cur.description]
             raw = [dict(zip(cols, r)) for r in cur.fetchall()]
             rows = _merge_rows(raw)
+            rows = _add_size_class(rows)
             # cc#827: composite_score is no longer computed at all — see the SQL above.
             # Hot/cold now key off GVM, matching the platform's own bands rather than a percentile
             # rank of five signals that no other surface used.

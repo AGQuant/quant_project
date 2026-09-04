@@ -342,7 +342,7 @@ loudly on anything not in its documented `KNOWN_EXCEPTIONS` (the four above), an
 ### Sector — `sector_endpoints.py`, `sector_brief_endpoints.py`
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/sector/rotation` | sector rotation |
+| GET | `/api/sector/rotation` | sector rotation. cc#1700 SEGMENT_SIZE_CLASS_V1: each merged-segment row also carries `size_class` ('LARGE'\|'MID'\|'SMALL'\|null), `size_rank` (1..N, null for an uncomputable row), `avg_mcap` (Rs Cr, total_mcap/stocks_count), `mcap_n`, `mcap_total` (both = stocks_count — sector_ratings has no separate "members with a market cap" count to split them). Ranked over the display (merged) segments: 1-30 LARGE, 31-60 MID, rest SMALL. |
 | GET | `/api/sector/brief` | sector brief |
 | POST | `/api/admin/sector/brief/batch` | 🔒 batch-generate briefs |
 | GET | `/api/admin/sector/brief/status` | batch status |
