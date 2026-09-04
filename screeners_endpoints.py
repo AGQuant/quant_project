@@ -74,6 +74,24 @@ def screeners_list():
                      "members": int(r[4] or 0), "last_run": str(r[5]) if r[5] else None,
                      "source": r[6]}
                     for r in cur.fetchall()]
+            # cc#1677: `newest` — up to 3 symbols with the most recent first_seen per screen, for
+            # the Model Portfolio pane's Screeners table (its own row without a per-screen detail
+            # fetch: read-only, one round trip, no new formula — the same rows screener_detail()
+            # already returns, just the newest slice of them). ROW_NUMBER over first_seen DESC so
+            # the LIMIT is per screen_id, not a single global top-3.
+            cur.execute("""
+                SELECT screen_id, symbol FROM (
+                    SELECT screen_id, symbol,
+                           ROW_NUMBER() OVER (PARTITION BY screen_id ORDER BY first_seen DESC, symbol) AS rn
+                    FROM v13_screen_results
+                ) t WHERE rn <= 3
+                ORDER BY screen_id, rn
+            """)
+            newest_map = {}
+            for sid, sym in cur.fetchall():
+                newest_map.setdefault(sid, []).append(sym)
+            for r in rows:
+                r["newest"] = newest_map.get(r["id"], [])
         # never_run is the honest state for a fresh deploy: the tab exists, the table is empty, and
         # the page says why rather than rendering an ambiguous blank.
         return {"status": "ok", "screens": rows,

@@ -1239,10 +1239,12 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          itself stays live for typed URLs and the /m/intel app screen is untouched. -->
     <button class="v8toptab" data-pane="intel" onclick="showV8Pane('intel')">Intel</button>
 
-    <!-- cc#1584 (founder 02-Sep 11:50): Model Portfolio joins the row after Intel (cc#1585 owns the
-         order). The pane folds the Quant Basket page (/quant-basket, 12 registry baskets) in as an
-         embed=1 iframe — the cc#1282 / cc#1523 pattern — under a chip strip built from the registry.
-         The /quant-basket nav entry stays; nothing is retired. -->
+    <!-- cc#1584 (founder 02-Sep 11:50) put Model Portfolio in the row after Intel (cc#1585 owns the
+         order) as a folded /quant-basket embed under a chip strip. cc#1677 (founder 04-Sep 09:35)
+         RETIRED that embed: the pane is now an empty launcher (scorr_model_portfolio.js) with two
+         buttons opening read-only table views of the registry baskets / stored screeners — nothing
+         renders until a button is pressed. The /quant-basket and /screeners nav entries stay;
+         neither page is retired, only this tab's folded copy of one of them. -->
     <button class="v8toptab" data-pane="model" onclick="showV8Pane('model')">Model Portfolio</button>
 
     <!-- cc#1528: the cc#1149 tabs-row theme pill (#iiThemeBtn) is REMOVED — the canonical top-nav
@@ -1439,11 +1441,11 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   <div id="pane-intel" style="display:none">
     <iframe id="intelFrame" title="Intel" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
   </div>
-  <!-- cc#1584: Model Portfolio pane — the 12-basket chip strip (registry-derived, numbers from the
-       same payloads the /quant-basket page merges) above the folded page, same embed frame pattern. -->
+  <!-- cc#1677 (founder 04-Sep 09:35 IST): Model Portfolio is now an EMPTY LAUNCHER, not a folded
+       copy of /quant-basket -- superseded cc#1584's chip strip + iframe embed below. Mounted by
+       scorr_model_portfolio.js on first open (showV8Pane's 'model' branch). -->
   <div id="pane-model" style="display:none">
-    <div id="mpStrip" style="padding:10px 2px 6px"></div>
-    <iframe id="modelFrame" title="Model Portfolio" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+    <div id="mpMount"></div>
   </div>
   <!-- cc#544: V6 BT playground pane (read-mostly wrapper over the existing bt6 engine) -->
   <div id="pane-bt" style="display:none">
@@ -1538,6 +1540,9 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
 <script src="/scrub_layer.js"></script>
 <script src="/pcr_trend_card.js"></script>
 <script src="/index_tape_card.js"></script>
+<!-- cc#1677: Model Portfolio pane — empty launcher + two table views, mounted lazily when the
+     tab first opens (showV8Pane's own 'model' branch, below). -->
+<script src="/scorr_model_portfolio.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 // cc#426: V9 Pairs is now the standalone /v9 page — old in-dashboard deep link redirects there.
@@ -8308,7 +8313,7 @@ function showV8Pane(name){
   if(name==='trades'){var ft=document.getElementById('tradesFrame');if(ft&&!ft.src)ft.src='/trades?embed=1';}  // cc#1282
   if(name==='intel'){var fi=document.getElementById('intelFrame');if(fi&&!fi.src)fi.src='/news?embed=1';}  // cc#1523
   if(name==='alerts'){var fa=document.getElementById('alertsFrame');if(fa&&!fa.src)fa.src='/alerts?embed=1';}  // cc#1585
-  if(name==='model'){var fm=document.getElementById('modelFrame');if(fm&&!fm.src)fm.src='/quant-basket?embed=1';if(window.mpBoot)window.mpBoot();}  // cc#1584
+  if(name==='model'){var mm=document.getElementById('mpMount');if(mm&&window.ScorrModelPortfolio)window.ScorrModelPortfolio.mount(mm);}  // cc#1677
 }
 /* cc#851 kept its promise a different way now: a saved /dashboard#digest bookmark opens the
    digest INSIDE the shell (cc#1282) instead of redirecting away — the link still means "the
@@ -8329,63 +8334,10 @@ function openInnerTab(h){ if(!(h in INNER_TABS))return false; try{ showV8Pane('v
 window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model'];var h=(location.hash||'').replace('#','');
   if(openInnerTab(h))return;
   showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
-/* cc#1584: Model Portfolio chip strip. Baskets come from /api/qb/registry (is_active rows, never a
-   hardcoded list) in the founder's order — the 3 quant baskets, the 6 FINZ, then Large/Mid/Small.
-   Numbers come from the SAME two payloads the /quant-basket page merges for its cards
-   (/api/performance/qb, then /api/performance/alpha's return_pct winning where present — the
-   page's own L345 rule), so a chip can never disagree with the card under it. The as-of is the
-   latest mark ts the qb payload carries (as_of_ist), never the page clock. A chip click opens that
-   basket's modal in the framed page (same origin: its own openModal on its own card). */
-(function(){
-  var booted=false, NAMES={large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap',
-    breakout_52w:'52W Breakout',contra_value:'Contra Value',finz_stable:'FINZ Stable',finz_wcb:'FINZ Wealth Compounder',
-    finz_helios:'FINZ Helios',finz_dividend:'FINZ Dividend',finz_defence:'FINZ Defence',finz_etf:'FINZ ETF Basket'};
-  var CAPORD={large_cap:0,mid_cap:1,small_cap:2};
-  function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  function grp(k){ if(k.indexOf('finz_')===0) return 1; if(CAPORD.hasOwnProperty(k)) return 2; return 0; }
-  function order(a,b){ var ga=grp(a.basket_name), gb=grp(b.basket_name); if(ga!==gb) return ga-gb;
-    if(ga===2) return CAPORD[a.basket_name]-CAPORD[b.basket_name]; return a.basket_name<b.basket_name?-1:(a.basket_name>b.basket_name?1:0); }
-  function getJ(u){ return fetch(u,{cache:'no-store'}).then(function(r){ if(!r.ok) throw new Error(u+' '+r.status); return r.json(); }); }
-  function pct(v){ return v==null?'—':((v>=0?'+':'')+Number(v).toFixed(2)+'%'); }
-  function dmy(d){ if(!d) return '—'; var p=String(d).split('T')[0].split('-'); if(p.length<3) return String(d);
-    return p[2]+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(+p[1])-1]; }
-  function render(reg,qb,alpha){
-    var el=document.getElementById('mpStrip'); if(!el) return;
-    var rows=(Array.isArray(reg)?reg:[reg]).filter(function(r){ return r&&r.basket_name&&r.is_active; }).sort(order);
-    var bmap={}; ((qb&&qb.baskets)||[]).forEach(function(b){ bmap[b.basket]=Object.assign({},b); });
-    ((alpha&&alpha.baskets)||[]).forEach(function(b){ if(bmap[b.basket]){ bmap[b.basket].alpha=b.alpha; bmap[b.basket].return_pct=b.return_pct; } });
-    var chips=rows.map(function(r){
-      var d=bmap[r.basket_name]||{}, ret=d.return_pct, n=d.positions||0;
-      var col=ret==null?'var(--mut)':(Number(ret)>=0?'var(--grn)':'var(--red)');
-      return '<button type="button" onclick="mpPick(\''+esc(r.basket_name)+'\')" title="Open '+esc(NAMES[r.basket_name]||r.basket_name)+' in the page below"'
-        +' style="display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;padding:7px 11px;border-radius:9px;border:1px solid var(--line2);border-left:3px solid '+col+';background:var(--panel);color:var(--txt);cursor:pointer;font:inherit;text-align:left;min-width:150px">'
-        +'<span style="font-size:12px;font-weight:700">'+esc(NAMES[r.basket_name]||r.basket_name)+'</span>'
-        +'<span style="font-size:10.5px;color:var(--mut);font-variant-numeric:tabular-nums">'+n+' holding'+(n===1?'':'s')+' · <b style="color:'+col+'">'+pct(ret)+'</b> · reb '+esc(dmy(r.next_rebalance))+'</span>'
-        +'</button>';
-    }).join('');
-    var asof=qb&&qb.as_of_ist;
-    el.innerHTML='<div style="display:flex;gap:8px;flex-wrap:wrap">'+chips+'</div>'
-      +'<div style="font-size:10.5px;color:var(--mut);margin-top:6px">'+(asof?'as of '+esc(asof)+' IST':'no basket mark yet')+' · '+rows.length+' baskets'
-      +' · unrealised % on open holdings · same numbers as /quant-basket · click a chip to open that basket below</div>';
-  }
-  window.mpPick=function(key){
-    var f=document.getElementById('modelFrame');
-    try{
-      var w=f&&f.contentWindow, doc=w&&w.document;
-      var btn=doc&&doc.querySelector('.bc-chart[data-basket="'+key+'"]'), card=btn&&btn.closest('.bcard');
-      if(card&&typeof w.openModal==='function') w.openModal(key,card);
-      if(f) f.scrollIntoView({behavior:'smooth',block:'start'});
-    }catch(e){ console.warn('[model strip] pick', e&&e.message); }
-  };
-  window.mpBoot=function(){
-    if(booted) return; booted=true;
-    var el=document.getElementById('mpStrip'); if(!el) return;
-    el.innerHTML='<div style="font-size:11px;color:var(--mut)">Loading baskets…</div>';
-    Promise.all([getJ('/api/qb/registry'), getJ('/api/performance/qb'), getJ('/api/performance/alpha').catch(function(){ return {}; })])
-      .then(function(a){ render(a[0],a[1],a[2]); })
-      .catch(function(e){ booted=false; el.innerHTML='<div style="font-size:11px;color:var(--mut)">Basket strip unavailable — '+esc(e&&e.message||'fetch failed')+'. The folded page below is unaffected.</div>'; });
-  };
-})();
+/* cc#1584's Model Portfolio chip strip (mpStrip/mpPick/mpBoot) is RETIRED here — superseded by
+   cc#1677's empty-launcher pane (scorr_model_portfolio.js, mounted from showV8Pane's 'model'
+   branch above). The /quant-basket page these functions opened via an iframe is untouched; only
+   this dashboard's OWN embed of it is gone. */
 </script>
 <style>
   /* cc#851: #pane-digest CSS removed with the pane. */

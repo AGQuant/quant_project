@@ -587,7 +587,10 @@ async def auth_gate(request: Request, call_next):
                     # who loaded a page before this deploy keeps the old bundle for a day —
                     # which for a brand-new file means the segment chip does nothing when
                     # clicked, with no error to explain it. The cc#1060 failure, pre-empted.
-                    b"scorr_segment_results.js"):
+                    b"scorr_segment_results.js",
+                    # cc#1677: added WITH its script tag in v8_dashboard.html, in this same commit
+                    # (cc#1060 rule) — the Model Portfolio pane's new empty-launcher + table module.
+                    b"scorr_model_portfolio.js"):
             body = body.replace(b'src="/' + _js + b'"',
                                 b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
         # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,
