@@ -454,6 +454,12 @@ def _ist_market_hours() -> bool:
 # the existing dma_20/50/200 columns store PERCENT DISTANCE from the MA, not the MA price level
 # (v13_presets_endpoints.py documents this) — so nothing stored is usable for a crossover test,
 # and computing fresh also avoids MAINTENANCE_LOCK_RULE's ALTER TABLE gate entirely.
+#
+# cc#1682 (founder direct 04-Sep, absorbs cc#1681): SUPERSEDES the cross-only definition above.
+# evaluate_dma_cross() and its DMA_CROSS_UP/DMA_CROSS_DOWN rows are LEFT IN PLACE (old rows are
+# never deleted, do_not_touch) but the endpoint stops reading them — evaluate_dma_state() below is
+# what run_tick() and the post-close pass call now. State, not cross: every open card shows its
+# square every day the relationship holds, not just the day it flipped.
 DMA_FAST, DMA_SLOW = 5, 20
 DMA_FETCH = 25          # 5+20 with headroom for a short-history symbol
 
@@ -539,6 +545,99 @@ def evaluate_dma_cross(conn, target_date: Optional[date] = None) -> List[Dict[st
             "glyph": "square",
             # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording.
             "note": f"5DMA {sma5_t:,.2f} crossed {rel} 20DMA {sma20_t:,.2f}",
+        })
+    return out
+
+
+# ── cc#1682 DMA_STATE_V1 (founder direct 04-Sep) — STATE, not cross ───────────────────────────
+# The founder's ask: every open card carries one square every day, green when 5DMA sits above
+# 20DMA, red when below — not only on the session the relationship flips. Same candidate set, same
+# SMA math as evaluate_dma_cross above; the only real difference is dropping yesterday's SMA pair
+# (a state test needs none) and lowering the history floor from DMA_SLOW+1 to DMA_SLOW, since
+# there is no "yesterday" comparison left to need the extra day.
+def evaluate_dma_state(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """GREEN/RED square STATE markers on the OPEN book (cc#1682). PURE READ.
+
+    Unlike evaluate_dma_cross, this reports the CURRENT relationship regardless of whether it is
+    fresh. `data_date` on each returned row is the date of the LATEST close actually used, which
+    during market hours is yesterday's close (today's raw_prices row is a partial candle and is
+    excluded, same ceiling_op gate as the cross evaluator) — this is what lets an intraday tick and
+    the post-close pass both call this function and each stamp the correct star_date without
+    guessing: the caller inserts under row['data_date'], not blindly under target_date. Fewer than
+    DMA_SLOW completed closes skips the symbol — insufficient history, never a guessed state."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
+        cur.execute("""
+            SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
+            FROM v8_paper_positions p
+            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+            WHERE p.status = 'OPEN'
+              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+              AND NOT (p.basket = ANY(%(retired)s))
+            ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+
+        ceiling_op = "<" if _ist_market_hours() else "<="
+        cur.execute(f"""
+            SELECT symbol, price_date, close FROM (
+                SELECT symbol, price_date, close,
+                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                FROM raw_prices
+                WHERE symbol = ANY(%s) AND close > 0 AND price_date {ceiling_op} %s
+            ) x WHERE rn <= %s
+            ORDER BY symbol, rn""", (syms, d, DMA_FETCH))
+        closes: Dict[str, List[float]] = {}
+        dates: Dict[str, List[date]] = {}
+        for sym, pdate, close in cur.fetchall():
+            closes.setdefault(sym, []).append(float(close))
+            dates.setdefault(sym, []).append(pdate)
+
+        live = {}
+        try:
+            import cmp_resolver
+            live = cmp_resolver.resolve_cmp_many(cur, syms)
+        except Exception as e:
+            log.warning("cc#1682 live CMP unavailable, using last close: %s", e)
+
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, day_1d FROM v8_metrics
+                       WHERE symbol = ANY(%s) AND score_date <= %s
+                       ORDER BY symbol, score_date DESC""", (syms, d))
+        met = {r[0]: _f(r[1]) for r in cur.fetchall()}
+
+    out = []
+    for sym, basket in cands:
+        c = closes.get(sym) or []          # newest first
+        dts = dates.get(sym) or []
+        if len(c) < DMA_SLOW:
+            continue                        # insufficient history — never a guessed state
+        sma5_t = sum(c[0:DMA_FAST]) / DMA_FAST
+        sma20_t = sum(c[0:DMA_SLOW]) / DMA_SLOW
+        if sma5_t > sma20_t:
+            colour, direction, rel = "GREEN", "DMA_ABOVE", "above"
+        elif sma5_t < sma20_t:
+            colour, direction, rel = "RED", "DMA_BELOW", "below"
+        else:
+            continue                        # exact tie — genuinely undefined, never guessed
+        data_date = dts[0]                  # the actual latest close used, may lag target_date
+        cmp_v = (live.get(sym) or {}).get("cmp") if live else None
+        if cmp_v is None:
+            cmp_v = c[0]                    # last completed close — honest fallback
+        out.append({
+            "symbol": sym, "basket": basket,
+            "direction": direction, "star_color": colour,
+            "level_name": "5DMA_X_20DMA",
+            "level_value": round(sma5_t, 2),    # the 5DMA
+            "pp": round(sma20_t, 2),            # the 20DMA — see the column-reuse note in run_tick
+            "cmp_at_star": round(float(cmp_v), 2),
+            "day_1d": met.get(sym),
+            "glyph": "square",
+            "data_date": data_date,
+            # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording.
+            "note": f"5DMA {sma5_t:,.2f} {rel} 20DMA {sma20_t:,.2f} (as of {data_date.strftime('%d-%b')})",
         })
     return out
 
@@ -798,13 +897,23 @@ def run_tick(conn=None) -> Dict[str, Any]:
                       if a["trigger"] != "OI" else a["oi_dod_pct"]))
                 awrote += cur.rowcount
         conn.commit()
-        # cc#1539: the third family, same first-fire-only pattern. direction values
-        # DMA_CROSS_UP / DMA_CROSS_DOWN cannot collide with BUY/SELL/ACTIVITY rows under the
+        # cc#1682: the third family, now a STATE not a cross (supersedes cc#1539's fresh-cross-only
+        # evaluate_dma_cross — that function and its DMA_CROSS_UP/DMA_CROSS_DOWN rows are left in
+        # place untouched, do_not_touch, the endpoint just stops reading them). direction values
+        # DMA_ABOVE / DMA_BELOW cannot collide with BUY/SELL/ACTIVITY/DMA_CROSS_* rows under the
         # existing UNIQUE(symbol, star_date, direction) — no ALTER TABLE (cc#351).
         # COLUMN REUSE, STATED: level_value carries the 5DMA and pp carries the 20DMA. pp is a
         # pivot-point column by name, but adding a column needs a locked weekend window; the row
         # stays self-describing through level_name='5DMA_X_20DMA'.
-        dmas = evaluate_dma_cross(conn, d)
+        #
+        # star_date is each row's OWN data_date, NOT the tick's calendar date `d` — during market
+        # hours today's raw_prices row is a partial candle and is excluded (_ist_market_hours gate
+        # inside evaluate_dma_state), so data_date is yesterday's close until the post-close pass
+        # (run_dma_state_eod) runs after today's EOD row lands. This is what makes the ON CONFLICT
+        # DO NOTHING dedupe on (symbol, data_date, direction) correct: every intraday tick before
+        # the close computes the identical state off the identical closes and no-ops after the
+        # first; the post-close pass then inserts a genuinely NEW row under today's date.
+        dmas = evaluate_dma_state(conn, d)
         dwrote = 0
         with conn.cursor() as cur:
             for x in dmas:
@@ -814,20 +923,93 @@ def run_tick(conn=None) -> Dict[str, Any]:
                        level_name, level_value, pp, cmp_at_star, day_1d)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (symbol, star_date, direction) DO NOTHING
-                """, (d, ts, x["symbol"], x["basket"], x["direction"], x["star_color"],
+                """, (x["data_date"], ts, x["symbol"], x["basket"], x["direction"], x["star_color"],
                       x["level_name"], x["level_value"], x["pp"], x["cmp_at_star"], x["day_1d"]))
                 dwrote += cur.rowcount
         conn.commit()
-        log.info("cc#856/933/1539 pivot_star tick: %d pivot markers (%d new), %d activity (%d new), "
-                 "%d dma crosses (%d new)%s",
+        log.info("cc#856/933/1682 pivot_star tick: %d pivot markers (%d new), %d activity (%d new), "
+                 "%d dma states (%d new)%s",
                  len(stars), wrote, len(acts), awrote, len(dmas), dwrote,
                  " (VALID ZERO-MARKER TICK)" if not stars and not acts and not dmas else "")
         return {"ok": True, "date": str(d), "evaluated": len(stars), "new_rows": wrote,
                 "activity": len(acts), "activity_new_rows": awrote,
-                "dma_cross": len(dmas), "dma_cross_new_rows": dwrote,
+                "dma_state": len(dmas), "dma_state_new_rows": dwrote,
+                "dma_cross": len(dmas), "dma_cross_new_rows": dwrote,   # alias, one release (cc#1682 scope 4)
                 "zero_star_tick": not stars and not acts and not dmas, "scope": EVAL_SCOPE}
     except Exception as e:
         log.exception("cc#856 pivot_star tick failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def run_dma_state_eod(conn=None) -> Dict[str, Any]:
+    """cc#1682 POST-CLOSE pass. Every 5-min intraday tick already writes a DMA state row, but
+    during market hours it is dated on YESTERDAY's close (today's raw_prices row is a partial
+    candle, excluded by evaluate_dma_state's own market-hours gate) — so without this pass every
+    open card's square would sit on yesterday's date until the NEXT day's first tick recomputes it,
+    one calendar day late. Run once after today's official EOD raw_prices row lands: recompute,
+    and insert ONLY the rows whose data_date IS today — a symbol whose EOD row has not landed yet
+    is SKIPPED and LOGGED (ENGINE_LIVENESS_RULE: never guessed forward), not silently carried.
+    Read-only w.r.t. the engine — writes only v8_pivot_star_log, same as run_tick."""
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        d = _ist_now().date()
+        with conn.cursor() as cur:
+            _retired, _ = retired_baskets(cur)
+            cur.execute("""
+                SELECT DISTINCT ON (p.symbol) p.symbol
+                FROM v8_paper_positions p
+                LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+                WHERE p.status = 'OPEN'
+                  AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+                  AND NOT (p.basket = ANY(%(retired)s))
+                ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
+            syms = [r[0] for r in cur.fetchall()]
+            if not syms:
+                log.info("cc#1682 dma_state_eod: no open positions, nothing to evaluate")
+                return {"ok": True, "date": str(d), "evaluated_today": 0, "new_rows": 0,
+                        "skipped_not_landed": [], "zero_tick": True}
+            cur.execute("SELECT symbol, MAX(price_date) FROM raw_prices WHERE symbol = ANY(%s) GROUP BY symbol",
+                        (syms,))
+            landed = {r[0]: r[1] for r in cur.fetchall()}
+        not_landed = sorted(s for s in syms if landed.get(s) != d)
+        if not_landed:
+            log.warning("cc#1682 dma_state_eod: %d/%d symbol(s) not landed for %s, skipped: %s",
+                        len(not_landed), len(syms), d, not_landed)
+        # evaluate_dma_state itself resolves each symbol's OWN data_date; a symbol not landed simply
+        # comes back with data_date < d and is filtered out below rather than special-cased above —
+        # one code path, the not_landed log line is purely diagnostic.
+        states = evaluate_dma_state(conn, d)
+        todays = [x for x in states if x["data_date"] == d]
+        ts = _ist_now()
+        wrote = 0
+        with conn.cursor() as cur:
+            for x in todays:
+                cur.execute("""
+                    INSERT INTO v8_pivot_star_log
+                      (star_date, first_seen_ts, symbol, basket, direction, star_color,
+                       level_name, level_value, pp, cmp_at_star, day_1d)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (symbol, star_date, direction) DO NOTHING
+                """, (x["data_date"], ts, x["symbol"], x["basket"], x["direction"], x["star_color"],
+                      x["level_name"], x["level_value"], x["pp"], x["cmp_at_star"], x["day_1d"]))
+                wrote += cur.rowcount
+        conn.commit()
+        log.info("cc#1682 dma_state_eod: %d landed-today states (%d new rows), %d symbol(s) not "
+                 "landed%s", len(todays), wrote, len(not_landed),
+                 " (VALID: nothing landed yet)" if not todays and not not_landed else "")
+        return {"ok": True, "date": str(d), "evaluated_today": len(todays), "new_rows": wrote,
+                "skipped_not_landed": not_landed,
+                "zero_tick": not todays and not wrote}
+    except Exception as e:
+        log.exception("cc#1682 dma_state_eod failed")
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
     finally:
         if own:
@@ -945,34 +1127,49 @@ def pivot_star(star_date: Optional[str] = None):
             except Exception as e:
                 log.warning("cc#1008 activity log-read failed: %s", e)
                 acts = []
-            # cc#1539: DMA crosses are the THIRD list — LOG read, not a live re-eval, for the
-            # exact cc#1008 reason documented above: a render-time re-eval could disagree with
-            # what the log holds (and a cross is only "fresh" on the session it fired, so a later
-            # re-eval would drop a marker the log correctly keeps for the day).
+            # cc#1682: DMA STATE squares are the THIRD list — LOG read, not a live re-eval, same
+            # cc#1008 reason as the other three lists. Supersedes the cc#1539 cross-only read: this
+            # is now "latest DMA_ row per OPEN symbol", not "rows dated the page's resolved
+            # star_date" — a state row's own data_date legitimately lags the resolved date during
+            # market hours (evaluate_dma_state's own doc comment explains why), so reading it by
+            # star_date=%s the way the other three lists do would blank every square until the
+            # post-close pass ran. Scoped to the OPEN book (same candidate rule every evaluator
+            # uses) so a since-closed symbol's old square never lingers.
             dma = []
             try:
                 with conn.cursor() as dcur:
+                    _dma_retired, _ = retired_baskets(dcur)
                     dcur.execute("""
-                        SELECT symbol, direction, star_color, level_value, pp, cmp_at_star
-                        FROM v8_pivot_star_log
-                        WHERE star_date=%s AND direction IN ('DMA_CROSS_UP','DMA_CROSS_DOWN')
-                        ORDER BY symbol""", (d,))
-                    for sym, dirn, col, lv, ppv, cmpv in dcur.fetchall():
-                        rel = "above" if dirn == "DMA_CROSS_UP" else "below"
+                        WITH book AS (
+                            SELECT DISTINCT ON (p.symbol) p.symbol
+                            FROM v8_paper_positions p
+                            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+                            WHERE p.status = 'OPEN'
+                              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+                              AND NOT (p.basket = ANY(%(retired)s))
+                            ORDER BY p.symbol, p.entry_ts DESC
+                        )
+                        SELECT DISTINCT ON (g.symbol) g.symbol, g.direction, g.star_color,
+                               g.level_value, g.pp, g.star_date
+                        FROM v8_pivot_star_log g
+                        JOIN book b ON b.symbol = g.symbol
+                        WHERE g.direction IN ('DMA_ABOVE','DMA_BELOW')
+                        ORDER BY g.symbol, g.star_date DESC""", {"retired": _dma_retired})
+                    for sym, dirn, col, lv, ppv, sdate in dcur.fetchall():
+                        rel = "above" if dirn == "DMA_ABOVE" else "below"
                         lvf, ppf = _f(lv), _f(ppv)
                         dma.append({
-                            "symbol": sym, "direction": dirn, "star_color": col,
-                            "glyph": "square",
-                            "level_name": "5DMA_X_20DMA",
-                            "level_value": lvf, "pp": ppf,
-                            "cmp_at_star": _f(cmpv),
+                            "symbol": sym, "color": col,
+                            "dma5": lvf, "dma20": ppf,
+                            "data_date": str(sdate) if sdate else None,
                             # FACTS ONLY — same wall as star_note().
-                            "note": (f"5DMA {lvf:,.2f} crossed {rel} 20DMA {ppf:,.2f}"
+                            "note": (f"5DMA {lvf:,.2f} {rel} 20DMA {ppf:,.2f}"
+                                     + (f" (as of {sdate.strftime('%d-%b')})" if sdate else "")
                                      if lvf is not None and ppf is not None
-                                     else f"5DMA crossed {rel} 20DMA"),
+                                     else f"5DMA {rel} 20DMA"),
                         })
             except Exception as e:
-                log.warning("cc#1539 dma-cross log-read failed: %s", e)
+                log.warning("cc#1682 dma-state log-read failed: %s", e)
                 dma = []
             # cc#1540: TC_STRONG amber stars — the fourth list, LOG read like the others.
             tcs = []
@@ -1002,6 +1199,9 @@ def pivot_star(star_date: Optional[str] = None):
                 "star_date": d, "as_of_is_last_session": (d != _today),
                 "count": len(rows), "stars": rows,
                 "activity": acts, "activity_count": len(acts),
+                # cc#1682: dma_state is the current name; dma_cross stays as an ALIAS returning the
+                # SAME list for one release so neither surface breaks mid-sprint (scope item 4).
+                "dma_state": dma, "dma_state_count": len(dma),
                 "dma_cross": dma, "dma_cross_count": len(dma),
                 "tc_strong": tcs, "tc_strong_count": len(tcs),
                 "scope": EVAL_SCOPE,
@@ -1036,7 +1236,7 @@ def pivot_star(star_date: Optional[str] = None):
                     "Blue star = held reversal at S1",
                     "Red star = mirror at R1",
                     "⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day",
-                    "Green/red square = fresh 5DMA cross above/below 20DMA",
+                    "Green/red square = 5DMA above/below 20DMA",
                 ],
             }
     except Exception as e:

@@ -596,7 +596,8 @@ function mkKeys(p){
   if(f.tcs) ks.tcs = 1;
   if(f.stars) ks[f.stars.star_color === 'BLUE' ? 's1' : 'r1'] = 1;
   if(f.act) ks.act = 1;
-  if(f.dma) ks.dma = 1;
+  // cc#1682: one key per STATE colour, matching the two-chip split below.
+  if(f.dma) ks[f.dma.star_color === 'GREEN' ? 'dmaUp' : 'dmaDn'] = 1;
   return ks;
 }
 function mkTc(p){
@@ -638,7 +639,8 @@ function renderMarkerChips(rows){
     if(f.act) c.act++; if(f.dma){ c.dma++; if(f.dma.star_color === 'GREEN') c.dmaUp++; else c.dmaDn++; } });
   var L = Array.isArray(MK.legend) ? MK.legend : [];
   var leg = function(){ var ws = Array.prototype.slice.call(arguments); var hit = ''; L.some(function(t){ if(ws.some(function(w){ return String(t).toLowerCase().indexOf(w) >= 0; })){ hit = t; return true; } return false; }); return hit; };
-  var dmaCol = (c.dmaDn > c.dmaUp) ? '#f87171' : '#0a9e63';
+  // cc#1682: two chips, one per STATE colour, not one combined 'dma' chip.
+  var dmaTip = leg('square', 'dma') || '5DMA above/below 20DMA';
   var chip = function(key, icon, col, title, n, tip){
     var on = !!openMarkers[key];
     return '<span class="chip'+(on ? ' gd' : '')+'" data-open-marker="'+key+'" title="'+esc(tip || title)+'" aria-pressed="'+on+'">'
@@ -648,7 +650,8 @@ function renderMarkerChips(rows){
     + chip('s1', '\u2605', '#4d7cfe', 'S1 rev', c.s1, leg('blue'))
     + chip('r1', '\u2605', '#f87171', 'R1 mirror', c.r1, leg('red star'))
     + chip('act', '\u26a1', 'var(--txt)', 'Vol/OI', c.act, leg('\u26a1', 'volume'))
-    + chip('dma', '\u25a0', dmaCol, '5DMA', c.dma, (leg('square', 'dma') || '5DMA cross') + ' \u00b7 up ' + c.dmaUp + ' \u00b7 down ' + c.dmaDn)
+    + chip('dmaUp', '\u25a0', '#0a9e63', '5>20', c.dmaUp, dmaTip)
+    + chip('dmaDn', '\u25a0', '#f87171', '5<20', c.dmaDn, dmaTip)
     + '<span class="chip" data-mk-legend="1" title="What the flags mean" aria-label="Marker legend">?</span>';
 }
 function bkTag(p){ var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'); return l ? '<span class="tag bk">'+esc(l.toUpperCase())+'</span>' : ''; }
@@ -1234,7 +1237,10 @@ function load(){
     MK = { stars:{}, act:{}, dma:{}, tcs:{}, legend: mk.legend || null, tcRows: (tcq.rows || []) };
     (mk.stars || []).forEach(function(x){ MK.stars[x.symbol] = x; });
     (mk.activity || []).forEach(function(x){ MK.act[x.symbol] = x; });
-    (mk.dma_cross || []).forEach(function(x){ MK.dma[x.symbol] = x; });
+    // cc#1682: dma_state is the current key (dma_cross kept one release as an alias, same list).
+    // The endpoint's own field is `color`; star_color is added here so mkKeys/mkFlag/the shared
+    // scorr_card_common.js reader keep the field name they already use.
+    (mk.dma_state || mk.dma_cross || []).forEach(function(x){ MK.dma[x.symbol] = Object.assign({}, x, {star_color: x.color}); });
     (mk.tc_strong || []).forEach(function(x){ MK.tcs[x.symbol] = x; });
     var d = istNow();
     STATE.fetchedAt = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+hhmm(d);

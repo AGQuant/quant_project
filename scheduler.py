@@ -1544,6 +1544,28 @@ def _bg_v8_eod():
     except Exception as e: log.error(f"v8_eod: {e}")
     finally: _eod_running = False
 
+_dma_state_eod_ran_today = None
+def _bg_dma_state_eod():
+    """cc#1682 POST-CLOSE pass: one minute behind _bg_v8_eod (15:45), so today's raw_prices EOD
+    row has landed for the same reason v8_eod itself waits until 15:45 — computing off it earlier
+    would evaluate a partial candle. Own scheduler_master row (ENGINE_LIVENESS_RULE 13829): timed
+    and silenceable independently of v8_eod, same reasoning as _bg_tc_score_tick riding its own
+    job name instead of folding into _bg_pivot_star."""
+    global _dma_state_eod_ran_today
+    today = _ist_now().date()
+    if _dma_state_eod_ran_today == today: return _Skip.already_ran()
+    try:
+        import v8_pivot_star
+        res = v8_pivot_star.run_dma_state_eod()
+        log.info(f"dma_state_eod: {res}")
+        if isinstance(res, dict) and not res.get("ok"):
+            raise RuntimeError(f"dma_state_eod failed: {res.get('error')}")
+        _dma_state_eod_ran_today = today
+        return res
+    except Exception as e:
+        log.error(f"dma_state_eod: {e}")
+        raise
+
 _heal_ran_today = None
 def _bg_heal_intraday():
     """cc#238 Branch B (addendum 1652): at session end heal any missing 5-min tick across the
@@ -4859,6 +4881,11 @@ async def _scheduler_loop():
         # never whether it can run twice.
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 45:
             _spawn(_bg_v8_eod)
+        # cc#1682: one minute behind v8_eod above, same trading-day gate — today's EOD raw_prices
+        # row needs to have landed before evaluate_dma_state can stamp a square under today's date
+        # instead of yesterday's (see _bg_dma_state_eod's own doc comment for why the offset).
+        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 46:
+            _spawn(_bg_dma_state_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         # cc#1175: QSR at 15:55 — after the 15:35 close refresh and after v8_eod at
         # 15:45, so the returns bands and the S1 touch read today. Trading-day gated
