@@ -2413,6 +2413,9 @@ INDEX_TAPE_CARD_JS = _read_root_js("index_tape_card.js")
 # failure of shipping a hardcoded tag for a file that was not stamped.
 SCRUB_LAYER_JS = _read_root_js("scrub_layer.js")
 PCR_TREND_CARD_JS = _read_root_js("pcr_trend_card.js")
+# cc#1677: the V8 Dashboard's Model Portfolio pane — empty launcher + two table views, in the
+# same repo-root-file serve pattern as its neighbours above.
+SCORR_MODEL_PORTFOLIO_JS = _read_root_js("scorr_model_portfolio.js")
 
 
 @router.get("/index_tape_card.js")
@@ -2602,6 +2605,11 @@ def pwa_scrub_layer_js():
 @router.get("/pcr_trend_card.js")
 def pwa_pcr_trend_card_js():
     return Response(PCR_TREND_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_model_portfolio.js")
+def pwa_scorr_model_portfolio_js():
+    return Response(SCORR_MODEL_PORTFOLIO_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_card_common.js")

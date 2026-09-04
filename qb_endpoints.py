@@ -263,13 +263,44 @@ def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
         (basket_name, limit))
 
 
+def _discretionary_baskets(cur):
+    """cc#1677: the Quant/Discretionary split for the Model Portfolio pane's Type column, from
+    app_config key qb_discretionary_baskets — registry-driven (rule 9 corollary), never a
+    hardcoded list here. Accepts a JSON array or comma-separated string, same tolerance
+    v8_book_canon.retired_baskets() gives a hand-edited config row. Missing/unparsable = empty
+    set (every basket reads Quant) rather than guessing."""
+    import json as _json
+    cur.execute("SELECT value FROM app_config WHERE key='qb_discretionary_baskets'")
+    row = cur.fetchone()
+    raw = row[0] if row and row[0] else None
+    if not raw:
+        return set()
+    raw = str(raw).strip()
+    try:
+        if raw.startswith("["):
+            parsed = _json.loads(raw)
+            return set(str(x).strip() for x in parsed if str(x).strip()) if isinstance(parsed, list) else set()
+        return set(p.strip() for p in raw.replace("\n", ",").split(",") if p.strip())
+    except Exception:
+        return set()
+
+
 @router.get("/registry")
 def qb_registry(basket_name: Optional[str] = None):
     if basket_name:
         return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
-    return api_query(
-        "SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, "
-        "next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
+    with _conn() as conn, conn.cursor() as cur:
+        discretionary = _discretionary_baskets(cur)
+        cur.execute(
+            "SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, "
+            "next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    # cc#1677: Type is SERVED, not derived client-side — one source for the Model Portfolio
+    # pane's Type column and any future reader of this endpoint.
+    for r in rows:
+        r["type"] = "Discretionary" if r.get("basket_name") in discretionary else "Quant"
+    return rows
 
 
 @router.get("/alpha/propose")
