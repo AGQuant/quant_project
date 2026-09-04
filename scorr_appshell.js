@@ -127,6 +127,13 @@
   }
 
   function buildBack(hdr, wm) {
+    /* cc#1671 (founder 04-Sep 09:14 IST screenshot): /m/home is the app ROOT — the wordmark
+       already links here, so Home never needs a way back. This is a PATH test, deliberately not
+       a history test: history.length > 1 is true the moment anyone navigates INTO Home from
+       another screen, which is exactly the case that put the chevron on the founder's screenshot.
+       Absolute per the founder's own direction — never shown on Home, whatever the referrer or
+       history depth. Every other /m/* screen is unaffected; only this one path is excluded. */
+    if (location.pathname === '/m/home') return;
     var canBack = sameOriginRef() || history.length > 1;
     if (!canBack) return;                    /* no dead chevron */
     var b = document.createElement('button');
