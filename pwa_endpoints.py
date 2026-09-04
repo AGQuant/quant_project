@@ -716,6 +716,32 @@ PWA_JS = """
     // the founder pointed at, not a NAV-array entry. The ScorrModels overlay, /api/models/status and
     // the /m/models route all stay untouched; only the nav button is gone.
 
+    // cc#1696 (founder 04-Sep: "same bell display on web nav also"): the ONE bell (scorr_bell.js,
+    // cc#1634) gets a mount here, right slot, LEFT of the theme pill appended below (this block
+    // runs first, so its appendChild lands first in DOM order). scorr_bell.js already ships on
+    // every /m/* page via _MOBILE_HEAD; web pages never loaded it, so it is fetched here, once,
+    // guarded against double-injection \u2014 the component itself is untouched by which page loads
+    // it, "one shared component" per the card, not a fork.
+    if (!document.querySelector('[data-scorr-bell]')) {
+      var bellMount = document.createElement('span');
+      bellMount.setAttribute('data-scorr-bell', '');
+      bellMount.style.cssText = 'display:inline-flex;align-items:center;margin-left:8px';
+      host.appendChild(bellMount);
+      if (!document.querySelector('script[src*="/scorr_bell.js"]')) {
+        // cc#1696: no cache-bust param here (unlike the server-templated script tags in
+        // _MOBILE_HEAD, which stamp BUILD_ID at render time) -- this tag is injected by pwa.js
+        // itself, a plain static asset with no per-request build value to read on a web page.
+        // /scorr_bell.js carries the app-wide cc#792 day-long cache header either way; a web
+        // visitor picks up a changed bell on their next cold load, same as any other unstamped
+        // static file this app serves.
+        var bs = document.createElement('script');
+        bs.src = '/scorr_bell.js';
+        document.head.appendChild(bs);
+      } else if (window.ScorrBell) {
+        window.ScorrBell.mount();   // script already present (e.g. a preview iframe) \u2014 just mount here too
+      }
+    }
+
     // cc#1203 push 4: the shared Theme pill, far right of the same bar.
     //
     // GUARDED ON window.ScorrTheme, and that guard is the whole app/web split. main.py inlines the
