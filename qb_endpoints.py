@@ -402,6 +402,32 @@ def qb_rebalance_history(basket_name: str = "large_cap", limit: int = 300):
             "empty": len(rows) == 0}
 
 
+@router.get("/gated_rebalances")
+def qb_gated_rebalances():
+    """cc#1704 scope 3a: one batch call for the card-face pill — every basket's LATEST real
+    rebalance row (actions has was_due) and whether it is still entry_status='awaiting_founder'.
+    One query for all baskets (quant_basket.html's init() already batches its other 3 fetches
+    the same way) rather than a per-card round trip."""
+    rows = api_query("""
+        SELECT DISTINCT ON (basket_name) basket_name, rebalance_date,
+               actions->>'entry_status' AS entry_status,
+               actions->>'was_due' AS was_due,
+               actions->'entry_candidates' AS entry_candidates
+        FROM quant_rebalance_log WHERE actions ? 'was_due'
+        ORDER BY basket_name, rebalance_date DESC, computed_at DESC
+    """)
+    if isinstance(rows, dict) and rows.get("error"):
+        return rows
+    out = {}
+    for r in rows:
+        if r.get("entry_status") != "awaiting_founder":
+            continue
+        cands = r.get("entry_candidates") or []
+        out[r["basket_name"]] = {"due": r.get("was_due") or str(r.get("rebalance_date")),
+                                  "n_candidates": len(cands)}
+    return out
+
+
 def _discretionary_baskets(cur):
     """cc#1677: the Quant/Discretionary split for the Model Portfolio pane's Type column, from
     app_config key qb_discretionary_baskets — registry-driven (rule 9 corollary), never a
