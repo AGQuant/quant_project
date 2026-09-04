@@ -1153,6 +1153,11 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
 #panel13 .hs-tbl th.emph{color:var(--txt,#E9EEFB)}
 #panel13 .hs-row td.asof{font-size:10.5px;color:var(--dim,#5E6B8F);white-space:nowrap}
 #panel13 .hs-row .hs-sym{font-size:10px;color:var(--dim,#5E6B8F);margin-left:6px}
+/* cc#1680: sortable Table-view headers. Same active/inactive arrow convention as sortTbl()'s Day
+   Log headers (cc#262) -- a faint neutral hint on every sortable header, a coloured triangle on
+   whichever one is active. The group tag only appears while a sort is active (FLAT mode). */
+#panel13 .hs-tbl th[data-hs-sort]{cursor:pointer;user-select:none;white-space:nowrap}
+#panel13 .hs-row .hs-grptag{font-size:10px;color:var(--dim,#5E6B8F);margin-left:6px}
 @media (max-width:700px){
   #panel13 .hs-tbl{font-size:11px}#panel13 .hs-tbl td{padding:6px 5px}#panel13 .hs-row .hs-sym{display:none}
 }
@@ -5191,6 +5196,11 @@ let HS_DATA=null;
 // cc#1580: view switch state. In-memory only — it lasts the session and resets on reload by design
 // (spec: no localStorage). HS_VIEW is 'tiles' | 'table'; HS_EMPH is the table's emphasis level.
 let HS_VIEW='tiles', HS_EMPH='day';
+// cc#1680: Table-view column sort. key is null (default grouped/relevance order) or one of
+// 'price'|'day'|'week'|'asof'; dir is 1 (descending, the founder-specified first-click direction)
+// or -1 (ascending, second click on the same header). In-memory only, same no-persistence rule as
+// HS_VIEW/HS_EMPH -- resets on Tiles/Table toggle and on reload.
+let HS_SORT={key:null,dir:1};
 
 function hsPct(v){ return v==null?'--':(v>=0?'+':'')+Number(v).toFixed(2)+'%'; }
 
@@ -5235,32 +5245,68 @@ function hsTableBlock(d){
   const order=(d.category_order)||['index','volatility','commodity','currency','crypto'];
   const label=(d.category_label)||{};
   const emphDay=HS_EMPH!=='week';
+  const sortKey=HS_SORT.key, sortDir=HS_SORT.dir;
   let body='';
-  order.forEach(cat=>{
-    // cc#1580 P4: the emphasis level (Day | Week) is the bold column AND the sort key — biggest
-    // move first WITHIN the category, by absolute change. Cross-category sort is out of scope.
-    // A null change (insufficient history) sorts last so it never masquerades as a zero move.
-    const key=emphDay?'day_chg_pct':'week_chg_pct';
-    const g=tiles.filter(t=>t.category===cat).slice().sort((a,b)=>{
-      const av=a[key]==null?-1:Math.abs(a[key]), bv=b[key]==null?-1:Math.abs(b[key]);
-      return bv-av;
+  const rowHtml=(t,grpTag)=>{
+    const px=t.price==null?'--':Number(t.price).toLocaleString('en-IN',{maximumFractionDigits:2});
+    // cc#1580 P5: a row is a tap target like a tile — keyboard-reachable, Enter opens the drawer.
+    return `<tr class="hs-row" tabindex="0" role="button" data-sym="${escAttr(t.symbol)}" title="${escAttr(t.name||t.symbol)}${t.inverted?' · inverted (up = risk-off)':''}">`
+      +`<td>${escHtml(t.name||t.symbol)}<span class="hs-sym">${escHtml(t.symbol)}</span>${grpTag}</td>`
+      +`<td class="num">${px}</td>`
+      +hsCell(t.day_chg_pct,t.day_band,emphDay)
+      +hsCell(t.week_chg_pct,t.week_band,!emphDay)
+      +`<td class="asof">${escHtml(hsAsOf(t))}</td></tr>`;
+  };
+  if(sortKey){
+    // cc#1680: a sort is active — the table goes FLAT (category header rows dropped) and each row
+    // states its own group inline instead, since the grouping no longer matches the row order.
+    // Client-side only, over the same already-fetched `tiles` array; no refetch, no new endpoint.
+    const val=t=>{
+      if(sortKey==='price')return t.price;
+      if(sortKey==='day')return t.day_chg_pct;
+      if(sortKey==='week')return t.week_chg_pct;
+      if(sortKey==='asof')return t.as_of||null;
+      return null;
+    };
+    const sorted=tiles.slice().sort((a,b)=>{
+      const av=val(a), bv=val(b);
+      // Null/absent sorts last in BOTH directions — never masquerades as a real value at either end.
+      if(av==null&&bv==null)return 0;
+      if(av==null)return 1;
+      if(bv==null)return -1;
+      const base=(sortKey==='asof')?String(av).localeCompare(String(bv)):(Number(av)-Number(bv));
+      return sortDir===1?-base:base;   // dir=1 (descending, default): biggest/most-recent first
     });
-    if(!g.length)return;
-    body+=`<tr class="hs-cat"><td colspan="5">${escHtml(label[cat]||cat)}</td></tr>`;
-    g.forEach(t=>{
-      const px=t.price==null?'--':Number(t.price).toLocaleString('en-IN',{maximumFractionDigits:2});
-      // cc#1580 P5: a row is a tap target like a tile — keyboard-reachable, Enter opens the drawer.
-      body+=`<tr class="hs-row" tabindex="0" role="button" data-sym="${escAttr(t.symbol)}" title="${escAttr(t.name||t.symbol)}${t.inverted?' · inverted (up = risk-off)':''}">`
-        +`<td>${escHtml(t.name||t.symbol)}<span class="hs-sym">${escHtml(t.symbol)}</span></td>`
-        +`<td class="num">${px}</td>`
-        +hsCell(t.day_chg_pct,t.day_band,emphDay)
-        +hsCell(t.week_chg_pct,t.week_band,!emphDay)
-        +`<td class="asof">${escHtml(hsAsOf(t))}</td></tr>`;
+    sorted.forEach(t=>{
+      const grpTag=` <span class="hs-grptag">${escHtml(label[t.category]||t.category||'')}</span>`;
+      body+=rowHtml(t,grpTag);
     });
-  });
+  }else{
+    // Default relevance order — UNCHANGED from before this card: grouped by category, sorted
+    // within each category by absolute magnitude (cc#1580 P4's own rule, cross-category sort out
+    // of scope there and still out of scope for the default view here).
+    order.forEach(cat=>{
+      const key=emphDay?'day_chg_pct':'week_chg_pct';
+      const g=tiles.filter(t=>t.category===cat).slice().sort((a,b)=>{
+        const av=a[key]==null?-1:Math.abs(a[key]), bv=b[key]==null?-1:Math.abs(b[key]);
+        return bv-av;
+      });
+      if(!g.length)return;
+      body+=`<tr class="hs-cat"><td colspan="5">${escHtml(label[cat]||cat)}</td></tr>`;
+      g.forEach(t=>{ body+=rowHtml(t,''); });
+    });
+  }
+  // cc#1680: click-to-sort headers, same active/inactive arrow convention as sortTbl()'s Day Log
+  // headers (cc#262) — a coloured triangle on the active column, a faint neutral hint elsewhere.
+  // Symbol is not itself a sort key; clicking it clears HS_SORT and restores the default view.
+  const arrow=k=>sortKey===k?(sortDir===1?' <span style="color:var(--cyan)">▼</span>':' <span style="color:var(--cyan)">▲</span>')
+                            :' <span style="opacity:.25;font-size:9px">⇅</span>';
   return '<div class="hs-tbl-wrap"><table class="hs-tbl"><thead><tr>'
-    +`<th>Symbol</th><th class="num">Price</th><th class="num${emphDay?' emph':''}">Day %</th>`
-    +`<th class="num${emphDay?'':' emph'}">Week %</th><th>As of</th>`
+    +`<th data-hs-sort="symbol">Symbol${sortKey?arrow('symbol'):''}</th>`
+    +`<th class="num" data-hs-sort="price">Price${arrow('price')}</th>`
+    +`<th class="num${emphDay?' emph':''}" data-hs-sort="day">Day %${arrow('day')}</th>`
+    +`<th class="num${emphDay?'':' emph'}" data-hs-sort="week">Week %${arrow('week')}</th>`
+    +`<th data-hs-sort="asof">As of${arrow('asof')}</th>`
     +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
@@ -5352,10 +5398,24 @@ function bindHeatStrip(){
     b.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); hsOpenDrawer(b.getAttribute('data-sym')); } };
   });
   document.querySelectorAll('[data-hs-view]').forEach(b=>{
-    b.onclick=()=>{ HS_VIEW=b.getAttribute('data-hs-view'); hsRerender(); };
+    // cc#1680: sort state resets on Tiles/Table toggle (spec item 4) — a Tiles round-trip must
+    // not leave a stale sort silently applied when Table comes back.
+    b.onclick=()=>{ HS_VIEW=b.getAttribute('data-hs-view'); HS_SORT={key:null,dir:1}; hsRerender(); };
   });
   document.querySelectorAll('[data-hs-emph]').forEach(b=>{
     b.onclick=()=>{ HS_EMPH=b.getAttribute('data-hs-emph'); hsRerender(); };
+  });
+  // cc#1680: Table-view sortable headers. Symbol always clears the sort (back to the default
+  // grouped/relevance order); the other four toggle onto themselves, defaulting to descending on
+  // first click and flipping on a second click of the SAME header.
+  document.querySelectorAll('[data-hs-sort]').forEach(th=>{
+    th.onclick=()=>{
+      const k=th.getAttribute('data-hs-sort');
+      if(k==='symbol'){ HS_SORT={key:null,dir:1}; }
+      else if(HS_SORT.key===k){ HS_SORT.dir=-HS_SORT.dir; }
+      else{ HS_SORT={key:k,dir:1}; }
+      hsRerender();
+    };
   });
 }
 
