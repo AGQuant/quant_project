@@ -95,6 +95,12 @@
   .bc-badge.warn{background:var(--panel)beb;color:var(--amber);border-color:#fcd34d}
   .bc-badge.risk{background:rgba(255,92,108,.08);color:var(--red);border-color:var(--red-bd)}
   .bc-badge.seed{background:rgba(245,185,74,.1);color:var(--amber);border-color:rgba(245,185,74,.4)}  /* cc#561 */
+  /* cc#1704: gated-rebalance banner — a rebalance ran, exits+cadence processed, but the new-entry
+     candidates it computed are still sitting unconfirmed. Distinct from .bc-badge (small footer
+     pill) since this needs room for "due <date>". */
+  .bc-gate{margin-top:8px;font-size:10px;font-weight:700;color:var(--amber);
+    background:rgba(245,185,74,.1);border:1px solid rgba(245,185,74,.4);
+    border-radius:8px;padding:5px 9px;text-align:center}
 
   .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
   .bc-crit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
@@ -343,11 +349,15 @@ const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;
 
 async function init(){
   try{
-    const [qb,alpha,reg]=await Promise.all([
+    const [qb,alpha,reg,gated]=await Promise.all([
       fetchWithTimeout('/api/performance/qb').then(r=>r.json()),
       fetchWithTimeout('/api/performance/alpha').then(r=>r.json()),
       fetchWithTimeout('/api/qb/registry').then(r=>r.json()),
+      // cc#1704: gated-rebalance pill — one batch call, {basket: {due, n_candidates}}. Missing
+      // entirely (old deploy, or a fetch error) must never crash the grid — default to {}.
+      fetchWithTimeout('/api/qb/gated_rebalances').then(r=>r.json()).catch(()=>({})),
     ]);
+    const gmap=(gated&&!gated.error)?gated:{};
 
     const tot=qb.total_pnl||0;
     const alp=alpha.total?.alpha;
@@ -425,6 +435,7 @@ async function init(){
           <div class="bc-info">${pos} positions &nbsp;·&nbsp; <span class="bc-reb-link">Reb <b>${reb}</b></span></div>
           ${badge}
         </div>
+        ${gmap[key]?`<div class="bc-gate">Rebalance awaiting confirmation · due ${gmap[key].due} · ${gmap[key].n_candidates} candidate${gmap[key].n_candidates===1?'':'s'}</div>`:''}
         <div class="bc-criteria">
           <div class="bc-crit-row">
             <span class="bc-crit-label entry">Entry</span>
