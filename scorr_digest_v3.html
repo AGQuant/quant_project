@@ -597,8 +597,6 @@ function secLadders(s){
     var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals);
     var span=(hi-lo)||1;
     function pctOf(v){ return Math.max(0,Math.min(100,(v-lo)/span*100)).toFixed(2)+'%'; }
-    var s1=null, r1=null;
-    rungs.forEach(function(r){ var lab=String(r.label||'').toUpperCase(); if(lab==='S1') s1=r; if(lab==='R1') r1=r; });
     /* cc#1606: the CMP joins the level set as its own row; every level keeps its tick on the bar,
        every label sits in a row (A pivots · B day range · C CMP) at its true x where it can, and is
        pushed right (elbowed guide) only when a neighbour in the SAME row would be closer than 70px.
@@ -607,11 +605,15 @@ function secLadders(s){
     var lv = rungs.map(function(r){
       var lab=String(r.label||'').toUpperCase();
       var kind = lab.indexOf('DAY')===0 ? 'day' : (lab.charAt(0)==='R' ? 'res' : (lab.charAt(0)==='S' ? 'sup' : 'pp'));
-      return {label:r.label, value:Number(r.value), kind:kind, row:(kind==='day'?1:0), sub:''};
+      return {label:r.label, value:Number(r.value), kind:kind, row:(kind==='day'?1:0)};
     });
+    /* cc#1687-adjacent, cc#1688: the CMP row used to carry a "to S1 x% to R1 y%" sub-line built
+       from pc() (real <span> HTML) and then run through esc() below (line ~623 pre-fix) -- the
+       exact root cause of the literal "<span class=neg>" text the founder saw. That sub-line is
+       gone (scope item 2: "CMP-to-S1/R1 box line" removed); the CMP row now carries only its
+       label + value, so there is no markup-bearing string left for esc() to ever mangle. */
     if(ix.cmp!=null){
-      var cmpSub=[]; if(s1&&s1.dist_pct!=null) cmpSub.push('to S1 '+pc(s1.dist_pct)); if(r1&&r1.dist_pct!=null) cmpSub.push('to R1 '+pc(r1.dist_pct));
-      lv.push({label:'CMP', value:Number(ix.cmp), kind:'cmp', row:2, sub:cmpSub.join(' · ')});
+      lv.push({label:'CMP', value:Number(ix.cmp), kind:'cmp', row:2});
     }
     h += '<div class="rail-wrap" data-ladder="1"><div class="rail">'+
          lv.filter(function(l){return l.kind!=='cmp';}).map(function(l){ return '<div class="tick '+l.kind+'" style="left:'+pctOf(l.value)+'"></div>'; }).join('')+
@@ -620,15 +622,34 @@ function secLadders(s){
          '<svg class="lguide" aria-hidden="true"></svg>'+
          [0,1,2].map(function(ri){
            return '<div class="lrow" data-row="'+ri+'" style="top:'+(52+ri*62)+'px">'+lv.filter(function(l){return l.row===ri;}).map(function(l){
-             return '<div class="ll '+l.kind+'" data-x="'+pctOf(l.value)+'"><div class="a">'+esc(l.label)+'</div><div class="b">'+num(l.value,2)+(l.sub?' <span style="font-size:9.5px;color:var(--tx3)">'+esc(l.sub)+'</span>':'')+'</div></div>';
+             return '<div class="ll '+l.kind+'" data-x="'+pctOf(l.value)+'"><div class="a">'+esc(l.label)+'</div><div class="b">'+num(l.value,2)+'</div></div>';
            }).join('')+'</div>';
          }).join('')+
          '</div>';
-    var foot=[];
-    if(s1&&r1) foot.push('<span>S1–R1 band <b>'+num(s1.value,2)+' – '+num(r1.value,2)+'</b></span>');
-    if(s1&&s1.dist_pct!=null) foot.push('<span>to S1 <b>'+pc(s1.dist_pct)+'</b></span>');
-    if(r1&&r1.dist_pct!=null) foot.push('<span>to R1 <b>'+pc(r1.dist_pct)+'</b></span>');
-    if(foot.length) h += '<div class="idxfoot">'+foot.join('')+'</div>';
+    /* cc#1688 (founder 04-Sep screenshot): the old two-line footer (CMP-to-S1/R1 box + S1-R1 band)
+       is gone. One plain-words line takes its place, built from the SAME rungs array already on
+       screen (PP, DAY LOW, DAY HIGH) — never a second lookup. Verified against live 04-Sep close
+       data: NIFTY50 -> "23,897.70 · below PP by 0.22% · trading near day low"; BANKNIFTY ->
+       "57,369.65 · below PP by 0.07% · trading near day low" (cmp 57,369.65 sits 10.7% into a
+       57,335.15-57,656.40 day range, inside the bottom-20% "near day low" band). */
+    var ppR=null, dLowR=null, dHighR=null;
+    rungs.forEach(function(r){ var lab=String(r.label||'').toUpperCase();
+      if(lab==='PP') ppR=r; if(lab==='DAY LOW') dLowR=r; if(lab==='DAY HIGH') dHighR=r; });
+    if(ix.cmp!=null && ppR && ppR.value!=null){
+      var ppv=Number(ppR.value), cmpv=Number(ix.cmp);
+      var ppPct=(cmpv-ppv)/ppv*100, ppAbs=Math.abs(ppPct);
+      var ppCls = ppAbs<0.05 ? 'flat' : (ppPct>0?'pos':'neg');
+      var ppWords = ppAbs<0.05 ? 'at PP' : ((ppPct>0?'above':'below')+' PP by '+ppAbs.toFixed(2)+'%');
+      var rangeWords='';
+      if(dLowR&&dHighR&&dLowR.value!=null&&dHighR.value!=null){
+        var lo=Number(dLowR.value), hi=Number(dHighR.value);
+        if(hi>lo){
+          var rp=(cmpv-lo)/(hi-lo);
+          rangeWords = rp<=0.20 ? ' · trading near day low' : (rp>=0.80 ? ' · trading near day high' : ' · trading mid-range');
+        }
+      }
+      h += '<div class="idxfoot"><span><span class="'+ppCls+'">'+num(ix.cmp,2)+'</span> · '+ppWords+rangeWords+'</span></div>';
+    }
     h += '</div>';
   });
   h += '</div>';
