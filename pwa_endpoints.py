@@ -874,6 +874,11 @@ NAV_TOGGLE_JS = """
   function setHidden(h) {
     try { if (h) sessionStorage.removeItem(SKEY); else sessionStorage.setItem(SKEY, '1'); } catch (e) {}
     if (h) root.setAttribute(HID, ''); else root.removeAttribute(HID);
+    // cc#1669: showing the nav here only lifts THIS script's max-height:0 gate. cc#926's
+    // independent scroll-aware auto-hide (scorr_card_common.js) may still have the nav
+    // translateY(-100%)'d off-screen from before Show was tapped -- clear that state too,
+    // via the hook it exposes, so the two hide mechanisms stop fighting silently.
+    if (!h && window.__scorrScrollNavShow) { try { window.__scorrScrollNavShow(); } catch (e) {} }
     sync();
   }
 
