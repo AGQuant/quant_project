@@ -31,6 +31,7 @@ import os
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import JSONResponse
 from typing import Dict, Optional, Tuple
 
 from scrape_universe import in_scrape_universe, log_universe_skip   # cc#700/814: top-750 NSE scrape gate
@@ -498,6 +499,15 @@ def result_corner_v2():
             cur.execute("""SELECT UPPER(ticker), MAX(ex_date) FROM earnings_calendar
                            WHERE status='reported' GROUP BY UPPER(ticker)""")
             repdate = {r[0]: r[1] for r in cur.fetchall()}
+            # cc#1698 P0 FIX: this call was living OUTSIDE the `with` block below (section 03, right
+            # before the companies loop) — cc#1426 wired it in without checking that the cursor it
+            # needs is already closed by then (`with conn.cursor() as cur:` exits right after
+            # repdate above). Every call hit psycopg2.InterfaceError "cursor already closed" ->
+            # result_corner_v2() 500s unconditionally -> /results has been dead since 30-Aug
+            # (cc#1426, main 75596ef). Moved here, inside the SAME cursor block it always ran
+            # under conceptually — still ONE batched call for the whole page, per cc#1426's own
+            # intent, just executed while the cursor is actually still open.
+            pe_map = segment_pe_map(cur)
 
         # ── per-segment same-quarter medians (needed for beats-vs-sector) ──
         seg_syms = defaultdict(list)
@@ -602,9 +612,8 @@ def result_corner_v2():
         # ── section 03 companies: same-quarter reporters (numbers) + reported-but-unscraped (dashes) ──
         season_win = date.today() - timedelta(days=45)
         listed = set(same) | {s for s, d in repdate.items() if s in uni and d and d >= season_win}
-        # cc#1426: ONE batched segment_pe_map query for this whole page, reused per company below —
-        # not a per-symbol query in this loop.
-        pe_map = segment_pe_map(cur)
+        # cc#1426/cc#1698: pe_map computed above, inside the cursor block — ONE batched call for
+        # the whole page, reused per company below, never a per-symbol query in this loop.
         companies = []
         for s in listed:
             u = uni[s]; f = fund.get(s); is_same = s in fund and fund[s]["latest_q"] == season_end
@@ -637,6 +646,14 @@ def result_corner_v2():
         companies.sort(key=lambda c: (c["reported_date"] is None, c["reported_date"] or "", ), reverse=True)
         return {"season": {"quarter": _fq_label(season_end), "quarter_end": str(season_end)},
                 "summary": summary, "sectors": sectors, "companies": companies}
+    except Exception as e:
+        # cc#1698 P0 GUARD: this function had NO top-level except -- an unhandled exception (the
+        # closed-cursor bug this same card fixes) propagated to FastAPI's generic handler with no
+        # structured body, so the page's own catch could not name what failed. Never swallowed into
+        # an empty 200: a real 500, a named exception class, and log.exception so the Railway log
+        # carries the traceback.
+        log.exception("cc#1698 result_corner_v2 failed")
+        return JSONResponse(status_code=500, content={"error": f"{type(e).__name__}: {str(e)[:300]}"})
     finally:
         conn.close()
 
