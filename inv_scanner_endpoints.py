@@ -18,8 +18,48 @@ import psycopg
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
+# cc#1697: the (i) sheet's entry/exit numbers, imported not retyped — inv_scanner_rules.py is
+# the engine's own constants module (ENTRY_MOM/ENTRY_REV/EXIT_MOM/EXIT_REV already power run()'s
+# actual gate/exit checks there); a read-only import here means the sheet can never silently
+# drift from what the engine really enforces. Band thresholds (84/65/50) are NOT imported — they
+# are inline literals inside inv_scanner_scoring.py's _band(), which is scanner SCORING and stays
+# untouched per this card's own do_not_touch, so they are restated as literals in META below
+# (verified against inv_scanner_scoring.py at build time; flagged in cc_task_logs 1697 that this
+# is the one place the card's "84/65/50 appear once" verify line does not literally hold).
+from inv_scanner_rules import ENTRY_MOM, ENTRY_REV, EXIT_MOM, EXIT_REV
+
 log = logging.getLogger("scorr.inv_scanner_page")
 router = APIRouter(tags=["investment_scanner"])
+
+META = {
+    "what_it_is": "Two tracks, momentum and reversal, each scored 0–100. Runs once a day, "
+                  "after the GVM engine writes for the night (EOD).",
+    "universe": "Every symbol in the GVM universe, plus the quant basket names, plus two extra "
+                "screens (a momentum screen and a quality-improving “gv rising” screen) "
+                "— each name carries every source it qualified through.",
+    "entry": {
+        "rule": "BUY when momentum score > {mom} OR reversal score > {rev}, AND all four price "
+                "gates pass.".format(mom=ENTRY_MOM, rev=ENTRY_REV),
+        "gates": ["day return is positive", "week gain is between 0% and 5%",
+                  "month gain is between 0% and 7%", "the stock's sector averaged a positive month"],
+        "thresholds": {"entry_mom": ENTRY_MOM, "entry_rev": ENTRY_REV},
+    },
+    "exit": {
+        "rule": "A momentum entry exits when its momentum score drops below {mom}. A reversal "
+                "entry exits when its reversal score drops below {rev}. The 5-point gap stops "
+                "churn. There is no stop-loss or target in V1 — exits are score-decay only."
+                .format(mom=EXIT_MOM, rev=EXIT_REV),
+        "thresholds": {"exit_mom": EXIT_MOM, "exit_rev": EXIT_REV},
+    },
+    "bands": {
+        "rule": "STRONG BUY ≥ 84 · ACCUMULATE ≥ 65 · WATCH ≥ 50 · AVOID < 50, "
+                "on both tracks.",
+        "thresholds": {"strong_buy": 84, "accumulate": 65, "watch": 50},
+    },
+    "honesty": "Research only — this is a scanner, not a trade recommendation. V1 has no "
+               "stop-loss or target leg. Every number on this page is as of the run date shown, "
+               "not live.",
+}
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -113,4 +153,4 @@ def board(track: str = "momentum", limit: int = 100):
                           if st_status else None),
                 "s1": s1 if isinstance(s1, dict) else None,
             })
-    return {"run_date": str(d), "track": track, "count": len(rows), "rows": rows}
+    return {"run_date": str(d), "track": track, "count": len(rows), "rows": rows, "meta": META}

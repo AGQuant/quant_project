@@ -61,12 +61,42 @@
   #posCard{margin-bottom:14px}
   #posCard .bar{padding:12px 16px 0;margin-bottom:0}
   @media(max-width:760px){.wrap{padding:12px 10px 64px} thead th,tbody td{padding:7px 6px;font-size:12px}}
+
+  /* cc#1697: title (i) button + rules sheet — a self-contained popover in this page's own
+     token-contract styling (no shared "cc#1225" component found under that name — see
+     cc_task_logs 1697). h1 becomes a flex row so the button sits right after the title text. */
+  .h1row{display:flex;align-items:center;gap:8px}
+  .h1row h1{margin:4px 0 2px}
+  .ibtn{width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:var(--panel);
+        color:var(--mut);font-size:11px;font-weight:800;line-height:1;cursor:pointer;
+        display:inline-flex;align-items:center;justify-content:center;flex:none}
+  .ibtn:hover{color:var(--txt);border-color:var(--dim)}
+  .isheet-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;
+             align-items:flex-end;justify-content:center}
+  .isheet-ov.open{display:flex}
+  .isheet{background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 0 0;
+          width:100%;max-width:560px;max-height:82vh;overflow-y:auto;padding:18px 20px 24px}
+  @media(min-width:760px){.isheet-ov{align-items:center}.isheet{border-radius:16px;max-height:78vh}}
+  .isheet-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .isheet-t{font-size:15px;font-weight:800}
+  .isheet-x{background:none;border:none;color:var(--mut);font-size:20px;cursor:pointer;line-height:1}
+  .isheet-x:hover{color:var(--txt)}
+  .isheet-sec{margin-bottom:14px}
+  .isheet-k{font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+            color:var(--mut);margin-bottom:4px}
+  .isheet-v{font-size:12.5px;color:var(--txt);line-height:1.55}
+  .isheet-v ul{margin:4px 0 0 18px;padding:0}
+  .isheet-v li{margin-bottom:2px}
+  .isheet-hon{font-size:11px;color:var(--dim);border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
 </style>
 </head>
 <body>
 <div id="scorr-nav"></div>
 <div class="wrap">
-  <h1>Investment Scanner</h1>
+  <div class="h1row">
+    <h1>Investment Scanner</h1>
+    <button class="ibtn" onclick="openInfoSheet()" aria-label="How the Investment Scanner enters and exits" title="How the Investment Scanner enters and exits">i</button>
+  </div>
   <div class="sub">TWO-TRACK /100 · GATED ENTRIES · GVM UNIVERSE + BASKETS · EOD</div>
 
   <!-- cc#1297: Open/Closed Positions, above the universe stats — founder said above universe
@@ -103,6 +133,16 @@
       <thead id="thead"></thead>
       <tbody id="body"></tbody>
     </table></div>
+  </div>
+</div>
+
+<div class="isheet-ov" id="isheetOv" onclick="if(event.target===this)closeInfoSheet()">
+  <div class="isheet" role="dialog" aria-modal="true" aria-labelledby="isheetT">
+    <div class="isheet-hd">
+      <div class="isheet-t" id="isheetT">How the Investment Scanner enters and exits</div>
+      <button class="isheet-x" aria-label="Close" onclick="closeInfoSheet()">&#10005;</button>
+    </div>
+    <div id="isheetBody">Loading…</div>
   </div>
 </div>
 
@@ -201,7 +241,14 @@ function pick(t){
 function load(t){
   (window.fetchWithTimeout||fetch)('/api/inv-scanner/board?track='+t+'&limit=150')
     .then(function(r){return r.json();})
-    .then(function(d){DATA[t]=d; if(TRACK===t){fillTagFilter();render();}})
+    .then(function(d){
+      DATA[t]=d;
+      if(TRACK===t){fillTagFilter();render();}
+      // cc#1697: a click on (i) before either fetch resolves shows a loading state — self-heal
+      // once real data (and its meta) actually lands, instead of staying stuck on that message.
+      var ov=document.getElementById('isheetOv');
+      if(ov&&ov.classList.contains('open'))renderInfoSheet();
+    })
     .catch(function(e){document.getElementById('meta').textContent='Could not load — '+e.message;});
 }
 
@@ -229,7 +276,7 @@ function renderPos(){
   var rows=POS_ROWS.filter(function(r){return r.status===POS_STATUS;});
   if(POS_STATUS==='open'){
     document.getElementById('posThead').innerHTML='<tr><th>Symbol</th><th>Track</th>'
-      +'<th class="num">Entry Score</th><th>Entered</th><th class="num">Entry Price</th>'
+      +'<th class="num" title="score at entry, on the qualifying track">Entry Score</th><th>Entered</th><th class="num">Entry Price</th>'
       +'<th class="num">CMP</th><th class="num">Day P&amp;L</th><th class="num">Net P&amp;L</th></tr>';
     document.getElementById('posBody').innerHTML=rows.length?rows.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td><td>'+esc(r.entry_track)+'</td>'
@@ -240,7 +287,7 @@ function renderPos(){
     }).join(''):'<tr><td colspan="8" class="empty">No open scanner positions</td></tr>';
   } else {
     document.getElementById('posThead').innerHTML='<tr><th>Symbol</th><th>Track</th>'
-      +'<th class="num">Entry Score</th><th>Entered</th><th>Exited</th><th>Exit Reason</th>'
+      +'<th class="num" title="score at entry, on the qualifying track">Entry Score</th><th>Entered</th><th>Exited</th><th>Exit Reason</th>'
       +'<th class="num">Entry Price</th><th class="num">Exit Price</th><th class="num">Net P&amp;L</th></tr>';
     document.getElementById('posBody').innerHTML=rows.length?rows.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td><td>'+esc(r.entry_track)+'</td>'
@@ -259,6 +306,35 @@ function loadPos(){
     .then(function(r){return r.json();})
     .then(function(d){POS_ROWS=d.rows||[]; renderPos();})
     .catch(function(e){document.getElementById('posMeta').textContent='Could not load — '+e.message;});
+}
+
+// cc#1697: the (i) sheet. Every number below is interpolated from meta on the board payload
+// (inv_scanner_endpoints.py) — nothing here is typed into the HTML. Falls back to whichever
+// track has already loaded; if neither has, opens with a loading state and fills in once one
+// resolves (boot() kicks off both fetches on page load, so this is normally instant).
+function infoSheetHtml(meta){
+  if(!meta) return '<div class="isheet-sec"><div class="isheet-v">Could not load the rules — try again in a moment.</div></div>';
+  var gates=(meta.entry.gates||[]).map(function(g){return '<li>'+esc(g)+'</li>';}).join('');
+  return ''
+    +'<div class="isheet-sec"><div class="isheet-k">What it is</div><div class="isheet-v">'+esc(meta.what_it_is)+'</div></div>'
+    +'<div class="isheet-sec"><div class="isheet-k">Who is scanned</div><div class="isheet-v">'+esc(meta.universe)+'</div></div>'
+    +'<div class="isheet-sec"><div class="isheet-k">Entry</div><div class="isheet-v">'+esc(meta.entry.rule)+'<ul>'+gates+'</ul></div></div>'
+    +'<div class="isheet-sec"><div class="isheet-k">Exit</div><div class="isheet-v">'+esc(meta.exit.rule)+'</div></div>'
+    +'<div class="isheet-sec"><div class="isheet-k">Bands</div><div class="isheet-v">'+esc(meta.bands.rule)+'</div></div>'
+    +'<div class="isheet-hon">'+esc(meta.honesty)+'</div>';
+}
+function renderInfoSheet(){
+  var d=DATA.momentum||DATA.reversal;
+  document.getElementById('isheetBody').innerHTML=infoSheetHtml(d&&d.meta);
+}
+function openInfoSheet(){
+  renderInfoSheet();
+  document.getElementById('isheetOv').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeInfoSheet(){
+  document.getElementById('isheetOv').classList.remove('open');
+  document.body.style.overflow='';
 }
 
 function boot(){load('momentum');load('reversal');loadPos();}
