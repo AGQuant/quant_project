@@ -923,38 +923,42 @@ def mobile_home2(request: Request):
         # that disagrees with the Digest chart for the same moment.
         # NO NEW COMPOSER AND NO CLIENT MATHS: this reads the series the PCR scheduler already
         # writes. Nothing computes a PCR here.
-        # AS-OF IS NOT OPTIONAL. pcr_asof carries the bar time and pcr_basis says LIVE or EOD, so
-        # the label can never show a live-looking number without saying which bar it is. That is
-        # why they are returned together from ONE query rather than assembled by the caller — a
-        # value and its timestamp that can be fetched separately will eventually be shown apart.
-        pcr_latest = pcr_date = pcr_asof = None
-        pcr_basis = "EOD"
-        pcr_stale = False
+        # AS-OF IS NOT OPTIONAL. pcr_as_of carries the reading's own timestamp and pcr_basis says
+        # LIVE / LAST / DAILY, so the label can never show a live-looking number without saying
+        # which bar it is. That is why they are returned together from ONE query rather than
+        # assembled by the caller — a value and its timestamp fetched separately will eventually
+        # be shown apart.
+        # cc#1670 (founder 04-Sep 09:20 IST): the OLD query gated on `ts::date = today` (both in
+        # the SQL and again in the `_i[1].date() == now.date()` check below) — so on any tick
+        # before the FIRST 5-min bar landed for the day, this fell straight to pcr_daily and
+        # printed a PAST session's number captioned "EOD", even though pcr_intraday still held a
+        # perfectly good latest bar from yesterday. The card is meant to state the DATA's own
+        # as-of, not "today or nothing" — so the date filter is gone; the query below is now just
+        # "the newest real intraday reading, whatever its date".
+        pcr_latest = pcr_date = pcr_asof = pcr_as_of = None
+        pcr_basis = "DAILY"
         try:
             cur.execute("""
                 SELECT pcr_total, ts FROM pcr_intraday
                 WHERE underlying='NIFTY' AND pcr_total IS NOT NULL
-                  AND ts::date = (SELECT MAX(ts)::date FROM pcr_intraday WHERE underlying='NIFTY')
                 ORDER BY ts DESC LIMIT 1
             """)
             _i = cur.fetchone()
-            if _i and _i[0] is not None and _i[1] is not None and _i[1].date() == now.date():
+            if _i and _i[0] is not None and _i[1] is not None:
                 pcr_latest = float(_i[0])
                 pcr_date = _i[1].date().isoformat()
                 pcr_asof = _i[1].strftime("%H:%M")
+                pcr_as_of = _i[1].strftime("%Y-%m-%d %H:%M")
                 # cc#1576 (Fable 4642, founder screenshot 19:34 IST "PCR 1.44 · 15:25 · LIVE" on a
-                # closed market): LIVE only while the session is open. After 15:30 IST, or on a
-                # non-trading day, the basis is CLOSE — the pill says "close", never LIVE. Same
-                # rule the Digest Internals pill follows (cc#1607).
+                # closed market): LIVE only while the bar is TODAY'S and the session is open.
+                # Any other real intraday bar (yesterday's close tick, or today's read outside
+                # 09:15-15:30) is LAST — a genuine reading, just not the live one. Same rule the
+                # Digest Internals pill follows (cc#1607), extended to cover the pre-open gap.
                 _in_session = bool(is_td and now.time() >= dt_time(9, 15) and now.time() <= dt_time(15, 30))
-                pcr_basis = "LIVE" if _in_session else "CLOSE"
-                # STALENESS GUARD (pcr_guard convention): a bar older than 10 minutes during the
-                # session is shown WITH its time and tagged, never presented as current. It is not
-                # suppressed — a 20-minute-old PCR is still the last thing that happened.
-                if _in_session:
-                    pcr_stale = (now - _i[1]).total_seconds() > 600
+                _is_today = _i[1].date() == now.date()
+                pcr_basis = "LIVE" if (_is_today and _in_session) else "LAST"
         except Exception as e:
-            log.warning("cc#1140 intraday PCR unavailable, falling back to EOD: %s", e)
+            log.warning("cc#1140 intraday PCR unavailable, falling back to DAILY: %s", e)
             try:
                 cur.connection.rollback()
             except Exception:
@@ -968,7 +972,16 @@ def mobile_home2(request: Request):
             _p = cur.fetchone()
             pcr_latest = float(_p[0]) if _p and _p[0] is not None else None
             pcr_date = _p[1].isoformat() if _p and _p[1] is not None else None
-            pcr_basis = "EOD"
+            pcr_as_of = pcr_date   # DAILY basis: bare date only, never a fabricated time
+            pcr_basis = "DAILY"
+        # STALENESS. cc#1670: this is now derived client-side from pcr_as_of via the shared
+        # scorrAsofStamp() helper (APP_TABLE_ASOF_STAMP_V1, session_log 34535) rather than a
+        # server-computed pcr_stale flag — one staleness rule for every app table, not a second
+        # one hand-rolled here. pcr_stale is kept in the payload, computed the same way, only so
+        # any OTHER surface still reading it does not silently go stale-blind in this same push.
+        pcr_stale = False
+        if pcr_basis == "LIVE" and pcr_as_of:
+            pcr_stale = (now - datetime.strptime(pcr_as_of, "%Y-%m-%d %H:%M")).total_seconds() > 600
         # cc#1568: the mood word + dial segments now come from the ONE server-side composer
         # (pcr_mood.py, session_log 36200) — the client draws what it is told, never re-bands.
         try:
@@ -1343,11 +1356,13 @@ def mobile_home2(request: Request):
             "chips": chips,
             "pcr": pcr_latest,
             "pcr_date": pcr_date,
-            # cc#1140: the as-of travels WITH the value, always. pcr_basis is LIVE, CLOSE or EOD,
-            # pcr_asof is the bar time when live, pcr_stale flags a bar older than 15 min during
-            # the session. The card cannot render a live-looking number without them because they
-            # arrive in the same object from the same query.
+            # cc#1140/cc#1670: the as-of travels WITH the value, always. pcr_basis is now LIVE,
+            # LAST or DAILY (the EOD/CLOSE words are retired — see the query above). pcr_as_of is
+            # the reading's own timestamp ('YYYY-MM-DD HH:MM' for LIVE/LAST, a bare date for
+            # DAILY) and is what the card's caption now reads via scorrAsofStamp(); pcr_date /
+            # pcr_asof / pcr_stale are kept alongside for any other reader of this payload.
             "pcr_asof": pcr_asof,
+            "pcr_as_of": pcr_as_of,
             "pcr_basis": pcr_basis,
             "pcr_stale": pcr_stale,
             "pcr_mood": pcr_mood_obj,   # cc#1568: {label, band, dial_segments, label_colour, reason, note}
