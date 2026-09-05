@@ -1691,3 +1691,81 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
     return '<div class="g-lbl" style="margin-top:0;margin-bottom:4px">VOLUME · '+n+'-DAY ACCUMULATION / DISTRIBUTION</div>' + svg + cap + tip + note;
   };
 })();
+
+/* ── cc#1708: SHARED (i) INFO SHEET — window.ScorrInfoSheet ──────────────────────────────────
+   Lifted from the cc#1697 page-local shell in scorr_inv_scanner.html (spec A3) so the Investment
+   Scanner and the Quant Basket cards open the SAME sheet: same classes (.ibtn, .isheet-*), same
+   token-contract styling, one copy. CSS is injected once; the overlay DOM is created on first
+   open. Tap on the backdrop, the X, or Escape closes it.
+     ScorrInfoSheet.open(title, bodyHtml)   -- bodyHtml is trusted page-built markup
+     ScorrInfoSheet.close()
+     ScorrInfoSheet.isOpen()
+     ScorrInfoSheet.section(label, html)    -- one '<div class="isheet-sec">…' block
+     ScorrInfoSheet.setBody(html)           -- re-render while open (async payloads)
+   Class names are unchanged from cc#1697 so a page that still ships its own copy of the CSS
+   renders identically; the shared rules use the same specificity, so whichever loads last wins
+   with the same values. */
+(function () {
+  if (window.ScorrInfoSheet) return;
+  var CSS = ''
+    + '.ibtn{width:20px;height:20px;border-radius:50%;border:1px solid var(--line,#243049);background:var(--panel,#0E1526);'
+    + '  color:var(--mut,#94a3b8);font-size:11px;font-weight:800;line-height:1;cursor:pointer;'
+    + '  display:inline-flex;align-items:center;justify-content:center;flex:none}'
+    + '.ibtn:hover{color:var(--txt,#e6ecf5);border-color:var(--dim,#5E6B8F)}'
+    + '.isheet-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;'
+    + '  align-items:flex-end;justify-content:center}'
+    + '.isheet-ov.open{display:flex}'
+    + '.isheet{background:var(--panel,#0E1526);border:1px solid var(--line,#243049);border-radius:16px 16px 0 0;'
+    + '  width:100%;max-width:560px;max-height:82vh;overflow-y:auto;padding:18px 20px 24px;color:var(--txt,#e6ecf5)}'
+    + '@media(min-width:760px){.isheet-ov{align-items:center}.isheet{border-radius:16px;max-height:78vh}}'
+    + '.isheet-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px}'
+    + '.isheet-t{font-size:15px;font-weight:800}'
+    + '.isheet-x{background:none;border:none;color:var(--mut,#94a3b8);font-size:20px;cursor:pointer;line-height:1}'
+    + '.isheet-x:hover{color:var(--txt,#e6ecf5)}'
+    + '.isheet-sec{margin-bottom:14px}'
+    + '.isheet-k{font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;'
+    + '  color:var(--mut,#94a3b8);margin-bottom:4px}'
+    + '.isheet-v{font-size:12.5px;color:var(--txt,#e6ecf5);line-height:1.55}'
+    + '.isheet-v ul{margin:4px 0 0 18px;padding:0}'
+    + '.isheet-v li{margin-bottom:2px}'
+    + '.isheet-hon{font-size:11px;color:var(--dim,#5E6B8F);border-top:1px solid var(--line,#243049);padding-top:10px;margin-top:4px}';
+  var ov = null, tEl = null, bEl = null;
+  function css() {
+    if (document.getElementById('scorr-isheet-css')) return;
+    var s = document.createElement('style'); s.id = 'scorr-isheet-css'; s.textContent = CSS;
+    document.head.appendChild(s);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function ensure() {
+    if (ov) return;
+    css();
+    ov = document.createElement('div'); ov.className = 'isheet-ov'; ov.id = 'scorrIsheetOv';
+    ov.innerHTML = '<div class="isheet" role="dialog" aria-modal="true" aria-labelledby="scorrIsheetT">'
+      + '<div class="isheet-hd"><div class="isheet-t" id="scorrIsheetT"></div>'
+      + '<button class="isheet-x" type="button" aria-label="Close">&#10005;</button></div>'
+      + '<div class="isheet-bd" id="scorrIsheetBody"></div></div>';
+    document.body.appendChild(ov);
+    tEl = ov.querySelector('#scorrIsheetT'); bEl = ov.querySelector('#scorrIsheetBody');
+    ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    ov.querySelector('.isheet-x').addEventListener('click', close);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen()) close(); });
+  }
+  function isOpen() { return !!(ov && ov.classList.contains('open')); }
+  function open(title, html) {
+    ensure();
+    tEl.textContent = title || '';
+    bEl.innerHTML = html || '';
+    ov.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function close() {
+    if (!ov) return;
+    ov.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+  function setBody(html) { ensure(); bEl.innerHTML = html || ''; }
+  function section(label, html) {
+    return '<div class="isheet-sec"><div class="isheet-k">' + esc(label) + '</div><div class="isheet-v">' + (html || '') + '</div></div>';
+  }
+  window.ScorrInfoSheet = { open: open, close: close, isOpen: isOpen, setBody: setBody, section: section, esc: esc };
+})();
