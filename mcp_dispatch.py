@@ -109,6 +109,7 @@ MCP_TOOLS = [
     {"name":"qb_summary","description":"Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
     {"name":"qb_rebalance_log","description":"Quant Basket: rebalance + EOD check history.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"},"limit":{"type":"integer"}},"required":[]}},
     {"name":"qb_registry","description":"Quant Basket: registry of all baskets.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
+    {"name":"qb_discretionary_rebalance","description":"Quant Basket (discretionary only: model_portfolio, finz_*): need-basis rebalance on founder instruction — close sells and open buys at as_of_date close in ONE transaction, writes one rebalance_log row; refuses (409, nothing written) if cap or cash would be breached; dry_run=true previews and writes nothing.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"},"as_of_date":{"type":"string","description":"YYYY-MM-DD trading day; closes come from raw_prices on this date"},"sells":{"type":"array","items":{"type":"object","properties":{"symbol":{"type":"string"},"reason":{"type":"string"}},"required":["symbol"]}},"buys":{"type":"array","items":{"type":"object","properties":{"symbol":{"type":"string"},"slot_rs":{"type":"number"}},"required":["symbol","slot_rs"]}},"dry_run":{"type":"boolean"},"note":{"type":"string"}},"required":["basket_name","as_of_date"]}},
     {"name":"fix_all_allocations","description":"Quant Basket: fix allocation column + insert NIFTYBEES residual for all 4 baskets.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"daily_adr","description":"ADR trend last N days from adr_daily.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"daily_pcr","description":"PCR trend last N days from pcr_daily.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
@@ -320,6 +321,8 @@ async def _call_tool(name, args):
             r = await client.get(f"{BASE_URL}/api/qb/summary", params={"basket_name": args.get("basket_name","large_cap")}); return r.json()
         elif name == "qb_rebalance_log":
             r = await client.get(f"{BASE_URL}/api/qb/rebalance_log", params={"basket_name": args.get("basket_name","large_cap"), "limit": args.get("limit",30)}); return r.json()
+        elif name == "qb_discretionary_rebalance":
+            r = await client.post(f"{BASE_URL}/api/qb/discretionary/rebalance", json=args, headers=h); return r.json()
         elif name == "qb_registry":
             params = {}
             if args.get("basket_name"): params["basket_name"] = args["basket_name"]

@@ -451,6 +451,17 @@ def _rule_text(p):
     return {"rule": "Stop", "text": "stop exit (reason not logged)", "measured": None, "kind": "hard_stop"}
 
 
+def _first_num(*vals):
+    """cc#1715: first value that parses as a number, else None (block footer cash)."""
+    for v in vals:
+        try:
+            if v is not None:
+                return round(float(v), 2)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _money(q, px):
     try:
         return round(float(q) * float(px), 2)
@@ -521,7 +532,10 @@ def _rebalance_blocks(log_rows, positions, held_asof, value_by_date, reasons):
             "date": d, "kind": "rebalance" if d in due else "quality_exit",
             "state": state, "chip": chip, "sells": sells, "buys": buys,
             "footer": {"held_after": len(held), "held_symbols": held, "bees_held": bees_held,
-                       "book_value_after": (value_by_date.get(dobj) if dobj else None), "cash_move": cash},
+                       "book_value_after": (value_by_date.get(dobj) if dobj else None), "cash_move": cash,
+                       # cc#1715: cash left after the rebalance when the row logged it (discretionary
+                       # rows write cash_after; the seed row wrote cash; QB rows carry alloc_residual).
+                       "cash_after": _first_num(a.get("cash_after"), a.get("cash"), a.get("alloc_residual"))},
             "next_due": a.get("advanced_to"), "n_candidates": len(cands),
         })
     return blocks

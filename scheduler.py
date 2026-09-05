@@ -3181,6 +3181,18 @@ def _bg_qb_eod():
                 cur.execute("SELECT basket_name, next_rebalance FROM quant_basket_registry "
                             "WHERE is_active=TRUE ORDER BY basket_name")
                 baskets = [(r[0], r[1]) for r in cur.fetchall()]
+            # cc#1715 scope 2: DISCRETIONARY baskets (app_config qb_discretionary_baskets —
+            # model_portfolio, finz_*) are never put through run_scheduled_rebalance: they have no
+            # selection engine and change only on founder instruction (qb_discretionary_rebalance).
+            # They still get the nightly run_eod_checker (marks + HS1) and the qb_nav row below,
+            # exactly like every other active registry basket. Registry-derived, never a name list.
+            try:
+                from qb_endpoints import _discretionary_baskets
+                with conn.cursor() as cur:
+                    discretionary = _discretionary_baskets(cur)
+            except Exception as e:
+                discretionary = set()
+                log.error(f"qb_eod discretionary list: {e}")
             # cc#838 step_3: SEED BEFORE REBALANCE. An active registry basket that has never held a
             # position is not in a rebalance situation — it has never started. run_scheduled_rebalance
             # deliberately never buys (its docstring is explicit), so a never-seeded basket would keep
@@ -3197,7 +3209,7 @@ def _bg_qb_eod():
             checked = 0; rebalanced = []
             for name, next_reb in baskets:
                 try:
-                    if next_reb and next_reb <= today:
+                    if next_reb and next_reb <= today and name not in discretionary:
                         qb_rebalance.run_scheduled_rebalance(conn, name)
                         rebalanced.append(name); checked += 1
                     else:
