@@ -24,12 +24,13 @@ import logging
 
 import psycopg
 
+import qb_config   # cc#1710: max_stocks + capital_rs from quant_basket_config, never literals
+
 log = logging.getLogger("qb_smallcap_select")
 
 BASKET      = "small_cap"
-MAX_STOCKS  = 20
+# cc#1710: MAX_STOCKS / CAPITAL literals retired — qb_config.basket_params() (config 20 / Rs 5L)
 BRAKE_N     = 10          # below this, size at 5L/10 and hold the rest in cash
-CAPITAL     = 500000.0
 GVM_MIN     = 8.0
 V_MIN       = 7.5
 DGVM_MIN    = 0.5         # strict > : (gvm_now - gvm_180d_ago) > 0.5
@@ -152,6 +153,8 @@ def propose_rebalance(conn=None, as_of=None):
         with conn.cursor() as cur:
             cur.execute("SELECT CURRENT_DATE")
             as_of = cur.fetchone()[0]
+    p = qb_config.basket_params(conn, BASKET)          # cc#1710
+    max_stocks, capital = p["max_stocks"], p["capital"]
     try:
         with conn.cursor() as cur:
             cur.execute(_QUALIFY_SQL, {"asof": as_of, "gvm": GVM_MIN, "v": V_MIN,
@@ -173,18 +176,18 @@ def propose_rebalance(conn=None, as_of=None):
                 })
 
             n_qualified = len(qualified)
-            entries = qualified[:MAX_STOCKS]          # already gvm-desc; cap at 20
+            entries = qualified[:max_stocks]          # already gvm-desc; cap from config (20)
             n = len(entries)
 
             # sizing: N>=10 -> equal 5L/N fully invested; N<10 -> 5L/10 (50k) per name, rest cash
             if n == 0:
-                slot_value, cash_value, mode = 0.0, CAPITAL, "empty"
+                slot_value, cash_value, mode = 0.0, capital, "empty"
             elif n < BRAKE_N:
-                slot_value = round(CAPITAL / BRAKE_N, 2)          # 50,000
-                cash_value = round(CAPITAL - slot_value * n, 2)
+                slot_value = round(capital / BRAKE_N, 2)          # 50,000
+                cash_value = round(capital - slot_value * n, 2)
                 mode = "brake_5L_div_10"
             else:
-                slot_value = round(CAPITAL / n, 2)
+                slot_value = round(capital / n, 2)
                 cash_value = 0.0
                 mode = "equal_5L_div_N"
             for e in entries:
@@ -198,8 +201,9 @@ def propose_rebalance(conn=None, as_of=None):
         return {
             "as_of": str(as_of),
             "basket": BASKET,
-            "capital": CAPITAL,
-            "max_stocks": MAX_STOCKS,
+            "capital": capital,
+            "max_stocks": max_stocks,
+            "cap_source": p["source"],
             "entries": entries,
             "n_qualified": n_qualified,
             "n_selected": n,
@@ -214,7 +218,7 @@ def propose_rebalance(conn=None, as_of=None):
                 "dgvm_lookback": "gvm_history nearest score in [as_of-200, as_of-180]",
                 "seg_avg_source": "sector_ratings.mcap_weighted_gvm",
                 "themes": list(THEME_SEGMENTS.keys()),
-                "sizing": f"N<={MAX_STOCKS} equal 5L/N; N<{BRAKE_N} -> 5L/{BRAKE_N} per name, rest cash",
+                "sizing": f"N<={max_stocks} equal capital/N; N<{BRAKE_N} -> capital/{BRAKE_N} per name, rest cash",
                 "exit": "UNCHANGED (HS1 -20% / HS2 -10% vs Nifty / quarterly screen); entry-only engine",
             },
         }

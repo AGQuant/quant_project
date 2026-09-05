@@ -22,12 +22,13 @@ import logging
 
 import psycopg
 
+import qb_config   # cc#1710
+
 log = logging.getLogger("qb_contra_select")
 
 BASKET      = "contra_value"
-CAPITAL     = 500000.0
-SLOT_VALUE  = 50000.0
-TOP_N       = 10
+# cc#1710: capital / slot_value / top_n literals retired — qb_config.basket_params() (config
+# top10 / Rs 5L); slot = capital / top_n = Rs 50k, as spec 6104 states.
 GVM_MIN     = 7.0     # strict >
 G_MIN       = 7.0     # >=
 V_MIN       = 7.5     # >=
@@ -94,6 +95,9 @@ def propose_rebalance(conn=None, as_of=None):
         with conn.cursor() as cur:
             cur.execute("SELECT CURRENT_DATE")
             as_of = cur.fetchone()[0]
+    p = qb_config.basket_params(conn, BASKET)          # cc#1710
+    top_n, capital = p["max_stocks"], p["capital"]
+    slot_value = round(capital / top_n, 2)             # Rs 5L/10 = 50k (spec 6104)
     try:
         with conn.cursor() as cur:
             cur.execute(_SCREEN_SQL, {"gvm": GVM_MIN, "g": G_MIN, "v": V_MIN,
@@ -109,21 +113,21 @@ def propose_rebalance(conn=None, as_of=None):
             n_qual = len(qualifiers)
 
             # Max 10 slots: top-10 by V (already sorted V desc, gvm desc, symbol) when >10, else all
-            entries = qualifiers[:TOP_N]
+            entries = qualifiers[:top_n]
             for e in entries:
-                e["slot_value"] = SLOT_VALUE
+                e["slot_value"] = slot_value
             n_sel = len(entries)
-            cash = round(CAPITAL - SLOT_VALUE * n_sel, 2)
-            note = (f"N={n_qual} > {TOP_N} -> top {TOP_N} by V score"
-                    if n_qual > TOP_N else f"N={n_qual} <= {TOP_N} -> hold all")
+            cash = round(capital - slot_value * n_sel, 2)
+            note = (f"N={n_qual} > {top_n} -> top {top_n} by V score"
+                    if n_qual > top_n else f"N={n_qual} <= {top_n} -> hold all")
 
             cur.execute("SELECT symbol FROM quant_paper_positions "
                         "WHERE basket_name=%s AND status='open'", (BASKET,))
             holdings = [row[0] for row in cur.fetchall()]
 
         return {
-            "as_of": str(as_of), "basket": BASKET, "capital": CAPITAL,
-            "slot_value": SLOT_VALUE, "top_n": TOP_N,
+            "as_of": str(as_of), "basket": BASKET, "capital": capital, "cap_source": p["source"],
+            "slot_value": slot_value, "top_n": top_n,
             "qualifiers": qualifiers, "n_qualified": n_qual,
             "entries": entries, "n_selected": n_sel, "cash_value": cash,
             "selection_note": note, "holdings": holdings, "entry_only": False,
@@ -131,8 +135,8 @@ def propose_rebalance(conn=None, as_of=None):
                 "universe": "universe_technicals (full) JOIN gvm_scores",
                 "screen": "GVM>7 AND G>=7 AND V>=7.5 AND M<=6.5 AND seg_avg_GVM>6 AND above_20DMA AND mcap>1000Cr",
                 "thesis": "quality (G) cheap (V) in a healthy sector, momentum washed out (low M), turn starting (above 20-DMA)",
-                "selection": f"max {TOP_N}; N>{TOP_N} -> top {TOP_N} by V desc (gvm tiebreak); else all",
-                "sizing": f"Rs {int(SLOT_VALUE)}/slot; empty slots = cash",
+                "selection": f"max {top_n}; N>{top_n} -> top {top_n} by V desc (gvm tiebreak); else all",
+                "sizing": f"Rs {int(slot_value)}/slot; empty slots = cash",
                 "exits": "HS1 -20% + GVM<6.8 quality exit + M>=8 profit-take (M_RECOVERED); no HS2, no rank",
             },
         }

@@ -23,12 +23,13 @@ import logging
 
 import psycopg
 
+import qb_config   # cc#1710
+
 log = logging.getLogger("qb_breakout_select")
 
 BASKET      = "breakout_52w"
-CAPITAL     = 500000.0
-SLOT_VALUE  = 50000.0     # Rs 5L/10, always
-TOP_N       = 10
+# cc#1710: capital / slot_value / top_n literals retired — qb_config.basket_params() (config
+# top10 / Rs 5L); slot = capital / top_n = Rs 50k, always, as spec 6103 states.
 MIN_N       = 5           # below this -> fully cash (breakouts in a dead tape are traps)
 GVM_MIN     = 7.5
 WK52_MIN    = 90
@@ -105,6 +106,9 @@ def propose_rebalance(conn=None, as_of=None):
         with conn.cursor() as cur:
             cur.execute("SELECT CURRENT_DATE")
             as_of = cur.fetchone()[0]
+    p = qb_config.basket_params(conn, BASKET)          # cc#1710
+    top_n, capital = p["max_stocks"], p["capital"]
+    slot_value = round(capital / top_n, 2)             # Rs 5L/10 = 50k, always (spec 6103)
     try:
         with conn.cursor() as cur:
             cur.execute(_SCREEN_SQL, {"gvm": GVM_MIN, "wk": WK52_MIN, "mon": MONTH_MIN,
@@ -123,23 +127,23 @@ def propose_rebalance(conn=None, as_of=None):
             # selection: N<5 -> cash; 5<=N<=10 -> all; N>10 -> top 10 by 1y return (already sorted)
             if n_qual < MIN_N:
                 entries, note = [], f"N={n_qual} < {MIN_N} -> FULLY CASH (dead-tape trap guard)"
-            elif n_qual <= TOP_N:
-                entries, note = list(qualifiers), f"N={n_qual} in [{MIN_N},{TOP_N}] -> hold all N"
+            elif n_qual <= top_n:
+                entries, note = list(qualifiers), f"N={n_qual} in [{MIN_N},{top_n}] -> hold all N"
             else:
-                entries, note = qualifiers[:TOP_N], f"N={n_qual} > {TOP_N} -> top {TOP_N} by 1y return"
+                entries, note = qualifiers[:top_n], f"N={n_qual} > {top_n} -> top {top_n} by 1y return"
 
             for e in entries:
-                e["slot_value"] = SLOT_VALUE
+                e["slot_value"] = slot_value
             n_sel = len(entries)
-            cash = round(CAPITAL - SLOT_VALUE * n_sel, 2)
+            cash = round(capital - slot_value * n_sel, 2)
 
             cur.execute("SELECT symbol FROM quant_paper_positions "
                         "WHERE basket_name=%s AND status='open'", (BASKET,))
             holdings = [row[0] for row in cur.fetchall()]
 
         return {
-            "as_of": str(as_of), "basket": BASKET, "capital": CAPITAL,
-            "slot_value": SLOT_VALUE, "top_n": TOP_N,
+            "as_of": str(as_of), "basket": BASKET, "capital": capital, "cap_source": p["source"],
+            "slot_value": slot_value, "top_n": top_n,
             "qualifiers": qualifiers, "n_qualified": n_qual,
             "entries": entries, "n_selected": n_sel, "cash_value": cash,
             "selection_note": note, "holdings": holdings, "entry_only": False,
@@ -147,8 +151,8 @@ def propose_rebalance(conn=None, as_of=None):
                 "universe": "universe_technicals (full) JOIN gvm_scores",
                 "screen": "GVM>=7.5 AND week_index_52>=90 AND month_index>=90 AND mcap>1000Cr AND vol_ratio_21>=1.0",
                 "vol_ratio_21": "latest volume / AVG(last 21 trading-day volumes), raw_prices (inline)",
-                "selection": f"N>{TOP_N} -> top {TOP_N} by 1y return; {MIN_N}<=N<={TOP_N} -> all; N<{MIN_N} -> cash",
-                "sizing": f"Rs {int(SLOT_VALUE)}/slot always (5L/{TOP_N}); N<{TOP_N} leaves cash",
+                "selection": f"N>{top_n} -> top {top_n} by 1y return; {MIN_N}<=N<={top_n} -> all; N<{MIN_N} -> cash",
+                "sizing": f"Rs {int(slot_value)}/slot always (5L/{top_n}); N<{top_n} leaves cash",
                 "exits": "HS1 -15% from entry + GVM<7.2 quality exit; no HS2, no rank/trailing",
             },
         }

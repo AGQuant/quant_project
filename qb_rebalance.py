@@ -26,6 +26,8 @@ from typing import Dict, List, Optional
 
 import requests
 
+import qb_config   # cc#1710: cap + capital from quant_basket_config (registry fallback)
+
 log = logging.getLogger("scorr.qb_rebalance")
 
 IST              = timezone(timedelta(hours=5, minutes=30))
@@ -162,16 +164,12 @@ def fix_basket_overdeployment(conn, basket_name: str) -> Dict:
     """
     now = datetime.now(IST)
 
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT capital, max_stocks FROM quant_basket_registry WHERE basket_name=%s",
-            (basket_name,)
-        )
-        row = cur.fetchone()
-    if not row:
-        return {"error": f"basket {basket_name} not in registry"}
-
-    capital, max_stocks = float(row[0]), int(row[1])
+    # cc#1710: cap + capital from quant_basket_config.stage2_stock (registry fallback), one read path
+    try:
+        _p = qb_config.basket_params(conn, basket_name)
+    except LookupError as e:
+        return {"error": str(e)}
+    capital, max_stocks = _p["capital"], _p["max_stocks"]
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -330,12 +328,19 @@ def run_scheduled_rebalance(conn, basket_name: str) -> Dict:
     today = datetime.now(IST).date()
 
     with conn.cursor() as cur:
-        cur.execute("SELECT capital, max_stocks, rebalance_freq, next_rebalance "
+        cur.execute("SELECT rebalance_freq, next_rebalance "
                     "FROM quant_basket_registry WHERE basket_name=%s", (basket_name,))
         row = cur.fetchone()
     if not row:
         return {"error": f"{basket_name} not in registry"}
-    capital, max_stocks, freq, next_reb = float(row[0]), int(row[1]), row[2], row[3]
+    freq, next_reb = row[0], row[1]
+    # cc#1710: cap + capital from quant_basket_config.stage2_stock (registry fallback) — the
+    # entry_note's "top {max_stocks}" and every selection engine now read the same number.
+    try:
+        _p = qb_config.basket_params(conn, basket_name)
+    except LookupError as e:
+        return {"error": str(e)}
+    capital, max_stocks = _p["capital"], _p["max_stocks"]
 
     # 1) exits (marks + HS1/HS2)
     eod = qb_eod_checker.run_eod_checker(conn, basket_name=basket_name)

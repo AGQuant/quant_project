@@ -36,6 +36,8 @@ from typing import Dict, Any, List
 
 import psycopg2
 
+import qb_config   # cc#1710: capital from quant_basket_config.capital_rs (registry fallback)
+
 log = logging.getLogger("scorr.qb_nav")
 
 NIFTY50 = "NIFTY50"
@@ -117,7 +119,12 @@ def compute_series(conn, basket_name: str) -> Dict[str, Any]:
         reg = cur.fetchone()
         if not reg:
             return {"basket": basket_name, "error": "not in registry", "points": []}
-        capital = float(reg[0] or 0)
+        # cc#1710: capital from quant_basket_config.capital_rs (registry fallback) — the same
+        # Rs 5L today for every basket; one source with the engines from here on.
+        try:
+            capital = float(qb_config.basket_params(conn, basket_name)["capital"])
+        except LookupError:
+            capital = float(reg[0] or 0)
         bench_sym, bench_note = benchmark_for(cur, reg[1])
 
         cur.execute("""SELECT symbol, entry_price, entry_date, qty, allocation,
