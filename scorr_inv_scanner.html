@@ -62,32 +62,11 @@
   #posCard .bar{padding:12px 16px 0;margin-bottom:0}
   @media(max-width:760px){.wrap{padding:12px 10px 64px} thead th,tbody td{padding:7px 6px;font-size:12px}}
 
-  /* cc#1697: title (i) button + rules sheet — a self-contained popover in this page's own
-     token-contract styling (no shared "cc#1225" component found under that name — see
-     cc_task_logs 1697). h1 becomes a flex row so the button sits right after the title text. */
+  /* cc#1697: title (i) button + rules sheet. h1 becomes a flex row so the button sits right after
+     the title text. cc#1708: the .ibtn / .isheet-* styles and the overlay DOM moved into
+     scorr_card_common.js (window.ScorrInfoSheet) so the Quant Basket cards share ONE sheet. */
   .h1row{display:flex;align-items:center;gap:8px}
   .h1row h1{margin:4px 0 2px}
-  .ibtn{width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:var(--panel);
-        color:var(--mut);font-size:11px;font-weight:800;line-height:1;cursor:pointer;
-        display:inline-flex;align-items:center;justify-content:center;flex:none}
-  .ibtn:hover{color:var(--txt);border-color:var(--dim)}
-  .isheet-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;
-             align-items:flex-end;justify-content:center}
-  .isheet-ov.open{display:flex}
-  .isheet{background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 0 0;
-          width:100%;max-width:560px;max-height:82vh;overflow-y:auto;padding:18px 20px 24px}
-  @media(min-width:760px){.isheet-ov{align-items:center}.isheet{border-radius:16px;max-height:78vh}}
-  .isheet-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-  .isheet-t{font-size:15px;font-weight:800}
-  .isheet-x{background:none;border:none;color:var(--mut);font-size:20px;cursor:pointer;line-height:1}
-  .isheet-x:hover{color:var(--txt)}
-  .isheet-sec{margin-bottom:14px}
-  .isheet-k{font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
-            color:var(--mut);margin-bottom:4px}
-  .isheet-v{font-size:12.5px;color:var(--txt);line-height:1.55}
-  .isheet-v ul{margin:4px 0 0 18px;padding:0}
-  .isheet-v li{margin-bottom:2px}
-  .isheet-hon{font-size:11px;color:var(--dim);border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
 </style>
 </head>
 <body>
@@ -136,15 +115,8 @@
   </div>
 </div>
 
-<div class="isheet-ov" id="isheetOv" onclick="if(event.target===this)closeInfoSheet()">
-  <div class="isheet" role="dialog" aria-modal="true" aria-labelledby="isheetT">
-    <div class="isheet-hd">
-      <div class="isheet-t" id="isheetT">How the Investment Scanner enters and exits</div>
-      <button class="isheet-x" aria-label="Close" onclick="closeInfoSheet()">&#10005;</button>
-    </div>
-    <div id="isheetBody">Loading…</div>
-  </div>
-</div>
+<!-- cc#1708: the (i) sheet overlay is now the shared ScorrInfoSheet (scorr_card_common.js) -->
+
 
 <script src="/scorr_card_common.js"></script>
 <script>
@@ -246,8 +218,7 @@ function load(t){
       if(TRACK===t){fillTagFilter();render();}
       // cc#1697: a click on (i) before either fetch resolves shows a loading state — self-heal
       // once real data (and its meta) actually lands, instead of staying stuck on that message.
-      var ov=document.getElementById('isheetOv');
-      if(ov&&ov.classList.contains('open'))renderInfoSheet();
+      if(window.ScorrInfoSheet&&window.ScorrInfoSheet.isOpen())renderInfoSheet();   // cc#1708: shared sheet
     })
     .catch(function(e){document.getElementById('meta').textContent='Could not load — '+e.message;});
 }
@@ -323,18 +294,20 @@ function infoSheetHtml(meta){
     +'<div class="isheet-sec"><div class="isheet-k">Bands</div><div class="isheet-v">'+esc(meta.bands.rule)+'</div></div>'
     +'<div class="isheet-hon">'+esc(meta.honesty)+'</div>';
 }
+// cc#1708: open/close/render go through the shared ScorrInfoSheet (scorr_card_common.js); the
+// page keeps its own infoSheetHtml(meta) — content is still interpolated from the board payload.
+var ISHEET_TITLE='How the Investment Scanner enters and exits';
 function renderInfoSheet(){
   var d=DATA.momentum||DATA.reversal;
-  document.getElementById('isheetBody').innerHTML=infoSheetHtml(d&&d.meta);
+  if(window.ScorrInfoSheet) window.ScorrInfoSheet.setBody(infoSheetHtml(d&&d.meta));
 }
 function openInfoSheet(){
-  renderInfoSheet();
-  document.getElementById('isheetOv').classList.add('open');
-  document.body.style.overflow='hidden';
+  if(!window.ScorrInfoSheet) return;
+  var d=DATA.momentum||DATA.reversal;
+  window.ScorrInfoSheet.open(ISHEET_TITLE, infoSheetHtml(d&&d.meta));
 }
 function closeInfoSheet(){
-  document.getElementById('isheetOv').classList.remove('open');
-  document.body.style.overflow='';
+  if(window.ScorrInfoSheet) window.ScorrInfoSheet.close();
 }
 
 function boot(){load('momentum');load('reversal');loadPos();}

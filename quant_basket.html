@@ -63,7 +63,7 @@
   @media(max-width:880px){.basket-grid{grid-template-columns:1fr 1fr}}
   @media(max-width:540px){.basket-grid{grid-template-columns:1fr}}
 
-  .bcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;
+  .bcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px 12px;   /* cc#1708: was 16px; face is numbers-only now */
     cursor:pointer;transition:.15s;border-top:3px solid var(--blu);display:flex;flex-direction:column}
   .bcard:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(20,30,50,.09);border-color:var(--blu)}
   .bcard.active{box-shadow:0 0 0 3px rgba(37,99,235,.15)}
@@ -79,11 +79,14 @@
   .chip.profit{background:rgba(47,212,139,.15);color:var(--grn)}
   .chip.nightly{background:rgba(255,92,108,.12);color:var(--red)}
   .bc-name{font-size:13px;font-weight:700;color:var(--txt);margin-bottom:2px}
-  .bc-rule{font-size:10px;color:var(--dim);margin-bottom:14px;line-height:1.4}
-  .bc-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+  /* cc#1708: the filter line (.bc-rule) left the card face for the (i) sheet's SCREEN section. */
+  .bc-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 8px}
+  /* cc#1708: the (i) button sits right of the two header icons; sizing/style = shared .ibtn
+     (scorr_card_common.js ScorrInfoSheet, lifted from cc#1697). */
+  .bc-top .ibtn{margin-left:8px;width:30px;height:30px;border-radius:7px;font-size:12px}
   .bc-m .mk{font-size:9px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px}
   .bc-m .mv{font-size:16px;font-weight:700}
-  .bc-divider{border:none;border-top:1px solid var(--line);margin:10px 0}
+  .bc-divider{border:none;border-top:1px solid var(--line);margin:8px 0}   /* cc#1708: was 10px */
   .bc-foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
   .bc-info{font-size:10px;color:var(--mut)}
   /* cc#1298: dedicated Reb trigger, separate from the whole-card click (opens Holdings). */
@@ -102,16 +105,8 @@
     background:rgba(245,185,74,.1);border:1px solid rgba(245,185,74,.4);
     border-radius:8px;padding:5px 9px;text-align:center}
 
-  .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
-  .bc-crit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
-  .bc-crit-row:last-child{margin-bottom:0}
-  .bc-crit-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
-    padding:2px 6px;border-radius:5px;white-space:nowrap;flex-shrink:0;margin-top:1px}
-  .bc-crit-label.entry{background:rgba(77,124,254,.14);color:var(--pulse, #4D7CFE)}
-  .bc-crit-label.exit{background:rgba(255,92,108,.08);color:var(--red)}
-  .bc-crit-text{font-size:10px;color:var(--mut);line-height:1.5}
-
-  .bc-click{font-size:10px;color:var(--blu);margin-top:10px;text-align:center;font-weight:500}
+  /* cc#1708: ENTRY/EXIT rows (.bc-criteria) and the "View holdings" hint (.bc-click) left the card
+     face. The rule text now lives in the (i) sheet, verbatim; the whole card still opens Holdings. */
 
   .pos{color:var(--grn);font-weight:700}
   .neg{color:var(--red);font-weight:700}
@@ -280,6 +275,32 @@ const BROLE = {contra_value:['Turn','role-turn'],breakout_52w:['Confirmation','r
 const BCHIPS = {contra_value:'<span class="chip profit">PROFIT-TAKE</span><span class="chip nightly">NIGHTLY</span>',
   breakout_52w:'<span class="chip nightly">NIGHTLY</span>'};
 
+// cc#1708: the (i) sheet. MOVE, NOT EDIT — every string below is the same BRULE / BCRITERIA / BCHIPS
+// text that used to sit on the card face, rendered whole. SCREEN = the filter line, one bullet per
+// " · " clause. ENTRY / EXIT = the full strings (EXIT keeps its special-exit chips). SIZING and
+// CADENCE are the clauses of those same strings that speak of slot size / weights / max positions
+// and of monthly / quarterly / nightly timing — pulled by keyword, never typed here; a basket
+// whose strings carry no such clause simply has no such section.
+function basketInfoHtml(key){
+  const S=window.ScorrInfoSheet, esc=S.esc, crit=BCRITERIA[key]||{entry:'',exit:''};
+  const clauses=s=>String(s||'').split(' · ').map(x=>x.trim()).filter(Boolean);
+  const screen=clauses(BRULE[key]).map(x=>'<li>'+esc(x)+'</li>').join('');
+  const all=[...clauses(crit.entry),...clauses(crit.exit)];
+  const sizing=all.filter(x=>/sizing|₹|equal weight|weight|slot|max \d|top-?\d+|holdings?\b/i.test(x)&&!/^HS[12]/i.test(x));
+  const cadence=[...clauses(BRULE[key]),...all].filter(x=>/monthly|quarterly|nightly|weekly|\(6th\)|review|re-screen|seeded|rebalanced/i.test(x));
+  const uniq=a=>a.filter((x,i)=>a.indexOf(x)===i);
+  let h=S.section('Screen','<ul>'+screen+'</ul>')
+       +S.section('Entry',esc(crit.entry))
+       +S.section('Exit',esc(crit.exit)+(BCHIPS[key]?' '+BCHIPS[key]:''));
+  if(sizing.length)  h+=S.section('Sizing','<ul>'+uniq(sizing).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>');
+  if(cadence.length) h+=S.section('Cadence','<ul>'+uniq(cadence).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>');
+  return h;
+}
+function openBasketInfo(key){
+  if(!window.ScorrInfoSheet) return;
+  window.ScorrInfoSheet.open(BNAMES[key]+' · '+(BROLE[key]?BROLE[key][0]:''), basketInfoHtml(key));
+}
+
 const BCRITERIA = {
   large_cap: {
     entry: 'Composite = GVM×0.5 + Momentum×0.5 · Universe mcap Top 100 · Hard gates: GVM ≥ 7.0 AND ΔGVM(180d) > +0.5 · 10-filter gauntlet retired (RSI-M / PE-mult / upside / FII+DII / 1Y / 50&200 DMA / sector gates all redundant inside G/V/M) · Top-12 equal weight ₹5L/12; <10 qualify → ₹50k/name + cash',
@@ -421,9 +442,10 @@ async function init(){
                    color:${BCOL[key]};border-radius:7px;width:30px;height:30px;line-height:1;
                    cursor:pointer;font-size:13px;flex:0 0 auto">▤</button>
           ${copyBtn}
+          <button class="ibtn bc-i" type="button" data-basket="${key}" aria-label="Screen, entry, exit, sizing and cadence rules"
+            title="Screen, entry, exit, sizing &amp; cadence">i</button>
         </div>
         <div class="bc-chartpanel" data-panel="${key}" style="display:none"></div>
-        <div class="bc-rule">${BRULE[key]}</div>
         <div class="bc-metrics">
           <div class="bc-m"><div class="mk">Return</div><div class="mv ${c(ret)}">${pct(ret)}</div></div>
           <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv ${c(alp)}">${pct(alp)}</div></div>
@@ -435,22 +457,17 @@ async function init(){
           <div class="bc-info">${pos} positions &nbsp;·&nbsp; <span class="bc-reb-link">Reb <b>${reb}</b></span></div>
           ${badge}
         </div>
-        ${gmap[key]?`<div class="bc-gate">Rebalance awaiting confirmation · due ${gmap[key].due} · ${gmap[key].n_candidates} candidate${gmap[key].n_candidates===1?'':'s'}</div>`:''}
-        <div class="bc-criteria">
-          <div class="bc-crit-row">
-            <span class="bc-crit-label entry">Entry</span>
-            <span class="bc-crit-text">${crit.entry}</span>
-          </div>
-          <div class="bc-crit-row">
-            <span class="bc-crit-label exit">Exit</span>
-            <span class="bc-crit-text">${crit.exit}${BCHIPS[key]||''}</span>
-          </div>
-        </div>
-        <div class="bc-click">↗ View holdings &amp; history</div>`;
+        ${gmap[key]?`<div class="bc-gate">Rebalance awaiting confirmation · due ${gmap[key].due} · ${gmap[key].n_candidates} candidate${gmap[key].n_candidates===1?'':'s'}</div>`:''}`;
+      // cc#1708 (founder 05-Sep: "give all entry exit rules in i button, make card smaller"): the
+      // filter line, ENTRY and EXIT text and the "View holdings" hint no longer render on the face —
+      // they moved, verbatim, into the (i) sheet (openBasketInfo below). Face = name, phase tag,
+      // the four numbers, positions, Reb date, badge, the cc#1704 gate pill, and the icon row.
       grid.appendChild(card);
       // cc#839: the chart button must not also open the holdings modal the card is bound to.
       const cb=card.querySelector('.bc-chart');
       if(cb) cb.onclick=(e)=>{ e.stopPropagation(); toggleNavChart(key,card); };
+      const ib=card.querySelector('.bc-i');
+      if(ib) ib.onclick=(e)=>{ e.stopPropagation(); openBasketInfo(key); };
       // cc#1298: the founder wants a dedicated trigger on the "Reb <date>" line that opens
       // straight to the Buy/Sell Ledger tab, distinct from clicking the rest of the card (which
       // opens on Holdings, cc#839's existing behaviour, untouched).
