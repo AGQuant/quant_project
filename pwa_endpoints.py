@@ -1802,12 +1802,14 @@ RESULTS_CARD_JS = """
     if(!pc) return '';
     function row(lbl, o){
       if(!o || o.peer==null) return '';
-      var st=(_grow(o.stock)||'--');   // cc#823: peer YoY growth -> one decimal
+      // cc#1705: 'Sales +18.6% MISS vs peers +24.1%' — our figure carries its sign, the tag sits
+      // between, and the word peers names the comparison so the two numbers never read as a range.
+      var st=_pc(o.stock);
       var beat=o.beat, cls=beat?'rcard-beat':'rcard-miss', tag=beat?'BEAT':'MISS';
-      return '<div class=\"rcard-peer-row\"><span class=\"rcard-peer-l\">'+lbl+' YoY</span>'
+      return '<div class=\"rcard-peer-row\"><span class=\"rcard-peer-l\">'+lbl+'</span>'
         +'<span class=\"rcard-peer-v\">'+esc(st)+'</span>'
-        +'<span class=\"rcard-peer-p\">Top-'+(pc.peer_count||0)+' peers '+esc(_grow(o.peer)||'--')+'</span>'
-        +'<span class=\"'+cls+'\">'+tag+'</span></div>';
+        +'<span class=\"'+cls+'\">'+tag+'</span>'
+        +'<span class=\"rcard-peer-p\">vs peers '+esc(_pc(o.peer))+'</span></div>';
     }
     var body=row('Sales',pc.sales)+row('PAT',pc.profit);
     if(!body) return '';
@@ -2025,7 +2027,12 @@ RESULTS_CARD_JS = """
     }
     var body = row('Sales', e.sales) + row('PAT', e.profit);
     if (!body) return '';
-    return '<div class=\"rcard-lbl\" title=\"Screener projected run-rate\">vs est.</div>'
+    // cc#1705: the block label is the one-line estimate read the founder asked for:
+    // 'vs estimate: Sales MISS -2.7%, Profit MISS -25.5%' — each side only when it exists.
+    var parts = [];
+    if (e.sales && e.sales.tag) parts.push('Sales '+esc(e.sales.tag)+' '+esc(_pc(e.sales.dev_pct)));
+    if (e.profit && e.profit.tag) parts.push('Profit '+esc(e.profit.tag)+' '+esc(_pc(e.profit.dev_pct)));
+    return '<div class=\"rcard-lbl\" title=\"Screener projected run-rate\">vs estimate'+(parts.length?': '+parts.join(', '):'')+'</div>'
       + '<div class=\"rcard-exp\">'+body+'</div>'
       + '<div class=\"rcard-note\">vs Screener projected run-rate &mdash; a mechanical projection from '
       + 'reported trend, not a broker forecast. Bands: beat above +2%, in-line within 2%, miss below -2%.</div>';
