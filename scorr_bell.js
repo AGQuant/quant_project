@@ -15,10 +15,19 @@
    trigger text; APPROVED/DISMISSED collapse under "History (n)" so a long-lived list never
    crowds out what still needs a decision. Badge counts pending+triggered only — a decided alert
    is not "waiting". Engine alerts are filtered OUT entirely (scope item 5): they live on the
-   Alerts page / Wall of Trades, and the sheet footer says so with a link. */
+   Alerts page / Wall of Trades, and the sheet footer says so with a link.
+
+   cc#1717 (founder 05-Sep: "if I click on bell notification and seen comment, then 1 should go
+   away"): the badge is now the UNSEEN count — manual pending/triggered alerts nobody has opened
+   the sheet on yet. Seen state lives SERVER-SIDE (trade_alert_seen via POST /api/alerts/seen, read
+   back as `seen` on each /api/alerts/list row), so it clears across devices. On sheet OPEN (not
+   per row) the ids currently rendered are posted once, the badge repaints to 0 at once and
+   reconciles from the server on the next load. Dismiss is unchanged; a NEW alert arriving later
+   is unseen and raises the badge again. Same file ships to /m/* (main.py _MOBILE_HEAD) and the
+   web nav (pwa.js) — no fork. */
 (function(){
   'use strict';
-  var URL = '/api/alerts/list?status=all&limit=200', ALERTS = '/m/alerts', WEB_ALERTS = '/alerts', REFRESH_MS = 300000;
+  var URL = '/api/alerts/list?status=all&limit=200', SEEN_URL = '/api/alerts/seen', ALERTS = '/m/alerts', WEB_ALERTS = '/alerts', REFRESH_MS = 300000;
   var state = { alerts: null, timer: null, open: false, historyOpen: false };
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function num(n){ return typeof n === 'number' && isFinite(n); }
@@ -48,7 +57,18 @@
       total: all.length,
     };
   }
-  function badgeCount(){ var m = manualAlerts(); return m.pending.length + m.triggered.length; }
+  // cc#1717: badge = UNSEEN waiting alerts (a row the sheet has already been opened on is not news).
+  function badgeCount(){ var m = manualAlerts(); return m.pending.concat(m.triggered).filter(function(a){ return !a.seen; }).length; }
+  // cc#1717: one POST per sheet open with every waiting id rendered; local rows flip to seen at
+  // once so the badge clears now, then the next load() re-reads the server's own flags.
+  function markSeen(){
+    var m = manualAlerts(), ids = m.pending.concat(m.triggered).filter(function(a){ return !a.seen; }).map(function(a){ return a.id; });
+    if(!ids.length) return Promise.resolve();
+    (state.alerts || []).forEach(function(a){ if(ids.indexOf(a.id) !== -1) a.seen = true; });
+    paint();
+    return fetch(SEEN_URL, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ids: ids})})
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+  }
   function paint(){
     var n = state.alerts ? badgeCount() : 0;
     mounts().forEach(function(m){
@@ -137,7 +157,9 @@
     ov.innerHTML = '<div id="scorr-bell-box" role="dialog" aria-modal="true" aria-label="Custom alerts" style="position:absolute;top:' + anchor.top + 'px;right:' + anchor.right + 'px;width:min(380px,calc(100vw - 24px));background:var(--panel,#17171B);color:var(--chalk,var(--muted,#F5F2EA));border:1px solid var(--line,var(--edge,#2A2A31));border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.55);overflow:hidden"></div>';
     ov.addEventListener('click', function(e){ if(e.target === ov || e.target.closest('[data-bell-close]')) close(); });
     document.body.appendChild(ov); state.open = true; render();
-    load();
+    // cc#1717: mark what is on screen as seen FIRST, then refresh — the GET must read the flags
+    // the POST just wrote, never race ahead of it and flip the badge back to 1.
+    (state.alerts ? markSeen() : Promise.resolve()).then(load);
   }
   function toggle(e){ if(e) e.preventDefault(); if(state.open) close(); else open(); }
   document.addEventListener('keydown', function(e){ if(e.key === 'Escape') close(); });
