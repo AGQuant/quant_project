@@ -52,6 +52,8 @@ log = logging.getLogger("scorr.gvm_report")
 #   group  : Trackrecord | Valuation | Outlook | Reliability | Technicals
 #   db_prefix maps to gvm_scores.<prefix>_raw/_peer/_rating columns (when present)
 #   unit   : '%' | 'x' | 'ratio' | '' (for display)
+_REPORT_PERSISTS_DETAIL = False   # cc#1714: nightly owns gvm_scores *_raw/*_peer/*_rating
+
 PARAMS = [
     ("sales_5y",   "Sales 5Y CAGR",          "Trackrecord", "sales_growth_5y",        True,  "sales_5y",   "%"),
     ("sales_3y",   "Sales 3Y CAGR",          "Trackrecord", "sales_growth_3y",        True,  "sales_3y",   "%"),
@@ -443,7 +445,14 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         negatives = sorted(rated, key=lambda x: x["rating"])[:3]
 
         # Persist computed detail back into gvm_scores (saved for tomorrow)
-        if persist_vals and me_idx is not None:
+        # cc#1714: OFF. The nightly (gvm_nightly.recompute_gvm) now writes every *_raw / *_peer /
+        # *_rating column for all ~1,787 names in one batch and is the source of truth; this page-open
+        # writer only ever reached the handful of names someone opened (8/1,787 on 05-Sep) and its M
+        # raw source (screener_raw.return_* COALESCE universe_technicals) differs from the values
+        # that actually score M (momentum_scores). Two writers into one column set = two truths.
+        # The report READS gvm_scores now and no longer writes it. persist_vals is still built above
+        # so the code path stays inspectable; flip _REPORT_PERSISTS_DETAIL only by a card.
+        if _REPORT_PERSISTS_DETAIL and persist_vals and me_idx is not None:
             try:
                 set_sql = ", ".join(f'"{k}" = %s' for k in persist_vals.keys())
                 cur.execute(
