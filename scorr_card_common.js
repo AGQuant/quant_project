@@ -313,8 +313,47 @@
     });
   }
 
+  /* cc#1705 NUMBER FORMAT CONTRACT — ONE shared formatter for every money / ratio figure on the
+     Results (R) card and any surface that mounts it (app card and web R button share RESULTS_CARD_JS,
+     so one change lands on both — DISPLAY_PARITY 16202). Never format a money figure inline anywhere
+     else; route it through window.ScorrFmt.
+       moneyCr(v)   -> 'Rs 23,165 cr' / '-Rs 1,234 cr'  integer rupees-crore, Indian grouping
+                       (23,165 / 1,23,456 / 12,34,567), minus OUTSIDE the prefix. Absent -> em dash.
+       pct(v)       -> '+18.6%' / '-3.0%'                signed growth / change, ONE decimal
+       pctLevel(v)  -> '36.0%'                           unsigned level (a margin), ONE decimal
+       x(v)         -> '32.8x'                           a multiple (PE), ONE decimal, always the x
+       pp(v)        -> '+2.0pp'                          percentage-point delta, signed, ONE decimal
+       groupIN(int) -> Indian digit grouping of a non-negative integer string
+     Absent (null / '' / NaN) ALWAYS renders as the em dash with the unit dropped — never 'Rs 0 cr'.
+     Rounding, never truncation (Math.round / toFixed both round). Indian grouping is done by hand so
+     an Android WebView without the en-IN locale data cannot degrade it to a bare 23165. */
+  function _fmtNum(v){
+    if (v == null || v === '' || typeof v === 'boolean') return null;
+    var n = Number(typeof v === 'string' ? v.replace(/,/g, '') : v);
+    return isNaN(n) ? null : n;
+  }
+  function fmtGroupIN(intStr){
+    var s = String(intStr);
+    if (s.length <= 3) return s;
+    var last = s.slice(-3), rest = s.slice(0, -3);
+    return rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last;
+  }
+  function fmtMoneyCr(v){
+    var n = _fmtNum(v); if (n == null) return '\u2014';
+    var r = Math.round(Math.abs(n));
+    return (n < 0 ? '-' : '') + 'Rs ' + fmtGroupIN(r) + ' cr';
+  }
+  function fmtPct(v, d){ var n = _fmtNum(v); if (n == null) return '\u2014'; return (n >= 0 ? '+' : '') + n.toFixed(d == null ? 1 : d) + '%'; }
+  function fmtPctLevel(v, d){ var n = _fmtNum(v); if (n == null) return '\u2014'; return n.toFixed(d == null ? 1 : d) + '%'; }
+  function fmtX(v, d){ var n = _fmtNum(v); if (n == null) return '\u2014'; return n.toFixed(d == null ? 1 : d) + 'x'; }
+  function fmtPp(v, d){ var n = _fmtNum(v); if (n == null) return '\u2014'; return (n >= 0 ? '+' : '') + n.toFixed(d == null ? 1 : d) + 'pp'; }
+  function fmtIsNeg(v){ var n = _fmtNum(v); return n != null && n < 0; }
+  window.ScorrFmt = { moneyCr: fmtMoneyCr, pct: fmtPct, pctLevel: fmtPctLevel, x: fmtX, pp: fmtPp,
+                      groupIN: fmtGroupIN, isNeg: fmtIsNeg, num: _fmtNum, DASH: '\u2014' };
+
   var API = {
     num: num, sign: sign, getJSON: getJSON, newsEsc: newsEsc,
+    fmt: window.ScorrFmt,   // cc#1705: shared number formatter (also window.ScorrFmt)
     fetchWithTimeout: fetchWithTimeout,   // cc#878
     scorrBasketLabel: scorrBasketLabel, scorrBasketFacets: scorrBasketFacets,   // cc#880
     _volCol: _volCol, _volTile: _volTile, _volTilesHtml: _volTilesHtml, qaVolExplain: qaVolExplain,
