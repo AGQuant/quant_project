@@ -836,12 +836,16 @@ PWA_JS = """
 """
 
 # ── nav hide/show toggle (cc_task #118) — shared across all pages ──
-# Persists collapse state in localStorage (key: scorr_nav_hidden). Collapse is
-# driven by an attribute on <html> + head CSS rather than a class on the nav,
-# so it survives pwa.js rebuilding #scorr-nav (innerHTML + className overwrite).
-# A toggle "Hide" pill sits at the right of the nav; when hidden, a thin 20px
-# sticky strip with a "Show" pill stays at the top so the nav is always
-# recoverable. The button is re-added via MutationObserver if a rebuild wipes it.
+# Collapse is driven by an attribute on <html> + head CSS rather than a class on the nav, so it
+# survives pwa.js rebuilding #scorr-nav (innerHTML + className overwrite). cc#1718 (founder
+# 05-Sep: "this Hide capsule is placed abruptly, better remove and make blue strip itself
+# clickable to expand, and hide capsule sits inside nav"): the fixed-position capsule
+# (#scorr-nav-toggle-btn, cc#126/433) is GONE. The Hide control is a 26px pill appended INSIDE
+# the bar, far right after the theme pill (bell -> theme -> Hide), same .scorr-theme-pill styling
+# family, added as a DOM node (cc#1203 lesson) and re-appended by the MutationObserver whenever
+# pwa.js rebuilds the nav. When hidden, the 20px blue #scorr-nav-strip stays and the WHOLE strip
+# is the Show control (role=button, a centred chevron is its only content) — no inner Show pill.
+# sessionStorage semantics (cc#311) and the cc#1669 __scorrScrollNavShow hook are unchanged.
 NAV_TOGGLE_JS = """
 (function () {
   if (window.__scorrNavToggle) return; window.__scorrNavToggle = true;
@@ -866,25 +870,22 @@ NAV_TOGGLE_JS = """
       + 'html[' + HID + '] #scorr-nav, html[' + HID + '] .model-nav{'
       + '  max-height:0!important;opacity:0!important;overflow:hidden!important;'
       + '  border:none!important}'
+      // cc#1718: the hidden-state strip IS the Show control — whole 20px bar clickable, a
+      // centred 10px chevron is its only content (the inner Show pill is gone).
       + '#scorr-nav-strip{position:sticky;top:0;z-index:20;display:none;height:20px;'
-      + '  align-items:center;justify-content:flex-end;padding:0 12px;background:var(--pulse, #2563eb)}'
+      + '  align-items:center;justify-content:center;padding:0 12px;cursor:pointer;'
+      + '  background:var(--pulse, #2563eb);color:#fff;user-select:none}'
+      + '#scorr-nav-strip:hover{filter:brightness(1.12)}'
+      + '#scorr-nav-strip .scorr-nav-chev{font-size:10px;line-height:1;pointer-events:none}'
       + 'html[' + HID + '] #scorr-nav-strip{display:flex}'
-      + '.scorr-nav-btn{font-size:11px;padding:4px 10px;border-radius:10px;'
-      + '  background:rgba(255,255,255,0.15);color:inherit;cursor:pointer;border:none;'
-      + '  margin-left:auto;flex-shrink:0}'
-      + '#scorr-nav-strip .scorr-nav-btn{color:#fff}'
-      // cc#126: toggle button is fixed top-right (NOT inline in the nav) so it stays
-      // visible no matter how wide the nav grows or whether the nav is hidden.
-      // cc#433: stacked below the Logout (top:64) + theme (top:102) pills, all now BELOW the
-      // 46px sticky navbar so none overlap the nav tabs; semi-transparent idle -> solid on hover.
-      + '#scorr-nav-toggle-btn{position:fixed;top:140px;right:14px;z-index:9999;'
-      + '  background:var(--pulse, #2563eb);color:#fff;font-size:11px;font-weight:600;'
-      + '  padding:4px 12px;border-radius:12px;border:none;cursor:pointer;margin:0;'
-      + '  box-shadow:0 1px 4px rgba(0,0,0,0.25);opacity:.45;transition:opacity .15s}'
-      + '#scorr-nav-toggle-btn:hover{opacity:1}'
-      // cc#328: the top-nav is display:none at <=767px (bottom nav is used there),
-      // so the Show/Hide pill + reveal strip are dead controls on mobile — kill them.
-      + '@media(max-width:767px){#scorr-nav-toggle-btn,#scorr-nav-strip{display:none!important}}';
+      // cc#1718: the Hide pill lives INSIDE the bar, after the theme pill. It borrows the theme
+      // pill's class for the look (26px pill, token colours) and only overrides the auto margin
+      // — two margin-left:auto items would split the free space and float the theme pill mid-bar.
+      + '.scorr-theme-pill.scorr-nav-hide{margin-left:8px}'
+      + '.scorr-nav-hide .ic{font-size:10px;line-height:1}'
+      // cc#328: the top-nav is display:none at <=767px (bottom nav is used there), so the reveal
+      // strip is a dead control on mobile — kill it (the Hide pill dies with the hidden bar).
+      + '@media(max-width:767px){#scorr-nav-strip{display:none!important}}';
     var st = document.createElement('style');
     st.id = 'scorr-navtoggle-style'; st.textContent = css;
     (document.head || root).appendChild(st);
@@ -897,10 +898,7 @@ NAV_TOGGLE_JS = """
     return document.getElementById('scorr-nav') || document.querySelector('.model-nav');
   }
 
-  function sync() {
-    var b = document.getElementById('scorr-nav-toggle-btn');
-    if (b) b.textContent = isHidden() ? 'Show' : 'Hide';
-  }
+  function sync() { /* cc#1718: the Hide pill's label is constant; state shows via the strip */ }
 
   function setHidden(h) {
     try { if (h) sessionStorage.removeItem(SKEY); else sessionStorage.setItem(SKEY, '1'); } catch (e) {}
@@ -913,25 +911,51 @@ NAV_TOGGLE_JS = """
     sync();
   }
 
+  // cc#1718: the right slot of the bar = wherever pwa.js appended the theme pill (its parent),
+  // else the canonical .scorr-cnav row, else the nav host itself.
+  function rightSlot(nav) {
+    var tp = document.getElementById('scorr-theme-pill');
+    if (tp && tp.parentNode && nav.contains(tp)) return tp.parentNode;
+    return nav.querySelector('.scorr-cnav') || nav;
+  }
+
+  function ensureHidePill(nav) {
+    var slot = rightSlot(nav);
+    var pill = document.getElementById('scorr-nav-hide');
+    if (!pill) {
+      pill = document.createElement('button');
+      pill.id = 'scorr-nav-hide'; pill.type = 'button';
+      pill.className = 'scorr-theme-pill scorr-nav-hide';
+      pill.innerHTML = '<span class="ic">\u2303</span>Hide';
+      pill.title = 'Hide navigation'; pill.setAttribute('aria-label', 'Hide navigation');
+      pill.addEventListener('click', function () { setHidden(true); });
+    }
+    // Always LAST in the right slot: bell -> theme pill -> Hide. A rebuild that re-appends the
+    // theme pill after us moves us back to the end.
+    if (pill.parentNode !== slot || slot.lastElementChild !== pill) slot.appendChild(pill);
+  }
+
   function build() {
     var nav = findNav();
     if (!nav) return;
-    if (!document.getElementById('scorr-nav-toggle-btn')) {
-      var btn = document.createElement('button');
-      btn.id = 'scorr-nav-toggle-btn'; btn.className = 'scorr-nav-btn';
-      btn.type = 'button';
-      btn.addEventListener('click', function () { setHidden(!isHidden()); });
-      // cc#126: append to body (fixed-positioned) so a wide/hidden nav can't bury it.
-      document.body.appendChild(btn);
-    }
-    if (!document.getElementById('scorr-nav-strip')) {
-      var strip = document.createElement('div');
+    // cc#1718: any leftover fixed capsule from an older cached bundle goes.
+    var old = document.getElementById('scorr-nav-toggle-btn');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    ensureHidePill(nav);
+    var strip = document.getElementById('scorr-nav-strip');
+    if (!strip) {
+      strip = document.createElement('div');
       strip.id = 'scorr-nav-strip';
-      var sb = document.createElement('button');
-      sb.className = 'scorr-nav-btn'; sb.type = 'button'; sb.textContent = 'Show';
-      sb.addEventListener('click', function () { setHidden(false); });
-      strip.appendChild(sb);
+      strip.setAttribute('role', 'button'); strip.setAttribute('tabindex', '0');
+      strip.setAttribute('aria-label', 'Show navigation'); strip.title = 'Show navigation';
+      strip.innerHTML = '<span class="scorr-nav-chev" aria-hidden="true">\u2304</span>';
+      strip.addEventListener('click', function () { setHidden(false); });
+      strip.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHidden(false); }
+      });
       nav.parentNode.insertBefore(strip, nav);
+    } else if (strip.querySelector('.scorr-nav-btn')) {
+      strip.innerHTML = '<span class="scorr-nav-chev" aria-hidden="true">\u2304</span>';   // old Show pill from a cached build
     }
     sync();
   }
@@ -940,11 +964,10 @@ NAV_TOGGLE_JS = """
     build();
     var nav = findNav();
     if (nav && window.MutationObserver) {
-      // pwa.js may rebuild #scorr-nav (innerHTML); re-add the toggle if wiped.
-      var mo = new MutationObserver(function () {
-        if (!document.getElementById('scorr-nav-toggle-btn')) build();
-      });
-      mo.observe(nav, {childList: true});
+      // pwa.js rebuilds #scorr-nav (innerHTML) and then appends the bell + theme pill; re-run
+      // build() on every child change so the Hide pill is present and stays LAST in the slot.
+      var mo = new MutationObserver(function () { build(); });
+      mo.observe(nav, {childList: true, subtree: true});
     }
   }
 
