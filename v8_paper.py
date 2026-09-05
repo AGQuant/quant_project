@@ -314,6 +314,7 @@ def qualified_set(conn, dropped_sink: Optional[list] = None) -> Dict[str, Dict]:
               AND symbol NOT IN (
                   SELECT UPPER(ticker) FROM earnings_calendar
                   WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                    AND verified <> 'false'   -- cc#1707 P4 fence
               )
             ORDER BY symbol, signal_ts DESC
         """)
@@ -409,7 +410,8 @@ def _sell_overbought_signals_raw(conn) -> Dict[str, Dict]:
                   AND l.vol_ratio<=0.8 AND vm.mom_2d<0 AND vm.rsi_month>=60
                   AND l.s1<l.entry
                   AND l.symbol NOT IN (SELECT UPPER(ticker) FROM earnings_calendar
-                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day'))
+                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day')
+                        AND verified <> 'false')   -- cc#1707 P4 fence
             )
             SELECT symbol, ROUND(entry::numeric,2) AS entry, s1 AS target,
                 ROUND((entry+(entry-s1))::numeric,2) AS stop
@@ -571,6 +573,7 @@ def _blackout(conn, sym):
         cur.execute("""
             SELECT 1 FROM earnings_calendar
             WHERE UPPER(ticker)=%s AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+              AND verified <> 'false'   -- cc#1707 P4 fence
             LIMIT 1
         """, (sym.upper(),))
         return cur.fetchone() is not None

@@ -261,6 +261,7 @@ def _is_blackout(cur, symbol):
         cur.execute("""SELECT 1 FROM earnings_calendar
                        WHERE UPPER(ticker)=%s
                          AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                         AND verified <> 'false'
                        LIMIT 1""", (symbol.upper(),))
         return cur.fetchone() is not None
     except Exception:

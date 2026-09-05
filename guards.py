@@ -78,6 +78,7 @@ def blackout(conn, sym: str, d: date) -> bool:
         cur.execute("""
             SELECT 1 FROM earnings_calendar
             WHERE UPPER(ticker)=%s AND ex_date IN (%s, %s + INTERVAL '1 day')
+              AND verified <> 'false'   -- cc#1707 P4: a cc#602 news lead never blocks an entry
             LIMIT 1
         """, (sym.upper(), d, d))
         return cur.fetchone() is not None

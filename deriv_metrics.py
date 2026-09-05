@@ -635,7 +635,7 @@ def _results_block(cur, sym) -> Dict[str, Any]:
     within 3d" gate. status: 'upcoming' (next_date/days_to set), 'recent' (recent_date set, within
     the last 10 days), or 'none' (no row either direction)."""
     cur.execute("""SELECT ex_date FROM earnings_calendar
-                   WHERE UPPER(ticker)=UPPER(%s) AND ex_date >= CURRENT_DATE
+                   WHERE UPPER(ticker)=UPPER(%s) AND ex_date >= CURRENT_DATE AND verified <> 'false'
                    ORDER BY ex_date ASC LIMIT 1""", (sym,))
     nxt = cur.fetchone()
     if nxt and nxt[0]:
@@ -644,7 +644,7 @@ def _results_block(cur, sym) -> Dict[str, Any]:
         return {"next_date": str(d), "days_to": days_to, "recent_date": None, "status": "upcoming"}
     cur.execute("""SELECT ex_date FROM earnings_calendar
                    WHERE UPPER(ticker)=UPPER(%s) AND ex_date < CURRENT_DATE
-                     AND ex_date >= CURRENT_DATE - INTERVAL '10 days'
+                     AND ex_date >= CURRENT_DATE - INTERVAL '10 days' AND verified <> 'false'
                    ORDER BY ex_date DESC LIMIT 1""", (sym,))
     rec = cur.fetchone()
     if rec and rec[0]:

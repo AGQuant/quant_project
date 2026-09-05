@@ -177,7 +177,8 @@ def _load_bulk(cur):
     # events blackout set (cc#451: 3-day earnings lookahead + capture the imminent result date so the
     # scanner's G2 gate matches the single-symbol /check evaluation exactly)
     cur.execute("""SELECT UPPER(ticker), MIN(ex_date) FROM earnings_calendar
-                   WHERE ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 2 GROUP BY UPPER(ticker)""")
+                   WHERE ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 2
+                     AND verified <> 'false' GROUP BY UPPER(ticker)""")
     black = {r[0]: r[1] for r in cur.fetchall()}
     for s in syms:
         D[s]["event_blackout"] = s in black
