@@ -218,6 +218,26 @@ These routers are wired in `main.py` via `include_router(...)`. Full paths below
 |---|---|---|
 | GET | `/api/diagnosis` | system diagnosis |
 
+### Earnings calendar backstop — `earnings_calendar_diag.py` (cc#1707)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/diag/earnings_calendar` | read-only: `{phantom_reported, phantom_upcoming, leads, offenders[], ok}` — rows with `verified='false'` that read `reported`/`upcoming`. Same check is a `data_feeds` line in `/api/health/report` ("Earnings calendar phantoms"). |
+
+**EARNINGS_CALENDAR_PROVENANCE (cc#1707, 05-Sep-2026).** `earnings_calendar.verified` is the source
+flag: `confirmed` / `estimated` come from the calendar scrape or the NSE feed; `false` means a
+cc#602 news-discovered LEAD (a company merely named in an article). Rules:
+- The news-lead writer (`result_corner.reconcile`) inserts `status='lead'`, never `upcoming`/`reported`.
+- The two status flips (`admin_data._earnings_lifecycle`, `ops_metrics_pipeline.flip_earnings_status`)
+  skip `verified='false'` rows. A lead becomes `reported` only when a confirmed source upserts the
+  same `(ticker, ex_date)`.
+- Every "has this company reported" reader carries `verified <> 'false'`: R card, results lists,
+  digest, mobile results, native cards, HR report, GVM page, watchdog preconditions, scrape targets.
+- R card date pairing: `/api/results/card` `ex_date` is the confirmed row for the card's OWN quarter
+  (`_q_label_end` + `_paired_result_date`), never `MAX(ex_date)`.
+- Trading gates (`guards.blackout`, `v8_paper`, `tc_intraday`, `native_trade_check`, `v8_endpoints`,
+  `v14_engine`, `tc_v4_*`, `tc_score_replay`, `v12`, `deriv_metrics`) read this table UNFENCED —
+  flagged separately on cc#1707; fence lands as P4 on the Fable Room ruling.
+
 ### V9 Pairs — `v9_endpoints.py` (prefix `/api/v9`)
 | Method | Path | Description |
 |---|---|---|
