@@ -2622,7 +2622,7 @@ APP_THEME_RESOLVE_JS = """(function(){
   /* cc#1636: the one set path. Validates, stores under the key the resolver reads, applies live on
      any body that carries data-theme, and announces scorr:theme (same event scorr_theme_boot.js
      dispatches on the web) so a page with its own canvas can repaint. */
-  var NAMES=[['goldnight','Gold Night'],['dark','Dark'],['ainight','AI Night'],['aquawhite','Aqua White'],['blush','Blush'],['silvergold','Silver Gold'],['winepurple','Wine Purple']];   /* cc#1654: Dark restored (founder 04-Sep); goldday/rosenight/rosewall stay hidden, order founder-set. cc#1719: Silver Gold + Wine Purple after Blush, visible for founder comparison */
+  var NAMES=[['goldnight','Gold Night'],['dark','Midnight Blue'],['ainight','AI Night'],['aquawhite','Aqua White'],['blush','Blush'],['silvergold','Silver Gold'],['winepurple','Wine Purple']];   /* cc#1654: Dark restored (founder 04-Sep); goldday/rosenight/rosewall stay hidden, order founder-set. cc#1719: Silver Gold + Wine Purple after Blush, visible for founder comparison. cc#1724: label Dark -> Midnight Blue (founder 05-Sep), key dark unchanged so saved picks survive */
   function get(){var b=document.body;var t=b&&b.getAttribute('data-theme');return (t&&ALLOWED[t])?t:resolve();}
   function set(k){
     if(!ALLOWED[k])return get();
