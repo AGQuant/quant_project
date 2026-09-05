@@ -74,7 +74,20 @@
   .basket-grid.hide{display:none}
   .basket-table{display:none;margin-bottom:20px;overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
   .basket-table.show{display:block}
-  .bt{width:100%;border-collapse:collapse;font-size:12.5px;white-space:nowrap}
+  /* cc#1716 (founder 05-Sep: "use full page space, horizontal scroll should not be required"):
+     Table view widens .wrap to the viewport minus 24px gutters; the KPI header, Basket Builder row
+     and 1-2-3 rail keep their card-view width. The table is table-layout:fixed at 100% with column
+     widths from <colgroup> (numbers ~90-115px, Status 140, Basket takes the rest), so at >= 1280px
+     table.scrollWidth == wrap.clientWidth and nothing scrolls. Below 1280 the .mtable contract
+     (cc#330) applies: horizontal scroll allowed, Basket column sticky so names never leave view. */
+  .wrap.tbl-full{max-width:none;padding-left:12px;padding-right:12px}
+  .wrap.tbl-full>.ph,.wrap.tbl-full>.cycle,.wrap.tbl-full>#alerts-wrap{max-width:948px;margin-left:auto;margin-right:auto}
+  .bt{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12.5px;white-space:nowrap}
+  .bt td,.bt th{overflow:hidden;text-overflow:ellipsis}
+  @media(max-width:1279px){
+    .bt{table-layout:auto;min-width:1100px}
+    .bt th:first-child,.bt td:first-child{position:sticky;left:0;background:var(--card);z-index:1}
+  }
   .bt th{font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--mut);
     padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;cursor:pointer;user-select:none}
   .bt th.num,.bt td.num{text-align:right}
@@ -444,9 +457,10 @@ const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;
 const QB_ROWS=[];
 let QB_VIEW='cards';
 const QB_SORT={key:null,dir:1};
-const QB_TCOLS=[['basket','Basket','txt'],['phase','Phase','txt'],['ret','Return %','num'],
-  ['alp','Alpha N500 %','num'],['pnl','P&amp;L ₹','num'],['mv','Mkt Value ₹','num'],['pos','Positions','num'],
-  ['cap','Cap','num'],['reb','Next Reb','date'],['status','Status','txt']];
+// cc#1716: 4th field = fixed column width in px (null = Basket takes the remaining width).
+const QB_TCOLS=[['basket','Basket','txt',null],['phase','Phase','txt',100],['ret','Return %','num',95],
+  ['alp','Alpha N500 %','num',110],['pnl','P&amp;L ₹','num',105],['mv','Mkt Value ₹','num',115],['pos','Positions','num',90],
+  ['cap','Cap','num',70],['reb','Next Reb','date',105],['status','Status','txt',140]];
 function qbSortVal(rw,k){
   if(k==='basket')return rw.name;
   if(k==='phase')return rw.role;
@@ -476,6 +490,7 @@ function setBasketView(v){
   document.querySelectorAll('#qb-view-seg button').forEach(b=>b.classList.toggle('on',b.dataset.view===QB_VIEW));
   document.getElementById('basket-grid').classList.toggle('hide',QB_VIEW==='table');
   document.getElementById('basket-table').classList.toggle('show',QB_VIEW==='table');
+  const wrap=document.querySelector('.wrap'); if(wrap) wrap.classList.toggle('tbl-full',QB_VIEW==='table');   // cc#1716: full width in Table view only
   if(QB_VIEW==='table')renderBasketTable();
 }
 function renderBasketTable(){
@@ -496,7 +511,8 @@ function renderBasketTable(){
     <td>${rw.reb==null?'—':esc(rw.reb)}</td>
     <td>${rw.badge} <button class="ibtn bt-i" type="button" data-basket="${rw.key}" aria-label="Screen, entry, exit, sizing and cadence rules" title="Screen, entry, exit, sizing &amp; cadence">i</button></td>
   </tr>`).join('');
-  host.innerHTML=`<table class="bt"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  const cols=QB_TCOLS.map(([k,_l,_kind,w])=>`<col${w?` style="width:${w}px"`:''}>`).join('');   // cc#1716
+  host.innerHTML=`<table class="bt"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
   host.querySelectorAll('tr.bt-row').forEach(tr=>{
     const rw=QB_ROWS.find(x=>x.key===tr.dataset.basket); if(!rw)return;
     tr.onclick=()=>openModal(rw.key,rw.card);
