@@ -1047,7 +1047,9 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
         # cc#602 news leads (a sector mention in an article) — they are not this company reporting.
         # Before this fence the R card read MAX(ex_date) over every row and BAJFINANCE printed a
         # 30-Aug "result date" no filing supports, above Q1 FY27 figures reported on 30-Jul.
-        cur.execute("""SELECT ex_date, status FROM earnings_calendar
+        # cc#1706: the row id rides along (r[2]) so the card can name the exact calendar row its
+        # figures were paired to. Positions 0/1 are unchanged for _paired_result_date.
+        cur.execute("""SELECT ex_date, status, id FROM earnings_calendar
                        WHERE UPPER(ticker)=%s AND verified <> 'false'
                        ORDER BY ex_date DESC LIMIT 12""", (sym,))
         ec_rows = cur.fetchall()
@@ -1074,6 +1076,12 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
         if paired and announced:
             ex_dt = paired[0]
             reported = reported or (paired[1] or "").strip().lower() == "reported"
+        # cc#1706 PROVENANCE LABEL (Fable ruling 05-Sep, cc_task_logs 5055): the card states WHICH
+        # earnings_calendar row its date and figures were bound to — the paired row when one exists,
+        # else the fenced newest row. Rendered as "src 30-Jul" beside the quarter tag; hover carries
+        # the row id + full date. None when the calendar has no confirmed row (card prints nothing).
+        src_row = paired if (paired and announced) else er
+        src = {"ec_id": src_row[2], "ex_date": str(src_row[0])} if (src_row and src_row[0]) else None
 
         # cc#623 POSITION_NEWS_CARD_V2 — two-branch flow, both surfaces (R button + Position News tab)
         # sharing the unified renderer. Sections common to BOTH branches, computed once:
@@ -1132,7 +1140,8 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
             base.update({"fy27_growth": fy27, "raw_news": raw_news, "polished_news": pol_news,
                          "expectations": expectations,    # cc#796: None -> card omits the line
                          "l1": l1, "auto_verdict": auto_verdict,   # cc#797
-                         "result_dot": result_dot})   # cc#1268: {dot, basis, est_sales, est_pat, snapshot_date}
+                         "result_dot": result_dot,    # cc#1268: {dot, basis, est_sales, est_pat, snapshot_date}
+                         "src": src})                 # cc#1706: {ec_id, ex_date} the figures were paired to
             return _with_peer(base)
 
         # (card / card_q / card_ts read above, next to the calendar rows — cc#1707 scope 3)
