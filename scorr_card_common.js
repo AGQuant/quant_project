@@ -501,7 +501,7 @@ window.scorrAsofStamp = function (asof) {
      scorr:theme. No reload: the themes are custom properties on <body>. The web light | dark pill
      is untouched and web-scoped. The fallbacks below exist only for a page whose head lost the
      resolver; they mirror its contract rather than invent one. */
-  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Dark'], ['ainight', 'AI Night'], ['aquawhite', 'Aqua White'], ['blush', 'Blush'], ['silvergold', 'Silver Gold'], ['winepurple', 'Wine Purple']];   /* cc#1654: Dark back per founder 04-Sep; mirrors pwa_endpoints NAMES - goldday/rosenight/rosewall stay hidden */
+  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Midnight Blue'], ['ainight', 'AI Night'], ['aquawhite', 'Aqua White'], ['blush', 'Blush'], ['silvergold', 'Silver Gold'], ['winepurple', 'Wine Purple']];   /* cc#1654: Dark back per founder 04-Sep; mirrors pwa_endpoints NAMES - goldday/rosenight/rosewall stay hidden */
   var THEME_GLYPH = { goldnight: '\u25c6', dark: '\u25c7', ainight: '\u2726', aquawhite: '\u25cb', blush: '\u2740', silvergold: '\u25c8', winepurple: '\u2756' };   /* cc#1719: two new sets, same glyph in both menus */
   function themeList() { var T = window.SCORR_THEME; return (T && T.list) || THEME_FALLBACK; }
   function curTheme() {
