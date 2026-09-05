@@ -199,12 +199,25 @@ body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge
    goldnight's slab bevel (cc#1095) and renaming them would break the contract for every set that
    already fills them. Inherited name, correct value — said plainly so nobody "fixes" it later.
    -------------------------------------------------------------------------------------------- */
-body[data-theme="aquawhite"]{--field:#F4F9FB;--panel:#FFFFFF;--hi:#E9F3F7;--edge:#D3E4EB;
- --ink:#0E1A20;--muted:#576B74;--brand:#07657A;--brandglow:rgba(7,101,122,.25);--accent:#07657A;
+/* cc#1720 (founder 05-Sep, phone screenshot of the AI Night tick: "I want this colour in Aqua
+   White theme, currently this theme appears dull"). ACCENT FAMILY = AI Night's exact hexes, read
+   from the ainight block below: --brand #35E0FF (the tick, active nav glyph, .sect glow, progress
+   and every --gold/--cyan alias resolves through --brand), --brandglow rgba(53,224,255,.55),
+   --railgrad cyan->transparent, --gold-hi #9FF0FF (hero highlight). CONTRAST GUARD: #35E0FF is a
+   FILL/STROKE colour on white — as text it measures 1.58 / 1.49 / 1.41 on panel / field / hi, so
+   every token that renders TEXT keeps the same hue one step darker: --accent (links, interactive
+   text) = #00798F, same hue as #35E0FF, 5.08 / 4.79 / 4.51 on panel / field / hi (>= 4.5 on all
+   three). Section eyebrows (.sect, text) are pointed at --accent for this set in theme_mobile.css.
+   DULLNESS: --muted #46585F (was #576B74; one step darker, 7.44 / 7.01 / 6.6), --edge #BFD4DD
+   (was #D3E4EB; one step stronger so the layout has edges). field / panel / hi / ink / label / win /
+   loss / texture / gold-lo / sunk unchanged. Previous values kept here for the diff:
+   brand #07657A · brandglow rgba(7,101,122,.25) · accent #07657A · railgrad #07657A · gold-hi #FFFFFF. */
+body[data-theme="aquawhite"]{--field:#F4F9FB;--panel:#FFFFFF;--hi:#E9F3F7;--edge:#BFD4DD;
+ --ink:#0E1A20;--muted:#46585F;--brand:#35E0FF;--brandglow:rgba(53,224,255,.55);--accent:#00798F;
  --label:#8F5300;--win:#14794A;--loss:#C0273A;
- --railgrad:linear-gradient(90deg,#07657A,transparent);
+ --railgrad:linear-gradient(90deg,#35E0FF,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
- --gold-lo:#9FC6D2;--gold-hi:#FFFFFF;--sunk:#E4EEF2}
+ --gold-lo:#9FC6D2;--gold-hi:#9FF0FF;--sunk:#E4EEF2}
 
 /* ── cc#1637 · THEME_BLUSH_ROSENIGHT_V1 (session_log 37303, founder 03-Sep-2026) ──────────────
    Two pink sets designed and contrast-measured by Fable (WCAG AA on all three grounds; worst

@@ -191,6 +191,11 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .sect,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .sect,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .sect{ color:var(--brand); text-shadow:var(--glow-10) var(--brandglow); }
+/* cc#1720: on aquawhite --brand is now the AI Night cyan (#35E0FF), a fill/stroke colour that fails
+ * as text on white. Section eyebrows are TEXT, so this one set reads them from --accent (same hue,
+ * darker step, AA on all three grounds); the glow keeps the cyan. Same specificity as the shared
+ * rule above and later in source, so it wins for aquawhite only. Token, not a raw colour. */
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .sect{ color:var(--accent); text-shadow:var(--glow-10) var(--brandglow); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-nav,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bnav,
