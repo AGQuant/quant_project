@@ -174,6 +174,7 @@ def _asof_load(cur, symbol, at):
     # event windows measured from the TICK's date, not from today
     cur.execute("""SELECT ex_date FROM earnings_calendar
                    WHERE UPPER(ticker)=UPPER(%s) AND ex_date BETWEEN %s AND %s
+                     AND verified <> 'false'
                    ORDER BY ex_date ASC LIMIT 1""", (symbol, day, day + timedelta(days=2)))
     _ev = cur.fetchone()
     d["event_blackout"] = _ev is not None
@@ -183,11 +184,11 @@ def _asof_load(cur, symbol, at):
                 (symbol, day - timedelta(days=5), day))
     d["fo_ban"] = cur.fetchone() is not None
     cur.execute("""SELECT ex_date FROM earnings_calendar WHERE UPPER(ticker)=UPPER(%s)
-                   AND status='upcoming' AND ex_date >= %s ORDER BY ex_date ASC LIMIT 1""",
+                   AND status='upcoming' AND verified <> 'false' AND ex_date >= %s ORDER BY ex_date ASC LIMIT 1""",
                 (symbol, day))
     _up = cur.fetchone()
     cur.execute("""SELECT ex_date FROM earnings_calendar WHERE UPPER(ticker)=UPPER(%s)
-                   AND status='reported' AND ex_date <= %s ORDER BY ex_date DESC LIMIT 1""",
+                   AND status='reported' AND verified <> 'false' AND ex_date <= %s ORDER BY ex_date DESC LIMIT 1""",
                 (symbol, day))
     _rep = cur.fetchone()
     d["result_up"] = _up[0].isoformat() if _up and _up[0] else None

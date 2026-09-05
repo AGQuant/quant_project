@@ -444,7 +444,8 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
             cmp = _f(cr[0]) if cr else None
 
             cur.execute("""SELECT 1 FROM earnings_calendar WHERE UPPER(ticker)=%s
-                           AND ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day') LIMIT 1""", (symbol,))
+                           AND ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day')
+                           AND verified <> 'false' LIMIT 1""", (symbol,))
             in_blackout = cur.fetchone() is not None
 
             cur.execute("""

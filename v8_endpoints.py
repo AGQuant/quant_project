@@ -377,6 +377,7 @@ _BLACKOUT_SQL = """
     symbol NOT IN (
         SELECT UPPER(ticker) FROM earnings_calendar
         WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+          AND verified <> 'false'
     )
 """
 
@@ -1731,7 +1732,8 @@ def qualified(basket: str, response: Response, limit: int = 50):
                 WHERE q.basket=%s AND q.signal_date=CURRENT_DATE
                   AND q.symbol NOT IN (
                       SELECT UPPER(ticker) FROM earnings_calendar
-                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day'))
+                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                        AND verified <> 'false')
                 ORDER BY q.gvm_score DESC NULLS LAST LIMIT %s
             """, (basket, min(max(limit, 1), 200)))
             cols = [d[0] for d in cur.description]
@@ -3072,7 +3074,7 @@ def forthcoming_results():
                 JOIN screener_raw sr ON UPPER(sr.nse_code) = UPPER(ec.ticker)   -- NSE-only: BSE-only tickers have no nse_code match
                 JOIN ranked r ON r.nse_code = sr.nse_code
                 LEFT JOIN futures_universe fu ON UPPER(fu.symbol) = UPPER(ec.ticker) AND fu.is_active = TRUE
-                WHERE ec.ex_date >= CURRENT_DATE
+                WHERE ec.ex_date >= CURRENT_DATE AND ec.verified <> 'false'
                 ORDER BY ec.ex_date ASC, sr.market_cap DESC NULLS LAST
             """)
             cols = [d[0] for d in cur.description]

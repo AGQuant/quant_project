@@ -552,6 +552,7 @@ def _load_one(cur, symbol):
     # so chip + banner can never disagree. result dates are scraped + refreshed daily (cc#420).
     cur.execute("""SELECT ex_date FROM earnings_calendar
                    WHERE UPPER(ticker)=UPPER(%s) AND ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 2
+                     AND verified <> 'false'
                    ORDER BY ex_date ASC LIMIT 1""",
                 (symbol,))
     _ev = cur.fetchone()
@@ -564,10 +565,10 @@ def _load_one(cur, symbol):
     cur.execute("SELECT 1 FROM fo_ban WHERE UPPER(symbol)=UPPER(%s) AND d >= CURRENT_DATE - 5 LIMIT 1", (symbol,))
     d["fo_ban"] = cur.fetchone() is not None
     cur.execute("""SELECT ex_date FROM earnings_calendar WHERE UPPER(ticker)=UPPER(%s)
-                   AND status='upcoming' AND ex_date >= CURRENT_DATE ORDER BY ex_date ASC LIMIT 1""", (symbol,))
+                   AND status='upcoming' AND verified <> 'false' AND ex_date >= CURRENT_DATE ORDER BY ex_date ASC LIMIT 1""", (symbol,))
     _up = cur.fetchone()
     cur.execute("""SELECT ex_date FROM earnings_calendar WHERE UPPER(ticker)=UPPER(%s)
-                   AND status='reported' ORDER BY ex_date DESC LIMIT 1""", (symbol,))
+                   AND status='reported' AND verified <> 'false' ORDER BY ex_date DESC LIMIT 1""", (symbol,))
     _rep = cur.fetchone()
     d["result_up"] = _up[0].isoformat() if _up and _up[0] else None
     d["result_rep"] = _rep[0].isoformat() if _rep and _rep[0] else None

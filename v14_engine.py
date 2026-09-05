@@ -271,7 +271,7 @@ def _basis_snapshot(cur, sym: str, latest: Dict) -> Dict:
 
 def _results_date(cur, sym: str) -> Optional[str]:
     """Next earnings ex_date for the symbol (G5 / id=3062 Results column). None if none upcoming."""
-    cur.execute("SELECT MIN(ex_date) FROM earnings_calendar WHERE UPPER(ticker)=%s AND ex_date >= CURRENT_DATE",
+    cur.execute("SELECT MIN(ex_date) FROM earnings_calendar WHERE UPPER(ticker)=%s AND ex_date >= CURRENT_DATE AND verified <> 'false'",
                 (sym.upper(),))
     r = cur.fetchone()
     return str(r[0]) if r and r[0] else None
@@ -325,7 +325,7 @@ def load_context(cur) -> Dict:
                      GROUP BY symbol ORDER BY turnover DESC NULLS LAST LIMIT %s) x""", (d, TOP_N_TURNOVER))
     ctx["top80"] = {r[0] for r in cur.fetchall()}
     # G5: results blackout (T / T+1)
-    cur.execute("SELECT UPPER(ticker) FROM earnings_calendar WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + 1)")
+    cur.execute("SELECT UPPER(ticker) FROM earnings_calendar WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + 1) AND verified <> 'false'")
     ctx["blackout"] = {r[0] for r in cur.fetchall()}
     # G1: V10 NIFTY regime — long only when V10 NIFTY is long; shorts mirror
     cur.execute("SELECT side FROM v10_positions WHERE symbol='NIFTY50' AND leg='FUT' AND status='OPEN' LIMIT 1")
