@@ -1936,19 +1936,22 @@ RESULTS_CARD_JS = """
   // Rounding, never truncation: Math.round and toFixed(1) both round, so 87.33 -> 87 and
   // 54.85 -> 54.9 rather than 54.8. The founder's rule is that an absolute reads as a quantity and
   // a growth figure reads as a rate; two decimals on either is noise on a card this dense.
-  function _absN(v){
-    if (v==null || v==='' || isNaN(Number(v))) return null;
-    // en-IN gives the 4,921 / 12,34,567 lakh-crore grouping the founder asked for.
-    try { return Math.round(Number(v)).toLocaleString('en-IN'); }
-    catch(e){ return String(Math.round(Number(v))); }
+  // cc#1705: the card's private helpers now DELEGATE to the shared window.ScorrFmt in
+  // scorr_card_common.js (main.py injects that file FIRST, cc#805 order). ONE formatter, both
+  // surfaces (app card + web R button share this file). Nothing on this card formats a money figure
+  // inline any more; _absN/_grow/_pc/_lvl keep their names so every call site reads as before.
+  function _F(){
+    var f = window.ScorrFmt;
+    if (!f) console.warn('results_card: window.ScorrFmt missing - scorr_card_common.js must load first');
+    return f;
   }
-  function _grow(v){
-    if (v==null || v==='' || isNaN(Number(v))) return null;
-    var n = Number(v);
-    return (n>=0?'+':'') + n.toFixed(1) + '%';
+  function _absN(v){ var f=_F(); if(!f||v==null||v===''||isNaN(Number(v))) return null; return f.groupIN(Math.round(Math.abs(Number(v)))); }
+  function _grow(v){ var f=_F(); if(!f||v==null||v===''||isNaN(Number(v))) return null; return f.pct(v); }
+  function _pc(v){ var f=_F(); return f ? f.pct(v) : '--'; }   // growth cells: signed, one decimal, dash when absent
+  function _lvl(v, unit){                                        // levels: '%' -> 36.0%, 'x' -> 32.8x
+    var f=_F(); if(!f) return '--';
+    return unit==='%' ? f.pctLevel(v) : (unit==='x' ? f.x(v) : (f.num(v)==null ? f.DASH : String(f.num(v))));
   }
-  function _pc(v){ var s=_grow(v); return s==null ? '--' : s; }   // growth cells (kept name, new contract)
-  function _lvl(v, unit){ var s=_absN(v); return s==null ? '--' : (s + (unit||'')); }   // levels: %, x, plain
   function l1Html(l1, verdict){
     if (!l1) return '';
     var h = '<div class=\"rcard-lbl\">Quarter'+(l1.quarter_label?' &middot; '+esc(l1.quarter_label):'')+'</div>';
@@ -1959,34 +1962,33 @@ RESULTS_CARD_JS = """
     // cc#823 rule_2/3: the Rs value is an absolute -> integer with Indian grouping (Rs4,921 Cr).
     function moneyRow(lbl, o){
       if (!o || o.value==null) return '';
-      var val = _absN(o.value);
-      return '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+lbl+'</span>'
-        + '<span class=\"rcard-l1v\">&#8377;'+esc(val==null?o.value:val)+' Cr</span>'
-        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.yoy)+'\">YoY '+_pc(o.yoy)+'</span>'
+      // cc#1705: 'Sales: Rs 23,165 cr, YoY +18.6%, QoQ +7.2%' — Rs prefix, Indian grouping, cr unit,
+      // a comma before each growth figure so the three numbers never run together. Negative money
+      // reads '-Rs 1,234 cr' in the card's red; absent is an em dash with no unit.
+      var F = _F(), money = F ? F.moneyCr(o.value) : String(o.value), neg = F && F.isNeg(o.value);
+      return '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+lbl+':</span>'
+        + '<span class=\"rcard-l1v\"'+(neg?' style=\"color:#d0433b\"':'')+'>'+esc(money)+', </span>'
+        + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.yoy)+'\">YoY '+_pc(o.yoy)+', </span>'
         + '<span class=\"rcard-l1d\" style=\"color:'+_sign(o.qoq)+'\">QoQ '+_pc(o.qoq)+'</span></div>';
     }
     h += moneyRow('Sales', l1.sales) + moneyRow('PAT', l1.pat);
     var m = l1.margin;
     if (m && m.now!=null){
-      // cc#823: margin LEVELS are absolutes -> integer (34% vs 32% LY). The pp DELTA is a change
-      // -> one decimal, same rule as growth.
-      h += '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+esc(m.label)+'</span>'
-        + '<span class=\"rcard-l1v\">'+esc(_lvl(m.now,'%'))+'</span>'
-        + '<span class=\"rcard-l1d\">vs LY '+esc(_lvl(m.ly,'%'))+'</span>'
+      // cc#1705: 'Financing Margin: 36.0%, +2.0pp vs LY' — level one decimal, pp unit spelled out.
+      var F2 = _F();
+      h += '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">'+esc(m.label)+':</span>'
+        + '<span class=\"rcard-l1v\">'+esc(_lvl(m.now,'%'))+', </span>'
         + '<span class=\"rcard-l1d\" style=\"color:'+_sign(m.pp)+'\">'
-        + (m.pp==null?'--':((m.pp>=0?'+':'')+esc(Number(m.pp).toFixed(1))+'pp'))+'</span></div>';
+        + esc(F2 ? F2.pp(m.pp) : '--')+' vs LY</span></div>';
     }
     var v = l1.valuation || {};
     if (v.pe!=null || v.industry_pe!=null){
-      // cc#823: NOT pre-rounded — _grow owns the precision. Rounding to an integer here and then
-      // formatting to one decimal would print a fabricated ".0" on a number that was never measured
-      // to that precision.
+      // cc#1705: 'PE 32.8x, industry 24.3x' — the x on every multiple so it is never read as rupees.
+      // The premium vs industry stays as the trailing read (a change -> signed, one decimal).
       var prem = (v.pe!=null && v.industry_pe) ? ((v.pe/v.industry_pe-1)*100) : null;
-      // cc#823: PE and industry PE are LEVELS -> integer (87x vs 34x, not 87.33x vs 33.54x).
-      // The premium is a change vs the sector -> one decimal.
       h += '<div class=\"rcard-l1row\"><span class=\"rcard-l1k\">Valuation</span>'
-        + '<span class=\"rcard-l1v\">PE '+esc(_lvl(v.pe,'x'))+'</span>'
-        + '<span class=\"rcard-l1d\">industry '+esc(_lvl(v.industry_pe,'x'))+'</span>'
+        + '<span class=\"rcard-l1v\">PE '+esc(_lvl(v.pe,'x'))+', </span>'
+        + '<span class=\"rcard-l1d\">industry '+esc(_lvl(v.industry_pe,'x'))+(prem==null?'':', ')+'</span>'
         + (prem==null ? '' : '<span class=\"rcard-l1d\" style=\"color:'+_sign(-prem)+'\">'
              + esc(_grow(prem))+' vs industry</span>')
         + '</div>';
