@@ -246,3 +246,37 @@ body[data-theme="ainight"]{--field:#05070F;--panel:#0B1020;--hi:#111A30;--edge:#
  --railgrad:linear-gradient(90deg,#35E0FF,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
  --gold-lo:#1E3050;--gold-hi:#9FF0FF;--sunk:#03050B}
+
+/* cc#1719 · THEME_SILVERGOLD_V1 + THEME_WINEPURPLE_V1 (founder 05-Sep: "Can we add 2 new themes:
+   silver gold, and wine, purple and metallic white"). Palettes filed by Fable on the card; the 17
+   contract keys (theme_validate SET COMPLETENESS) mapped as follows, existing nine blocks untouched.
+   SILVER GOLD — a dark set. field/panel/hi/edge = graphite ramp (field, panel, panel_hi, line);
+   ink = chalk silver-white; muted = silver; brand + accent = gold (CTAs, active tab, hero numbers —
+   one accent, folded like the gold themes); label = the palette's silver accent2 (index-name chips);
+   win/loss = the dark-ground green/red shades every dark set uses (hue fixed, P&L never re-skins).
+   DERIVED (palette does not name them): brandglow = gold at .35 like the other dark glows;
+   railgrad = gold to transparent; texture = the dark-set hairline; gold-lo = line2 (the deep tone,
+   as ainight uses its edge); gold-hi = a pale gold highlight lifted from the accent; sunk = one step
+   darker than the field. */
+body[data-theme="silvergold"]{--field:#0F1013;--panel:#171921;--hi:#1F222B;--edge:#2C3039;
+ --ink:#E8E9EC;--muted:#A9AEB8;--brand:#D4AF37;--brandglow:rgba(212,175,55,.35);--accent:#D4AF37;
+ --label:#C3C7CF;--win:#3DD68C;--loss:#FF5C6C;
+ --railgrad:linear-gradient(90deg,#D4AF37,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
+ --gold-lo:#3A3F4A;--gold-hi:#F5E6B3;--sunk:#0A0B0D}
+/* WINE PURPLE — a light set on metallic white. field = cool metallic white, panel = white, hi =
+   panel_hi, edge = line; ink = deep plum; muted = the palette muted; brand = wine (CTAs, active tab,
+   hero numbers); accent = purple (links, secondary chips — the contract's interactive key); label =
+   purple too (index-name chips are secondary chips here); win/loss = the card's AA pair for white
+   (#157A4B / #C0263C, both >= 4.5:1 on #FFFFFF and on the field, measured before push).
+   DERIVED: brandglow = wine at .22 like blush's light glow; railgrad = wine to transparent;
+   texture = the light-set hairline; gold-lo = line2 (mid tone, as blush uses its mid pink);
+   gold-hi = white; sunk = one step below the field. The "metallic edge" (panel border-top
+   rgba(255,255,255,.7)) is not a contract key, so it is not declared here — same rule as rosewall's
+   non-contract tokens. */
+body[data-theme="winepurple"]{--field:#F3F0F4;--panel:#FFFFFF;--hi:#ECE7EF;--edge:#DCD3DE;
+ --ink:#2B1A2F;--muted:#6F5B75;--brand:#7B2D42;--brandglow:rgba(123,45,66,.22);--accent:#6D4AA3;
+ --label:#6D4AA3;--win:#157A4B;--loss:#C0263C;
+ --railgrad:linear-gradient(90deg,#7B2D42,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
+ --gold-lo:#C8BCCB;--gold-hi:#FFFFFF;--sunk:#E9E3EC}

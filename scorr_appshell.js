@@ -55,8 +55,8 @@
      pwa_endpoints NAMES), literal THEME_FALLBACK only for a page whose head lost the resolver
      entirely. Glyphs match scorr_card_common.js THEME_GLYPH exactly, so the two menus never show
      two different icons for the same theme. */
-  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Dark'], ['ainight', 'AI Night'], ['aquawhite', 'Aqua White'], ['blush', 'Blush']];
-  var THEME_GLYPH = { goldnight: '◆', dark: '◇', ainight: '✦', aquawhite: '○', blush: '❀' };
+  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Dark'], ['ainight', 'AI Night'], ['aquawhite', 'Aqua White'], ['blush', 'Blush'], ['silvergold', 'Silver Gold'], ['winepurple', 'Wine Purple']];
+  var THEME_GLYPH = { goldnight: '◆', dark: '◇', ainight: '✦', aquawhite: '○', blush: '❀', silvergold: '◈', winepurple: '❖' };   /* cc#1719: two new sets, same glyph in both menus */
   function themeList() { var T = window.SCORR_THEME; return (T && T.list) || THEME_FALLBACK; }
   function themeOk(k) {
     var list = themeList();
