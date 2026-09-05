@@ -551,7 +551,7 @@ def run_scrape(mode="run", symbols=None) -> dict:
                     WHERE s.symbol = ANY(%s)
                       AND EXISTS (SELECT 1 FROM earnings_calendar e
                                   WHERE UPPER(e.ticker)=UPPER(s.symbol) AND e.status='reported'
-                                    AND e.ex_date >= %s)
+                                    AND e.verified <> 'false' AND e.ex_date >= %s)
                       AND NOT EXISTS (SELECT 1 FROM fundamentals_history f
                                       WHERE UPPER(f.symbol)=UPPER(s.symbol) AND f.section='quarters'
                                         AND f.period_type='quarter' AND f.period_end=%s)

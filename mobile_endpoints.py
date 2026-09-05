@@ -1025,6 +1025,7 @@ def mobile_results(request: Request, days: int = 10, limit: int = 60):
                 FROM earnings_calendar e
                 WHERE e.ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date
                   AND e.ex_date <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date + %s
+                  AND e.verified <> 'false'   -- cc#1707 fence
                 ORDER BY e.ex_date, (NOT EXISTS (SELECT 1 FROM futures_universe f
                                WHERE f.symbol = e.ticker AND f.is_active)), e.ticker
                 LIMIT %s
@@ -1034,6 +1035,7 @@ def mobile_results(request: Request, days: int = 10, limit: int = 60):
                 SELECT COUNT(*) FROM earnings_calendar
                 WHERE ex_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date
                   AND ex_date <= (NOW() AT TIME ZONE 'Asia/Kolkata')::date + %s
+                  AND verified <> 'false'   -- cc#1707 fence
             """, (days,))
             total = cur.fetchone()[0]
             cur.execute("SELECT MAX(last_updated) FROM earnings_calendar")

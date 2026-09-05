@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_watchdog_gaps_status ON watchdog_gaps(status);
 SEED_CHECKS = [
     {"check_id": "ops_metrics_t1_data", "job_name": "bg_ops_metrics_t1", "check_type": "data",
      "output_table": "sector_ops_metrics", "ts_column": "created_at", "scope_filter": None,
-     "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND ex_date >= CURRENT_DATE-3 LIMIT 1",
+     "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND verified <> 'false' AND ex_date >= CURRENT_DATE-3 LIMIT 1",
      "cadence": "daily", "sla_hours": 48, "severity": "high",
      "suggested_action": "sector_ops_metrics stale while companies reported: confirm T+1 stages doc_texts, then run CC extraction (doc_texts -> sector_ops_metrics). App anthropic retired 19-Jul (cc#595)."},
     {"check_id": "ops_metrics_saturday_data", "job_name": "bg_ops_metrics_saturday", "check_type": "data",
@@ -133,7 +133,7 @@ SEED_CHECKS = [
     # while companies have reported (the doc-fetch/extraction cycle silently produced nothing).
     {"check_id": "ops_extraction_yield", "job_name": "bg_ops_metrics_t1", "check_type": "data",
      "output_table": "sector_ops_metrics", "ts_column": "created_at", "scope_filter": None,
-     "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND ex_date >= CURRENT_DATE-5 LIMIT 1",
+     "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND verified <> 'false' AND ex_date >= CURRENT_DATE-5 LIMIT 1",
      "cadence": "daily_trading", "sla_hours": 24, "severity": "high",
      "suggested_action": "ops-extraction produced no new sector_ops_metrics in >24h while companies reported — check the doc-fetch/extraction cycle (cc#595/596) + the CC extraction batch off doc_texts."},
     # cc#847: position_news_data check REMOVED with the feature. Leaving a freshness check
@@ -141,7 +141,7 @@ SEED_CHECKS = [
     # the watchdog must not cry about a job that was killed on purpose.
     {"check_id": "fundamentals_t1_data", "job_name": "bg_ops_metrics_t1", "check_type": "data",
      "output_table": "fundamentals_history", "ts_column": "scraped_at", "scope_filter": "section<>'shareholding'",
-     "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND ex_date >= CURRENT_DATE-3 LIMIT 1",
+     "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND verified <> 'false' AND ex_date >= CURRENT_DATE-3 LIMIT 1",
      "cadence": "daily", "sla_hours": 72, "severity": "medium",
      "suggested_action": "fundamentals not re-scraped for reported companies — check the T+1 fundamentals path."},
 ]
@@ -370,7 +370,8 @@ def _check_result_analysis_staleness(conn, now) -> dict:
                 WITH ann AS (
                     SELECT UPPER(ticker) AS sym, MAX(ex_date) AS ex_date
                     FROM earnings_calendar
-                    WHERE status='reported' AND ex_date <= CURRENT_DATE - 2 AND ticker IS NOT NULL
+                    WHERE status='reported' AND verified <> 'false'
+                      AND ex_date <= CURRENT_DATE - 2 AND ticker IS NOT NULL
                     GROUP BY UPPER(ticker))
                 SELECT COUNT(*), array_agg(a.sym ORDER BY a.sym)
                 FROM ann a JOIN input_raw i ON i.nse_code = a.sym

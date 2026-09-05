@@ -17,7 +17,7 @@ main.py registers fy27_outlook in _ALLOWED_CONTENT_FIELDS + _FIELD_TO_TS_COL for
 """
 import os
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 import psycopg2
@@ -56,6 +56,33 @@ def _card_quarter(text):
     import re
     m = re.match(r"\s*(Q[1-4]\s+FY\d{2})", text or "")
     return m.group(1).strip() if m else None
+
+
+def _q_label_end(label):
+    """cc#1707 scope 3: 'Q1 FY27' / 'Q1FY27' -> the fiscal quarter-end date (2026-06-30). Indian FY:
+    Q1=Jun, Q2=Sep, Q3=Dec of FY-1 calendar year; Q4=Mar of the FY year. None if unparseable."""
+    import re
+    m = re.match(r"\s*Q([1-4])\s*FY\s*(\d{2})", label or "")
+    if not m:
+        return None
+    q, fy = int(m.group(1)), 2000 + int(m.group(2))
+    return {1: date(fy - 1, 6, 30), 2: date(fy - 1, 9, 30), 3: date(fy - 1, 12, 31), 4: date(fy, 3, 31)}[q]
+
+
+def _paired_result_date(rows, period_end, today):
+    """cc#1707 scope 3 (R CARD PAIRING): the result date shown must be the date of the EVENT the
+    displayed figures belong to — the confirmed calendar row for the analysed quarter — never
+    MAX(ex_date). `rows` = (ex_date, status) confirmed rows (verified<>'false'), newest first.
+    A quarter's result lands after its quarter-end and, in practice, within ~100 days of it
+    (Q4 has the 60-day SEBI window). Prefer a 'reported' row in that window, latest, not in the
+    future; else the latest row in the window. None when nothing pairs (caller falls back)."""
+    if not period_end or not rows:
+        return None
+    hi = period_end + timedelta(days=100)
+    win = [r for r in rows if r[0] and period_end < r[0] <= hi]
+    rep = [r for r in win if (r[1] or "").strip().lower() == "reported" and r[0] <= today]
+    pick = rep or win
+    return max(pick, key=lambda r: r[0]) if pick else None
 
 
 # cc#796 EXPECTATIONS. Screener's CSV carries an EXPECTED quarterly sales/profit per company. It is a
@@ -749,7 +776,8 @@ def _peer_results(cur, sym, segment, today=None, include_self=False):
         else:
             # unreported -> greyed with the peer's own next expected earnings_calendar date
             cur.execute("""SELECT ex_date FROM earnings_calendar
-                           WHERE UPPER(ticker)=%s AND ex_date >= %s ORDER BY ex_date ASC LIMIT 1""", (psym, d))
+                           WHERE UPPER(ticker)=%s AND ex_date >= %s AND verified <> 'false'
+                           ORDER BY ex_date ASC LIMIT 1""", (psym, d))
             er = cur.fetchone()
             rec["expected_date"] = str(er[0]) if (er and er[0]) else None
         out.append(rec)
@@ -841,7 +869,7 @@ _SEGMENT_RESULTS_SQL = """
     nxt AS (
         SELECT DISTINCT ON (UPPER(ticker)) UPPER(ticker) AS sym, ex_date
         FROM earnings_calendar
-        WHERE UPPER(ticker) IN (SELECT sym FROM seg) AND ex_date >= %s
+        WHERE UPPER(ticker) IN (SELECT sym FROM seg) AND ex_date >= %s AND verified <> 'false'
         ORDER BY UPPER(ticker), ex_date ASC),
     q AS (
         SELECT UPPER(f.symbol) AS sym, f.period_end,
@@ -1015,8 +1043,15 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
             d["segment"] = segment
             return d
 
-        cur.execute("SELECT ex_date, status FROM earnings_calendar WHERE UPPER(ticker)=%s ORDER BY ex_date DESC LIMIT 1", (sym,))
-        er = cur.fetchone()
+        # cc#1707 READER FENCE: only CONFIRMED/estimated calendar rows count. verified='false' rows are
+        # cc#602 news leads (a sector mention in an article) — they are not this company reporting.
+        # Before this fence the R card read MAX(ex_date) over every row and BAJFINANCE printed a
+        # 30-Aug "result date" no filing supports, above Q1 FY27 figures reported on 30-Jul.
+        cur.execute("""SELECT ex_date, status FROM earnings_calendar
+                       WHERE UPPER(ticker)=%s AND verified <> 'false'
+                       ORDER BY ex_date DESC LIMIT 12""", (sym,))
+        ec_rows = cur.fetchall()
+        er = ec_rows[0] if ec_rows else None
         today = date.today()
         # cc#648 part_1: earnings_calendar.status='reported' is the AUTHORITATIVE "results are out" signal
         # (an ex_date can pass without the company having reported — reschedules). The structured card is
@@ -1025,6 +1060,20 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
         ex_dt = er[0] if er else None
         reported = bool(er) and (er[1] or "").strip().lower() == "reported"
         announced = reported or (ex_dt is not None and ex_dt <= today)
+
+        # cc#1707 scope 3 R CARD PAIRING: the stored card is read here (it was read further down) so the
+        # header date can be bound to the quarter the displayed figures belong to. When a current-quarter
+        # card exists, ex_dt = the confirmed calendar row for THAT quarter (BAJFINANCE Q1 FY27 -> 30-Jul),
+        # never the newest row. Without a pairable row the fenced newest row stands.
+        cur.execute("SELECT result_analysis, last_result_analysis_updated FROM input_raw WHERE nse_code=%s", (sym,))
+        ra = cur.fetchone()
+        card = ra[0] if (ra and ra[0]) else None
+        card_q = _card_quarter(card) if card else None
+        card_ts = str(ra[1]) if (ra and ra[1]) else None
+        paired = _paired_result_date(ec_rows, _q_label_end(card_q), today) if card_q else None
+        if paired and announced:
+            ex_dt = paired[0]
+            reported = reported or (paired[1] or "").strip().lower() == "reported"
 
         # cc#623 POSITION_NEWS_CARD_V2 — two-branch flow, both surfaces (R button + Position News tab)
         # sharing the unified renderer. Sections common to BOTH branches, computed once:
@@ -1086,11 +1135,7 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
                          "result_dot": result_dot})   # cc#1268: {dot, basis, est_sales, est_pat, snapshot_date}
             return _with_peer(base)
 
-        cur.execute("SELECT result_analysis, last_result_analysis_updated FROM input_raw WHERE nse_code=%s", (sym,))
-        ra = cur.fetchone()
-        card = ra[0] if (ra and ra[0]) else None
-        card_q = _card_quarter(card) if card else None
-        card_ts = str(ra[1]) if (ra and ra[1]) else None
+        # (card / card_q / card_ts read above, next to the calendar rows — cc#1707 scope 3)
 
         # Branch A: ANNOUNCED — strict priority chain on the structured card.
         if announced:
