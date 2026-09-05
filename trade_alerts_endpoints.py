@@ -89,8 +89,36 @@ def _ensure_schema(conn):
         cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS trade_alerts_source_uniq
                        ON trade_alerts (source_engine, source_ref, kind)
                        WHERE source_engine IS NOT NULL""")
+        # cc#1717: SEEN state, server-side (single-account app, so "seen" must clear across devices).
+        # One tiny side table keyed by alert id — CREATE TABLE IF NOT EXISTS, no ALTER on the live
+        # trade_alerts table. The bell writes it on sheet OPEN; /api/alerts/list reads it back as a
+        # per-row `seen` flag plus `unseen_count` (manual pending/triggered rows not yet seen — the
+        # bell's own badge definition, cc#1696), so the count clears once the sheet has been opened
+        # and rises again only when a NEW alert arrives.
+        cur.execute("""CREATE TABLE IF NOT EXISTS trade_alert_seen (
+                           alert_id BIGINT PRIMARY KEY,
+                           seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
     conn.commit()
     _SCHEMA_READY = True
+
+
+def _is_unseen_open_manual(r):
+    """cc#1717: what the bell badge counts — a MANUAL (engine-less) alert still waiting
+    (pending / triggered) that nobody has opened the sheet on yet."""
+    return (not r.get("source_engine")) and r.get("status") in ("pending", "triggered") and not r.get("seen")
+
+
+def _attach_seen(cur, rows):
+    """cc#1717: stamp seen/seen_at on each row from trade_alert_seen; return unseen_count."""
+    ids = [r["id"] for r in rows]
+    seen = {}
+    if ids:
+        cur.execute("SELECT alert_id, seen_at FROM trade_alert_seen WHERE alert_id = ANY(%s)", (ids,))
+        seen = {a: b for a, b in cur.fetchall()}
+    for r in rows:
+        r["seen"] = r["id"] in seen
+        r["seen_at"] = str(seen[r["id"]]) if r["id"] in seen else None
+    return sum(1 for r in rows if _is_unseen_open_manual(r))
 
 
 # Run once at import (main.py imports this at boot) so the columns exist BEFORE the trade wall's
@@ -298,7 +326,38 @@ def list_alerts(status: str = "all", limit: int = 200):
                     r["cmp"] = hit.get("cmp")
                     r["cmp_live"] = bool(hit.get("live")) if hit else None
                     r["cmp_source"] = hit.get("source")
-    return {"status_filter": status, "count": len(rows), "alerts": rows}
+        unseen = _attach_seen(cur, rows)   # cc#1717: seen flag per row + the bell's badge count
+    return {"status_filter": status, "count": len(rows), "alerts": rows,
+            "unseen_count": unseen, "seen_count": sum(1 for r in rows if r.get("seen"))}
+
+
+@router.post("/api/alerts/seen")
+async def mark_alerts_seen(req: Request):
+    """cc#1717: the bell calls this ONCE when its sheet opens, with every alert id it rendered.
+    Idempotent (ON CONFLICT DO NOTHING); ids that are not real alerts are ignored, never invented.
+    Returns the fresh unseen_count over the whole table (same definition as /api/alerts/list) so
+    the badge can repaint from the server's number, not a client guess."""
+    body = await req.json()
+    raw = body.get("ids") if isinstance(body, dict) else None
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "ids: non-empty list of alert ids required")
+    ids = []
+    for v in raw:
+        try:
+            ids.append(int(v))
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"bad id {v!r}")
+    with _conn() as conn, conn.cursor() as cur:
+        _ensure_schema(conn)
+        cur.execute("""INSERT INTO trade_alert_seen (alert_id)
+                       SELECT id FROM trade_alerts WHERE id = ANY(%s)
+                       ON CONFLICT (alert_id) DO NOTHING""", (ids,))
+        marked = cur.rowcount
+        cur.execute(f"SELECT {_COLS} FROM trade_alerts WHERE status IN ('pending','triggered')")
+        open_rows = [_row(r) for r in cur.fetchall()]
+        unseen = _attach_seen(cur, open_rows)
+        conn.commit()
+    return {"status": "ok", "marked": marked, "requested": len(ids), "unseen_count": unseen}
 
 
 @router.post("/api/alerts/approve")
