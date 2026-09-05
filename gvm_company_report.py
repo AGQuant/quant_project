@@ -37,6 +37,7 @@ Coverage are IRRELEVANT and are dropped from the parameter set.
 
 import logging
 import statistics
+import gvm_inputs   # cc#1714: one shared raw-input + segment-median-peer helper for every reader
 from datetime import date
 from typing import Optional, Dict, Any, List
 
@@ -50,10 +51,9 @@ log = logging.getLogger("scorr.gvm_report")
 # ─── Parameter definitions ──────────────────────────────────────────────────
 # Each: (key, label, group, screener_col, higher_is_better, db_prefix, unit)
 #   group  : Trackrecord | Valuation | Outlook | Reliability | Technicals
-#   db_prefix maps to gvm_scores.<prefix>_raw/_peer/_rating columns (when present)
+#   db_prefix = the gvm_inputs / gvm_scores *_rating key for the row (cc#1714: *_raw/*_peer are
+#   deprecated and never written; raw+peer come from gvm_inputs.get_inputs at read time)
 #   unit   : '%' | 'x' | 'ratio' | '' (for display)
-_REPORT_PERSISTS_DETAIL = False   # cc#1714: nightly owns gvm_scores *_raw/*_peer/*_rating
-
 PARAMS = [
     ("sales_5y",   "Sales 5Y CAGR",          "Trackrecord", "sales_growth_5y",        True,  "sales_5y",   "%"),
     ("sales_3y",   "Sales 3Y CAGR",          "Trackrecord", "sales_growth_3y",        True,  "sales_3y",   "%"),
@@ -245,19 +245,36 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         pe_non_null = [v for v in (_f(p.get("pe")) for p in peers) if v is not None]
         live_segment_median_pe = _median(pe_non_null)
 
+        # cc#1714 (OPTION 2): this company's raw input and segment-median peer per parameter come
+        # from gvm_inputs.get_inputs — the SAME _load_merged_df + _peer_averages values the nightly
+        # scores with (screener_raw for G/V, momentum_scores for M) — so the numbers on this page
+        # are the numbers behind the *_rating columns, and no reader computes its own median.
+        # The segment peer list queried above is still used for rank, best/worst and the ladder.
+        # If the helper has no entry (symbol outside the merge), the local values stand.
+        try:
+            _inp = gvm_inputs.get_inputs([symbol]).get(symbol, {})
+        except Exception as _ie:
+            log.warning("cc#1714 gvm_inputs unavailable for %s: %s", symbol, _ie)
+            _inp = {}
+        _h_pe = _inp.get("pe") or {}
+        if _h_pe.get("peer") is not None:
+            live_segment_median_pe = _h_pe["peer"]
+
         # Build per-parameter benchmark
         params_out = []
         pillar_acc: Dict[str, List[float]] = {}
         pillar_total: Dict[str, int] = {}   # cc#828 part_3: denominator incl. excluded metrics
-        persist_vals: Dict[str, Any] = {}
 
         for key, label, group, scol, hib, prefix, unit in PARAMS:
             if bfsi and key in ("int_cov",):
                 continue  # BFSI rule: interest coverage irrelevant
 
             col_vals = [_f(p.get(scol)) for p in peers]
+            _h = _inp.get(prefix) or {}
+            if me_idx is not None and _h.get("raw") is not None:
+                col_vals[me_idx] = _h["raw"]     # cc#1714: own value = the scored input
             non_null = [v for v in col_vals if v is not None]
-            peer_median = _median(non_null)
+            peer_median = _h["peer"] if _h.get("peer") is not None else _median(non_null)
 
             raw = rating = rank = None
             best_sym = worst_sym = None
@@ -318,9 +335,6 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
 
             if rating is not None:
                 pillar_acc.setdefault(group, []).append(rating)
-                persist_vals[f"{prefix}_raw"] = round(raw, 2) if raw is not None else None
-                persist_vals[f"{prefix}_peer"] = peer_median
-                persist_vals[f"{prefix}_rating"] = rating
 
         # ── Missing M metrics: DMA50/200, RSI Monthly, 1M Return, Volume Trend ──
         # These come from momentum_scores (not screener_raw), queried separately.
@@ -444,26 +458,10 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         positives = sorted(rated, key=lambda x: x["rating"], reverse=True)[:4]
         negatives = sorted(rated, key=lambda x: x["rating"])[:3]
 
-        # Persist computed detail back into gvm_scores (saved for tomorrow)
-        # cc#1714: OFF. The nightly (gvm_nightly.recompute_gvm) now writes every *_raw / *_peer /
-        # *_rating column for all ~1,787 names in one batch and is the source of truth; this page-open
-        # writer only ever reached the handful of names someone opened (8/1,787 on 05-Sep) and its M
-        # raw source (screener_raw.return_* COALESCE universe_technicals) differs from the values
-        # that actually score M (momentum_scores). Two writers into one column set = two truths.
-        # The report READS gvm_scores now and no longer writes it. persist_vals is still built above
-        # so the code path stays inspectable; flip _REPORT_PERSISTS_DETAIL only by a card.
-        if _REPORT_PERSISTS_DETAIL and persist_vals and me_idx is not None:
-            try:
-                set_sql = ", ".join(f'"{k}" = %s' for k in persist_vals.keys())
-                cur.execute(
-                    f"UPDATE gvm_scores SET {set_sql} "
-                    f"WHERE symbol = %s AND score_date = (SELECT MAX(score_date) FROM gvm_scores)",
-                    list(persist_vals.values()) + [symbol]
-                )
-                conn.commit()
-            except Exception as e:
-                log.warning(f"persist {symbol} detail failed: {e}")
-                conn.rollback()
+        # cc#1714 (OPTION 2): the lazy "UPDATE gvm_scores SET <prefix>_raw/_peer/_rating" that used
+        # to live here is GONE. It only ever reached the names someone opened (8 of 1,787 on 05-Sep)
+        # and was wiped by the nightly DELETE; gvm_scores.*_raw/*_peer are deprecated, never written.
+        # This report READS (gvm_inputs + the peer query above) and writes nothing.
 
     return {
         "symbol": symbol,

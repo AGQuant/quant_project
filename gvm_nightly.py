@@ -639,11 +639,7 @@ def _load_merged_df(target_date: date) -> pd.DataFrame:
         # 21-parameter rating set (Breakup heatmap source). m_score itself is unchanged.
         mom = pd.read_sql_query(
             "SELECT DISTINCT ON (symbol) symbol, m_score, ret_1y_rating, ret_3y_rating, "
-            "dma_50_rating, dma_200_rating, ret_52w_idx_rating, "
-            # cc#1714: the 5 raw M inputs ride along too, prefixed mom_ so they never collide with
-            # screener_raw's own (dead, cc#1494) return_1y / dma_50 / dma_200 columns in the merge.
-            "ret_1y AS mom_ret_1y, ret_3y AS mom_ret_3y, dma_50 AS mom_dma_50, "
-            "dma_200 AS mom_dma_200, ret_52w_vs_index AS mom_ret_52w_idx FROM momentum_scores "
+            "dma_50_rating, dma_200_rating, ret_52w_idx_rating FROM momentum_scores "
             "WHERE score_date <= %s ORDER BY symbol, score_date DESC",
             conn, params=(target_date,),
         )
@@ -817,65 +813,6 @@ _M_RATING_COLS = ["ret_1y_rating", "ret_3y_rating", "dma_50_rating", "dma_200_ra
                   "ret_52w_idx_rating"]
 _ALL_RATING_COLS = [c for c, _ in _GV_RATING_COLS] + _M_RATING_COLS
 
-# ── cc#1714: per-parameter RAW INPUT + PEER BENCHMARK persistence ────────────────────────────────
-# Same gap as cc#1484, one level down: the *_raw / *_peer columns (pe_raw, roce_raw, pe_peer ...)
-# were only ever filled lazily by gvm_company_report on a page open (8/1,787 names on 05-Sep) and
-# wiped by the nightly DELETE. The values are ALREADY in hand here — _stock_dict() builds exactly
-# these inputs for api_g_score / api_v_score — so persist them. (prefix, _stock_dict key): raw =
-# sd[key], peer = sd["peer_"+key]; PE's peer is the live segment MEDIAN pe (sd["segment_pe"],
-# cc#506). upside_raw is already written separately below, so upside contributes only its peer.
-# M: raw from momentum_scores (the values that actually scored M — never screener_raw's dead
-# return columns), peer = segment median of the same, computed over the merged frame.
-_GV_RAW_PEER = [
-    ("sales_5y", "sales_growth_5y"), ("sales_3y", "sales_growth_3y"),
-    ("profit_5y", "profit_growth_5y"), ("profit_3y", "profit_growth_3y"),
-    ("qoq_sales", "qoq_sales_growth"), ("qoq_profit", "qoq_profit_growth"),
-    ("opm", "opm"), ("opm_exp", "opm_expansion"), ("fa_growth", "fixed_asset_growth"),
-    ("inst_abs", "inst_holding_abs"), ("inst_change", "inst_holding_change"),
-    ("roce", "roce"), ("int_cov", "interest_coverage"), ("div_yield", "dividend_yield"),
-    ("pe", "pe"), ("upside", "potential_upside"),
-]
-_M_RAW_PEER = [("ret_1y", "mom_ret_1y"), ("ret_3y", "mom_ret_3y"), ("dma_50", "mom_dma_50"),
-               ("dma_200", "mom_dma_200"), ("ret_52w_idx", "mom_ret_52w_idx")]
-_M_RAW_SRC = [src for _p, src in _M_RAW_PEER]
-_RAW_PEER_COLS = []
-for _p, _src in _GV_RAW_PEER:
-    if _p != "upside":
-        _RAW_PEER_COLS.append(f"{_p}_raw")
-    _RAW_PEER_COLS.append(f"{_p}_peer")
-for _p, _src in _M_RAW_PEER:
-    _RAW_PEER_COLS += [f"{_p}_raw", f"{_p}_peer"]
-
-
-def _raw_peer_vals(sd, row, m_peers):
-    """The *_raw / *_peer tuple for one stock, in _RAW_PEER_COLS order. None for missing — never
-    NaN, never 0 (same _rating_val discipline)."""
-    out = []
-    for p, src in _GV_RAW_PEER:
-        if p != "upside":
-            out.append(_rating_val(sd.get(src)))
-        out.append(_rating_val(sd.get("segment_pe") if p == "pe" else sd.get("peer_" + src)))
-    seg_m = m_peers.get(sd.get("segment"), {})
-    for p, src in _M_RAW_PEER:
-        out.append(_rating_val(row.get(src)))
-        out.append(_rating_val(seg_m.get(src)))
-    return out
-
-
-def _m_peer_medians(df: pd.DataFrame) -> Dict:
-    """cc#1714: segment MEDIAN of each raw M input (mirrors _peer_averages for G/V)."""
-    out = {}
-    cols = [c for c in _M_RAW_SRC if c in df.columns]
-    if not cols:
-        return out
-    for seg, grp in df.groupby("gvm_segment"):
-        avgs = {}
-        for c in cols:
-            vals = pd.to_numeric(grp[c], errors="coerce").dropna()
-            avgs[c] = round(vals.median(), 4) if len(vals) else None
-        out[seg] = avgs
-    return out
-
 
 def _rating_val(x):
     """float rounded 2dp, or None — never NaN into the DB."""
@@ -905,7 +842,6 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
                 "momentum": mom_result}
 
     peer_avgs = _peer_averages(df)
-    m_peers = _m_peer_medians(df)   # cc#1714
     history_rows, latest_rows, errors, m_missing = [], [], 0, 0
 
     for _, row in df.iterrows():
@@ -920,8 +856,6 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
             _bd.update(vres["breakdown"])
             rating_vals = [_rating_val(_bd.get(lbl)) for _c, lbl in _GV_RATING_COLS]
             rating_vals += [_rating_val(row.get(c)) for c in _M_RATING_COLS]
-            # cc#1714: the raw inputs + peer benchmarks behind those ratings, same source values.
-            raw_peer_vals = _raw_peer_vals(sd, row, m_peers)
             # M from daily momentum_scores; neutral 5.0 fallback if missing.
             m_raw = row.get("m_score_daily")
             if m_raw is None or (isinstance(m_raw, float) and pd.isna(m_raw)):
@@ -947,7 +881,7 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
 
             history_rows.append((sym, target_date, g, vv, m, total, verd, seg))
             latest_rows.append((sym, cname, seg, price, g, vv, m, total, verd, punch, mcap, target_date,
-                                upside_val, *rating_vals, *raw_peer_vals))
+                                upside_val, *rating_vals))
         except Exception as e:
             errors += 1
             log.warning(f"GVM score {row.get('nse_code','?')}: {e}")
@@ -962,13 +896,20 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
         """, history_rows)
         cur.execute("DELETE FROM gvm_scores")
         # cc#1484: + the 21 per-parameter rating columns (see _GV_RATING_COLS/_M_RATING_COLS above).
-        # cc#1714: + the 41 *_raw / *_peer input columns (see _RAW_PEER_COLS above). No schema change.
-        _extra_cols = _ALL_RATING_COLS + _RAW_PEER_COLS
+        #
+        # cc#1714 (founder 05-Sep, OPTION 2): gvm_scores.*_raw / *_peer columns are DEPRECATED,
+        # never written, readers use gvm_inputs.get_inputs (cc#1714). They were only ever filled
+        # lazily by gvm_company_report on a page open (8 of 1,787 names) and wiped by the DELETE
+        # above, so gvm_scores stops pretending to carry raw inputs. Raw values live in screener_raw
+        # (the source) and momentum_scores (M); segment-median peers come from _peer_averages via
+        # gvm_inputs, one helper for every reader. Columns stay in place (no DDL, MAINTENANCE_LOCK_RULE)
+        # until a weekend console DROP; the list is on cc#1714. upside_raw is NOT in that set — it is
+        # still written below (task #39) and stays.
         cur.executemany("""
             INSERT INTO gvm_scores
                 (symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap, score_date, upside_raw,
-                 """ + ", ".join(_extra_cols) + """)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,""" + ",".join(["%s"] * len(_extra_cols)) + ")", latest_rows)
+                 """ + ", ".join(_ALL_RATING_COLS) + """)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,""" + ",".join(["%s"] * len(_ALL_RATING_COLS)) + ")", latest_rows)
         # cc#406: keep gvm_cache + peer_averages in lock-step with gvm_scores (same txn) so the
         # Max/query cache can never drift a month behind again.
         cache_result = sync_gvm_cache(cur)
