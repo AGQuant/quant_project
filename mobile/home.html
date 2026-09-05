@@ -563,7 +563,7 @@ body[data-theme]{
 .pfrow{cursor:pointer}
 .pfrow:active{background:var(--panel2)}
 .pfcard{padding:var(--space-4) var(--space-2) var(--space-10)}
-.sect{color:#35E0FF;text-shadow:0 0 12px rgba(53,224,255,.4)}
+.sect{color:var(--wayfind,#35E0FF);text-shadow:0 0 12px color-mix(in srgb, var(--wayfind,#35E0FF) 40%, transparent)}   /* cc#1721: the wayfinding token — goldnight resolves to the same #35E0FF this line hardcoded since cc#1068 */
 /* cc#1158 — INDEX BOOK strip, per design_refs/scorr_home_indexbook_R2.html (7564bc4). It takes
    the place of the cc#1068 INDEX SIGNALS card, whose .r5-idxcard / .r5-idxsub rules are removed
    with it rather than left behind. The ref's own token names (--aqua/--panel-edge/--up/--down/
@@ -916,7 +916,7 @@ body[data-theme]{
    "static or smooth", never "broken or jerky". */
 #heroTrack > .c::after{
   content:'';position:absolute;inset:0;border-radius:inherit;padding:var(--space-2);box-sizing:border-box;
-  pointer-events:none;background:#35E0FF;
+  pointer-events:none;background:var(--wayfind,#35E0FF);   /* cc#1721 */
   -webkit-mask:linear-gradient(black 0 0) content-box,linear-gradient(black 0 0);
   -webkit-mask-composite:xor;mask-composite:exclude;
 }
@@ -924,7 +924,7 @@ body[data-theme]{
 html.glitter-ok #heroTrack > .c::after{
   /* one bright arc travelling the ring, rest transparent -- not a full glow */
   background:conic-gradient(from var(--glitter-angle),
-    transparent 0deg, #35E0FF 18deg, transparent 46deg, transparent 360deg);
+    transparent 0deg, var(--wayfind,#35E0FF) 18deg, transparent 46deg, transparent 360deg);
   animation:glitterSweep 5s linear infinite;   /* cc#1400: 3.6s -> 5s, founder ask, speed only */
   /* cc#1378 battery/visibility discipline: paused by default, .glitter-run is the only thing
      that turns it on (see glitterSync() in JS) -- same "off unless proven visible AND active"
@@ -945,7 +945,7 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    would have lost the tie to the animated rule whenever both conditions were true at once. */
 @media (prefers-reduced-motion:reduce){
   #heroTrack > .c::after,
-  html.glitter-ok #heroTrack > .c::after{animation:none;background:#35E0FF}
+  html.glitter-ok #heroTrack > .c::after{animation:none;background:var(--wayfind,#35E0FF)}
 }
 /* cc#1134 · FINAL RULING, and it supersedes the space distribution I chose in cc#1125.
    Three attempts on this one card, each satisfying its own spec text and opening a new gap,
