@@ -179,7 +179,7 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .m,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .c,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .card,
-:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .m{ background:var(--panel); border-color:var(--edge); color:var(--ink); }
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .m{ background:var(--panel); border-color:var(--edge); color:var(--ink); box-shadow:var(--panel-shadow); }   /* cc#1722: depth role — "none" on every set that has not opted in */
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .chd .t,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .card-hd .t,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .chd .t,
@@ -217,6 +217,22 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .as-hdr a.as-wm,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-hdr a.as-wm,
 :root:root:not([data-theme="light"]) body[data-theme="silvergold"] .as-hdr a.as-wm{ color:var(--ink); }
+/* cc#1722 DEPTH ROLES, light sets: the field wash is a background-image layer laid in front of the
+ * --texture hairline the body already paints; a set whose --field-grad is "none" renders exactly as
+ * before (an empty layer). Read from the contract, never a literal. */
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"],
+:root:root:not([data-theme="light"]) body[data-theme="blush"],
+:root:root:not([data-theme="light"]) body[data-theme="goldday"],
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"],
+:root:root:not([data-theme="light"]) body[data-theme="winepurple"],
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"]{ background-image:var(--field-grad), var(--texture); }
+/* cc#1722 WINE PURPLE only — the roles that need a consumer this set opts into: chips carry the
+ * --accent-soft fill with a wine border and wine text (was hollow grey); the SCORR wordmark is a
+ * wine -> purple gradient (--brand -> --wayfind) instead of ink; the O joins the gradient. State
+ * chips (.ok / .bad / .vixc) keep their own P&L / neutral colours. Tokens only. */
+:root:root:not([data-theme="light"]) body[data-theme="winepurple"] .hchips .hc.slab:not(.ok):not(.bad):not(.vixc){ --panel:var(--accent-soft); --line:var(--brand); color:var(--brand); }
+:root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--brand), var(--wayfind)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+:root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-hdr a.as-wm i{ color:transparent; }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-nav,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bnav,

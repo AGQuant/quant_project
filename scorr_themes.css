@@ -33,6 +33,15 @@
    nothing on any live screen until a page links it AND sets body[data-theme].
 --------------------------------------------------------------------------------------------- */
 
+/* ══ cc#1722 · DEPTH ROLES — three more contract keys ═════════════════════════════════════════════
+   --panel-shadow (box-shadow of a card / panel: drop shadow + an inset metallic lip), --field-grad
+   (a background-image wash laid over --field) and --accent-soft (the fill behind accent-coloured
+   chip text). Every block declares them; for every set except the ones that opt in the values are
+   the NEUTRAL ones — none / none / transparent — which render byte-identically to today (measured:
+   card box-shadow was "none" on every light set and body already paints --texture as its image;
+   a "none" layer in front of it draws nothing). Consumers live in mobile/theme_mobile.css'' light-set
+   release block, so a dark set never reads them. */
+
 /* ══ cc#1721 · --wayfind, the 18th contract key ═══════════════════════════════════════════════════
    R5 calls it WAYFINDING (scorr_theme_r5.css --r5-aqua, cc#1071): the colour of "where you can go"
    — section eyebrows (.sect), the heroTrack glitter ring, tool tiles, inactive nav. mobile/home.html
@@ -147,12 +156,14 @@ body[data-theme="dark"]{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#263
  --muted:#8A97B0;--brand:#35E0FF;--brandglow:rgba(53,224,255,.4);--accent:#7C5CFF;--label:#FF9F45;
  --win:#C8F542;--loss:#FF4D6D;--railgrad:linear-gradient(90deg,#EAF0FA,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
- --wayfind:#35E0FF}
+ --wayfind:#35E0FF;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 body[data-theme="goldday"]{--field:#FAF7F0;--panel:#FFFFFF;--hi:#F3EEE3;--edge:#E5DFD2;--ink:#1A1A1E;
  --muted:#8A8578;--brand:#A67C00;--brandglow:rgba(166,124,0,.25);--accent:#A67C00;--label:#A67C00;
  --win:#1F9D61;--loss:#D93B4F;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
- --wayfind:#07657A}
+ --wayfind:#07657A;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;
  --muted:#8E8A7E;--brand:#D4AF37;--brandglow:rgba(212,175,55,.35);--accent:#D4AF37;--label:#8C7A3F;
  --win:#3DD68C;--loss:#FF5C6C;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
@@ -169,7 +180,8 @@ body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge
      is what is written, and the divergence is logged rather than silently resolved. */
   --gold-lo:#7A6320;--gold-hi:#F0D67A;--sunk:#0C0C0F
 ;
- --wayfind:#35E0FF}
+ --wayfind:#35E0FF;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 
 /* ══ cc#1185 P9 · AQUA WHITE ═══════════════════════════════════════════════════════════════════
    The fourth set. HIDDEN and INERT the moment it lands: every boot script in the repo accepts only
@@ -230,7 +242,8 @@ body[data-theme="aquawhite"]{--field:#F4F9FB;--panel:#FFFFFF;--hi:#E9F3F7;--edge
  --railgrad:linear-gradient(90deg,#35E0FF,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
  --gold-lo:#9FC6D2;--gold-hi:#9FF0FF;--sunk:#E4EEF2;
- --wayfind:#00798F}
+ --wayfind:#00798F;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 
 /* ── cc#1637 · THEME_BLUSH_ROSENIGHT_V1 (session_log 37303, founder 03-Sep-2026) ──────────────
    Two pink sets designed and contrast-measured by Fable (WCAG AA on all three grounds; worst
@@ -244,14 +257,16 @@ body[data-theme="blush"]{--field:#FFF4F7;--panel:#FFFFFF;--hi:#FCE8EE;--edge:#F0
  --railgrad:linear-gradient(90deg,#C2185B,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
  --gold-lo:#E8A8BE;--gold-hi:#FFFFFF;--sunk:#FBE3EA;
- --wayfind:#C2185B}
+ --wayfind:#C2185B;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 body[data-theme="rosenight"]{--field:#0F0A0D;--panel:#1A1216;--hi:#241820;--edge:#2E1F27;
  --ink:#FBF1F4;--muted:#B08A98;--brand:#FF6B9D;--brandglow:rgba(255,107,157,.35);--accent:#FF6B9D;
  --label:#D98AA8;--win:#3DD68C;--loss:#FF5C6C;
  --railgrad:linear-gradient(90deg,#FF6B9D,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
  --gold-lo:#7A2F4C;--gold-hi:#FFB3CC;--sunk:#0C0709;
- --wayfind:#FF6B9D}
+ --wayfind:#FF6B9D;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 /* cc#1637 amend (37303 rosewall_03sep, founder 03-Sep 07:55): ROSE WALL - dark pink wall, light pink
    cards; the founder-preferred direction. The 17 contract keys here, copied by code. The set's two
    on-field tokens (--on-field, --on-field-muted) and --nav-bg are NOT contract keys, so they live in
@@ -262,7 +277,8 @@ body[data-theme="rosewall"]{--field:#B8355F;--panel:#FFEAF1;--hi:#FFDDE8;--edge:
  --railgrad:linear-gradient(90deg,#FFF1F5,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.05) 0 2px,transparent 2px 9px);
  --gold-lo:#7A0C3D;--gold-hi:#FFFFFF;--sunk:#FFF6F9;
- --wayfind:#7A0C3D}
+ --wayfind:#7A0C3D;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 
 /* cc#1641 · THEME_AINIGHT_V1 (session_log 37945, founder approved on glass 03-Sep ~17:40 IST via
    scorr_home_theme_mockup.html: "blue background could be dark and shiny like AI colour"). A NEW
@@ -275,7 +291,8 @@ body[data-theme="ainight"]{--field:#05070F;--panel:#0B1020;--hi:#111A30;--edge:#
  --railgrad:linear-gradient(90deg,#35E0FF,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
  --gold-lo:#1E3050;--gold-hi:#9FF0FF;--sunk:#03050B;
- --wayfind:#35E0FF}
+ --wayfind:#35E0FF;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
 
 /* cc#1719 · THEME_SILVERGOLD_V1 + THEME_WINEPURPLE_V1 (founder 05-Sep: "Can we add 2 new themes:
    silver gold, and wine, purple and metallic white"). cc#1721 (founder 05-Sep 20:35, phone: "Silver
@@ -296,21 +313,29 @@ body[data-theme="silvergold"]{--field:#EEEFF2;--panel:#FFFFFF;--hi:#E4E6EB;--edg
  --railgrad:linear-gradient(90deg,#D4AF37,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
  --gold-lo:#BFC3CC;--gold-hi:#FFFFFF;--sunk:#E6E7EB;
- --wayfind:#7D6112}
-/* WINE PURPLE — a light set on metallic white. field = cool metallic white, panel = white, hi =
-   panel_hi, edge = line; ink = deep plum; muted = the palette muted; brand = wine (CTAs, active tab,
-   hero numbers); accent = purple (links, secondary chips — the contract's interactive key); label =
-   purple too (index-name chips are secondary chips here); win/loss = the card's AA pair for white
-   (#157A4B / #C0263C, both >= 4.5:1 on #FFFFFF and on the field, measured before push).
-   DERIVED: brandglow = wine at .22 like blush's light glow; railgrad = wine to transparent;
-   texture = the light-set hairline; gold-lo = line2 (mid tone, as blush uses its mid pink);
-   gold-hi = white; sunk = one step below the field. The "metallic edge" (panel border-top
-   rgba(255,255,255,.7)) is not a contract key, so it is not declared here — same rule as rosewall's
-   non-contract tokens. */
-body[data-theme="winepurple"]{--field:#F3F0F4;--panel:#FFFFFF;--hi:#ECE7EF;--edge:#DCD3DE;
- --ink:#2B1A2F;--muted:#6F5B75;--brand:#7B2D42;--brandglow:rgba(123,45,66,.22);--accent:#6D4AA3;
- --label:#6D4AA3;--win:#157A4B;--loss:#C0263C;
- --railgrad:linear-gradient(90deg,#7B2D42,transparent);
+ --wayfind:#7D6112;
+ --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
+/* WINE PURPLE — cc#1722 (founder 05-Sep 20:36, phone: "Wine purple should be richer, look premium").
+   The cc#1719 set was a washed lilac-grey with white panels and no depth. Fable's rich palette:
+   field = deeper mauve-ivory #EBE2E8 (the metallic white is the PANEL #FBF9FA, not the field); hi =
+   panel_hi; edge = line #D2BFCC (lines visible again); ink = wine-black #2A1226; muted #6A4A63;
+   brand = deep wine #6B1F35 (CTAs, hero words, active nav, tick, section labels, bell badge — all
+   route through --brand/--gold); accent = royal purple #5B3A9B (links, carousel dot, secondary
+   chips — the contract's interactive key); label = purple (DAILY DIGEST link, index chips);
+   wayfind = purple (card rail / glitter ring); win #15753F / loss #B4223A = Fable's deeper pair, both
+   >= 4.5 on panel AND field (5.49 / 4.54, 6.20 / 5.13). CONTRAST on panel / field / hi: ink 16.5 /
+   13.7 / 14.5, muted 7.23 / 5.98 / 6.36, wine 10.7 / 8.85 / 9.42, purple 7.94 / 6.57 / 6.99.
+   DEPTH ROLES (new contract keys, see the note above the P3 schema): --panel-shadow = the drop
+   shadow + metallic top lip; --field-grad = the top-to-bottom field wash; --accent-soft = the chip
+   fill behind wine text. gold-lo = line2 #B99FB1, gold-hi white, sunk one step below the field. The
+   wordmark gradient (wine -> purple) is a scoped rule in theme_mobile.css reading --brand/--wayfind. */
+body[data-theme="winepurple"]{--field:#EBE2E8;--panel:#FBF9FA;--hi:#F1E9EF;--edge:#D2BFCC;
+ --ink:#2A1226;--muted:#6A4A63;--brand:#6B1F35;--brandglow:rgba(107,31,53,.22);--accent:#5B3A9B;
+ --label:#5B3A9B;--win:#15753F;--loss:#B4223A;
+ --railgrad:linear-gradient(90deg,#6B1F35,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
- --gold-lo:#C8BCCB;--gold-hi:#FFFFFF;--sunk:#E9E3EC;
- --wayfind:#6D4AA3}
+ --gold-lo:#B99FB1;--gold-hi:#FFFFFF;--sunk:#E2D6DE;
+ --wayfind:#5B3A9B;
+ --panel-shadow:0 8px 24px rgba(74,20,40,.14), inset 0 1px 0 #FFFFFF;
+ --field-grad:linear-gradient(180deg,#F1EAEF 0%,#E6DBE3 100%);
+ --accent-soft:rgba(107,31,53,.10)}
