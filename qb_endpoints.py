@@ -402,6 +402,157 @@ def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
 _BEES = ("NIFTYBEES", "LIQUIDBEES")
 
 
+# ── cc#1709: Rebalance History as BLOCKS + HSL History ─────────────────────────────────────────
+# Founder 05-Sep (two screenshots): "Hide Buy Sell Ledger, replace by HSL history, and rebalance
+# tab display information month (date) wise as per image 1 format, each rebalance is a block."
+# Read-only over quant_rebalance_log + quant_paper_positions. There is NO separate eod_stop_check
+# table: the nightly checks are quant_rebalance_log rows with actions.type='eod_stop_check', and
+# each carries actions.positions[] with exit_reason / vs_nifty_pct / stock_ret_pct for the names
+# that exited that night — that is the join the HSL tab needs (exit_date = rebalance_date).
+_HSL_RULES_V2_FROM = "2026-07-19"   # scope 5: exits dated before this carry the V1 tag, after -> V2
+
+
+def _exit_reason_map(log_rows):
+    """(date 'YYYY-MM-DD', symbol) -> the actions.positions[] entry of the nightly row where that
+    symbol shows status exited*. One source for exit_reason and the measured vs_nifty / abs value."""
+    m = {}
+    for r in log_rows:
+        d = str(r["rebalance_date"])
+        for p in (r.get("actions") or {}).get("positions") or []:
+            if str(p.get("status", "")).startswith("exited") and p.get("symbol"):
+                m.setdefault((d, p["symbol"]), p)
+    return m
+
+
+def _rule_text(p):
+    """Classify one logged exit. kind: 'hard_stop' (HS1/HS2 — an EVENT, HSL History tab),
+    'quality' (GVM quality exit / M_RECOVERED profit-take / rank exit — a DECISION, shown in the
+    SELL table of its date's block, scope 4 + A3). An exit with no logged reason is treated as a
+    hard stop (its status is exited_stop) and says so, rather than inventing a reason."""
+    reason = (p or {}).get("exit_reason") or ""
+    vs, ab = (p or {}).get("vs_nifty_pct"), (p or {}).get("stock_ret_pct")
+    def _f(v, lbl):
+        try:
+            return "{} {:+.2f}%".format(lbl, float(v))
+        except (TypeError, ValueError):
+            return None
+    if reason.startswith("HARD_STOP_2"):
+        return {"rule": "HS2", "text": "HS2 -10% vs Nifty", "measured": _f(vs, "vs Nifty"), "kind": "hard_stop"}
+    if reason.startswith("HARD_STOP_1"):
+        return {"rule": "HS1", "text": "HS1 -20% abs", "measured": _f(ab, "abs"), "kind": "hard_stop"}
+    if reason.startswith("GVM_EXIT"):
+        return {"rule": "Quality", "text": reason.replace("GVM_EXIT:", "Quality exit:", 1), "measured": None, "kind": "quality"}
+    if reason.startswith("M_RECOVERED"):
+        return {"rule": "Profit-take", "text": reason.replace("M_RECOVERED:", "Profit-take:", 1), "measured": None, "kind": "quality"}
+    if reason.startswith("RANK") or "rank" in reason.lower() or "re-screen" in reason.lower():
+        return {"rule": "Rank", "text": reason, "measured": None, "kind": "quality"}
+    if reason:
+        return {"rule": reason.split(":")[0][:24], "text": reason, "measured": None, "kind": "quality"}
+    return {"rule": "Stop", "text": "stop exit (reason not logged)", "measured": None, "kind": "hard_stop"}
+
+
+def _money(q, px):
+    try:
+        return round(float(q) * float(px), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _rebalance_blocks(log_rows, positions, held_asof, value_by_date, reasons):
+    """scope 2/3/4/6: one block per rebalance date (actions has was_due) plus one per date that
+    carried a quality/rank exit. SELL rows = stock positions whose exit_date is that day and whose
+    logged reason is NOT a hard stop; BUY rows = stock positions entered that day. Price is the
+    position's own entry/exit price, Amount = qty * price — never a close. The NIFTYBEES cash
+    residual folds into the footer of the block dated the same day (A2), never its own block.
+    state: DONE when the block has sells or buys; AWAITING CONFIRMATION only when the log row says
+    entry_status=awaiting_founder AND a candidate list exists; NO ACTION when nothing moved and
+    there were no candidates (Alpha 06-Aug) — the standing 'awaiting confirmation' chip is dropped
+    there because there was nothing to confirm."""
+    stocks = [p for p in positions if p["symbol"] not in _BEES]
+    bees = [p for p in positions if p["symbol"] in _BEES]
+    row_by_date, due = {}, {}
+    for r in log_rows:                      # log_rows are newest-first; keep the first seen per date
+        d = str(r["rebalance_date"])
+        row_by_date.setdefault(d, r)
+        if "was_due" in (r.get("actions") or {}):
+            due.setdefault(d, r)
+    quality_dates = set()
+    for (d, _sym), p in reasons.items():
+        if _rule_text(p)["kind"] == "quality":
+            quality_dates.add(d)
+    blocks = []
+    for d in sorted(set(due) | quality_dates, reverse=True):
+        r = due.get(d) or row_by_date.get(d)
+        a = (r.get("actions") or {}) if r else {}
+        sells, buys = [], []
+        for p in stocks:
+            if str(p.get("exit_date")) == d:
+                rt = _rule_text(reasons.get((d, p["symbol"])))
+                if rt["kind"] == "hard_stop":
+                    continue                # scope 4: hard stops are events -> HSL History tab
+                sells.append({"symbol": p["symbol"], "price": p.get("exit_price"), "qty": p.get("qty"),
+                              "amount": _money(p.get("qty"), p.get("exit_price")), "action": "Full Sell",
+                              "rule": rt["rule"], "reason": rt["text"]})
+            if str(p.get("entry_date")) == d:
+                buys.append({"symbol": p["symbol"], "price": p.get("entry_price"), "qty": p.get("qty"),
+                             "amount": _money(p.get("qty"), p.get("entry_price")), "action": "Buy"})
+        # scope 2: exits_hs1/exits_hs2 on the was_due row are the same-night hard stops the
+        # rebalance run processed — they are hard stops, so they stay on the HSL tab too.
+        cash = None
+        for b in bees:
+            if str(b.get("entry_date")) == d:
+                cash = {"symbol": b["symbol"], "direction": "in", "qty": b.get("qty"), "price": b.get("entry_price"),
+                        "amount": _money(b.get("qty"), b.get("entry_price")), "residual": a.get("alloc_residual")}
+            elif str(b.get("exit_date")) == d:
+                cash = {"symbol": b["symbol"], "direction": "out", "qty": b.get("qty"), "price": b.get("exit_price"),
+                        "amount": _money(b.get("qty"), b.get("exit_price")), "residual": None}
+        cands = a.get("entry_candidates") or []
+        if sells or buys:
+            state, chip = "DONE", "Done"
+        elif a.get("entry_status") == "awaiting_founder" and cands:
+            state, chip = "AWAITING CONFIRMATION", "Awaiting confirmation"
+        else:
+            state, chip = "NO ACTION", "No action needed"
+        dobj = r["rebalance_date"] if r else None
+        held = held_asof(dobj) if dobj else []
+        bees_held = any(b.get("entry_date") and dobj and b["entry_date"] <= dobj
+                        and (b.get("exit_date") is None or b["exit_date"] > dobj) for b in bees)
+        blocks.append({
+            "date": d, "kind": "rebalance" if d in due else "quality_exit",
+            "state": state, "chip": chip, "sells": sells, "buys": buys,
+            "footer": {"held_after": len(held), "held_symbols": held, "bees_held": bees_held,
+                       "book_value_after": (value_by_date.get(dobj) if dobj else None), "cash_move": cash},
+            "next_due": a.get("advanced_to"), "n_candidates": len(cands),
+        })
+    return blocks
+
+
+def _hsl_rows(positions, reasons):
+    """scope 5: every quant_paper_positions row with status='exited_stop' (V2's count check is on
+    exactly that set), newest first, joined to its nightly row for the rule + measured value.
+    P&L Rs = qty * (exit - entry) from the position's own prices (equals the stored pnl column;
+    ADANIPOWER 148 * (218.45 - 235.93) = -2587.04). Version tag V1 before 2026-07-19, else V2."""
+    rows = []
+    for p in positions:
+        if p.get("status") != "exited_stop" or p["symbol"] in _BEES:
+            continue
+        d = str(p.get("exit_date"))
+        rt = _rule_text(reasons.get((d, p["symbol"])))
+        ai, ao = _money(p.get("qty"), p.get("entry_price")), _money(p.get("qty"), p.get("exit_price"))
+        pnl = round(ao - ai, 2) if (ai is not None and ao is not None) else None
+        try:
+            pnl_pct = round((float(p["exit_price"]) / float(p["entry_price"]) - 1) * 100, 2)
+        except (TypeError, ValueError, ZeroDivisionError):
+            pnl_pct = None
+        rows.append({"date": d, "symbol": p["symbol"], "entry_price": p.get("entry_price"),
+                     "exit_price": p.get("exit_price"), "qty": p.get("qty"), "pnl": pnl, "pnl_pct": pnl_pct,
+                     "rule": rt["rule"], "rule_text": rt["text"], "measured": rt["measured"], "kind": rt["kind"],
+                     "version": "V1" if d < _HSL_RULES_V2_FROM else "V2"})
+    rows.sort(key=lambda x: (x["date"], x["symbol"]), reverse=True)
+    total = round(sum(x["pnl"] for x in rows if x["pnl"] is not None), 2)
+    return {"rows": rows, "count": len(rows), "total_pnl": total}
+
+
 @router.get("/rebalance_history")
 def qb_rebalance_history(basket_name: str = "large_cap", limit: int = 300):
     """cc#1703 (session_log 38966, founder 04-Sep screenshot "every row +0/-0"): the raw
@@ -531,9 +682,15 @@ def qb_rebalance_history(basket_name: str = "large_cap", limit: int = 300):
     rows.sort(key=lambda r: r["date"], reverse=True)
     nightly = [r for r in rows if r["row_type"] == "nightly_check"]
     visible = [r for r in rows if r["row_type"] != "nightly_check"]
+    # cc#1709: same round trip also carries the block view + the HSL History rows. The flat
+    # rows/nightly_rows keys stay for any reader still on the cc#1703 shape.
+    reasons = _exit_reason_map(log_rows)
+    blocks = _rebalance_blocks(log_rows, positions, held_asof, value_by_date, reasons)
+    hsl = _hsl_rows(positions, reasons)
     return {"basket": basket_name, "rows": visible, "nightly_rows": nightly,
             "nightly_count": len(nightly), "next_rebalance": reg.get("next_rebalance"),
-            "empty": len(rows) == 0}
+            "empty": len(rows) == 0,
+            "blocks": blocks, "hsl": hsl}
 
 
 @router.get("/gated_rebalances")
