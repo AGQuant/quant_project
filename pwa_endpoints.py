@@ -1794,6 +1794,17 @@ RESULTS_CARD_JS = """
   function esc(s){ return String(s==null?'':s).replace(/[&<>\"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c];}); }
   function fmtDate(s){ if(!s) return 'TBD'; var d=new Date(String(s).replace(' ','T')); if(isNaN(d.getTime())) return esc(s);
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
+  // cc#1706 PROVENANCE LABEL: payload.src = {ec_id, ex_date} — the earnings_calendar row the shown date
+  // and figures were paired to (cc#1707 P3 pairing). Rendered as a muted 'src 30-Jul' beside the quarter
+  // tag; hover names the row id + full date. Empty when the payload carries no confirmed row.
+  function _srcTag(src){
+    if (!src || !src.ex_date) return '';
+    var d=new Date(String(src.ex_date).slice(0,10)+'T00:00:00'); if (isNaN(d.getTime())) return '';
+    var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return ' <span class=\"rcard-src\" style=\"font-size:10px;font-weight:400;opacity:.65\" '
+      + 'title=\"earnings_calendar #'+esc(String(src.ec_id==null?'':src.ec_id))+' &middot; '+esc(String(src.ex_date).slice(0,10))+'\">'
+      + 'src '+d.getDate()+'-'+M[d.getMonth()]+'</span>';
+  }
 
   // cc#697: compact peer line MERGED into the Result Analysis block (no separate bottom section, zero
   // duplication). SAME-QUARTER peers only; YoY basis (screener qoq_* = latest-Q vs year-ago-Q). A metric
@@ -1953,9 +1964,9 @@ RESULTS_CARD_JS = """
     var f=_F(); if(!f) return '--';
     return unit==='%' ? f.pctLevel(v) : (unit==='x' ? f.x(v) : (f.num(v)==null ? f.DASH : String(f.num(v))));
   }
-  function l1Html(l1, verdict){
+  function l1Html(l1, verdict, src){
     if (!l1) return '';
-    var h = '<div class=\"rcard-lbl\">Quarter'+(l1.quarter_label?' &middot; '+esc(l1.quarter_label):'')+'</div>';
+    var h = '<div class=\"rcard-lbl\">Quarter'+(l1.quarter_label?' &middot; '+esc(l1.quarter_label):'')+_srcTag(src)+'</div>';   // cc#1706
     if (verdict) h += '<div class=\"rcard-av\">'+esc(verdict)+'</div>';
     // cc#823 rule_1: YoY LEADS, QoQ is the trailing secondary. A single quarter against the prior
     // quarter is seasonal noise for most of this universe; against the same quarter last year it is
@@ -2158,7 +2169,7 @@ RESULTS_CARD_JS = """
     if (announced){
       // BRANCH A order: date -> Result Analysis (current quarter) -> FY27 -> RAW 48h -> POLISH 1mo.
       h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)
-        + (d && d.card_quarter ? ' &middot; '+esc(d.card_quarter) : '')+'</div>';
+        + (d && d.card_quarter ? ' &middot; '+esc(d.card_quarter) : '')+_srcTag(d && d.src)+'</div>';   // cc#1706
       if (d && d.result_analysis){
         // cc#784: when a polish batch has written a long-form V2 analysis for this symbol, keep the
         // 4-line metric header (Sales/PAT/Margins/PE) from the template card and render the editorial
@@ -2179,7 +2190,7 @@ RESULTS_CARD_JS = """
         h += peerHtml(d && d.peer_comparison);
       }
       // cc#788: LEVEL 2 gate sits ABOVE the FY27 section; absent when there is no V2 row for this quarter.
-      h += l1Html(d && d.l1, d && d.auto_verdict);   // cc#797 block 1: absolutes-first + deterministic verdict
+      h += l1Html(d && d.l1, d && d.auto_verdict, d && d.src);   // cc#797 block 1: absolutes-first + deterministic verdict; cc#1706 src tag
       h += expHtml(d && d.expectations);   // cc#796: reported quarter vs Screener run-rate; omitted when absent
       // cc#1414 · founder ruling (ICICIAMC review): an announced card with NO matching V2 row
       // used to omit the detailed-analysis section entirely (cc#788's hidden-when-empty rule).
