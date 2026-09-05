@@ -251,14 +251,30 @@ body[data-theme="aquawhite"]{--field:#F4F9FB;--panel:#FFFFFF;--hi:#E9F3F7;--edge
    --win green, --loss red; the pink brand is used on eyebrows, icons, active nav and glow only,
    never on a number. --gold-lo / --gold-hi / --sunk keep their gold NAMES and carry pink values,
    exactly as aquawhite does above - inherited contract, do not rename. Append only. */
-body[data-theme="blush"]{--field:#FFF4F7;--panel:#FFFFFF;--hi:#FCE8EE;--edge:#F0CAD5;
- --ink:#2A171F;--muted:#7D5765;--brand:#C2185B;--brandglow:rgba(194,24,91,.22);--accent:#C2185B;
- --label:#9C3B63;--win:#177245;--loss:#B3261E;
- --railgrad:linear-gradient(90deg,#C2185B,transparent);
+/* BLUSH PREMIUM — cc#1723 (founder 05-Sep, phone: "Blush also make premium, the pinkish colour on
+   top part is better"). The header pink becomes the WHOLE field #F7DCE3; panels #FFF8FA lift off it
+   with a rose shadow (was: near-white body, panels barely separated). hi = panel_hi #FBEAEF; edge =
+   line #EBBFCB; ink = rose-black #2B0E1A; muted #7A4658; brand = raspberry #B5174E (the carousel dot
+   the founder pointed at — CTAs, hero words, active nav, tick, bell badge, nav underline replaces
+   lime); accent = plum #7A2E9E (links, secondary chips); label = plum (DAILY DIGEST link, index
+   chips); wayfind = raspberry (THE BOOK section labels, card rail, glitter ring — replaces green/
+   cyan). win: Fable's #15753F measured 4.47 on the field, one step darker #126636 (6.73 / 5.47 /
+   6.08 on panel / field / hi, 5.09 on the gradient bottom); loss #B4223A as given (6.21 / 5.05 /
+   5.61, 4.69 gradient bottom). CONTRAST panel / field / hi: ink 17.0 / 13.8 / 15.4, muted 7.05 /
+   5.73 / 6.37, raspberry 6.27 / 5.10 / 5.67, plum 7.40 / 6.01 / 6.68. DEPTH ROLES (cc#1722 keys):
+   --panel-shadow = rose drop shadow + white top lip; --field-grad = header pink -> deeper pink wash;
+   --accent-soft = raspberry chip fill. gold-lo = line2 #D99AAD, gold-hi white, sunk one step below
+   the field. Wordmark raspberry -> plum is a scoped rule in theme_mobile.css (--brand -> --accent). */
+body[data-theme="blush"]{--field:#F7DCE3;--panel:#FFF8FA;--hi:#FBEAEF;--edge:#EBBFCB;
+ --ink:#2B0E1A;--muted:#7A4658;--brand:#B5174E;--brandglow:rgba(181,23,78,.22);--accent:#7A2E9E;
+ --label:#7A2E9E;--win:#126636;--loss:#B4223A;
+ --railgrad:linear-gradient(90deg,#B5174E,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
- --gold-lo:#E8A8BE;--gold-hi:#FFFFFF;--sunk:#FBE3EA;
- --wayfind:#C2185B;
- --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
+ --gold-lo:#D99AAD;--gold-hi:#FFFFFF;--sunk:#F1CFD8;
+ --wayfind:#B5174E;
+ --panel-shadow:0 8px 24px rgba(181,23,78,.14), inset 0 1px 0 #FFFFFF;
+ --field-grad:linear-gradient(180deg,#FBE3E8 0%,#F3D3DC 100%);
+ --accent-soft:rgba(181,23,78,.10)}
 body[data-theme="rosenight"]{--field:#0F0A0D;--panel:#1A1216;--hi:#241820;--edge:#2E1F27;
  --ink:#FBF1F4;--muted:#B08A98;--brand:#FF6B9D;--brandglow:rgba(255,107,157,.35);--accent:#FF6B9D;
  --label:#D98AA8;--win:#3DD68C;--loss:#FF5C6C;

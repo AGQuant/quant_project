@@ -233,6 +233,12 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .hchips .hc.slab:not(.ok):not(.bad):not(.vixc){ --panel:var(--accent-soft); --line:var(--brand); color:var(--brand); }
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--brand), var(--wayfind)); -webkit-background-clip:text; background-clip:text; color:transparent; }
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-hdr a.as-wm i{ color:transparent; }
+/* cc#1723 BLUSH premium — same opt-ins as Wine Purple: chips carry the --accent-soft raspberry fill
+ * with a raspberry border and text; the SCORR wordmark is raspberry -> plum (--brand -> --accent).
+ * State chips (.ok / .bad / .vixc) keep their own colours. Tokens only. */
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .hchips .hc.slab:not(.ok):not(.bad):not(.vixc){ --panel:var(--accent-soft); --line:var(--brand); color:var(--brand); }
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--brand), var(--accent)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .as-hdr a.as-wm i{ color:transparent; }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-nav,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bnav,
