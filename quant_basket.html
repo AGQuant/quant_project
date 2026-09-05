@@ -60,6 +60,30 @@
 
   /* cc#561 R1 DECISION 2 — 3x2 grid (4-col breaks with 6 cards; 3+3 is the clean read) */
   .basket-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+  /* cc#1712: Cards | Table view toggle (founder 05-Sep: "view all baskets in table view with
+     sorting feature besides card view"). Toggle sits on the Basket Builder row, right-aligned.
+     Web only — the /m/ QB surface has no table (SURFACE_SPLIT 16915). */
+  .ph-left{flex:1 1 auto;min-width:0}
+  .ph-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .ph-tools .seg{margin-left:auto}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card)}
+  .seg button{background:transparent;border:0;color:var(--mut);font:inherit;font-size:12px;font-weight:700;
+    padding:7px 14px;cursor:pointer;letter-spacing:.3px}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:rgba(77,124,254,.14);color:var(--blu)}
+  .basket-grid.hide{display:none}
+  .basket-table{display:none;margin-bottom:20px;overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+  .basket-table.show{display:block}
+  .bt{width:100%;border-collapse:collapse;font-size:12.5px;white-space:nowrap}
+  .bt th{font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--mut);
+    padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;cursor:pointer;user-select:none}
+  .bt th.num,.bt td.num{text-align:right}
+  .bt td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .bt tbody tr:last-child td{border-bottom:0}
+  .bt tr.bt-row{cursor:pointer}
+  .bt tr.bt-row:hover td{background:rgba(77,124,254,.06)}
+  .bt .bt-name{font-weight:700;padding-left:8px;border-left:3px solid var(--line);margin-right:8px}
+  .bt .bt-i{width:24px;height:24px;font-size:11px;border-radius:6px}
   @media(max-width:880px){.basket-grid{grid-template-columns:1fr 1fr}}
   @media(max-width:540px){.basket-grid{grid-template-columns:1fr}}
 
@@ -209,7 +233,14 @@
       <div class="ph-title">Quant Basket</div>
       <div class="ph-sub">Equity Buy &amp; Hold · GVM-Screened · <b style="color:var(--txt)">6 Baskets</b> · Full market cycle</div>
       <!-- cc#557: V12 Basket Builder folded into the QB page (removed from top nav) -->
+      <!-- cc#1712: Cards | Table toggle on the same row, right-aligned. Default Cards. -->
+      <div class="ph-tools">
       <a href="/v12" title="Build & backtest your own rotation basket (V12)" style="display:inline-flex;align-items:center;gap:7px;margin-top:12px;border:1px solid var(--blu);border-radius:9px;padding:7px 14px;font-size:12.5px;font-weight:700;color:var(--blu);background:rgba(77,124,254,.10);text-decoration:none">&#8863; Basket Builder &rarr;</a>
+      <div class="seg" id="qb-view-seg" role="group" aria-label="Basket view">
+        <button type="button" class="on" data-view="cards" onclick="setBasketView('cards')">Cards</button>
+        <button type="button" data-view="table" onclick="setBasketView('table')">Table</button>
+      </div>
+      </div>
     </div>
     <div class="ph-stats">
       <div class="ph-stat"><div class="sk">Capital</div><div class="sv" id="s-cap">—</div></div>
@@ -228,6 +259,8 @@
     <span class="cy-step trend"><b>3 · HOLD THE TREND</b> — Large · Mid · Small · Alpha</span>
   </div>
 
+  <!-- cc#1712: Table view replaces the card grid (never both at once); built from the same rows. -->
+  <div class="basket-table" id="basket-table"></div>
   <div class="basket-grid" id="basket-grid">
     <div class="msg" style="grid-column:1/-1">Loading…</div>
   </div>
@@ -393,6 +426,79 @@ const pct=(n,d=2)=>n==null?'—':(+n>=0?'+':'')+((+n).toFixed(d))+'%';
 const c=(n)=>+n>0?'pos':+n<0?'neg':'neu';
 const esc=(s)=>String(s==null?'':s).replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// cc#1712 — Cards | Table view. One table, every basket the grid renders, sortable headers.
+// View + sort state live in JS variables only for the session (no browser storage of any
+// kind — artifact/PWA rule). Sort pattern = cc#1680 hsTableBlock: coloured ▼/▲ on the active column, a
+// faint ⇅ elsewhere; dir 1 = descending. Numeric columns sort on the raw number, Next Reb on the
+// ISO date, text columns alphabetically; null/— sorts last in both directions. Default order =
+// page order (BASKETS array). Row click = the basket sheet the card opens; (i) = the cc#1708 sheet.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+const QB_ROWS=[];
+let QB_VIEW='cards';
+const QB_SORT={key:null,dir:1};
+const QB_TCOLS=[['basket','Basket','txt'],['phase','Phase','txt'],['ret','Return %','num'],
+  ['alp','Alpha N500 %','num'],['pnl','P&amp;L ₹','num'],['mv','Mkt Value ₹','num'],['pos','Positions','num'],
+  ['cap','Cap','num'],['reb','Next Reb','date'],['status','Status','txt']];
+function qbSortVal(rw,k){
+  if(k==='basket')return rw.name;
+  if(k==='phase')return rw.role;
+  if(k==='status')return rw.badge.replace(/<[^>]+>/g,'').trim();
+  if(k==='reb')return rw.reb;
+  return rw[k];   // ret / alp / pnl / mv / pos / cap — raw numbers, never the formatted string
+}
+function qbSortedRows(){
+  const k=QB_SORT.key; if(!k)return QB_ROWS.slice();
+  const kind=(QB_TCOLS.find(c=>c[0]===k)||[])[2];
+  return QB_ROWS.slice().sort((a,b)=>{
+    const av=qbSortVal(a,k), bv=qbSortVal(b,k);
+    if(av==null&&bv==null)return 0;
+    if(av==null)return 1;
+    if(bv==null)return -1;
+    const base=(kind==='num')?(Number(av)-Number(bv)):String(av).localeCompare(String(bv));
+    return QB_SORT.dir===1?-base:base;
+  });
+}
+function qbSortBy(k){
+  if(QB_SORT.key===k){ QB_SORT.dir=-QB_SORT.dir; }
+  else{ QB_SORT.key=k; const kind=(QB_TCOLS.find(c=>c[0]===k)||[])[2]; QB_SORT.dir=(kind==='txt')?-1:1; }
+  renderBasketTable();
+}
+function setBasketView(v){
+  QB_VIEW=(v==='table')?'table':'cards';
+  document.querySelectorAll('#qb-view-seg button').forEach(b=>b.classList.toggle('on',b.dataset.view===QB_VIEW));
+  document.getElementById('basket-grid').classList.toggle('hide',QB_VIEW==='table');
+  document.getElementById('basket-table').classList.toggle('show',QB_VIEW==='table');
+  if(QB_VIEW==='table')renderBasketTable();
+}
+function renderBasketTable(){
+  const host=document.getElementById('basket-table'); if(!host)return;
+  if(!QB_ROWS.length){ host.innerHTML='<div class="msg">Loading…</div>'; return; }
+  const arrow=k=>QB_SORT.key===k?(QB_SORT.dir===1?' <span style="color:var(--blu)">▼</span>':' <span style="color:var(--blu)">▲</span>')
+                              :' <span style="opacity:.25;font-size:9px">⇅</span>';
+  const head=QB_TCOLS.map(([k,l,kind])=>`<th class="${kind==='num'?'num':''}" data-qb-sort="${k}" onclick="qbSortBy('${k}')">${l}${arrow(k)}</th>`).join('');
+  const body=qbSortedRows().map(rw=>`<tr class="bt-row" data-basket="${rw.key}" tabindex="0">
+    <td><span class="bt-name" style="border-left-color:${rw.col}">${esc(rw.name)}</span><span class="bc-role ${rw.roleCls}">${esc(rw.role)}</span></td>
+    <td>${esc(rw.role)}</td>
+    <td class="num ${c(rw.ret)}">${pct(rw.ret)}</td>
+    <td class="num ${c(rw.alp)}">${pct(rw.alp)}</td>
+    <td class="num ${c(rw.pnl)}">${f(rw.pnl)}</td>
+    <td class="num neu">${f(rw.mv)}</td>
+    <td class="num">${rw.pos}</td>
+    <td class="num">${rw.cap==null?'—':rw.cap}</td>
+    <td>${rw.reb==null?'—':esc(rw.reb)}</td>
+    <td>${rw.badge} <button class="ibtn bt-i" type="button" data-basket="${rw.key}" aria-label="Screen, entry, exit, sizing and cadence rules" title="Screen, entry, exit, sizing &amp; cadence">i</button></td>
+  </tr>`).join('');
+  host.innerHTML=`<table class="bt"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  host.querySelectorAll('tr.bt-row').forEach(tr=>{
+    const rw=QB_ROWS.find(x=>x.key===tr.dataset.basket); if(!rw)return;
+    tr.onclick=()=>openModal(rw.key,rw.card);
+    tr.onkeydown=(e)=>{ if(e.key==='Enter')openModal(rw.key,rw.card); };
+    const ib=tr.querySelector('.bt-i');
+    if(ib) ib.onclick=(e)=>{ e.stopPropagation(); openBasketInfo(rw.key); };
+  });
+}
+
 async function init(){
   try{
     const [qb,alpha,reg,gated]=await Promise.all([
@@ -420,6 +526,7 @@ async function init(){
 
     const grid=document.getElementById('basket-grid');
     grid.innerHTML='';
+    QB_ROWS.length=0;
     BASKETS.forEach(key=>{
       const d=bmap[key]||{};
       const r=rmap[key]||{};
@@ -488,6 +595,12 @@ async function init(){
       // they moved, verbatim, into the (i) sheet (openBasketInfo below). Face = name, phase tag,
       // the four numbers, positions, Reb date, badge, the cc#1704 gate pill, and the icon row.
       grid.appendChild(card);
+      // cc#1712: one row record per basket for the Table view — the SAME numbers the card face
+      // just rendered (no second computation), plus the card element so a row click opens the
+      // same basket sheet. Cap = registry max_stocks (/api/qb/registry, already fetched).
+      QB_ROWS.push({key, name:BNAMES[key], role:BROLE[key][0], roleCls:BROLE[key][1], col:BCOL[key],
+        ret:(ret==null?null:+ret), alp:(alp==null?null:+alp), pnl:+pnl, mv:(mv==null?null:+mv), pos:+pos,
+        cap:(r.max_stocks==null?null:+r.max_stocks), reb:(reb==='—'?null:reb), badge, card});
       // cc#839: the chart button must not also open the holdings modal the card is bound to.
       const cb=card.querySelector('.bc-chart');
       if(cb) cb.onclick=(e)=>{ e.stopPropagation(); toggleNavChart(key,card); };
@@ -500,6 +613,7 @@ async function init(){
       const rl=card.querySelector('.bc-reb-link');
       if(rl) rl.onclick=(e)=>{ e.stopPropagation(); openModal(key,card,SHOW_LEDGER_TAB?'ledger':'rebalance'); };
     });
+    renderBasketTable();
 
     // cc#561: per-basket exit thresholds — HS1 Breakout −15% (tighter), rest −20%; HS2 only mid/small.
     const HS1A={breakout_52w:-15}, HS2A={mid_cap:-5,small_cap:-5};
