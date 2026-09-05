@@ -117,7 +117,9 @@ def _reported_qend(cur, symbol: str):
     earnings_calendar date (the standard quarter-end on/before ex_date). status='reported' is
     authoritative post-cc#765-GUARD-1 (news leads land as 'upcoming', never 'reported'), so this is
     both the stale-scrape detector AND the ceiling quarter for any result card (never label ahead)."""
-    cur.execute("SELECT MAX(ex_date) FROM earnings_calendar WHERE UPPER(ticker)=%s AND status='reported'", (symbol,))
+    # cc#1707: verified<>'false' — a cc#602 news lead must never set the ceiling quarter.
+    cur.execute("""SELECT MAX(ex_date) FROM earnings_calendar
+                   WHERE UPPER(ticker)=%s AND status='reported' AND verified <> 'false'""", (symbol,))
     r = cur.fetchone()
     ex = r[0] if r and r[0] else None
     if not ex:
@@ -346,8 +348,10 @@ def build_card(cur, symbol: str, min_quarter_end: date = None, pe_map: dict = No
 
 
 def _announced_symbols(cur, since: date):
+    # cc#1707: fenced — a news lead must not put a company into the regen/analysis set.
     cur.execute("""SELECT DISTINCT UPPER(ticker) FROM earnings_calendar
-                   WHERE status='reported' AND ex_date >= %s AND ticker IS NOT NULL""", (since,))
+                   WHERE status='reported' AND verified <> 'false'
+                     AND ex_date >= %s AND ticker IS NOT NULL""", (since,))
     return [r[0] for r in cur.fetchall()]
 
 

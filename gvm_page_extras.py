@@ -359,7 +359,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                     SELECT ex_date::text, event_type,
                            (ex_date - CURRENT_DATE) AS days_to
                     FROM earnings_calendar
-                    WHERE ticker = %s AND ex_date >= CURRENT_DATE
+                    WHERE ticker = %s AND ex_date >= CURRENT_DATE AND verified <> 'false'
                     ORDER BY ex_date ASC LIMIT 1
                 """, (symbol,))
                 row = cur.fetchone()

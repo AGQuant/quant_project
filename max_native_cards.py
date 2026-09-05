@@ -466,7 +466,7 @@ def global_indices_card(cur, p):
 
 def results_today(cur, p):
     cur.execute("""SELECT UPPER(ticker), company_name, ex_date FROM earnings_calendar
-                   WHERE ex_date = CURRENT_DATE ORDER BY company_name""")
+                   WHERE ex_date = CURRENT_DATE AND verified <> 'false' ORDER BY company_name""")
     rows = cur.fetchall()
     if not rows:
         return _empty("Results today", "No company is scheduled to report today.", "earnings_calendar")
@@ -476,7 +476,7 @@ def results_today(cur, p):
 
 def results_week(cur, p):
     cur.execute("""SELECT UPPER(ticker), company_name, ex_date FROM earnings_calendar
-                   WHERE ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+                   WHERE ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7 AND verified <> 'false'
                    ORDER BY ex_date, company_name LIMIT 60""")
     rows = cur.fetchall()
     if not rows:

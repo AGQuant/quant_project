@@ -209,13 +209,13 @@ def verify(conn) -> dict:
     q_start = _quarter_start()
     with conn.cursor() as cur:
         cur.execute("""SELECT COUNT(DISTINCT UPPER(ticker)) FROM earnings_calendar
-                       WHERE status='reported' AND ex_date >= %s""", (q_start,))
+                       WHERE status='reported' AND verified <> 'false' AND ex_date >= %s""", (q_start,))
         cal_reported = cur.fetchone()[0]
         # discovered symbols that resolve AND are missing from the calendar = the true lead
         missing = 0
         for sym in discovered:
             cur.execute("""SELECT 1 FROM earnings_calendar WHERE UPPER(ticker)=%s
-                           AND status='reported' AND ex_date >= %s LIMIT 1""", (sym, q_start))
+                           AND status='reported' AND verified <> 'false' AND ex_date >= %s LIMIT 1""", (sym, q_start))
             if cur.fetchone() is None and _resolve(cur, sym):
                 missing += 1
         gap = missing
@@ -502,7 +502,7 @@ def result_corner_v2():
             cur.execute("SELECT segment, ROUND(mcap_weighted_gvm::numeric,2), verdict FROM sector_ratings")
             secrt = {r[0]: {"rating": float(r[1]) if r[1] is not None else None, "verdict": r[2]} for r in cur.fetchall()}
             cur.execute("""SELECT UPPER(ticker), MAX(ex_date) FROM earnings_calendar
-                           WHERE status='reported' GROUP BY UPPER(ticker)""")
+                           WHERE status='reported' AND verified <> 'false' GROUP BY UPPER(ticker)""")
             repdate = {r[0]: r[1] for r in cur.fetchall()}
             # cc#1698 P0 FIX: this call was living OUTSIDE the `with` block below (section 03, right
             # before the companies loop) — cc#1426 wired it in without checking that the cursor it
@@ -686,7 +686,7 @@ def result_corner_list(tier: str = "all", page: int = 1, per_page: int = 30):
                 ),
                 reported AS (
                     SELECT UPPER(ticker) AS sym, MAX(ex_date) AS reported_date, MAX(company_name) AS company
-                    FROM earnings_calendar WHERE status='reported'
+                    FROM earnings_calendar WHERE status='reported' AND verified <> 'false'
                     GROUP BY UPPER(ticker)
                 )
                 SELECT r.sym, r.company, r.reported_date, t.tier, t.gvm_score, t.verdict, t.mrank

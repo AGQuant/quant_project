@@ -2497,6 +2497,7 @@ def run_t1_refresh(conn=None):
                     JOIN scrape_universe u ON u.symbol = UPPER(e.ticker)
                     LEFT JOIN screener_raw s ON UPPER(s.nse_code) = UPPER(e.ticker)
                     WHERE e.status = 'reported'
+                      AND COALESCE(e.verified::text,'') <> 'false'   -- cc#1707 fence
                       AND e.ticker IS NOT NULL
                       AND e.ex_date >= %s
                       AND e.ex_date < CURRENT_DATE

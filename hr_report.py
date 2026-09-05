@@ -433,6 +433,7 @@ def _upcoming(cur, syms):
     cur.execute("""
         SELECT ticker, event_type, ex_date, (ex_date - CURRENT_DATE) AS days
         FROM earnings_calendar WHERE ticker = ANY(%s) AND ex_date >= CURRENT_DATE
+          AND verified <> 'false'
         ORDER BY ex_date ASC
     """, (syms,))
     return [{"symbol": r[0], "event": r[1] or "Results", "date": str(r[2]), "days_to": r[3]}
@@ -445,6 +446,7 @@ def _announced(cur, syms):
     cur.execute("""SELECT ticker, MAX(ex_date) FROM earnings_calendar
                    WHERE ticker = ANY(%s) AND ex_date <= CURRENT_DATE
                      AND ex_date >= (CURRENT_DATE - INTERVAL '60 days')
+                     AND verified <> 'false'   -- cc#1707 fence
                    GROUP BY ticker""", (syms,))
     return {r[0]: str(r[1]) for r in cur.fetchall()}
 

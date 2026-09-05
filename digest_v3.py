@@ -452,7 +452,7 @@ def _reporting_today(cur) -> Dict[str, Any]:
     cur.execute("""SELECT UPPER(e.ticker), e.company_name, s.market_cap
                    FROM earnings_calendar e
                    LEFT JOIN screener_raw s ON s.nse_code = UPPER(e.ticker)
-                   WHERE e.ex_date = CURRENT_DATE
+                   WHERE e.ex_date = CURRENT_DATE AND e.verified <> 'false'
                    ORDER BY s.market_cap DESC NULLS LAST LIMIT 25""")
     rows = []
     for r in cur.fetchall():
@@ -643,7 +643,7 @@ WITH latest_gvm AS (
 ), ex AS (
     SELECT DISTINCT ON (UPPER(ticker)) UPPER(ticker) AS symbol, ex_date
     FROM earnings_calendar
-    WHERE status = 'reported'
+    WHERE status = 'reported' AND verified <> 'false'   -- cc#1707 fence
     ORDER BY UPPER(ticker), ex_date DESC
 )
 SELECT r.symbol,
