@@ -1947,7 +1947,6 @@ RESULTS_CARD_JS = """
     if (!f) console.warn('results_card: window.ScorrFmt missing - scorr_card_common.js must load first');
     return f;
   }
-  function _absN(v){ var f=_F(); if(!f||v==null||v===''||isNaN(Number(v))) return null; return f.groupIN(Math.round(Math.abs(Number(v)))); }
   function _grow(v){ var f=_F(); if(!f||v==null||v===''||isNaN(Number(v))) return null; return f.pct(v); }
   function _pc(v){ var f=_F(); return f ? f.pct(v) : '--'; }   // growth cells: signed, one decimal, dash when absent
   function _lvl(v, unit){                                        // levels: '%' -> 36.0%, 'x' -> 32.8x
@@ -2016,12 +2015,14 @@ RESULTS_CARD_JS = """
       // cc#823: actual and expected are ABSOLUTES -> integer + Indian grouping; the deviation is a
       // change -> one decimal. The BEAT/IN-LINE/MISS bands still key off the raw value, so trimming
       // display precision cannot move a row across a band boundary.
-      var dev = _grow(o.dev_pct) || '--';
+      var dev = _pc(o.dev_pct);
       var col = o.dev_pct>2 ? '#0f9d58' : (o.dev_pct<-2 ? '#d0433b' : 'var(--mut,#667085)');
-      var _a = _absN(o.actual), _e = _absN(o.expected);
+      // cc#1705 stat table: 'Rs 23,165 cr' / 'vs est. Rs 23,816 cr' — money through the shared
+      // formatter; a negative actual reads '-Rs 1,234 cr' in the card's red; absent is an em dash.
+      var F = _F(), _a = F ? F.moneyCr(o.actual) : String(o.actual), _e = F ? F.moneyCr(o.expected) : String(o.expected);
       return '<div class=\"rcard-exp-row\"><span class=\"rcard-exp-l\">'+lbl+'</span>'
-        + '<span class=\"rcard-exp-v\">'+esc(_a==null?o.actual:_a)+'</span>'
-        + '<span class=\"rcard-exp-e\">vs est. '+esc(_e==null?o.expected:_e)+'</span>'
+        + '<span class=\"rcard-exp-v\"'+(F && F.isNeg(o.actual)?' style=\"color:#d0433b\"':'')+'>'+esc(_a)+'</span>'
+        + '<span class=\"rcard-exp-e\">vs est. '+esc(_e)+'</span>'
         + '<span class=\"rcard-exp-d\" style=\"color:'+col+'\">'+dev+'</span>'
         + '<span class=\"'+cls+'\">'+esc(o.tag)+'</span></div>';
     }
