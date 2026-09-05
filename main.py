@@ -39,6 +39,7 @@ from v8_engine import (
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
+from qb_discretionary_rebalance import router as qb_discretionary_router  # cc#1715: need-basis rebalance for discretionary baskets
 from gvm_report_endpoints import router as gvm_report_router
 from gvm_market_endpoints import router as gvm_market_router
 from gvm_universe_pivots import router as gvm_universe_pivots_router
@@ -715,6 +716,7 @@ app.include_router(authset_probe_router)
 app.include_router(v8_router)
 app.include_router(v8_futures_router)
 app.include_router(qb_router)
+app.include_router(qb_discretionary_router)
 app.include_router(gvm_nightly_router)
 app.include_router(gvm_report_router)
 app.include_router(gvm_market_router)

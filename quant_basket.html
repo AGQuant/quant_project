@@ -297,7 +297,8 @@
 <script>
 const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap',breakout_52w:'52W Breakout',contra_value:'Contra Value',
   // cc#1533/1534: FINZ baskets — Finkhoz-curated fixed lists, distinct from Scorr's own 6 algorithmic screens above.
-  finz_stable:'FINZ Stable',finz_wcb:'FINZ Wealth Compounder',finz_helios:'FINZ Helios',finz_dividend:'FINZ Dividend',finz_defence:'FINZ Defence',finz_etf:'FINZ ETF Basket'};
+  finz_stable:'FINZ Stable',finz_wcb:'FINZ Wealth Compounder',finz_helios:'FINZ Helios',finz_dividend:'FINZ Dividend',finz_defence:'FINZ Defence',finz_etf:'FINZ ETF Basket',
+  model_portfolio:'Model Portfolio'};   // cc#1715: founder-picked discretionary basket (Rs 1L)
 const BRULE  = {
   large_cap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.0 · ΔGVM(180d) > +0.5 · Mcap Top 100 · Monthly',
   mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · Top-20 by M-Score · Rank 101–250 · Monthly',
@@ -312,23 +313,29 @@ const BRULE  = {
   finz_helios:'Finkhoz committee list · real weights (5.5%–9.6%, uneven) · 7 holdings + LIQUIDCASE cash · Monthly',
   finz_dividend:'Finkhoz committee list · real weights (8.9%–19.3%, uneven) · 8 holdings · Monthly',
   finz_defence:'Finkhoz committee list · real weights (6.9%–21.5%, uneven) · 6 holdings + LIQUIDCASE cash · Monthly',
-  finz_etf:'Finkhoz committee list · real weights (17.6%–43.3%, uneven) · 4 ETFs · Monthly'
+  finz_etf:'Finkhoz committee list · real weights (17.6%–43.3%, uneven) · 4 ETFs · Monthly',
+  // cc#1715: model_portfolio's rule text is NOT hardcoded — init() fills BRULE/BCRITERIA for every
+  // Discretionary basket from quant_basket_registry.notes (served by /api/qb/registry).
+  model_portfolio:'Discretionary · founder-picked · see registry notes'
 };
 // cc#561 R1: top-border colors — Contra orange, Breakout cyan, Alpha violet, Large green, Mid blue, Small amber
 const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF',breakout_52w:'#37D3E8',contra_value:'#FF8A5C',
   // cc#1533/1534: FINZ baskets get their own colors, distinct from the 6 above.
-  finz_stable:'#5CC8FF',finz_wcb:'#B0E85C',finz_helios:'#FFD15C',finz_dividend:'#E85CB0',finz_defence:'#8A8FFF',finz_etf:'#5CFFD1'};
+  finz_stable:'#5CC8FF',finz_wcb:'#B0E85C',finz_helios:'#FFD15C',finz_dividend:'#E85CB0',finz_defence:'#8A8FFF',finz_etf:'#5CFFD1',
+  model_portfolio:'#E6C15A'};   // cc#1715
 // cc#561 R1: card grid order reads as the market cycle — Contra, Breakout, Alpha / Large, Mid, Small
 // cc#1533/1534: FINZ baskets appended after Scorr's own 6, in protocol order (Stable, WCB, Helios, Dividend, Defence, ETF).
 const BASKETS = ['contra_value','breakout_52w','alpha_multicap','large_cap','mid_cap','small_cap',
-  'finz_stable','finz_wcb','finz_helios','finz_dividend','finz_defence','finz_etf'];
+  'finz_stable','finz_wcb','finz_helios','finz_dividend','finz_defence','finz_etf',
+  'model_portfolio'];   // cc#1715: founder-picked discretionary basket, same finz_* card face
 // cc#561 R1: role tag [label, css-class] — Turn / Confirmation / Trend
 const BROLE = {contra_value:['Turn','role-turn'],breakout_52w:['Confirmation','role-confirm'],
   alpha_multicap:['Trend','role-trend'],large_cap:['Trend · Anchor','role-trend'],
   mid_cap:['Trend','role-trend'],small_cap:['Trend · Themes','role-trend'],
   // cc#1533/1534: FINZ baskets are committee-curated, not a Scorr algorithmic role — labelled plainly.
   finz_stable:['Finkhoz','role-trend'],finz_wcb:['Finkhoz','role-trend'],finz_helios:['Finkhoz','role-trend'],
-  finz_dividend:['Finkhoz','role-trend'],finz_defence:['Finkhoz','role-trend'],finz_etf:['Finkhoz','role-trend']};
+  finz_dividend:['Finkhoz','role-trend'],finz_defence:['Finkhoz','role-trend'],finz_etf:['Finkhoz','role-trend'],
+  model_portfolio:['Discretionary','role-trend']};   // cc#1715
 // cc#561 R1: special-exit chips appended to the Exit criteria of the two new baskets
 const BCHIPS = {contra_value:'<span class="chip profit">PROFIT-TAKE</span><span class="chip nightly">NIGHTLY</span>',
   breakout_52w:'<span class="chip nightly">NIGHTLY</span>'};
@@ -513,7 +520,7 @@ async function init(){
 
     const tot=qb.total_pnl||0;
     const alp=alpha.total?.alpha;
-    document.getElementById('s-cap').textContent='₹60,00,000';   // cc#1534: 12 baskets × ₹5L (finz_etf unblocked)
+    // cc#1715: CAPITAL KPI is set below, once the registry map exists (cc#1534's ₹60,00,000 literal retired).
     document.getElementById('s-pnl').innerHTML=`<span class="${c(tot)}">${f(tot)}</span>`;
     document.getElementById('s-alpha').innerHTML=`<span class="${c(alp)}">${pct(alp)} vs N500</span>`;
     document.getElementById('s-pos').textContent=qb.total_positions||'—';
@@ -523,6 +530,19 @@ async function init(){
     (alpha.baskets||[]).forEach(b=>{if(bmap[b.basket]){bmap[b.basket].alpha=b.alpha;bmap[b.basket].return_pct=b.return_pct;}});
     const rmap={};
     (Array.isArray(reg)?reg:[reg]).forEach(r=>{if(r&&r.basket_name)rmap[r.basket_name]=r;});
+    // cc#1715 scope 4: a Discretionary basket's (i) sheet reads the registry notes (its locked rule
+    // text, e.g. MODEL_PORTFOLIO_V1), never a string typed here. Sentences that name an exit /
+    // stop / rebalance go under EXIT, the rest under ENTRY; the first sentence is the card sub-line.
+    Object.keys(rmap).forEach(k=>{
+      const r=rmap[k]; if(!r||r.type!=='Discretionary'||!r.notes||BCRITERIA[k]) return;
+      const sent=String(r.notes).split(/\.\s+/).map(x=>x.trim().replace(/\.$/,'')).filter(Boolean);
+      const isExit=x=>/HS1|HS2|exit|stop|rebalance/i.test(x);
+      BCRITERIA[k]={entry:sent.filter(x=>!isExit(x)).join(' · '),exit:sent.filter(isExit).join(' · ')};
+      if(sent.length) BRULE[k]=sent.slice(0,2).join(' · ');
+    });
+    // cc#1715: CAPITAL = sum of registry capital over the baskets this page renders (was a literal).
+    const capSum=BASKETS.reduce((a,k)=>a+((rmap[k]&&+rmap[k].capital)||0),0);
+    document.getElementById('s-cap').textContent=capSum?'₹'+capSum.toLocaleString('en-IN'):'—';
 
     const grid=document.getElementById('basket-grid');
     grid.innerHTML='';
@@ -862,7 +882,7 @@ function rbBlockHtml(b){
   if(f.cash_move){
     const cm=f.cash_move, amt=cm.residual!=null?Math.round(+cm.residual).toLocaleString('en-IN'):inr(cm.amount);
     cash=` · ${cm.direction==='out'?'−':'+'}${esc(cm.symbol)} ${amt}${cm.direction==='out'?' (liquidated to cash)':' (cash residual)'}`;
-  }
+  }else if(f.cash_after!=null){ cash=` · cash ${inr(f.cash_after)}`; }   // cc#1715: cash left after this rebalance
   return `<div class="rb-block">
     <div class="rb-hd">
       <span class="rb-title">${esc(BNAMES[curBasket]||curBasket)} ${b.kind==='quality_exit'?'Quality exit':'Rebalance'}</span>
