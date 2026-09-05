@@ -141,6 +141,7 @@ body[data-theme]{
   --gold-lo:var(--t-gold-lo); --gold-hi:var(--t-gold-hi);
 }
 
+/* cc#1721: silvergold (now a light set) is mirrored the same way, line for line.
 /* cc#1719: winepurple (a light set) is added to EVERY selector group of the release block below,
  * mirroring blush line for line — without it the R5 dark card skin would land on the metallic-white
  * field (the cc#1640 bug, again). */
@@ -165,10 +166,13 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .card,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .m,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .c,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .c,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .card,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .card,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .m,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .m,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .m,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .c,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .card,
@@ -179,8 +183,10 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .chd .t,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .card-hd .t,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .chd .t,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .chd .t,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .chd .t,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .card-hd .t,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .card-hd .t,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .card-hd .t,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .chd .t,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .card-hd .t,
@@ -188,6 +194,7 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .card-hd .t{ color:var(--ink); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .sect,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .sect,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .sect,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .sect,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .sect,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .sect{ color:var(--brand); text-shadow:var(--glow-10) var(--brandglow); }
@@ -196,50 +203,75 @@ body[data-theme]{
  * darker step, AA on all three grounds); the glow keeps the cyan. Same specificity as the shared
  * rule above and later in source, so it wins for aquawhite only. Token, not a raw colour. */
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .sect{ color:var(--accent); text-shadow:var(--glow-10) var(--brandglow); }
+/* cc#1721: Silver Gold is a LIGHT set (mirrored into every release group above, like winepurple);
+ * its --brand is a gold FILL (1.83:1 on the field), so eyebrow TEXT reads the dark-gold --accent. */
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .sect{ color:var(--accent); text-shadow:var(--glow-10) var(--brandglow); }
+/* cc#1721 LEAK 1 — the SCORR wordmark. scorr_appshell.css paints .as-wm with --ink, but the R5
+ * sheet's global `:root:root:not([data-theme="light"]) a{color:var(--r5-pulse)}` (0,3,1) outranks
+ * `.as-hdr .as-wm` (0,2,0), so the wordmark is R5 purple with a green O on every set. On a light
+ * field that is the "green -> purple" the founder saw. Released to --ink for the six light sets at
+ * (0,6,2); goldnight and the dark sets keep today's colour, per the card. */
+:root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-hdr a.as-wm,
+:root:root:not([data-theme="light"]) body[data-theme="blush"] .as-hdr a.as-wm,
+:root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-hdr a.as-wm,
+:root:root:not([data-theme="light"]) body[data-theme="rosewall"] .as-hdr a.as-wm,
+:root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-hdr a.as-wm,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .as-hdr a.as-wm{ color:var(--ink); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-nav,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bnav,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .as-nav,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .as-nav,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-nav,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-nav{ background:var(--panel); border-top-color:var(--edge); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bn,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-bn,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bn,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .bn,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .bn,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .as-bn,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .as-bn,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-bn,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .bn,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-bn{ color:var(--muted); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bn.on,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-bn.on,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .bn.on,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .bn.on,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .as-bn.on,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .as-bn.on,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-bn.on,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .bn.on,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-bn.on{ color:var(--brand) !important; text-shadow:var(--glow-10) var(--brandglow); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bn.on::before,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-bn.on::before,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bn.on::before,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .bn.on::before,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .bn.on::before,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .as-bn.on::before,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .as-bn.on::before,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .as-bn.on::before,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .bn.on::before,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .as-bn.on::before{ background:var(--brand); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .pressed{ border-color:var(--edge); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .well,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .well,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .well,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .well,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .well,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .well{ box-shadow:0 var(--space-2) 0 0 var(--edge); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .tool span,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .tool span,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .tool span,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .tool span,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .tool span,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .tool span{ color:var(--brand); text-shadow:var(--glow-10) var(--brandglow); }
@@ -247,6 +279,7 @@ body[data-theme]{
  * tile. This rule (0,5,1)) beats it; the icon rule above is untouched. */
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .tool,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .tool,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .tool,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .tool,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .tool,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .tool{ color:var(--ink); }
@@ -274,17 +307,20 @@ body[data-theme]{
  * to all four sets for consistency rather than as a goldday-only patch. Dark sets (dark,
  * goldnight, rosenight, ainight) match no selector below. Nothing here touches P&L. */
 body[data-theme="aquawhite"], body[data-theme="blush"], body[data-theme="goldday"], body[data-theme="rosewall"],
+body[data-theme="aquawhite"], body[data-theme="silvergold"], body[data-theme="goldday"], body[data-theme="rosewall"],
 body[data-theme="aquawhite"], body[data-theme="winepurple"], body[data-theme="goldday"], body[data-theme="rosewall"]{
   --shell-panel:var(--panel); --shell-line:var(--edge); --shell-chalk:var(--ink); --shell-mute:var(--muted);
   --shell-well:var(--hi); --shell-field:var(--field); --shell-sunk:var(--hi);
 }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .pressed{
@@ -293,16 +329,19 @@ body[data-theme="aquawhite"], body[data-theme="winepurple"], body[data-theme="go
 }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .slab,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .slab,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .slab{ background:var(--panel); border-color:var(--line); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .pressed,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .pressed,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .pressed{ background:var(--sunk); border-color:var(--line); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .well-up,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .well-up,
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .well-up,
 :root:root:not([data-theme="light"]) body[data-theme="winepurple"] .well-up,
 :root:root:not([data-theme="light"]) body[data-theme="goldday"] .well-up,
 :root:root:not([data-theme="light"]) body[data-theme="rosewall"] .well-up{ background:var(--well); }
