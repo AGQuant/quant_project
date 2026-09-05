@@ -282,8 +282,11 @@ def _earnings_lifecycle(cur):
     """cc#252/#420: after each scrape — age past-date 'upcoming' rows to 'reported'. cc#420: the
     purge is REMOVED — earnings_calendar is the permanent announcement-date archive from Jul-2026
     onward; 'reported'/'analyzed' rows are NEVER deleted (rescheduled rows keep their reschedule_log)."""
+    # cc#1707: never age an unverified row (cc#602 news lead, verified='false') into 'reported'.
+    # Only a confirmed/estimated calendar row may flip on date alone.
     cur.execute("""UPDATE earnings_calendar SET status='reported', last_updated=NOW()
-                   WHERE status='upcoming' AND ex_date < CURRENT_DATE""")
+                   WHERE status='upcoming' AND ex_date < CURRENT_DATE
+                     AND COALESCE(verified::text,'') <> 'false'""")
     reported = cur.rowcount
     purged = 0   # cc#420: never purge reported/analyzed rows (permanent archive)
     return reported, purged
