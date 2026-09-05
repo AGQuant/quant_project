@@ -45,6 +45,7 @@ from gvm_universe_pivots import router as gvm_universe_pivots_router
 from admin_data import router as admin_data_router
 from fyers_endpoints import router as fyers_router
 from diagnosis import router as diagnosis_router
+import earnings_calendar_diag  # cc#1707 scope 5: read-only phantom backstop (health check + /api/diag/earnings_calendar)
 from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
 from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
@@ -721,6 +722,7 @@ app.include_router(gvm_universe_pivots_router)
 app.include_router(admin_data_router)
 app.include_router(fyers_router)
 app.include_router(diagnosis_router)
+app.include_router(earnings_calendar_diag.router)  # cc#1707: GET /api/diag/earnings_calendar
 app.include_router(v9_router)
 app.include_router(v10_router)
 app.include_router(v14_router)   # cc#442
@@ -1562,6 +1564,8 @@ def build_health_report() -> dict:
                     add_check("data_feeds", {"check": "Earnings calendar", "value": "no rows", "status": "fail"})
             except Exception as e:
                 add_check("data_feeds", {"check": "Earnings calendar", "value": str(e), "status": "fail"})
+            # cc#1707 scope 5: phantom backstop — verified='false' rows must never read 'reported'
+            add_check("data_feeds", earnings_calendar_diag.health_check(cur))
 
             report["sections"]["content_refresh"] = {"checks": [], "grade": "A"}
             add_check("content_refresh", _check(_get_config("takeaway_refresh_due","false"), "Takeaway refresh due", lambda v: v=="false", lambda v: True))
