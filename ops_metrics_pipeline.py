@@ -2410,13 +2410,18 @@ def flip_earnings_status(conn=None, since=None):
     missing_cutoff = _n_trading_days_ago(today, 2)
     try:
         with conn.cursor() as cur:
+            # cc#1707: verified='false' rows (cc#602 news leads) are excluded from BOTH flips — a stale
+            # lead dated in the past is 'proven' by any later nightly quarters scrape, so the artefact
+            # predicate cannot tell a real report from a sector mention. Leads stay leads.
             cur.execute(f"""UPDATE earnings_calendar ec SET status='reported', last_updated=NOW()
                             WHERE ec.status IN ('upcoming','missing') AND ec.ticker IS NOT NULL
+                              AND COALESCE(ec.verified::text,'') <> 'false'
                               AND ec.ex_date < %s AND ec.ex_date >= %s AND {_RESULT_ARTEFACT_SQL}""",
                         (today, since))
             reported = cur.rowcount
             cur.execute(f"""UPDATE earnings_calendar ec SET status='missing', last_updated=NOW()
                             WHERE ec.status='upcoming' AND ec.ticker IS NOT NULL
+                              AND COALESCE(ec.verified::text,'') <> 'false'
                               AND ec.ex_date <= %s AND ec.ex_date >= %s AND NOT {_RESULT_ARTEFACT_SQL}""",
                         (missing_cutoff, since))
             missing = cur.rowcount

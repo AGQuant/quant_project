@@ -14,8 +14,8 @@ alias-matching), with a news_tagger._match fallback for rows the polisher left u
 
 RECONCILE (idempotent): a discovered symbol that resolves to a real nse_code and is NOT already
 status='reported' in earnings_calendar for the current quarter gets a reported row upserted on the
-(ticker, ex_date) unique key — event_type='Quarterly Result', status='reported', verified=false
-(news-sourced, not NSE-confirmed), reschedule_log noting the source. It is ALSO enqueued into
+(ticker, ex_date) unique key — event_type='Quarterly Result', status='lead' (cc#1707: was 'upcoming';
+originally 'reported'), verified=false (news-sourced, not NSE-confirmed), reschedule_log noting the source. It is ALSO enqueued into
 ops_metrics_t1_queue so the existing T+1/Saturday chain stages its doc-text + re-scrapes fundamentals.
 
 VERIFY (recurring, read-only alert): compares the news-result symbol count vs the stored
@@ -118,8 +118,8 @@ def _resolve(cur, sym: str) -> Optional[str]:
 
 
 def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
-    """Add news-discovered result LEADS missing from earnings_calendar as status='upcoming' (cc#765
-    GUARD 1 — news never asserts 'reported'). Idempotent: upsert on (ticker, ex_date); skip symbols
+    """Add news-discovered result LEADS missing from earnings_calendar as status='lead' (cc#1707;
+    was 'upcoming' — cc#765 GUARD 1: news never asserts 'reported'). Idempotent: upsert on (ticker, ex_date); skip symbols
     that already have any calendar row this quarter. Each add is enqueued into ops_metrics_t1_queue so
     the T+1/Saturday chain stages its docs + re-scrapes fundamentals; the authoritative flip to
     'reported' comes only from the exchange scrape / cc#749 evidence path, never from this news lead."""
@@ -130,7 +130,7 @@ def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
     samples = []
     with conn.cursor() as cur:
         # cc#765 GUARD 1: dedup against ANY calendar row this quarter (any status), not just
-        # 'reported'. A news-discovered entry is written once as 'upcoming' and must not be
+        # 'reported'. A news-discovered entry is written once as 'lead' (cc#1707) and must not be
         # re-touched on later runs (that churned reschedule_log). The authoritative flip to
         # 'reported' comes only from the exchange scrape / cc#749 evidence path — never from here.
         cur.execute("""SELECT UPPER(ticker) FROM earnings_calendar
@@ -149,15 +149,20 @@ def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
                 continue
             ex_date = info["ex_date"]
             # cc#765 GUARD 1: news is a LEAD, not verified evidence — it must never assert a
-            # reported Quarterly Result. Insert as 'upcoming' (event_type kept so the calendar
-            # surfaces an expected result). On conflict NEVER overwrite an existing status:
+            # reported Quarterly Result. On conflict NEVER overwrite an existing status:
             # keep whatever the exchange/evidence path already set (esp. a real 'reported') and
-            # only append an audit note. The T+1 scrape + cc#749 evidence flip own 'reported'.
+            # only append an audit note.
+            # cc#1707 WRITER GATE: insert as status='lead' (was 'upcoming'). 'upcoming' rows are
+            # date-aged into 'reported' by admin_data._earnings_lifecycle and evidence-flipped by
+            # ops_metrics_pipeline.flip_earnings_status, so a sector mention in an article became a
+            # 'reported' result date (69 phantom rows, BAJFINANCE 30-Aug). A 'lead' row is never
+            # aged or flipped; it becomes 'reported' only when the confirmed calendar scrape
+            # (admin_data L239 upsert, verified='confirmed') supplies the same ticker+ex_date.
             cur.execute("""
                 INSERT INTO earnings_calendar
                     (company_name, ticker, ex_date, event_type, status, verified, first_seen,
                      last_updated, reschedule_log)
-                VALUES (%s,%s,%s,'Quarterly Result','upcoming',FALSE,NOW(),NOW(),
+                VALUES (%s,%s,%s,'Quarterly Result','lead',FALSE,NOW(),NOW(),
                         jsonb_build_array(jsonb_build_object('src','cc#602','ts',NOW()::text,'note',%s)))
                 ON CONFLICT (ticker, ex_date) DO UPDATE SET
                     last_updated=NOW(),
