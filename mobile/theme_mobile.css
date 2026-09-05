@@ -418,6 +418,19 @@ body[data-theme="ainight"]{ --glow-line:rgba(53,224,255,.35); --glow-num:rgba(53
 :root:root:not([data-theme="light"]) body[data-theme="ainight"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="ainight"] .as-nav{ background:var(--nav-bg); }
 
+/* cc#1725 · MIDNIGHT BLUE (key dark) — the sheen. Dark is not a light set, so it is not in the
+ * LIGHT-SET release block above; the two cc#1722 depth consumers it needs are scoped here, tokens
+ * only: the body paints --field-grad (a radial wash, brighter at the top) over the --texture
+ * hairline; cards carry --panel-shadow (black drop + blue halo + lit top lip). Same shape as the
+ * ainight card rule above. Accents, P&L and nav glyph colours are untouched by construction. */
+:root:root:not([data-theme="light"]) body[data-theme="dark"]{ background-image:var(--field-grad), var(--texture); }
+:root:root:not([data-theme="light"]) body[data-theme="dark"] .c:not(.slab),
+:root:root:not([data-theme="light"]) body[data-theme="dark"] .card:not(.slab),
+:root:root:not([data-theme="light"]) body[data-theme="dark"] .m:not(.slab){ background:var(--panel); border-color:var(--edge); box-shadow:var(--panel-shadow); }
+/* Pressed slabs (.slab) are excluded on purpose: they keep the R5 pressed lip, which now reads this
+ * set's own --gold-lo #2B3D6B (line2 blue) instead of the gold fallback #7A6320 it fell back to
+ * while dark left --gold-lo undeclared. */
+
 /* cc#1661 · ONE HEADER ROW EVERYWHERE (supersedes cc#1658, unclaimed). Founder 04-Sep 10:07 +
  * 10:25 IST: SCORR showed twice on Home, and every cc#1645-migrated page carried the new shared
  * .as-hdr ABOVE its own pre-existing page-local title strip -- two headers stacked, not one.
