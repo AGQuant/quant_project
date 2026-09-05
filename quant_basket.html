@@ -171,6 +171,28 @@
   .rh-toggle:hover{color:var(--txt);border-color:var(--dim)}
   .rh-sym{font-size:11px}
   .rh-note{font-size:11px;color:var(--mut);white-space:normal;min-width:220px}
+  /* cc#1709: rebalance BLOCKS (Finz format) + HSL History tags */
+  .rb-wrap{padding:12px 20px 0}
+  .rb-block{border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden}
+  .rb-hd{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border-bottom:1px solid var(--line)}
+  .rb-title{font-size:12.5px;font-weight:700;color:var(--txt)}
+  .rb-date{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--txt);font-variant-numeric:tabular-nums}
+  .rb-chip{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:6px}
+  .rb-chip.done{background:rgba(47,212,139,.12);color:var(--grn)}
+  .rb-chip.await{background:rgba(245,185,74,.14);color:var(--amber)}
+  .rb-chip.none{background:rgba(148,166,210,.14);color:var(--mut)}
+  .rb-side{font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:10px 14px 0;color:var(--mut)}
+  .rb-side.sell{color:var(--red)} .rb-side.buy{color:var(--grn)}
+  .rb-tbl{margin:4px 0 6px}
+  .rb-tbl th,.rb-tbl td{padding:6px 14px}
+  .rb-tbl tr.rb-sell td{background:rgba(255,92,108,.07)}
+  .rb-tbl tr.rb-buy td{background:rgba(47,212,139,.07)}
+  .rb-tbl tr.rb-sell td.rb-act{color:var(--red);font-weight:700}
+  .rb-tbl tr.rb-buy td.rb-act{color:var(--grn);font-weight:700}
+  .rb-none{font-size:11px;color:var(--dim);padding:6px 14px 8px;font-style:italic}
+  .rb-foot{font-size:11px;color:var(--mut);padding:8px 14px 10px;border-top:1px solid var(--line);white-space:normal}
+  .rb-tag{display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:5px;background:rgba(148,166,210,.14);color:var(--mut);white-space:nowrap}
+  .rb-ver{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;border:1px solid var(--line);color:var(--mut)}
   @media(max-width:768px){
     body{font-size:12px}
     table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -225,10 +247,13 @@
     <div class="modal-tabs">
       <div class="mtab active" id="tab-holdings" onclick="switchTab('holdings')">Holdings</div>
       <div class="mtab" id="tab-rebalance" onclick="switchTab('rebalance')">Rebalance History</div>
+      <!-- cc#1709: hard-stop exits (HS1 / HS2) as their own table, newest first. -->
+      <div class="mtab" id="tab-hsl" onclick="switchTab('hsl')">HSL History</div>
       <!-- cc#1298: per-symbol Buy/Sell ledger (entry+exit price/date/qty, realised/unrealised
-           P&L, exit reason) — distinct from Rebalance History above, which is per-EVENT
-           (stocks in/out counts per rebalance run), not per-symbol. -->
-      <div class="mtab" id="tab-ledger" onclick="switchTab('ledger')">Buy/Sell Ledger</div>
+           P&L, exit reason). cc#1709: HIDDEN behind SHOW_LEDGER_TAB (cc#1699 pattern) — the
+           element is removed at init when the flag is off, so its label never reaches the DOM;
+           flip the const to bring it back. -->
+      <div class="mtab" id="tab-ledger" onclick="switchTab('ledger')" hidden></div>
     </div>
     <div class="modal-body" id="modal-body">
       <div class="msg">Loading…</div>
@@ -471,8 +496,9 @@ async function init(){
       // cc#1298: the founder wants a dedicated trigger on the "Reb <date>" line that opens
       // straight to the Buy/Sell Ledger tab, distinct from clicking the rest of the card (which
       // opens on Holdings, cc#839's existing behaviour, untouched).
+      // cc#1709: with the ledger hidden the Reb link opens Rebalance History instead.
       const rl=card.querySelector('.bc-reb-link');
-      if(rl) rl.onclick=(e)=>{ e.stopPropagation(); openModal(key,card,'ledger'); };
+      if(rl) rl.onclick=(e)=>{ e.stopPropagation(); openModal(key,card,SHOW_LEDGER_TAB?'ledger':'rebalance'); };
     });
 
     // cc#561: per-basket exit thresholds — HS1 Breakout −15% (tighter), rest −20%; HS2 only mid/small.
@@ -624,14 +650,17 @@ function closeModal(e){
 }
 
 async function switchTab(tab){
+  if(tab==='ledger'&&!SHOW_LEDGER_TAB) tab='rebalance';   // cc#1709: ledger hidden by flag
   curTab=tab;
-  ['holdings','rebalance','ledger'].forEach(t=>{
-    document.getElementById('tab-'+t).classList.toggle('active',t===tab);
+  ['holdings','rebalance','hsl','ledger'].forEach(t=>{
+    const el=document.getElementById('tab-'+t);
+    if(el) el.classList.toggle('active',t===tab);
   });
   const body=document.getElementById('modal-body');
   body.innerHTML='<div class="msg">Loading…</div>';
   if(tab==='holdings') await showHoldings(body);
   else if(tab==='rebalance') await showRebalance(body);
+  else if(tab==='hsl') await showHsl(body);
   else await showLedger(body);
 }
 
@@ -683,43 +712,94 @@ async function showHoldings(body){
 // happened, which is the wall of zeros the founder screenshotted. /api/qb/rebalance_history
 // classifies each row server-side (rebalance / stop exit / cash move / nightly check) and this
 // sheet shows only the first three by default, with a toggle to reveal the nightly noise.
-const RH_LABEL={rebalance:'Rebalance',stop_exit:'Stop exit',cash_move:'Cash move',nightly_check:'Nightly check'};
-let rhDefaultRows=[], rhNightly=[], rhShowNightly=false;
+// cc#1709 (founder 05-Sep, Finz image 1): Rebalance History = one BLOCK per rebalance date,
+// newest first — header bar "<Basket> Rebalance" | state chip | DD-Mon-YYYY, then a SELL table and
+// a BUY table (S.No | Stock | Price | Qty | Amount | Action), then a muted footer line (held after,
+// book value after, cash residual move, next due). Quality/rank exits sit in the SELL table of
+// their date with the reason as a tag; hard stops live on the HSL History tab. The cc#1703 flat
+// row table (and its nightly-check toggle) is superseded — the endpoint still serves those keys.
+const SHOW_LEDGER_TAB=false;   // cc#1709: Buy/Sell Ledger hidden, not deleted (cc#1699 pattern)
+(function(){ const lt=document.getElementById('tab-ledger'); if(!lt) return;
+  if(SHOW_LEDGER_TAB){ lt.hidden=false; lt.textContent='Buy/Sell Ledger'; } else { lt.remove(); } })();
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDMY(s){ if(!s) return '—'; const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${m[3]}-${MON[+m[2]-1]}-${m[1]}`:esc(String(s)); }
+function inr(v){ return v==null||isNaN(+v)?'—':'₹'+(+v).toLocaleString('en-IN',{maximumFractionDigits:2}); }
+function lakh(v){ return v==null||isNaN(+v)?'—':'₹'+(+v/100000).toFixed(2)+'L'; }
+function num2(v){ return v==null||isNaN(+v)?'—':(+v).toFixed(2); }
+async function rhFetch(){
+  return fetchWithTimeout(`/api/qb/rebalance_history?basket_name=${curBasket}&limit=300`).then(r=>r.json());
+}
+function rbSideTable(rows,side){
+  const empty=side==='sell'?'No sells':'No buys';
+  if(!rows||!rows.length) return `<div class="rb-none">${empty}</div>`;
+  return `<table class="rb-tbl"><thead><tr>
+      <th>S.No</th><th>Stock</th><th>Price</th><th>Qty</th><th>Amount</th><th>Action</th>
+    </tr></thead><tbody>${rows.map((r,i)=>`<tr class="rb-${side}">
+      <td>${i+1}</td>
+      <td><strong>${esc(r.symbol)}</strong>${r.reason?` <span class="rb-tag" title="${esc(r.reason)}">${esc(r.rule||r.reason)}</span>`:''}</td>
+      <td>${num2(r.price)}</td><td>${r.qty!=null?r.qty:'—'}</td><td>${inr(r.amount)}</td>
+      <td class="rb-act">${side==='sell'?'Full Sell':'Buy'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+function rbBlockHtml(b){
+  const f=b.footer||{};
+  const chip=b.state==='DONE'?'done':(b.state==='AWAITING CONFIRMATION'?'await':'none');
+  let cash='';
+  if(f.cash_move){
+    const cm=f.cash_move, amt=cm.residual!=null?Math.round(+cm.residual).toLocaleString('en-IN'):inr(cm.amount);
+    cash=` · ${cm.direction==='out'?'−':'+'}${esc(cm.symbol)} ${amt}${cm.direction==='out'?' (liquidated to cash)':' (cash residual)'}`;
+  }
+  return `<div class="rb-block">
+    <div class="rb-hd">
+      <span class="rb-title">${esc(BNAMES[curBasket]||curBasket)} ${b.kind==='quality_exit'?'Quality exit':'Rebalance'}</span>
+      <span class="rb-chip ${chip}">${esc(b.chip||b.state||'')}</span>
+      <span class="rb-date">${fmtDMY(b.date)}</span>
+    </div>
+    <div class="rb-side sell">Sell</div>${rbSideTable(b.sells,'sell')}
+    <div class="rb-side buy">Buy</div>${rbSideTable(b.buys,'buy')}
+    <div class="rb-foot">held after = ${f.held_after!=null?f.held_after:'—'}${f.bees_held?' (+NIFTYBEES)':''}
+      · book value after = ${lakh(f.book_value_after)}${cash}${b.next_due?' · next due '+fmtDMY(b.next_due):''}</div>
+  </div>`;
+}
 async function showRebalance(body){
   try{
-    const d=await fetchWithTimeout(`/api/qb/rebalance_history?basket_name=${curBasket}&limit=300`).then(r=>r.json());
+    const d=await rhFetch();
     if(d&&d.error){body.innerHTML=`<div class="err-msg">Error: ${esc(d.error)}</div>`;return;}
-    if(d.empty||(!Array.isArray(d.rows)||!d.rows.length)){
-      body.innerHTML=`<div class="msg">No rebalance yet — first due ${d.next_rebalance?(d.next_rebalance+'').split('T')[0]:'—'}.</div>`;
+    const blocks=(d&&d.blocks)||[];
+    if(!blocks.length){
+      body.innerHTML=`<div class="msg">No rebalance yet — first due ${d&&d.next_rebalance?fmtDMY(d.next_rebalance):'—'}.</div>`;
       return;
     }
-    rhDefaultRows=d.rows; rhNightly=d.nightly_rows||[]; rhShowNightly=false;
-    rhRender();
+    body.innerHTML=`<div class="rb-wrap">${blocks.map(rbBlockHtml).join('')}</div>`
+      +(d.nightly_count?`<div class="rb-foot" style="padding:6px 20px 0">${d.nightly_count} nightly stop-checks ran with no action; hard-stop exits are on the HSL History tab.</div>`:'');
   }catch(e){body.innerHTML=`<div class="err-msg">Error: ${e.message}</div>`;}
 }
-function rhToggleNightly(){ rhShowNightly=!rhShowNightly; rhRender(); }
-function rhRender(){
-  const rows=rhShowNightly
-    ? rhDefaultRows.concat(rhNightly).sort((a,b)=>a.date<b.date?1:-1)
-    : rhDefaultRows;
-  document.getElementById('modal-body').innerHTML=rhTableHtml(rows)+
-    (rhNightly.length?`<button class="rh-toggle" onclick="rhToggleNightly()">${rhShowNightly?'hide':'show'} nightly checks (${rhNightly.length})</button>`:'');
-}
-function rhTableHtml(rows){
-  return `<div class="tbl-wrap"><table>
-    <thead><tr>
-      <th>Date</th><th>Action</th><th>In</th><th>Out</th><th>Held</th><th>Value After</th><th>Note</th>
-    </tr></thead>
-    <tbody>${rows.map(r=>`<tr>
-      <td>${r.date}</td>
-      <td><span class="rh-type ${r.row_type}">${RH_LABEL[r.row_type]||r.row_type}</span>${r.gated?'<span class="rh-gated">awaiting confirmation</span>':''}</td>
-      <td class="rh-sym pos">${(r.in&&r.in.length)?'+'+esc(r.in.join(', ')):'—'}</td>
-      <td class="rh-sym neg">${(r.out&&r.out.length)?'−'+esc(r.out.join(', ')):'—'}</td>
-      <td title="${esc((r.held_symbols||[]).join(', '))}">${r.held!=null?r.held:'—'}</td>
-      <td>${r.value_after!=null?'₹'+(+r.value_after/100000).toFixed(2)+'L':'—'}</td>
-      <td class="rh-note">${esc(r.note||'—')}</td>
-    </tr>`).join('')}</tbody>
-  </table></div>`;
+// cc#1709 scope 5: HSL History — every exited_stop position, newest first, with the rule that
+// fired and its measured value from the nightly check of that date, tagged V1 (before 19-Jul-2026)
+// or V2. Footer: count and total P&L. P&L Rs = qty * (exit − entry) from the position's own prices.
+async function showHsl(body){
+  try{
+    const d=await rhFetch();
+    if(d&&d.error){body.innerHTML=`<div class="err-msg">Error: ${esc(d.error)}</div>`;return;}
+    const h=(d&&d.hsl)||{rows:[],count:0,total_pnl:0};
+    if(!h.rows||!h.rows.length){body.innerHTML='<div class="msg">No stop exits yet.</div>';return;}
+    body.innerHTML=`<div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Date</th><th>Stock</th><th>Entry Price</th><th>Exit Price</th><th>Qty</th>
+        <th>P&amp;L ₹</th><th>P&amp;L %</th><th>Rule</th><th>Rules</th>
+      </tr></thead>
+      <tbody>${h.rows.map(r=>`<tr>
+        <td>${fmtDMY(r.date)}</td>
+        <td><strong>${esc(r.symbol)}</strong></td>
+        <td>${num2(r.entry_price)}</td><td>${num2(r.exit_price)}</td><td>${r.qty!=null?r.qty:'—'}</td>
+        <td class="${c(r.pnl)}">${inr(r.pnl)}</td>
+        <td class="${c(r.pnl_pct)}">${pct(r.pnl_pct)}</td>
+        <td class="rh-note">${esc(r.rule_text||'—')}${r.measured?` <span class="rb-tag">${esc(r.measured)}</span>`:''}</td>
+        <td><span class="rb-ver">${esc(r.version||'')}</span></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div class="rb-foot" style="padding:10px 20px 0">${h.count} stop${h.count===1?'':'s'} · total P&amp;L <span class="${c(h.total_pnl)}">${inr(h.total_pnl)}</span></div>`;
+  }catch(e){body.innerHTML=`<div class="err-msg">Error: ${e.message}</div>`;}
 }
 
 // cc#1298: per-symbol Buy/Sell ledger — every position this basket has EVER held, open or
