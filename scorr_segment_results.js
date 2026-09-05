@@ -33,10 +33,13 @@
     });
   }
   function pct(v) {
+    /* cc#1705: growth figures route through the shared formatter (scorr_card_common.js loads
+       first). Same string the R card prints, so the popout and the card never disagree. */
+    if (window.ScorrFmt) { return window.ScorrFmt.pct(v); }
     if (v == null) { return "—"; }
     var n = Number(v);
     if (!isFinite(n)) { return "—"; }
-    return (n > 0 ? "+" : "") + n.toFixed(1) + "%";
+    return (n >= 0 ? "+" : "") + n.toFixed(1) + "%";
   }
   function cls(v) {
     if (v == null) { return "sg-na"; }
