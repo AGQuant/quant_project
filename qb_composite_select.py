@@ -11,10 +11,10 @@ quant_paper_positions only.
 
 Config per basket:
   large_cap (id=6097): universe mcap rank<=100; score 0.5*GVM+0.5*M; gates GVM>=7.0 AND dGVM_180d>+0.5;
-                       top-12 equal weight 5L/12; monthly max-3 exit outside composite top-20; HS2
+                       top-N (config max_stocks, 15 after cc#1710) equal weight capital/N; monthly max-3 exit outside composite top-20; HS2
                        removed for large_cap in qb_eod_checker.
   mid_cap  (id=6098): universe mcap rank 101-250; rank by M SCORE; gates GVM>=7.5 AND G>=7.0 (no V,
-                       no dGVM); top-20 equal weight 5L/20; ENTRY-ONLY (exits UNCHANGED, HS2 kept).
+                       no dGVM); top-N (config, 20) equal weight capital/N; ENTRY-ONLY (exits UNCHANGED, HS2 kept).
 Sizing (both): N (<=top_n) filled slots. N>=brake_n -> slot=capital/top_n (cash for empty slots).
                N<brake_n -> slot=capital/brake_n (50k), remaining CASH (concentration brake).
 """
@@ -22,6 +22,8 @@ import os
 import logging
 
 import psycopg
+
+import qb_config   # cc#1710: max_stocks + capital_rs from quant_basket_config, never literals
 
 log = logging.getLogger("qb_composite_select")
 
@@ -32,14 +34,14 @@ _RANK_EXPR = {
 }
 
 LARGECAP_CFG = {
-    "basket": "large_cap", "capital": 500000.0, "rank_min": 1, "rank_max": 100,
+    "basket": "large_cap", "rank_min": 1, "rank_max": 100,   # cap + capital: qb_config (cc#1710)
     "gvm_min": 7.0, "g_min": None, "v_min": None, "dgvm_min": 0.5,
-    "rank_by": "composite", "top_n": 12, "brake_n": 10, "keep_rank": 20, "max_exits": 3,
+    "rank_by": "composite", "brake_n": 10, "keep_rank": 20, "max_exits": 3,
 }
 MIDCAP_CFG = {
-    "basket": "mid_cap", "capital": 500000.0, "rank_min": 101, "rank_max": 250,
+    "basket": "mid_cap", "rank_min": 101, "rank_max": 250,
     "gvm_min": 7.5, "g_min": 7.0, "v_min": None, "dgvm_min": None,
-    "rank_by": "m_score", "top_n": 20, "brake_n": 10, "keep_rank": None, "max_exits": 0,
+    "rank_by": "m_score", "brake_n": 10, "keep_rank": None, "max_exits": 0,
 }
 
 
@@ -102,7 +104,8 @@ def propose_rebalance(cfg, conn=None, as_of=None):
         with conn.cursor() as cur:
             cur.execute("SELECT CURRENT_DATE")
             as_of = cur.fetchone()[0]
-    cap, top_n, brake_n = cfg["capital"], cfg["top_n"], cfg["brake_n"]
+    p = qb_config.basket_params(conn, cfg["basket"])   # cc#1710: cap + capital from config, never literals
+    cap, top_n, brake_n = p["capital"], p["max_stocks"], cfg["brake_n"]
     try:
         params = {"asof": as_of, "rank_min": cfg["rank_min"], "rank_max": cfg["rank_max"],
                   "gvm_min": cfg["gvm_min"], "g_min": cfg.get("g_min"),
@@ -123,16 +126,7 @@ def propose_rebalance(cfg, conn=None, as_of=None):
             n = len(picked)
 
             # sizing: N>=brake_n -> capital/top_n (cash only for empty slots); N<brake_n -> brake slot + cash
-            if n == 0:
-                slot, cash, mode = 0.0, cap, "empty"
-            elif n < brake_n:
-                slot = round(cap / brake_n, 2)
-                cash = round(cap - slot * n, 2)
-                mode = f"brake_5L_div_{brake_n}"
-            else:
-                slot = round(cap / top_n, 2)
-                cash = round(cap - slot * n, 2)
-                mode = f"equal_5L_div_{top_n}"
+            slot, cash, mode = qb_config.size_slots(cap, top_n, n, brake_n)   # cc#1710 fill_rule
 
             entries = [{"symbol": r["symbol"], "mcap_rank": int(r["mrank"]), "rank": r["rank"],
                         "gvm": _f(r["gvm_score"]), "g": _f(r["g_score"]), "v": _f(r["v_score"]),
@@ -160,7 +154,7 @@ def propose_rebalance(cfg, conn=None, as_of=None):
                            for q in qualifiers if q["symbol"] not in held_set][:refill_slots]
 
         out = {
-            "as_of": str(as_of), "basket": cfg["basket"], "capital": cap,
+            "as_of": str(as_of), "basket": cfg["basket"], "capital": cap, "cap_source": p["source"],
             "top_n": top_n, "entries": entries, "n_qualified": len(qualifiers), "n_selected": n,
             "slot_value": slot, "cash_value": cash, "sizing_mode": mode,
             "holdings": holdings, "entry_only": keep_rank is None,

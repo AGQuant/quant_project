@@ -13,7 +13,8 @@ Spec id=6086 rules encoded here:
   hard gates  GVM >= 7.5 AND V >= 7.5 AND M > 7 AND (gvm_now - gvm_180d_ago) > +0.5
               dGVM 180d lookback from gvm_history: nearest score in [as_of-200, as_of-180]
   selection   top-12 by alpha_score among qualifiers, equal weight; < 12 qualify -> cash slots
-              (return convention: full 12-slot / Rs 5L capital, cash earns 0)
+              (return convention: full cap-slot / Rs 5L capital, cash earns 0; cap + capital from
+               quant_basket_config via qb_config — cc#1710, 15 slots after QB_CAP_AMENDMENT_V1)
   exit        monthly (6th): MAX 3 holdings ranked OUTSIDE composite top-25, worst rank first;
               refills must pass ALL entry gates incl dGVM
   stops       HS1 -20% from entry only (HS2 removed for alpha in qb_eod_checker.py); no trail
@@ -23,17 +24,19 @@ import logging
 
 import psycopg
 
+import qb_config   # cc#1710: max_stocks + capital_rs from quant_basket_config, never literals
+
 log = logging.getLogger("qb_alpha_select")
 
 BASKET      = "alpha_multicap"
-TOP_N       = 12      # equal-weight slots (~Rs 41.6k/slot on Rs 5L)
+# cc#1710: TOP_N / CAPITAL literals retired — qb_config.basket_params(conn, BASKET) supplies
+# max_stocks (15 after QB_CAP_AMENDMENT_V1) and capital_rs (Rs 5L) at call time.
 KEEP_RANK   = 25      # holdings ranked worse than this are exit-eligible
 MAX_EXITS   = 3       # per monthly rebalance, worst rank first
 GVM_MIN     = 7.5
 V_MIN       = 7.5
 M_MIN       = 7.0     # strict > (encoded as m_score > M_MIN)
 DGVM_MIN    = 0.5     # strict > : (gvm_now - gvm_180d_ago) > 0.5
-CAPITAL     = 500000.0
 
 # Full Nifty-500 eligible set ranked by alpha_score. `passes_gates` is the entry-qualifier flag;
 # the alpha_score ORDER is the "composite" rank basis used for BOTH selection and the exit test.
@@ -75,7 +78,7 @@ def _f(v):
 
 def _ranked_universe(cur, as_of):
     """Return the full Nifty-500 eligible set, alpha_score-desc, each row a dict with a 1-based
-    composite `rank` (the same ranking that defines both top-12 entries and the top-25 keep zone)."""
+    composite `rank` (the same ranking that defines both the top-N entries and the top-25 keep zone)."""
     cur.execute(_RANK_SQL, {"asof": as_of, "gvm": GVM_MIN, "v": V_MIN, "m": M_MIN, "dgvm": DGVM_MIN})
     cols = [c.name for c in cur.description]
     rows = []
@@ -94,8 +97,8 @@ def propose_rebalance(conn=None, as_of=None):
     Returns:
       {
         as_of, basket, capital, slot_size,
-        entries:      top-12 qualifiers (equal weight), each {symbol, gvm, v, m, dgvm, alpha_score, rank},
-        cash_slots:   12 - len(entries)  (>0 only when fewer than 12 names pass all gates),
+        entries:      top-N qualifiers (N = config max_stocks, equal weight), each {symbol, gvm, v, m, dgvm, alpha_score, rank, slot_value},
+        cash_slots:   N - len(entries)  (>0 only when fewer than N names pass all gates),
         holdings:     current open positions with their live composite rank,
         exits:        MAX 3 held names ranked outside top-25, worst rank first,
         refills:      best qualifiers (passing ALL gates) not currently held, to fill freed/empty slots,
@@ -109,16 +112,23 @@ def propose_rebalance(conn=None, as_of=None):
         with conn.cursor() as cur:
             cur.execute("SELECT CURRENT_DATE")
             as_of = cur.fetchone()[0]
+    p = qb_config.basket_params(conn, BASKET)          # cc#1710: cap + capital from config
+    top_n, capital = p["max_stocks"], p["capital"]
     try:
         with conn.cursor() as cur:
             ranked = _ranked_universe(cur, as_of)
             rank_of = {r["symbol"]: r["rank"] for r in ranked}
             by_symbol = {r["symbol"]: r for r in ranked}
 
-            # entries: top-12 by alpha_score among gate-qualifiers, equal weight
+            # entries: top-N (config cap) by alpha_score among gate-qualifiers — fill to the cap in
+            # rank order with every gate-passer (QB_CAP_AMENDMENT_V1 fill_rule); sizing via
+            # qb_config.size_slots: capital/cap at a full book, N<10 brake -> capital/10 + cash.
             qualifiers = [r for r in ranked if r["passes_gates"]]
-            entries = qualifiers[:TOP_N]
-            cash_slots = max(0, TOP_N - len(entries))
+            entries = qualifiers[:top_n]
+            cash_slots = max(0, top_n - len(entries))
+            slot, cash_value, sizing_mode = qb_config.size_slots(capital, top_n, len(entries))
+            for e in entries:
+                e["slot_value"] = slot
 
             # current holdings + their live composite rank
             cur.execute("SELECT symbol FROM quant_paper_positions "
@@ -136,19 +146,22 @@ def propose_rebalance(conn=None, as_of=None):
             exits = exit_pool[:MAX_EXITS]
 
             # refills: best gate-qualifiers not currently held, to fill freed slots (and any empty
-            # slots when currently below 12). Refills must pass ALL gates incl dGVM (they come from
+            # slots when currently below the cap). Refills must pass ALL gates incl dGVM (they come from
             # `qualifiers`). Count = exits freed + slots short of 12.
             held_set = set(held)
             freed = len(exits)
-            short_of_full = max(0, TOP_N - len(held_set))
+            short_of_full = max(0, top_n - len(held_set))
             refill_slots = max(freed, short_of_full)
             refills = [q for q in qualifiers if q["symbol"] not in held_set][:refill_slots]
 
         return {
             "as_of": str(as_of),
             "basket": BASKET,
-            "capital": CAPITAL,
-            "slot_size": round(CAPITAL / TOP_N, 2),
+            "capital": capital,
+            "max_stocks": top_n,
+            "cap_source": p["source"],
+            "slot_size": round(capital / top_n, 2),
+            "slot_value": slot, "cash_value": cash_value, "sizing_mode": sizing_mode,
             "entries": entries,
             "cash_slots": cash_slots,
             "qualified_pool": len(qualifiers),
@@ -160,10 +173,10 @@ def propose_rebalance(conn=None, as_of=None):
                 "score": "0.5*GVM + 0.5*M",
                 "hard_gates": "GVM>=7.5 AND V>=7.5 AND M>7 AND dGVM_180d>+0.5",
                 "dgvm_lookback": "gvm_history nearest score in [as_of-200, as_of-180]",
-                "selection": f"top-{TOP_N} by alpha_score, equal weight; fewer -> cash slots",
+                "selection": f"top-{top_n} by alpha_score, equal weight; fewer -> cash slots; <{qb_config.BRAKE_N} -> capital/{qb_config.BRAKE_N} + cash",
                 "exit": f"monthly 6th: max {MAX_EXITS} held names ranked outside top-{KEEP_RANK}, worst first",
                 "stops": "HS1 -20% from entry only (no HS2, no trailing)",
-                "return_convention": f"full {int(TOP_N)}-slot / Rs {int(CAPITAL)} capital, cash slots earn 0",
+                "return_convention": f"full {int(top_n)}-slot / Rs {int(capital)} capital, cash slots earn 0",
             },
         }
     finally:

@@ -761,8 +761,9 @@ def qb_registry(basket_name: Optional[str] = None):
 
 @router.get("/alpha/propose")
 def qb_alpha_propose(as_of: Optional[str] = None):
-    """cc#553 (spec id=6086): DRY-RUN Alpha Multicap V2 FINAL rebalance proposal — top-12 entries
-    (0.5*GVM+0.5*M, gates GVM>=7.5/V>=7.5/M>7/dGVM_180d>+0.5, Nifty500), cash slots when <12 pass,
+    """cc#553 (spec id=6086): DRY-RUN Alpha Multicap V2 FINAL rebalance proposal — top-N entries
+    (N = quant_basket_config max_stocks, 15 after cc#1710 QB_CAP_AMENDMENT_V1; 0.5*GVM+0.5*M, gates
+    GVM>=7.5/V>=7.5/M>7/dGVM_180d>+0.5, Nifty500), cash slots when fewer than N pass,
     plus the monthly max-3 exit (held names ranked outside composite top-25, worst first) and
     gate-passing refills. READ-ONLY — execution stays founder-confirmed. `as_of` defaults to today.
     Reproduces the manual SQL replication exactly (acceptance)."""

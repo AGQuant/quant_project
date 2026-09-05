@@ -328,7 +328,7 @@ function openBasketInfo(key){
 
 const BCRITERIA = {
   large_cap: {
-    entry: 'Composite = GVM×0.5 + Momentum×0.5 · Universe mcap Top 100 · Hard gates: GVM ≥ 7.0 AND ΔGVM(180d) > +0.5 · 10-filter gauntlet retired (RSI-M / PE-mult / upside / FII+DII / 1Y / 50&200 DMA / sector gates all redundant inside G/V/M) · Top-12 equal weight ₹5L/12; <10 qualify → ₹50k/name + cash',
+    entry: 'Composite = GVM×0.5 + Momentum×0.5 · Universe mcap Top 100 · Hard gates: GVM ≥ 7.0 AND ΔGVM(180d) > +0.5 · 10-filter gauntlet retired (RSI-M / PE-mult / upside / FII+DII / 1Y / 50&200 DMA / sector gates all redundant inside G/V/M) · Top-15 equal weight ₹5L/15 (~₹33.3k/slot); <10 qualify → ₹50k/name + cash',
     exit:  'HS1: −20% from entry (nightly) · Monthly (6th): exit max 3 holdings ranked outside composite top-20, worst rank first; refills pass both gates · No HS2, no trailing stop'
   },
   mid_cap: {
@@ -340,7 +340,7 @@ const BCRITERIA = {
     exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −10% from entry · Quarterly theme/GVM screen · Exit rules unchanged in V2'
   },
   alpha_multicap: {
-    entry: 'Composite score = GVM×0.5 + Momentum×0.5 · Universe Nifty 500 · Hard gates: GVM ≥ 7.5 AND V ≥ 7.5 AND M > 7 AND ΔGVM(180d) > +0.5 (gvm_now − gvm_180d_ago) · Top-12 by composite, equal weight (~₹41k/slot on ₹5L) · Fewer than 12 qualify → hold cash for empty slots (returns computed on full 12-slot capital)',
+    entry: 'Composite score = GVM×0.5 + Momentum×0.5 · Universe Nifty 500 · Hard gates: GVM ≥ 7.5 AND V ≥ 7.5 AND M > 7 AND ΔGVM(180d) > +0.5 (gvm_now − gvm_180d_ago) · Top-15 by composite, equal weight (~₹33.3k/slot on ₹5L) · Fewer than 15 qualify → hold cash for empty slots; <10 → ₹50k/name + cash (returns computed on full 15-slot ₹5L capital)',
     exit:  'HS1: −20% from entry (nightly 01:15) · Monthly (6th): exit max 3 holdings ranked outside composite top-25, worst rank first; refills must pass all entry gates incl ΔGVM · No HS2, no trailing stop'
   },
   breakout_52w: {
