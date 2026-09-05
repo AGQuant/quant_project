@@ -152,12 +152,29 @@
   --glow-10:0 0 10px;--glow-8:0 0 8px
 }
 
-body[data-theme="dark"]{--field:#0D1322;--panel:#161F33;--hi:#1C2740;--edge:#26334F;--ink:#EAF0FA;
- --muted:#8A97B0;--brand:#35E0FF;--brandglow:rgba(53,224,255,.4);--accent:#7C5CFF;--label:#FF9F45;
- --win:#C8F542;--loss:#FF4D6D;--railgrad:linear-gradient(90deg,#EAF0FA,transparent);
+/* MIDNIGHT BLUE (key dark) — cc#1725 (founder 05-Sep, phone: "Give Midnight Blue slightly dark blue
+   tone, shining"; label rename cc#1724). A step deeper navy that brightens toward the top of the
+   page. field #070C1A; panel #0F1A33; hi = panel_hi #152243; edge = line #1E2C4E; ink #EEF2FF;
+   muted #93A0C4. ACCENTS UNCHANGED on founder instruction: brand cyan #35E0FF (nav glyphs, wayfind),
+   accent purple #7C5CFF (dot), label amber #FF9F45, win lime #C8F542, loss coral #FF4D6D. The
+   "shine": --field-grad is a radial wash, brighter blue #10203F at the top falling to near-black
+   #060A16 at the bottom; --panel-shadow = soft black drop + faint blue halo + a lit top lip
+   rgba(140,170,255,.22) (the glossy edge); --accent-soft = cyan chip fill. railgrad = the card
+   rail #4D7CFE -> #7AA2FF (vertical, brighter than the old ink->transparent). gold-lo = line2
+   #2B3D6B, gold-hi = the lit blue #7AA2FF, sunk one step below the field — declared for the first
+   time here (the set was 18/21; the R5 pressed-slab lip read the gold fallback #7A6320 on a blue
+   theme). CONTRAST panel / field / gradient top #10203F: ink 17.2 / 19.1 / 16.0, muted 7.85 / 8.72 /
+   7.32, cyan 11.6 / 12.9 / 10.8. Both consumers (body wash, card shadow) are dark-scoped rules in
+   theme_mobile.css — dark is not in the LIGHT-SET release block, so they are added there for dark. */
+body[data-theme="dark"]{--field:#070C1A;--panel:#0F1A33;--hi:#152243;--edge:#1E2C4E;--ink:#EEF2FF;
+ --muted:#93A0C4;--brand:#35E0FF;--brandglow:rgba(53,224,255,.4);--accent:#7C5CFF;--label:#FF9F45;
+ --win:#C8F542;--loss:#FF4D6D;--railgrad:linear-gradient(180deg,#4D7CFE,#7AA2FF);
  --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
+ --gold-lo:#2B3D6B;--gold-hi:#7AA2FF;--sunk:#040812;
  --wayfind:#35E0FF;
- --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
+ --panel-shadow:0 10px 28px rgba(0,0,0,.45), 0 0 0 1px rgba(80,120,255,.08), inset 0 1px 0 rgba(140,170,255,.22);
+ --field-grad:radial-gradient(120% 80% at 50% 0%, #10203F 0%, #0A1229 45%, #060A16 100%);
+ --accent-soft:rgba(53,224,255,.10)}
 body[data-theme="goldday"]{--field:#FAF7F0;--panel:#FFFFFF;--hi:#F3EEE3;--edge:#E5DFD2;--ink:#1A1A1E;
  --muted:#8A8578;--brand:#A67C00;--brandglow:rgba(166,124,0,.25);--accent:#A67C00;--label:#A67C00;
  --win:#1F9D61;--loss:#D93B4F;--railgrad:linear-gradient(90deg,#D4AF37,transparent);
