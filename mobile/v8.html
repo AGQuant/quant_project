@@ -157,6 +157,24 @@ body{ --field:#0A0A0C; }
 #v8p .trk .lbl.end.l{left:0} #v8p .trk .lbl.end.r{right:0}
 #v8p .trk .lbl.tick{top:-15px}
 #v8p .trk .lbl.tick.entry{color:var(--mute)} #v8p .trk .lbl.tick.cmp{color:var(--gold)} #v8p .trk .lbl.tick.combo{color:var(--mute)}
+/* cc#1726 (founder 05-Sep, /m/v8 screenshot "Data overlap in V8 open pos cards"): when the ENTRY and
+   CMP tick labels would share pixels, ENTRY drops BELOW the rail onto the SL/TGT row (trkFixLabels,
+   measured after render, never guessed from a % of track); CMP always stays above and lit. */
+#v8p .trk .lbl.tick.entry.below{top:auto;bottom:-14px}
+/* cc#1726 root cause of the missed collision: the CMP LABEL carries class "cmp", so the MARKER rule
+   above (#v8p .trk .cmp — width:2px, height:18px, gold background + glow) also styled the label:
+   its box was 2px wide with the text overflowing it, so any box-based check (the old 12% rule
+   included) saw no overlap while the glyphs sat on top of each other. The label is text: undo the
+   marker geometry on it so its box IS its text. The marker <i class="cmp"> is untouched. */
+#v8p .trk .lbl.tick.cmp{width:auto;height:auto;background:none;box-shadow:none}
+/* cc#1726 header row = ONE line: symbol ellipsises, the basket chip abbreviates at <=360px
+   (SELL MOM -> S.MOM), P&L never wraps and never leaves the top line. */
+#v8p .prow .psym{flex-wrap:nowrap;min-width:0}
+#v8p .prow .psym .sym{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#v8p .prow .psym .tag,#v8p .prow .psym button{flex:none;white-space:nowrap}
+#v8p .prow .pnl{white-space:nowrap}
+#v8p .prow .tag.bk .abbr{display:none}
+@media(max-width:360px){#v8p .prow .tag.bk .full{display:none} #v8p .prow .tag.bk .abbr{display:inline}}
 #v8p .vmore{display:flex;justify-content:center;margin-top:10px}
 #v8p .vmore .chip{padding:8px 14px}
 /* sectors: the table lives under #v8p with a page-local class so mobile_app.css bare rules stay clear */
@@ -561,13 +579,47 @@ function trkLabels(p, fz, fc, slEnd, tgtEnd){
   var top;
   if(fz == null){
     top = '<i class="lbl tick cmp" style="'+trkTickStyle(fc)+'">CMP '+cmpPx+'</i>';
-  } else if(Math.abs(fc - fz) < 0.12){
-    top = '<i class="lbl tick combo" style="'+trkTickStyle((fz+fc)/2)+'">'+enPx+' → '+cmpPx+'</i>';
   } else {
+    /* cc#1726: the old "within 12% of the track -> one combined label" rule is gone. It guessed
+       text width from a fraction of the track, so two ~70px labels on a ~300px track overlapped
+       whenever CMP sat 1-3% from entry (M&M, HCLTECH, TCS on the founder's screenshot). Both
+       labels always render with their own tag; trkFixLabels() below measures the real boxes after
+       the cards are in the DOM and drops ENTRY under the rail when they would touch. */
     top = '<i class="lbl tick entry" style="'+trkTickStyle(fz)+'">ENTRY '+enPx+'</i>'
         + '<i class="lbl tick cmp" style="'+trkTickStyle(fc)+'">CMP '+cmpPx+'</i>';
   }
   return bottom + top;
+}
+/* cc#1726 · LABEL COLLISION PASS. Runs once per render over every rail in the list. Rule: if the
+   ENTRY box and the CMP box would share pixels (a 6px gap counts as touching), ENTRY moves BELOW
+   the rail onto the SL / TGT row, centred on its own marker; if there it would touch SL or TGT
+   text, it is pushed just clear of that end label (right of a left-end label, left of a right-end
+   label) and clamped to the rail. CMP is always the label that stays above and lit. Measured with
+   getBoundingClientRect, so it is right for any symbol length, font or viewport. */
+function trkFixLabels(root){
+  var GAP = 6, trks = (root || document).querySelectorAll('#v8p .trk');
+  for(var i = 0; i < trks.length; i++){
+    var trk = trks[i], en = trk.querySelector('.lbl.tick.entry'), cm = trk.querySelector('.lbl.tick.cmp');
+    if(!en || !cm) continue;
+    var tr = trk.getBoundingClientRect(); if(!tr.width) continue;
+    /* measure the TEXT, not the element box — a stray rule could shrink the box while the glyphs
+       still paint (exactly what hid this bug), so the range rect is the one that can be trusted */
+    var box = function(el){ try { var r = document.createRange(); r.selectNodeContents(el); var b = r.getBoundingClientRect(); if(b.width) return b; } catch(e){} return el.getBoundingClientRect(); };
+    var re = box(en), rc = box(cm);
+    if(!(re.right + GAP > rc.left && rc.right + GAP > re.left)) continue;   // clear above: nothing to do
+    en.classList.add('below');
+    re = box(en);
+    var ends = trk.querySelectorAll('.lbl.end');
+    for(var j = 0; j < ends.length; j++){
+      var e = ends[j], rr = box(e);
+      if(!(re.right + GAP > rr.left && rr.right + GAP > re.left)) continue;
+      var left = e.classList.contains('l') ? (rr.right - tr.left + GAP) : (rr.left - tr.left - GAP - re.width);
+      left = Math.max(0, Math.min(left, tr.width - re.width));
+      en.style.left = Math.round(left) + 'px'; en.style.transform = 'none';
+      en.style.textAlign = e.classList.contains('l') ? 'left' : 'right';
+      re = box(en);
+    }
+  }
 }
 /* held time from entry_ts (naive IST string, cc#844: compare with IST wall-clock, no offset) */
 function heldLabel(p){
@@ -654,7 +706,14 @@ function renderMarkerChips(rows){
     + chip('dmaDn', '\u25a0', '#f87171', '5<20', c.dmaDn, dmaTip)
     + '<span class="chip" data-mk-legend="1" title="What the flags mean" aria-label="Marker legend">?</span>';
 }
-function bkTag(p){ var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'); return l ? '<span class="tag bk">'+esc(l.toUpperCase())+'</span>' : ''; }
+function bkTag(p){
+  var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom').replace(/_/g,' ');
+  if(!l) return '';
+  var full = l.toUpperCase(), w = full.split(/\s+/);
+  /* cc#1726: two-word basket names carry an abbreviation for <=360px (SELL MOM -> S.MOM); one-word names keep their text */
+  var abbr = w.length >= 2 ? (w[0].charAt(0)+'.'+w.slice(1).join(' ')) : full;
+  return '<span class="tag bk"><span class="full">'+esc(full)+'</span><span class="abbr">'+esc(abbr)+'</span></span>';
+}
 function posRow(p){
   var side = (p.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
   var ax = trkAxis(p);
@@ -685,7 +744,7 @@ function posRow(p){
   }
   var cmpTxt = num(p.cmp) ? px(p.cmp) : '—';
   return '<div class="slab dense prow" data-side="'+sl+'" data-basket="'+esc(p.basket||'')+'">'+
-    '<div class="psym">'+esc(p.symbol)+' '+mkFlag(p)+'<span class="tag '+sl+'">'+esc(side||'—')+'</span>'+bkTag(p)+'</div>'+
+    '<div class="psym"><span class="sym">'+esc(p.symbol)+'</span>'+mkFlag(p)+'<span class="tag '+sl+'">'+esc(side||'—')+'</span>'+bkTag(p)+'</div>'+
     '<div class="pnl '+sgn(p.unrealised)+'">'+inr(p.unrealised)+'</div>'+
     /* cc#1660 item 4: the tgt/sl half of this line is gone -- both numbers are on the bar now. */
     '<div class="pmeta"><span>'+px(p.entry_price)+' → <b>'+cmpTxt+'</b>'+(p.cmp_is_live===false?' <span class="mu">(last close)</span>':'')+'</span>'+
@@ -711,6 +770,7 @@ function renderOpen(){
   /* cc#1629: the caption gets clear air under the last track (it read as sitting on the bar), and
      uses the session stamp so a closed market says close · HH:MM, never LIVE (cc#1611 / 1621 rule) */
   el.innerHTML = show.map(posRow).join('') + asofSession(bk.as_of, 'book · CMP '+(rows[0].cmp_at||'')).replace('class="asof', 'style="margin-top:14px" class="asof');
+  trkFixLabels(el);   // cc#1726: measure the rendered rails, drop ENTRY below where it would touch CMP
   if(rows.length > OPEN_LIMIT) more.innerHTML = '<span class="chip" data-open-toggle="1">'+(openAll ? 'Show fewer ▴' : 'Show all '+rows.length+' ▾')+'</span>';
 }
 /* ── top bar ──────────────────────────────────────────────────────────────────────────── */
