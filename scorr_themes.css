@@ -427,3 +427,43 @@ body[data-theme="winepurple"]{--field:#120A18;--panel:#1C1223;--hi:#241830;--edg
  --panel-shadow:0 10px 28px rgba(0,0,0,.55), inset 0 1px 0 rgba(210,190,255,.14);
  --field-grad:radial-gradient(120% 80% at 50% 0%, #221334 0%, #120A18 55%, #0B0610 100%);
  --accent-soft:rgba(198,75,128,.12)}
+
+/* ══ cc#1775 · DUSK VIOLET + INDIGO ASH (THEME_DUSKVIOLET_INDIGOASH_V1, session_log 39650; founder
+   06-Sep picked candidates A and C of Fable's 5-way mock: "this colour bit sharp for eyes ... make 2
+   themes live dusk violet, indigo ash both looks cool"). Two DARK sets built to be easier on the
+   eyes than Aubergine (winepurple): peak ink contrast 13.67 / 13.60 against Aubergine's 16.12, and
+   every text token measured by Fable on the worst of panel/field/hi clears AA 4.5 —
+   Dusk Violet: ink 10.49, muted 5.90, label 6.35, brand/accent 5.00, win 6.38, loss 5.26, gold-hi 7.97;
+   Indigo Ash:  ink 10.10, muted 5.87, label 6.71, brand/accent 5.65, win 6.08, loss 5.22, gold-hi 8.08.
+   Every hex, gradient and alpha below is 39650's verbatim — nothing re-derived or adjusted.
+   ROLE MAPPING, key for key from the winepurple block above (the contract has no --accent2):
+     --brand / --accent / --label  the set's primary hue (39650 sets brand = accent; label its own step)
+     --wayfind                     THE SECOND HUE. winepurple carries its purple partner #7E57C2 on
+                                   --wayfind (the wordmark gradient partner in theme_mobile.css and the
+                                   Home eyebrow .sect); Dusk Violet #7E93CE periwinkle, Indigo Ash
+                                   #6FB0C4 soft cyan sit on the same key. No new token.
+     --brandglow                   .20 alpha against Aubergine's .35 (the halation complaint)
+     --win / --loss                P&L keeps hue — green / red, softened in chroma only; money cells
+                                   never carry the brand colour.
+     --railgrad / --texture / --field-grad / --panel-shadow / --accent-soft / --gold-lo / --gold-hi /
+     --sunk / --field / --panel / --hi / --edge / --ink / --muted  as named in 39650. 21 keys each. */
+body[data-theme="duskviolet"]{--field:#171526;--panel:#1F1D31;--hi:#28263D;--edge:#332F4A;
+ --ink:#DCD8EA;--muted:#A6A1BE;--brand:#A28BD4;--brandglow:rgba(162,139,212,.20);--accent:#A28BD4;
+ --label:#B3A2DC;--win:#4FBF8B;--loss:#E8798C;
+ --railgrad:linear-gradient(90deg,#A28BD4,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.012) 0 2px,transparent 2px 9px);
+ --gold-lo:#4A3A6B;--gold-hi:#C9B6F0;--sunk:#100E1C;
+ --wayfind:#7E93CE;
+ --panel-shadow:0 10px 28px rgba(0,0,0,.45);
+ --field-grad:radial-gradient(120% 80% at 50% 0%, #201D35 0%, #171526 55%, #110F1D 100%);
+ --accent-soft:rgba(162,139,212,.12)}
+body[data-theme="indigoash"]{--field:#141A26;--panel:#1C2331;--hi:#252D3D;--edge:#2E3849;
+ --ink:#D6DDE8;--muted:#9EAABC;--brand:#8CA6DB;--brandglow:rgba(140,166,219,.20);--accent:#8CA6DB;
+ --label:#9DB6E0;--win:#4FC08D;--loss:#E58292;
+ --railgrad:linear-gradient(90deg,#8CA6DB,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.012) 0 2px,transparent 2px 9px);
+ --gold-lo:#33455F;--gold-hi:#AFC8EC;--sunk:#0E131D;
+ --wayfind:#6FB0C4;
+ --panel-shadow:0 10px 28px rgba(0,0,0,.45);
+ --field-grad:radial-gradient(120% 80% at 50% 0%, #1B2434 0%, #141A26 55%, #0E131D 100%);
+ --accent-soft:rgba(140,166,219,.12)}

@@ -501,8 +501,8 @@ window.scorrAsofStamp = function (asof) {
      scorr:theme. No reload: the themes are custom properties on <body>. The web light | dark pill
      is untouched and web-scoped. The fallbacks below exist only for a page whose head lost the
      resolver; they mirror its contract rather than invent one. */
-  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Midnight Blue'], ['ainight', 'AI Night'], ['aquawhite', 'Aqua White'], ['silvergold', 'Silver Gold'], ['winepurple', 'Wine Purple'], ['blush', 'Blush']];   /* cc#1750: mirrors NAMES order (Blush last); the menu reads NAMES first, this only when the resolver is absent */   /* cc#1654: Dark back per founder 04-Sep; mirrors pwa_endpoints NAMES - goldday/rosenight/rosewall stay hidden */
-  var THEME_GLYPH = { goldnight: '\u25c6', dark: '\u25c7', ainight: '\u2726', aquawhite: '\u25cb', blush: '\u2740', silvergold: '\u25c8', winepurple: '\u2756' };   /* cc#1719: two new sets, same glyph in both menus */
+  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Midnight Blue'], ['ainight', 'AI Night'], ['duskviolet', 'Dusk Violet'], ['indigoash', 'Indigo Ash'], ['aquawhite', 'Aqua White'], ['silvergold', 'Silver Gold'], ['winepurple', 'Wine Purple'], ['blush', 'Blush']];   /* cc#1775: mirrors NAMES — the two new dark sets after AI Night, Blush still last */   /* cc#1750: mirrors NAMES order (Blush last); the menu reads NAMES first, this only when the resolver is absent */   /* cc#1654: Dark back per founder 04-Sep; mirrors pwa_endpoints NAMES - goldday/rosenight/rosewall stay hidden */
+  var THEME_GLYPH = { goldnight: '\u25c6', dark: '\u25c7', ainight: '\u2726', aquawhite: '\u25cb', blush: '\u2740', silvergold: '\u25c8', winepurple: '\u2756', duskviolet: '\u25d0', indigoash: '\u25d1' };   /* cc#1775: same glyphs as the app-shell menu */   /* cc#1719: two new sets, same glyph in both menus */
   function themeList() { var T = window.SCORR_THEME; return (T && T.list) || THEME_FALLBACK; }
   function curTheme() {
     var T = window.SCORR_THEME; if (T && T.get) return T.get();
