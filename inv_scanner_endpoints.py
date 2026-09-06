@@ -27,6 +27,9 @@ from fastapi.responses import HTMLResponse
 # (verified against inv_scanner_scoring.py at build time; flagged in cc_task_logs 1697 that this
 # is the one place the card's "84/65/50 appear once" verify line does not literally hold).
 from inv_scanner_rules import ENTRY_MOM, ENTRY_REV, EXIT_MOM, EXIT_REV
+# cc#1767: the GATES column reads the engine's OWN gate function and gate registry — never a
+# second computation of the same four numbers.
+from inv_scanner_rules import evaluate_gates, gates_passed, GATE_ORDER, GATE_LABELS, GATE_RULES, GATE_UNITS
 
 log = logging.getLogger("scorr.inv_scanner_page")
 router = APIRouter(tags=["investment_scanner"])
@@ -129,22 +132,46 @@ def board(track: str = "momentum", limit: int = 100):
                    u.gvm, u.g, u.v, u.m, u.tags, u.insufficient_history,
                    ut.week_index_52, ut.rsi_month, ut.vol_ratio_21, ut.month_return,
                    st.status, st.entry_track, st.entered_at,
-                   s.{comp_col}->'s1_touch_reclaim'->'input' AS s1_input
+                   s.{comp_col}->'s1_touch_reclaim'->'input' AS s1_input,
+                   ut.week_return, gs.segment
             FROM investment_scanner_scores s
             JOIN investment_scanner_universe u ON u.symbol=s.symbol AND u.run_date=s.run_date
             LEFT JOIN universe_technicals ut ON ut.symbol=s.symbol
                  AND ut.score_date=(SELECT MAX(score_date) FROM universe_technicals)
             LEFT JOIN investment_scanner_state st ON st.symbol=s.symbol
+            LEFT JOIN (SELECT DISTINCT ON (symbol) symbol, segment FROM gvm_scores
+                       ORDER BY symbol, score_date DESC) gs ON gs.symbol=s.symbol
             WHERE s.run_date=%s AND s.{col} IS NOT NULL
             ORDER BY s.{col} DESC, s.symbol
             LIMIT %s""", (d, max(1, min(limit, 250))))
+        fetched = cur.fetchall()
         rows = []
-        for r in cur.fetchall():
+        seg_cache = {}
+        bar = ENTRY_MOM if track != "reversal" else ENTRY_REV
+        for r in fetched:
             (sym, score, band, mom, rev, gvm, g, v, m, tags, insuff,
-             wk52, rsi, vol, mret, st_status, st_track, st_at, s1) = r
+             wk52, rsi, vol, mret, st_status, st_track, st_at, s1, wk_ret, segment) = r
+            # cc#1767: the four gates through the engine's own evaluate_gates (same sources: day
+            # from _day_return, week/month from universe_technicals, sector from IC's
+            # _segment_month) — the SAME call run() makes before an entry. Never recomputed here.
+            try:
+                gates = evaluate_gates(cur, sym, _f(wk_ret), _f(mret), segment, seg_cache)
+            except Exception as ex:   # the row still renders; every capsule reads "no data"
+                log.warning("cc#1767 evaluate_gates failed for %s: %s", sym, ex)
+                gates = {k: {"value": None, "pass": False, "error": str(ex)[:80]} for k in GATE_ORDER}
+            n_pass = gates_passed(gates)
+            mom_f, rev_f, score_f = _f(mom), _f(rev), _f(score)
+            # the engine's score condition, both tracks, exactly as run() asks it
+            score_ok = (mom_f is not None and mom_f > ENTRY_MOM) or (rev_f is not None and rev_f > ENTRY_REV)
+            entered = st_status == "open"
+            gates_state = ("ENTERED" if entered
+                           else "ENTERS" if (score_ok and n_pass == 4)
+                           else "GATED" if score_ok
+                           else "BELOW_BAR" if n_pass == 4
+                           else "OUT")
             rows.append({
-                "symbol": sym, "score": _f(score), "band": band,
-                "mom_score": _f(mom), "rev_score": _f(rev),
+                "symbol": sym, "score": score_f, "band": band,
+                "mom_score": mom_f, "rev_score": rev_f,
                 "gvm": _f(gvm), "g": _f(g), "v": _f(v), "m": _f(m),
                 "tags": tags or [], "insufficient_history": bool(insuff),
                 "wk52": _f(wk52), "rsi_month": _f(rsi), "vol_ratio_21": _f(vol),
@@ -152,5 +179,21 @@ def board(track: str = "momentum", limit: int = 100):
                 "state": ({"status": st_status, "track": st_track, "entered_at": str(st_at)}
                           if st_status else None),
                 "s1": s1 if isinstance(s1, dict) else None,
+                # cc#1767: the gates, the count, the state and the score bar — the page renders,
+                # it computes nothing. score_bar is SEPARATE from the gate count (A6).
+                "gates": gates,
+                "gates_pass_n": n_pass,
+                "gates_state": gates_state,
+                "score_bar": {"value": score_f, "bar": bar, "pass": score_f is not None and score_f > bar,
+                              "track": "reversal" if track == "reversal" else "momentum"},
             })
-    return {"run_date": str(d), "track": track, "count": len(rows), "rows": rows, "meta": META}
+    meta = dict(META)
+    meta["gate_order"] = list(GATE_ORDER)
+    meta["gate_labels"] = GATE_LABELS
+    meta["gate_rules"] = GATE_RULES
+    meta["gate_units"] = GATE_UNITS
+    meta["gate_function"] = "inv_scanner_rules.evaluate_gates — the entry engine's own call (run()), read per row here"
+    meta["gates_state_rule"] = ("ENTERED = open in investment_scanner_state; ENTERS = score bar passes on either track "
+                                "AND 4/4 gates (would enter on the next run); GATED = score bar passes, a gate fails; "
+                                "BELOW_BAR = 4/4 gates, score under the bar; OUT = neither. A missing input is not a pass.")
+    return {"run_date": str(d), "track": track, "count": len(rows), "rows": rows, "meta": meta}
