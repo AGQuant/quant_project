@@ -22,7 +22,6 @@ import psycopg
 from fastapi import APIRouter
 
 from nifty_dwm import live_nifty_dwm
-from r6_volume import volume_ratio
 import logging as _logging
 log = _logging.getLogger("scorr.tc_v4_scan")
 from tc_v4_dual import (_f, _r, _derive, score_card, _verdict,
@@ -203,13 +202,7 @@ def _load_bulk(cur):
         a3, n3, a21, n21 = dlv.get(s, (None, 0, None, 0))
         D[s].update({"deliv_3d": a3, "deliv_n3": n3, "deliv_21d": a21, "deliv_n21": n21})
 
-    # cc#1441: LEGACY T-factor read for the LOCKED 18062 dual-rulebook vol tests (exact parity
-    # with tc_v4_dual). R6/R7 themselves moved to r6_read (canon V2); ruling pending on these.
-    for s in syms:
-        try:
-            D[s]["vol_ratio_today"] = volume_ratio(cur, s)["ratio"]
-        except Exception:
-            D[s]["vol_ratio_today"] = None
+    # cc#1786: the legacy vol_ratio_today read is gone with LOCK_VOLUME, its last reader.
 
     # cc#1785: the four R5 volume checks — SAME fields, SAME readers as tc_v4_dual._load_one
     # (_vol_reads), so the scanner's R5 cannot disagree with /check. Vol D comes from ONE batch

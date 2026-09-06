@@ -45,7 +45,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from nifty_dwm import live_nifty_dwm
-from r6_volume import volume_ratio
 # reuse the pure low-level helpers from the older v4 module — no rule logic imported
 from tc_v4_endpoints import _f, _r, _rsi, _weekly_closes, _current_expiry
 
@@ -460,8 +459,38 @@ def _vol_reads(cur, symbol, d):
 
 
 # cc#1785: the four pass/fail bars, one place. Vol AD >= 55 is Accumulation (the same 55 _ad_21d
-# labels on); cc#1786 will read the SAME fields on the SELL side with AD flipped (<= 45).
+# labels on); cc#1786 reads the SAME fields on the SELL side with AD flipped to Distribution
+# (<= 45, the same 45 _ad_21d labels on). One helper, two callers, no second derivation.
 VOL_R_MIN, VOL_P_MIN, VOL_D_MIN, VOL_AD_MIN = 1.2, 1.0, 1.1, 55.0
+VOL_AD_MAX_DIST = 45.0
+
+
+def _vol_checks(d, side):
+    """The four volume checks on the loader fields vol_r / vol_p / vol_d / vol_ad, each pass/fail.
+    side BUY: Vol AD >= 55 (Accumulation). side SELL: Vol AD <= 45 (Distribution). Returns
+    (credit = checks passed, value dict, required string). A missing input FAILS its check and is
+    named in value['no_data'] — never a fabricated pass."""
+    ad_v = d.get("vol_ad")
+    ad_ok = (ad_v is not None) and ((ad_v <= VOL_AD_MAX_DIST) if side == "SELL" else (ad_v >= VOL_AD_MIN))
+    chk = [("vol_r", "Vol R", d.get("vol_r"), (d.get("vol_r") is not None and d.get("vol_r") >= VOL_R_MIN)),
+           ("vol_p", "Vol P", d.get("vol_p"), (d.get("vol_p") is not None and d.get("vol_p") >= VOL_P_MIN)),
+           ("vol_d", "Vol D", d.get("vol_d"), (d.get("vol_d") is not None and d.get("vol_d") >= VOL_D_MIN)),
+           ("vol_ad", "Vol AD", ad_v, ad_ok)]
+    val, no_data, passed = {}, [], 0
+    for key, name, v, ok in chk:
+        val[key] = _r(v)
+        val["pass_" + key[4:]] = bool(ok)
+        if v is None:
+            no_data.append(name)
+        passed += int(bool(ok))
+    val["passed"] = passed
+    if no_data:
+        val["no_data"] = no_data
+    ad_txt = (f"Vol AD <= {VOL_AD_MAX_DIST:.0f}% (Distribution)" if side == "SELL"
+              else f"Vol AD >= {VOL_AD_MIN:.0f}%")
+    req = (f"Vol R >= {VOL_R_MIN:.1f} · Vol P >= {VOL_P_MIN:.1f} · Vol D >= {VOL_D_MIN:.1f} · "
+           f"{ad_txt} (1 each, pass/fail; 15 pts x passed/4)")
+    return float(passed), val, req
 
 
 def _load_one(cur, symbol):
@@ -478,10 +507,8 @@ def _load_one(cur, symbol):
 
     d["nifty_day"], d["nifty_wk"], d["nifty_mo"], d["nifty_source"] = live_nifty_dwm(cur)
 
-    # cc#1441: LEGACY T-factor read — kept ONLY because the vol tests below are founder-locked
-    # on this scale (cc#934 / 18062). R6/R7 moved to r6_read (canon V2); ruling pending on these.
-    vr = volume_ratio(cur, symbol)
-    d["vol_ratio_today"] = vr["ratio"]
+    # cc#1786: the cc#1441 legacy T-factor read (r6_volume.volume_ratio -> vol_ratio_today) is
+    # GONE with LOCK_VOLUME, its last reader; the function itself is retired in r6_volume.py.
     # cc#1785 / TC_VOLUME_SIMPLE_V2 (39684): the FOUR volume reads the BUY cards' R5 scores as
     # pass/fail — Vol R (live RVOL) and Vol P (previous session's closing RVOL) from r6_read, the
     # canon 3-tier read the V4 endpoints already use; Vol D from deliv_ratio_batch (3-day vs the
@@ -706,7 +733,6 @@ def _sell_rules(d, style):
     v8 = d.get("v8") or {}
     out = []
 
-    vr = d.get("vol_ratio_today")
     mom2 = v8.get("mom_2d")
     wk = v8.get("week_return")
     mo = v8.get("month_return")
@@ -717,6 +743,14 @@ def _sell_rules(d, style):
     gvm = d.get("gvm_score")
     fails = d.get("mood_fails", 0)
     sm = v8.get("sector_month")
+
+    # R5V — cc#1786 / TC_VOLUME_SIMPLE_SELL_V1 (session_log 39692), BOTH SELL cards: the same four
+    # volume checks the BUY cards score (cc#1785, same loader fields, same helper), with Vol AD
+    # flipped to Distribution (<= 45). credit = checks passed of max 4; registry weight 15, so the
+    # rule is worth 15 x passed/4 — a hard cap. LOCK_VOLUME (vol_ratio_today, the legacy T-factor
+    # read) is removed from both cards below and its registry rows are active=false, not deleted.
+    c5v, val5v, req5v = _vol_checks(d, "SELL")
+    out.append(_R("R5V", "Volume (4 checks)", c5v, val5v, required=req5v, max_credit=4.0))
 
     if MOM:
         # ── SELL-MOM · 27977 · ignition shorts: momentum begins, short the break ──────────────
@@ -730,10 +764,6 @@ def _sell_rules(d, style):
         out.append(_R("LOCK_WEEK_FALLING_BAND", "Week falling band",
                       1.0 if (wk is not None and -6.5 <= wk <= -1.5) else 0.0, {"wk": _r(wk)},
                       required="week_return in [-6.5, -1.5] (falling but not exhausted; both edges bind)"))
-
-        out.append(_R("LOCK_VOLUME", "Volume",
-                      1.0 if (vr is not None and vr >= 1.0) else (0.5 if (vr is not None and vr >= 0.6) else 0.0),
-                      {"ratio": _r(vr)}, required="vol_ratio >= 1.0 (>= 0.6 = 0.5)"))
 
         out.append(_R("LOCK_MOM_2D", "2-day momentum",
                       1.0 if (mom2 is not None and mom2 <= -1) else (0.5 if (mom2 is not None and mom2 <= -0.3) else 0.0),
@@ -789,10 +819,6 @@ def _sell_rules(d, style):
     # lows, negative months and MAs down. The RSI band is inverted for that reason and the
     # freshness rule reads the RIGHT way round — a deeply fallen stock is a crowded short, so
     # month_return >= -6 scores FULL and a deeper fall scores less.
-    out.append(_R("LOCK_VOLUME", "Volume",
-                  1.0 if (vr is not None and vr >= 1.5) else (0.5 if (vr is not None and vr >= 0.9) else 0.0),
-                  {"ratio": _r(vr)}, required="vol_ratio >= 1.5 (>= 0.9 = 0.5)"))
-
     out.append(_R("LOCK_FALL_FRESHNESS", "Fall freshness",
                   1.0 if (mo is not None and mo >= -6) else (0.5 if (mo is not None and mo >= -8) else 0.0),
                   {"mo": _r(mo)}, required="month_return >= -6 (>= -8 = 0.5; deep-fallen = crowded short)"))
@@ -973,24 +999,8 @@ def _rules(d, style, side):
     # leaves on the first line for _sell_rules), so the old `not BUY` mirror here was dead code
     # and is not carried over — SELL's LOCK_VOLUME is untouched.
     if BUY:
-        chk = [("vol_r", "Vol R", d.get("vol_r"), VOL_R_MIN),
-               ("vol_p", "Vol P", d.get("vol_p"), VOL_P_MIN),
-               ("vol_d", "Vol D", d.get("vol_d"), VOL_D_MIN),
-               ("vol_ad", "Vol AD", d.get("vol_ad"), VOL_AD_MIN)]
-        val, no_data, passed = {}, [], 0
-        for key, name, v, bar in chk:
-            ok = (v is not None and v >= bar)
-            val[key] = _r(v)
-            val["pass_" + key[4:]] = bool(ok)
-            if v is None:
-                no_data.append(name)
-            passed += int(ok)
-        val["passed"] = passed
-        if no_data:
-            val["no_data"] = no_data
-        req = (f"Vol R >= {VOL_R_MIN:.1f} · Vol P >= {VOL_P_MIN:.1f} · Vol D >= {VOL_D_MIN:.1f} · "
-               f"Vol AD >= {VOL_AD_MIN:.0f}% (1 each, pass/fail; 15 pts x passed/4)")
-        out.append(_R("R5", "Volume (4 checks)", float(passed), val, required=req, max_credit=4.0))
+        c5, val, req = _vol_checks(d, "BUY")   # cc#1786: shared with the SELL cards' R5V
+        out.append(_R("R5", "Volume (4 checks)", c5, val, required=req, max_credit=4.0))
 
     # R7 — RSI. cc#513 cross-cutting fix: MOM (both sides) now reads true_weekly_rsi, not the
     # synthetic rsi_weekly (~16pt off, cc#353) -- synthetic must not appear in any rule after this.
