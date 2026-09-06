@@ -60,6 +60,19 @@
   .num{text-align:right;font-variant-numeric:tabular-nums}
   .sym{font-weight:800}
   .pos{color:var(--grn)} .neg{color:var(--red)}
+  /* cc#1735: Approved tab — inline level inputs, saved tick, warnings, greyed closed rows */
+  .tw-lvl{width:86px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);
+    color:var(--txt);font-size:12px;text-align:right;font-family:inherit}
+  .tw-lvl:focus{outline:none;border-color:var(--blu)}
+  .tw-lvl.saving{opacity:.6}
+  .tw-saved{display:block;font-size:10px;color:var(--grn);margin-top:2px;min-height:12px}
+  .tw-saved.warn{color:#eab308}
+  .tw-saved.err{color:var(--red)}
+  .tw-close-btn{padding:5px 10px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--txt);
+    font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .tw-close-btn:hover{border-color:var(--red);color:var(--red)}
+  tr.tw-closed td{opacity:.55}
+  .tw-cmp-lbl{display:block;font-size:10px;color:var(--mut)}
   .long{color:var(--grn);font-weight:700} .short{color:var(--red);font-weight:700}
   .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
   .tw-tag{font-family:ui-monospace,monospace;font-size:10px;color:var(--mut)}
@@ -201,7 +214,9 @@ var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: nul
                  brings the old wall back with no deploy. */
               mode: 'approved', approvedAsOf: null,
               /* cc#1609: engine 'ALL' = every engine of the instrument; stateFilter over open rows */
-              stateFilter: 'pending-approval', approvalCounts: null };
+              stateFilter: 'pending-approval', approvalCounts: null,
+              /* cc#1735: the Approved tab's own payload */
+              approvedRows: [], approvedCount: null, approvedTabAsOf: null, approvedNote: null };
 var PAGE  = { cursor: null, more: true, busy: false };
 var LIMIT = 100;
 
@@ -284,10 +299,13 @@ function theadHtml(){
 }
 
 function statusTabsHtml(){
-  return ['open','closed'].map(function(k){
-    var n = (STATE.statusCounts || {})[k];
+  /* cc#1735: a third book, Approved — the founder's approved positions with levels and a Close.
+     Its count comes from its own endpoint (STATE.approvedCount), not the engine status_counts. */
+  return ['open','closed','approved'].map(function(k){
+    var n = k === 'approved' ? STATE.approvedCount : (STATE.statusCounts || {})[k];
+    var label = k === 'open' ? 'Open' : (k === 'closed' ? 'Closed' : 'Approved');
     return '<button class="tab' + (k === STATE.status ? ' on' : '') + '" onclick="pickStatus(\'' + k + '\')">'
-      + (k === 'open' ? 'Open' : 'Closed') + (n == null ? '' : ' <span class="n">' + n + '</span>') + '</button>';
+      + label + (n == null ? '' : ' <span class="n">' + n + '</span>') + '</button>';
   }).join('');
 }
 
@@ -400,6 +418,7 @@ function renderApproved(){
 
 function render(){
   if (STATE.mode === 'approved') return renderApproved();
+  if (STATE.status === 'approved') return renderApprovedTab();   /* cc#1735 */
   setSubline();
   document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
   document.getElementById('tabsInstrument').innerHTML = instrumentTabsHtml();
@@ -487,6 +506,7 @@ function pickBucket(eng){
 }
 
 function boot(keepCounts){
+  if (STATE.status === 'approved' && STATE.mode !== 'approved') return bootApprovedTab();   /* cc#1735 */
   fetchWithTimeout(url(null))
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -548,6 +568,133 @@ function openOther(){
     });
 }
 function closeOther(){ document.getElementById('otherOv').classList.remove('open'); }
+
+/* ══ cc#1735: APPROVED TAB — the approved book with Entry level, editable Target / Stop loss and a
+   Close action. Reads /api/tradewall/approved; writes go to /api/tradewall/approved/levels and
+   /close (trade_wall_approved.py, sidecar table, never an ALTER on trade_alerts). Entry level is
+   the approved price at the approval timestamp — the header says so. CMP/P&L blank when the
+   resolver has no price; never carried forward, never zeroed. ═══════════════════════════════ */
+/* cc#1735: prices on this tab keep 2 decimals — an approved_price of 3550.50 must not print as
+   3,551, since the founder sets levels against the exact number. */
+function px2(v){ if (v == null || v === '') return ''; var n = Number(v); if (!isFinite(n)) return ''; return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function bootApprovedTab(){
+  fetchWithTimeout('/api/tradewall/approved')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error) throw new Error(d.error);
+      STATE.approvedRows = d.rows || [];
+      STATE.approvedCount = d.count;
+      STATE.approvedTabAsOf = d.as_of || null;
+      STATE.approvedNote = d.entry_level_note || null;
+      STATE.approvedOpen = d.open_count; STATE.approvedClosed = d.closed_count;
+      render();
+    })
+    .catch(function(e){
+      document.getElementById('meta').textContent = 'Could not load the approved book — ' + e.message;
+      document.getElementById('body').innerHTML = '<tr><td colspan="10" class="empty">Could not load the approved book.</td></tr>';
+      document.getElementById('more').innerHTML = '';
+    });
+}
+function approvedTabTheadHtml(){
+  return '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Approved at (IST)</th><th class="num">Entry level</th>'
+    + '<th class="num">CMP</th><th class="num">Target</th><th class="num">Stop loss</th><th class="num">P&amp;L</th><th>Close</th></tr>';
+}
+function lvlInput(r, key){
+  var v = r[key];
+  return '<input class="tw-lvl" type="number" step="0.05" min="0" inputmode="decimal" data-id="' + r.id + '" data-k="' + key + '"'
+    + ' data-orig="' + (v == null ? '' : v) + '" value="' + (v == null ? '' : v) + '" placeholder="set"'
+    + ' onblur="saveLevel(this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">'
+    + '<span class="tw-saved" id="lvlmsg-' + r.id + '-' + key + '"></span>';
+}
+function approvedTabRowsHtml(list){
+  return list.map(function(r){
+    var pnlCls = r.pnl == null ? '' : (r.pnl > 0 ? 'pos' : (r.pnl < 0 ? 'neg' : ''));
+    var pnlTxt = r.pnl == null ? '' : (px2(r.pnl) + (r.pnl_pct == null ? '' : ' (' + (r.pnl_pct > 0 ? '+' : '') + r.pnl_pct.toFixed(2) + '%)'));
+    var cmpCell = r.closed
+      ? '<td class="num tw-tag">closed</td>'
+      : '<td class="num">' + (r.cmp == null ? '' : px2(r.cmp))
+        + (r.cmp == null ? '<span class="tw-cmp-lbl">no price</span>'
+           : '<span class="tw-cmp-lbl">' + esc(r.cmp_label || '') + (r.cmp_date ? ' ' + esc(r.cmp_date) : '') + '</span>') + '</td>';
+    var tgt = r.closed ? '<td class="num">' + (r.target_price == null ? '—' : px2(r.target_price)) + '</td>' : '<td class="num">' + lvlInput(r, 'target_price') + '</td>';
+    var sl  = r.closed ? '<td class="num">' + (r.stop_loss == null ? '—' : px2(r.stop_loss)) + '</td>' : '<td class="num">' + lvlInput(r, 'stop_loss') + '</td>';
+    var closeCell = r.closed
+      ? '<td class="tw-tag">closed ' + esc(r.closed_at || '') + ' @ ' + px2(r.close_price) + (r.close_reason ? ' · ' + esc(r.close_reason) : '') + '</td>'
+      : '<td><button class="tw-close-btn" onclick="closeApproved(' + r.id + ')">Close</button></td>';
+    return '<tr' + (r.closed ? ' class="tw-closed"' : '') + ' id="aprow-' + r.id + '">'
+      + '<td class="sym">' + esc(r.symbol) + '</td>'
+      + '<td class="' + sideCls(r.side) + '">' + esc(r.side) + '</td>'
+      + '<td>' + esc(r.engine) + '</td>'
+      + '<td class="tw-tag">' + esc(r.approved_at || '--') + (r.approved_via ? '<span class="tw-cmp-lbl">' + esc(r.approved_via) + '</span>' : '') + '</td>'
+      + '<td class="num">' + px2(r.entry_level) + '</td>'
+      + cmpCell + tgt + sl
+      + '<td class="num ' + pnlCls + '">' + pnlTxt + (r.pnl_basis === 'realised' ? '<span class="tw-cmp-lbl">realised</span>' : '') + '</td>'
+      + closeCell
+      + '</tr>';
+  }).join('');
+}
+function renderApprovedTab(){
+  setSubline();
+  document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
+  document.getElementById('tabsInstrument').innerHTML = '';
+  document.getElementById('tabsBucket').innerHTML = '';
+  document.getElementById('tabsState').innerHTML = '';
+  document.getElementById('thead').innerHTML = approvedTabTheadHtml();
+  var rows = STATE.approvedRows || [];
+  document.getElementById('meta').textContent =
+    (STATE.approvedOpen == null ? rows.length : STATE.approvedOpen) + ' approved open · ' + (STATE.approvedClosed || 0) + ' closed'
+    + ' · Entry level = the approved price at that timestamp (never the trigger, never a later price)'
+    + (STATE.approvedTabAsOf ? ' · CMP as of ' + STATE.approvedTabAsOf + ' IST (label per row)' : '');
+  document.getElementById('body').innerHTML = rows.length
+    ? approvedTabRowsHtml(rows)
+    : '<tr><td colspan="10" class="empty">No approved positions yet. Approve a signal on the Open tab or on /alerts.</td></tr>';
+  document.getElementById('more').innerHTML = '';
+}
+function postJson(u, body){
+  return fetch(u, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(j){ j._status = r.status; return j; }); });
+}
+function saveLevel(el){
+  var id = el.getAttribute('data-id'), k = el.getAttribute('data-k');
+  var raw = String(el.value || '').trim(), orig = String(el.getAttribute('data-orig') || '');
+  var msg = document.getElementById('lvlmsg-' + id + '-' + k);
+  if (raw === orig) return;                         /* nothing changed */
+  if (raw !== '' && !(parseFloat(raw) > 0)){ if (msg){ msg.textContent = 'positive number'; msg.className = 'tw-saved err'; } return; }
+  var body = { alert_id: parseInt(id, 10), via: 'web-wall' }; body[k] = raw === '' ? null : parseFloat(raw);
+  el.classList.add('saving'); if (msg){ msg.textContent = 'saving…'; msg.className = 'tw-saved'; }
+  postJson('/api/tradewall/approved/levels', body).then(function(j){
+    el.classList.remove('saving');
+    if (j.error){ if (msg){ msg.textContent = j.error; msg.className = 'tw-saved err'; } return; }
+    var saved = (j.levels || {})[k];
+    el.value = saved == null ? '' : saved; el.setAttribute('data-orig', saved == null ? '' : saved);
+    var w = (j.warnings || []).filter(function(x){ return x.indexOf(k === 'stop_loss' ? 'stop loss' : 'target') === 0; });
+    if (msg){
+      msg.textContent = (saved == null ? 'cleared' : 'saved ' + saved) + (j.levels && j.levels.updated_at ? ' · ' + j.levels.updated_at : '') + (w.length ? ' · ' + w[0] : '');
+      msg.className = 'tw-saved' + (w.length ? ' warn' : '');
+    }
+    /* keep the row's P&L honest without a full reload: levels do not change P&L, so nothing else moves */
+    var row = (STATE.approvedRows || []).filter(function(r){ return String(r.id) === String(id); })[0];
+    if (row) row[k] = saved;
+  }).catch(function(e){ el.classList.remove('saving'); if (msg){ msg.textContent = 'failed — ' + e.message; msg.className = 'tw-saved err'; } });
+}
+function closeApproved(id){
+  var row = (STATE.approvedRows || []).filter(function(r){ return String(r.id) === String(id); })[0];
+  if (!row) return;
+  var def = row.cmp == null ? '' : String(row.cmp);
+  var p = window.prompt('Close ' + row.symbol + ' (' + row.side + ', entry ' + row.entry_level + ').\n'
+    + 'Close price — defaults to the current CMP but EDIT it to the price you actually exited at:', def);
+  if (p === null) return;
+  var price = parseFloat(String(p).trim());
+  if (!(price > 0)){ window.alert('Close price must be a positive number. Nothing recorded.'); return; }
+  var reason = window.prompt('Close reason (optional — target hit / stop hit / discretionary / other):', '');
+  if (reason === null) return;
+  postJson('/api/tradewall/approved/close', { alert_id: row.id, close_price: price, close_reason: reason, via: 'web-wall' })
+    .then(function(j){
+      if (j.error){ window.alert('Not recorded — ' + j.error); if (j._status === 409) bootApprovedTab(); return; }
+      bootApprovedTab();   /* re-read: closed row greys out with close price, time and realised P&L */
+    })
+    .catch(function(e){ window.alert('Close failed — ' + e.message); });
+}
 
 /* cc#1733: the engine-rules (i) sheet. One table, one row per engine unit (basket / screen /
    index), five columns; the epochs on one line at the top so a reader knows why older signals
