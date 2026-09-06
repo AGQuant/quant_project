@@ -7461,8 +7461,8 @@ function ipGuide(){
     + '<p><b>The dot.</b> Where the index trades now. Its place between the levels is the '
     + 'position read — above PP with room to R1 is a very different day from sitting on S1.</p>'
     + '<p><b>The legs.</b> The V10 paper book\'s open legs on this index — entry, stop, target, '
-    + 'lot size and live P&amp;L — sit in the Open Positions section at the foot of the page '
-    + '(cc#1571); this card shows the open total. Each V10 signal fires a futures leg and an '
+    + 'lot size and live P&amp;L — sit in the Open Positions section below Volume Flow &amp; Basis '
+    + '(cc#1741); this card shows the open total. Each V10 signal fires a futures leg and an '
     + 'option write; they are peers, not a hedge.</p>'
     + '<p><b>View on chart.</b> Opens the same shared chart every symbol on Scorr opens — '
     + '5-minute candles with the V10 trade markers.</p>'
@@ -8045,8 +8045,15 @@ function render(){
        them, and removing content unasked is a scope guess (choice logged in the forum).
        cc#1571/1574 (02-Sep-2026): Divergence hidden; Open Positions + The Record are the last two
        blocks. Final order: TopBar, Mood, Idx/VIX, PCR/ADR, F&O ban, Index Position, Max Pain,
-       Build Ups, Flow & Basis, [Settings, Performance], Open Positions, The Record, foot. */
-    rIndexPos() + rOpenPos() + rMaxPainSec() + rBuildUps() + rFlowBasis() +   /* cc#1597 (supersedes cc#1571 on placement): Open Positions sits DIRECTLY ABOVE Max Pain */
+       Build Ups, Flow & Basis, [Settings, Performance], Open Positions, The Record, foot.
+       cc#1741 (06-Sep-2026): Open Positions moves to sit between Flow & Basis and the Settings /
+       Performance stack. Final order: TopBar, Mood, Idx/VIX, PCR/ADR, F&O ban, Index Position,
+       Max Pain, Build Ups, Flow & Basis, Open Positions, [Settings, Performance], The Record, foot. */
+    /* cc#1741 (founder 06-Sep, comment 1 of 3: "Shift Open Position box below Basis Positive above
+       Entry/Exit setting"; supersedes cc#1597 on placement): Open Positions now sits AFTER Volume
+       Flow & Basis (whose basis tables are its tail) and BEFORE the Settings / Performance stack.
+       A move only — rOpenPos() and its data are unchanged. */
+    rIndexPos() + rMaxPainSec() + rBuildUps() + rFlowBasis() + rOpenPos() +
     /* cc#1574 (founder comment 5, 02-Sep-2026): the Futures ⇄ Equity Divergence card is HIDDEN -
        rDivergence() and /api/v10/divergence stay intact, only this call and its loader are out. */
     `<div class="stack">` + rSettings() + rPerf() + `</div>` +
