@@ -107,6 +107,17 @@ const GVM_PILLAR_MAP = {
   rsi_month:"M", vol_trend:"M",
 };
 
+
+// ── cc#1773 · the G / V / M tile hover geometry, stated ONCE (founder 06-Sep: "top border line is
+// cut on hover"). The tile row is a horizontal scroller (overflowX:auto); CSS makes overflow-y
+// compute to auto with it, so the 3px hover lift left the box and the scroller shaved the top
+// border. The clearance is derived, not eyeballed: hover travel + border width, reserved as
+// padding INSIDE the scroller (a margin on the tiles would scroll with them and reserve
+// nothing). The GVM TREND panel takes the same value as a top margin so the two top edges stay
+// flush. The hover rule reads the same constant, so travel and clearance cannot drift apart.
+const PILLAR_HOVER_LIFT = 3;                                   // px, the translateY on hover
+const PILLAR_BORDER = 1;                                       // px, the tile border at rest and on hover (only its colour changes)
+const PILLAR_CLEARANCE = PILLAR_HOVER_LIFT + PILLAR_BORDER;    // 4px — clearance >= travel + border, the acceptance inequality
 const PILLAR_INFO = {
   G: { label:"G — Growth", color: C.gPillar, bg:"rgba(47,212,139,.14)", desc:"Profitability" },
   V: { label:"V — Value",  color: C.vPillar, bg:"rgba(245,185,74,.14)", desc:"Valuation" },
@@ -2453,7 +2464,7 @@ function GvmReport({ r, hist }) {
               identity column, stacked under the C·A·R·D strip; the header is now three explicit
               columns (identity | pillars | trend) so the width freed by removing the Price·3M box
               goes to the trend chart instead of stretching the name block. */}
-          <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 260, flexWrap: "nowrap", overflowX: "auto" }}>
+          <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 260, flexWrap: "nowrap", overflowX: "auto", paddingTop: PILLAR_CLEARANCE }}>{/* cc#1773: clearance INSIDE the scroller */}
               {["G","V","M"].map(pillar => {
                 const pi = PILLAR_INFO[pillar];
                 const score = pillarScore(pillar);
@@ -2465,7 +2476,7 @@ function GvmReport({ r, hist }) {
                     style={{ background: pi.bg, border: `1px solid ${hov ? pi.color : pi.color + "40"}`,
                     borderRadius: 10, padding: "9px 14px", flex: 1, minWidth: 80, textAlign: "center", position: "relative",
                     cursor: "pointer", transition: "transform .15s ease, border-color .15s ease, box-shadow .15s ease",
-                    transform: hov ? "translateY(-3px)" : "none", boxShadow: hov ? `0 0 18px ${pi.color}26` : "none" }}>
+                    transform: hov ? `translateY(-${PILLAR_HOVER_LIFT}px)` : "none", boxShadow: hov ? `0 0 18px ${pi.color}26` : "none" }}>
                     <span style={{ position: "absolute", top: 6, right: 8, fontSize: 11, color: pi.color, opacity: hov ? 1 : 0, transition: "opacity .15s" }}>⤢</span>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: pi.color, textTransform: "uppercase", letterSpacing: ".05em" }}>{pillar}</div>
                     <div style={{ fontSize: 24, fontWeight: 900, color: gvmColor(score), fontFamily: "monospace", lineHeight: 1.1 }}>
@@ -2486,7 +2497,7 @@ function GvmReport({ r, hist }) {
               (extras.trend missing AND the async gvm_history fetch not yet in / failed); the tile
               stays tappable to open the 5Y expand modal, which loads its own series. */}
           <div onClick={() => setChartExpand("gvm")} title="Tap to expand — up to 5Y"
-               style={{ flex: 1.4, minWidth: 320, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+               style={{ flex: 1.4, minWidth: 320, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", marginTop: PILLAR_CLEARANCE }}>{/* cc#1773: moves down by the same value as the tile row */}
             {trendPoints
               ? <TrendChart points={trendPoints} />
               : (<React.Fragment>
