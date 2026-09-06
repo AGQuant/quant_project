@@ -298,6 +298,7 @@ PROTECTED.add("/m/v10")      # cc#1069: V10 signal view — gated like every oth
 # for every sibling /m/ screen is PROTECTED-only, and that is what is followed.)
 PROTECTED.add("/m/alerts")
 PROTECTED.add("/m/models")   # cc#886 slot 5
+PROTECTED.add("/m/holdings")   # cc#1779: My Portfolio full page — PROTECTED-only like every /m/ screen (theme head injected; NOT _PWA_INJECT_PATHS)
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
 # duplicates no auth logic of its own.

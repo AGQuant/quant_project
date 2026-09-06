@@ -85,6 +85,137 @@ def mobile_holdings(request: Request):
     }
 
 
+# ══ cc#1779 · MY PORTFOLIO full page (MYPORTFOLIO_PAGE_SPEC_V1, session_log 39665; design ref
+# design_refs/scorr_mobile_myportfolio_R1.html). READ-ONLY. Two windows, each with its own basis:
+#   * OPEN  = smartgain_holdings (the SmartGain book, the ONLY book on mobile — 16185), priced at the
+#            rows' updated_at. Empty book => empty state, never a placeholder row.
+#   * CLOSED = personal_journal rows with an exit_price, realised P&L banked on exits.
+# The curve is CUMULATIVE REALISED P&L FROM CLOSED TRADES, grouped by trade_date, running total. It
+# is NOT portfolio value and NOT a NAV — smartgain_m2m has no rows and smartgain_weekly_pnl is stale,
+# so a value curve cannot be drawn without inventing it (the card's one hard gate). AVG HOLD is None
+# with a stated reason because holding_days is NULL on every row: absent, not zero.
+
+def _pf_f(v):
+    return float(v) if v is not None else None
+
+
+def _portfolio_payload(journal_rows, holdings_rows, now):
+    """Pure builder (no DB) so it can be exercised on real rows without a connection. `journal_rows`
+    are personal_journal dicts (trade_date, symbol, direction, qty, entry_price, exit_price, pnl,
+    result, holding_days); `holdings_rows` are smartgain_holdings dicts as /api/mobile/holdings reads
+    them (symbol, direction, qty, entry_price, ltp, mtm, updated_at naive IST)."""
+    closed = [r for r in journal_rows if r.get("exit_price") is not None]
+    closed.sort(key=lambda r: (str(r["trade_date"]), r.get("id") or 0))
+    # ── series: one point per trade_date, running total ─────────────────────────────────────
+    by_day, order = {}, []
+    for r in closed:
+        d = str(r["trade_date"])
+        if d not in by_day:
+            by_day[d] = {"d": d, "day": 0.0, "n": 0}
+            order.append(d)
+        by_day[d]["day"] += _pf_f(r.get("pnl")) or 0.0
+        by_day[d]["n"] += 1
+    series, cum = [], 0.0
+    for d in order:
+        cum += by_day[d]["day"]
+        series.append({"d": d, "day": round(by_day[d]["day"], 2), "n": by_day[d]["n"], "cum": round(cum, 2)})
+    # ── stats ────────────────────────────────────────────────────────────────────────────────
+    pnls = [_pf_f(r.get("pnl")) or 0.0 for r in closed]
+    wins = [x for x in pnls if x > 0]
+    losses = [x for x in pnls if x < 0]
+    realised = round(sum(pnls), 2) if closed else None
+    peak_pt = max(series, key=lambda p: p["cum"]) if series else None
+    latest = series[-1]["cum"] if series else None
+    hold = [r["holding_days"] for r in closed if r.get("holding_days") is not None]
+    stats = {
+        "closed": len(closed), "wins": len(wins), "losses": len(losses),
+        "flat": len([x for x in pnls if x == 0]),
+        "win_rate": (round(len(wins) * 100.0 / len(closed), 1) if closed else None),
+        "avg_win": (round(sum(wins) / len(wins), 2) if wins else None),
+        "avg_loss": (round(sum(losses) / len(losses), 2) if losses else None),
+        "best": (max(pnls) if pnls else None), "worst": (min(pnls) if pnls else None),
+        "symbols": len({r["symbol"] for r in closed}),
+        "peak": (peak_pt["cum"] if peak_pt else None), "peak_date": (peak_pt["d"] if peak_pt else None),
+        "from_peak": (round(latest - peak_pt["cum"], 2) if peak_pt else None),
+        # ABSENT, NOT ZERO: holding_days is NULL on these rows; the page prints an em dash and says so.
+        "avg_hold": (round(sum(hold) / len(hold), 1) if hold else None),
+        "hold_rows": len(hold),
+        "avg_hold_note": (None if hold else "holding_days is not populated on these rows. Absent, not zero."),
+        "trade_dates": len(series),
+    }
+    # ── open book (the holdings shape, same maths as /api/mobile/holdings) ───────────────────
+    open_rows = []
+    for r in holdings_rows:
+        entry, ltp, qty = _pf_f(r.get("entry_price")), _pf_f(r.get("ltp")), _pf_f(r.get("qty"))
+        open_rows.append({
+            "symbol": r["symbol"], "direction": (r.get("direction") or "").upper(),
+            "qty": qty, "entry": entry, "ltp": ltp, "mtm": _pf_f(r.get("mtm")),
+            "value": round(qty * ltp, 2) if qty is not None and ltp is not None else None,
+            "ret_pct": (round((ltp - entry) / entry * 100.0
+                              * (-1.0 if (r.get("direction") or "").upper().startswith("S") else 1.0), 2)
+                        if entry and ltp is not None else None),
+        })
+    newest = max((r["updated_at"] for r in holdings_rows if r.get("updated_at")), default=None)
+    open_mtm = round(sum((x["mtm"] or 0.0) for x in open_rows), 2) if open_rows else None
+    open_val = round(sum((x["value"] or 0.0) for x in open_rows), 2) if open_rows else None
+    hero = {
+        "combined": (round((realised or 0.0) + (open_mtm or 0.0), 2) if (realised is not None or open_mtm is not None) else None),
+        "realised": realised, "open_mtm": open_mtm, "position_value": open_val,
+        "open_count": len(open_rows), "closed_count": len(closed),
+        # two bases, stated separately — never one blended as-of
+        "prices_as_of": (newest.strftime("%Y-%m-%d %H:%M:%S") if newest else None),
+        "prices_basis": ("last close" if newest else "no open positions"),
+        "realised_from": (series[0]["d"] if series else None),
+        "realised_to": (series[-1]["d"] if series else None),
+    }
+    closed_out = [{
+        "id": r.get("id"), "date": str(r["trade_date"]), "symbol": r["symbol"],
+        "direction": (r.get("direction") or "").upper(), "qty": _pf_f(r.get("qty")),
+        "entry": _pf_f(r.get("entry_price")), "exit": _pf_f(r.get("exit_price")),
+        "pnl": _pf_f(r.get("pnl")), "result": r.get("result"),
+    } for r in reversed(closed)]            # newest first
+    return {
+        "book": "smartgain",
+        "hero": hero, "series": series,
+        "series_basis": "cumulative realised P&L from closed trades, by trade_date (personal_journal). Not portfolio value, not NAV.",
+        "stats": stats,
+        "open": {"empty": not open_rows, "rows": open_rows, "count": len(open_rows),
+                 "total_mtm": open_mtm, "total_value": open_val,
+                 "message": "Book is flat. No positions open." if not open_rows else None,
+                 "rail": rail_state(newest, 1440, now, now.weekday() < 5)},
+        "closed": closed_out,
+        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "sources": {"open": "smartgain_holdings", "closed": "personal_journal WHERE exit_price IS NOT NULL",
+                    "value_curve": "absent — smartgain_m2m has no rows; not drawn, not labelled"},
+    }
+
+
+@router.get("/api/mobile/portfolio")
+@_json_safe
+def mobile_portfolio(request: Request):
+    """cc#1779 — hero, cumulative realised series, stats, open book and the closed list, one call."""
+    g = _guard(request)
+    if g:
+        return g
+    now = _ist_now()
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT id, trade_date, symbol, direction, qty, entry_price, exit_price, pnl, result,
+                   holding_days
+            FROM personal_journal
+            ORDER BY trade_date, id
+        """)
+        journal = _rows(cur)
+        cur.execute("""
+            SELECT symbol, direction, qty, entry_price, ltp, mtm,
+                   (updated_at AT TIME ZONE 'Asia/Kolkata') AS updated_at
+            FROM smartgain_holdings
+            ORDER BY ABS(COALESCE(mtm, 0)) DESC
+        """)
+        holdings = _rows(cur)
+    return _portfolio_payload(journal, holdings, now)
+
+
 @router.get("/api/mobile/result_analysis")
 @_json_safe
 def mobile_result_analysis(request: Request, symbol: str = ""):
