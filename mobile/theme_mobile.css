@@ -589,3 +589,56 @@ body[data-theme]{
   --chalk: var(--ink);
   --gold: var(--brand);
 }
+
+
+/* cc#1792 · ELECTRIC VIOLET — THE METALLIC RECIPE (THEME_ELECTRIC_VIOLET_V1, session_log 39762). A DARK
+ * set, so the R5 skin stays active; this block is the surface treatment the entry calls the point of the
+ * set, not polish: (1) panels are a 168deg gradient, --hi at the top sinking to --sunk at the bottom;
+ * (2) a 1px lit rim (inset 0 1px 0) on every top edge — cards, slabs, chips, the bottom nav; (3) a
+ * diagonal sheen overlay across each card (::after, pointer-events none; the Home hero deck keeps its
+ * own #heroTrack ::after glitter, which outranks this by id); (4) INSET shadows in the progress bars
+ * and the A/D pipe so they read as cut into the surface; (5) the wordmark and the verdict words are
+ * gradient-clipped text — via -webkit-text-fill-color so the inline / state colour still drives the
+ * hue (pass stays green, watch amber, fail red, mood colour unchanged) and NO text-shadow is added:
+ * the hero glow stays off (cc#1775 scope 4). The four rgba literals are the set's own surface values,
+ * declared once as custom properties on body (the cc#1637 / cc#1641 pattern); every rule reads a var().
+ * Never on P&L numbers. */
+body[data-theme="electricviolet"]{ --ev-rim:rgba(200,180,255,.26); --ev-sink:rgba(0,0,0,.5); --ev-cut:rgba(0,0,0,.55); --ev-sheen:rgba(215,200,255,.11); }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"]{ background-image:var(--field-grad), var(--texture); background-attachment:fixed; }
+/* (1) + (2) graded panels with the lit rim; (3) the sheen */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .m,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .pf-card{ position:relative; background:linear-gradient(168deg, var(--t-hi) 0%, var(--t-panel) 48%, var(--t-sunk) 100%); border-color:var(--t-edge); box-shadow:var(--panel-shadow); }
+/* the shell (.slab) carries R5's own gold-night --panel literal on the element (cc#1643 explains why), so the
+ * gradient reads the theme through the body-level --t-* captures, not the shadowed names */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .slab{ background:linear-gradient(168deg, var(--t-hi) 0%, var(--t-panel) 48%, var(--t-sunk) 100%); box-shadow:inset 0 var(--bw-1) 0 var(--ev-rim), 0 var(--space-5) 0 0 var(--gold-lo), 0 var(--space-5) 0 var(--bw-15) var(--line); }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .c::after,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .card::after,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .m::after,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .pf-card::after{ content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(108deg, transparent 38%, var(--ev-sheen) 50%, transparent 62%); }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .chip,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .hchips .hc,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .pill,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .pf-hero .b,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .pf-st{ box-shadow:inset 0 var(--bw-1) 0 var(--ev-rim); }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .bnav,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-nav{ background:linear-gradient(180deg, var(--hi), var(--panel)); border-top-color:var(--edge); box-shadow:inset 0 var(--bw-1) 0 var(--ev-rim); }
+/* (4) bars cut into the surface: the track sinks, the fill keeps a thin lip */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .adrpipe,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .decbar,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .posbar,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-meter,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-rule .c-bar,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-ic .c-bar{ background:var(--sunk); box-shadow:inset 0 var(--bw-1) var(--space-3) var(--ev-cut), inset 0 calc(-1 * var(--bw-1)) 0 var(--ev-rim); }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .adrpipe .adv,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .adrpipe .dec,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .decbar i,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-meter i,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-bar i{ box-shadow:inset 0 var(--bw-1) 0 var(--ev-rim), inset 0 calc(-1 * var(--bw-1)) 0 var(--ev-sink); }
+/* (5) gradient-clipped text: wordmark (brand -> partner blue), verdict word and hero mood word (a lit tint of
+ * their own state colour -> the colour), no glow */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--gold-hi), var(--brand) 55%, var(--wayfind)); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm i{ color:transparent; -webkit-text-fill-color:transparent; }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-vword,
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .hero-mood{ background-image:linear-gradient(180deg, color-mix(in srgb, currentColor 55%, var(--ink)) 0%, currentColor 65%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; text-shadow:none; }

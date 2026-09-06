@@ -505,3 +505,24 @@ body[data-theme="orangepeel"]{--field:#FDF8F3;--panel:#FFFFFF;--hi:#F6F1EB;--edg
  --panel-shadow:0 4px 18px rgba(120,80,40,.10);
  --field-grad:none;
  --accent-soft:rgba(255,108,17,.08)}
+
+/* ══ cc#1792 · ELECTRIC VIOLET (THEME_ELECTRIC_VIOLET_V1, session_log 39762; founder 06-Sep 22:55: "Dusk
+   violet little bit dull can we build sharper metallic wine or violet background / Electric violet replacing
+   dusk violet"). A DARK set that REPLACES Dusk Violet in the switcher; the duskviolet block above is
+   WITHDRAWN, not deleted (the cc#1776 winepurple pattern) and a stored duskviolet is remapped once in the
+   boot path. Dusk DAY (cc#1790) is a different theme and stays. The point of the set is SURFACE, not
+   brightness: --panel-shadow carries the lit rim + sink, --texture is the diagonal sheen, --field-grad the
+   graded field; mobile/theme_mobile.css applies the metallic recipe (graded panels, rim, sheen, inset bars,
+   gradient-clipped wordmark and verdict word). Every value is the entry's. All 21 contract keys. Measured
+   worst-of panel/field/hi: ink 12.93 · muted 7.46 · label 7.59 · accent 6.05 · accent2 8.25 · win 9.05 ·
+   loss 5.65 — all AA. The hero glow stays OFF (cc#1775 scope 4). */
+body[data-theme="electricviolet"]{--field:#150E26;--panel:#1D1533;--hi:#291E45;--edge:#3F2F63;
+ --ink:#EFE8FF;--muted:#BCADE0;--brand:#B98CFF;--brandglow:rgba(185,140,255,.34);--accent:#B98CFF;
+ --label:#C3A8FF;--win:#3DE0A0;--loss:#FF6B8A;
+ --railgrad:linear-gradient(90deg,transparent,#B98CFF,#7BC5FF,transparent);
+ --texture:linear-gradient(108deg,transparent 38%,rgba(215,200,255,.11) 50%,transparent 62%);
+ --gold-lo:#4A3A7A;--gold-hi:#D9C2FF;--sunk:#0E0919;
+ --wayfind:#7BC5FF;
+ --panel-shadow:inset 0 1px 0 rgba(200,180,255,.26), inset 0 -1px 0 rgba(0,0,0,.5), 0 14px 34px rgba(0,0,0,.55);
+ --field-grad:radial-gradient(120% 55% at 50% -8%, rgba(185,140,255,.13), transparent 62%), linear-gradient(180deg,#241B3D 0%,#150E26 42%,#0E0919 100%);
+ --accent-soft:rgba(185,140,255,.12)}
