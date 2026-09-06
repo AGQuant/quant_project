@@ -818,10 +818,15 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
     bs_map = _label_map(cur, sym, "balance-sheet")
     ra_map = _label_map(cur, sym, "ratios")
     closes = {}
-    if pl_ends:
+    # cc#1772 tidy (BUG_FIRST_RULE): the P&L annual frame carries the TTM row with period_end NULL,
+    # which used to reach this map as the literal key "None" (closes[str(None)]). A period with no
+    # end date has no FY-end close by definition, so null ends are skipped when building AND when
+    # reading (the .get below is keyed on the real date only).
+    dated_ends = [pe for pe in pl_ends if pe is not None]
+    if dated_ends:
         cur.execute("""SELECT t.e, (SELECT close FROM raw_prices rp WHERE rp.symbol=%s
                           AND rp.price_date <= t.e ORDER BY rp.price_date DESC LIMIT 1)
-                       FROM unnest(%s::date[]) AS t(e)""", (sym, pl_ends))
+                       FROM unnest(%s::date[]) AS t(e)""", (sym, dated_ends))
         for pe, c in cur.fetchall():
             closes[str(pe)] = _parse_metric(c)
 
@@ -840,7 +845,7 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
         eqcap = _mv(bs, "Equity Capital"); res = _mv(bs, "Reserves")
         ta = _mv(bs, "Total Assets"); borrow = _mv(bs, "Borrowings")
         nw = (eqcap + res) if (eqcap is not None and res is not None) else None
-        close = closes.get(str(pl_ends[i]))
+        close = closes.get(str(pl_ends[i])) if pl_ends[i] is not None else None   # cc#1772: no end date, no FY-end close
         # Profitability
         roce_y.append(_mv(ra, "ROCE %"))
         roe_y.append(_safe_div(np_, nw, pct=True, nd=1))
@@ -870,9 +875,33 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
     buckets = []
 
     def _add(title, periods, rows):
+        """The ONE path every bucket takes (cc#1772 routed Efficiency through it too).
+        cc#1772 THE COLUMN RULE — cc#833's row doctrine lifted to the column: a column that is a
+        dash across EVERY row of a bucket does not render. It is not missing data, it is a column
+        that should never have been drawn — GLAND Valuation's TTM: the P&L annual frame carries a
+        TTM row (period_end NULL) so the axis gains a TTM column that no balance-sheet / ratios
+        row and no FY-end close can ever fill, and PE, PB, EV/EBITDA, MCap/Sales, Dividend Yield
+        all die together. The rule is ALL-DASH, never the label: a future symbol whose Mar 2020
+        column is empty across a bucket gets the same treatment. periods and every row's values
+        are trimmed by the SAME index set in one pass — never separately, or the table shifts by
+        one and every figure lands under the wrong year — and the alignment assertion below fails
+        loudly rather than ship that. A bucket with no all-dash column comes out byte-identical."""
         rows = [x for x in rows if x is not None]
-        if rows:
-            buckets.append({"title": title, "table": {"periods": periods, "rows": rows}})
+        if not rows:
+            return
+        periods = list(periods)
+        n = len(periods)
+        for r in rows:
+            if len(r["values"]) != n:
+                raise ValueError("ratios_v2 %s: row %r has %d values for %d periods"
+                                 % (title, r.get("label"), len(r["values"]), n))
+        keep = [i for i in range(n) if any(r["values"][i] is not None for r in rows)]
+        if len(keep) != n:
+            periods = [periods[i] for i in keep]
+            rows = [dict(r, values=[r["values"][i] for i in keep]) for r in rows]
+        for r in rows:
+            assert len(r["values"]) == len(periods), "ratios_v2 %s: trim desynchronised %r" % (title, r.get("label"))
+        buckets.append({"title": title, "table": {"periods": periods, "rows": rows}})
 
     def _yr_row(label, unit, hist, current):
         """cc#833: a year-wise row whose HISTORY is empty across every FY does not render, even when
@@ -944,7 +973,7 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
         eff_defs = [d for d in _RATIO_ROW_DEFS if d[0] != "ROCE %"]
         eff_tbl = _build_table(eff_rows, eff_defs)
         if eff_tbl["rows"]:
-            buckets.append({"title": "Efficiency", "table": eff_tbl})
+            _add("Efficiency", eff_tbl["periods"], eff_tbl["rows"])   # cc#1772: through the one path (no all-dash column here -> byte-identical)
 
     return {"buckets": buckets, "bfsi": _is_bfsi(segment)}
 
