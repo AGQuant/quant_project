@@ -121,6 +121,10 @@
   .nm summary::before{content:'\25B8';font-size:10px;transition:transform .15s}
   .nm[open] summary::before{transform:rotate(90deg)}
   .nm .scroll{margin-top:10px}
+  /* cc#1745: Near Miss lists EVERY scored row, one collapsible block per bucket (see renderPanel).
+     .prov is the one-line "which population is this" note under the header (item 3), muted so it
+     reads as a footnote and not as a fourth number. */
+  .prov{font-size:11.5px;line-height:1.55;color:var(--dim);margin:-4px 0 12px;max-width:980px}
   /* cc#1686 (founder 04-Sep screenshot): the eligible (BUY/SELL) and Near Miss tables read 2
      notches up. This page has no --type ramp (checked: every size here is a plain px literal, not
      the token scale scorr_v10_signal.html's cc#1502 used for its own "2 notches") — per the card's
@@ -183,6 +187,10 @@
        Sell Qualified, cc#1229) are GONE — they took a full row above the tables. The two numbers
        that matter now ride in the muted caption under the title (#hdrCounts, painted by
        renderSummary from the same tc_config the tiles read). No box, no row. -->
+
+  <!-- cc#1745 item 3: which population the header count describes — painted by paintProvenance()
+       from the config and the scan payload; empty until both have loaded, never typed. -->
+  <div class="prov" id="provLine"></div>
 
   <div class="tabs" style="align-items:center">
     <div class="tabgrp">
@@ -328,6 +336,9 @@ function paintSpecText(){
       bars + ' · entry gates on sector and monthly RSI · max ' + (c.caps||{}).per_bucket_per_day +
       ' per bucket per day · target +' + (c.exit||{}).target_pct + '% / SL ' + (c.exit||{}).stop_pct +
       '% · screener only, not a live signal';
+  /* cc#1745: the config and the scan land in either order; whichever is last completes the
+     provenance line (its bars come from here, its cap and as-of from the scan). */
+  if (typeof paintProvenance === 'function') paintProvenance();
 }
 
 async function loadSpec(){
@@ -351,10 +362,20 @@ async function loadSpec(){
    the "one engine, one truth, no fork" the card asks for, and it is why the same symbol must read
    identically on both pages: there is only one place the number can come from.
 
-   QUALIFIED MEANS BOTH, and the row says which half failed. A symbol qualifies only when it
-   clears its bucket's score bar AND passes all three entry gates for its side AND sits inside the
-   per-bucket daily cap. Anything else renders in NEAR MISS with the failing condition named, so a
-   row that just missed is readable rather than merely absent. */
+   WOULD QUALIFY MEANS ALL THREE, and the row says which one failed. A symbol would qualify only
+   when it clears its bucket's score bar AND passes all three entry gates for its side AND sits
+   inside the per-bucket daily cap. Anything else renders in NEAR MISS with the failing condition
+   named, so a row that just missed is readable rather than merely absent.
+
+   cc#1745 (RECO 5224; session_log 29448 V1.1 observation): NOTHING IS CUT AND NOTHING IS HIDDEN.
+   Every scored row is on the page — the would-qualify rows in the main table, every other row
+   under Near Miss, grouped by bucket, with NO row cap (the old .slice(0, 25) hid ~80 rows a day;
+   it was the one real filter this page had). The caption says "would qualify", not "qualified":
+   that number is the annotation count for the full rule (bar + gates + cap), not an eligibility
+   count — under V1.1 every scored row is eligible, and the caption says so. Two stamps, never one:
+   scores are re-computed live on every load while the gates read v8_metrics as of the last
+   session, and the pill prints both dates. The one-line note under the header says which
+   population this count describes, so it is never read as the trading book. */
 
 function renderSummary(){
   const cfg = (data && data.tc_config) || null;
@@ -362,26 +383,75 @@ function renderSummary(){
   /* cc#1601 scope 1: the counts live in the caption line now — "207 scanned · 1 qualified
      (BUY 0 · SELL 1)" — from the same tc_config the tiles used to read. A failed annotation says
      so in the same place rather than printing dashes in four boxes. */
+  set('liveTs', stampLine());
   if (!cfg || cfg.error) {
     set('hdrCounts', cfg && cfg.error ? ' · counts unavailable (annotation failed)' : '');
     set('tabBuyN', ''); set('tabSellN', '');
+    paintProvenance();
     return;
   }
   const bb = cfg.by_bucket || {};
   const q = b => ((bb[b] || {}).would_qualify || 0);
+  const n = b => ((bb[b] || {}).total || 0);
   const buyQ = q('BUY-MOM') + q('BUY-REV'), sellQ = q('SELL-MOM') + q('SELL-REV');
-  set('hdrCounts', ' · ' + cfg.total + ' scanned · ' + cfg.would_qualify + ' qualified (BUY ' + buyQ + ' · SELL ' + sellQ + ')');
-  set('tabBuyN', buyQ);
-  set('tabSellN', sellQ);
-  set('liveTs', data.as_of || data.computed_at || '—');
+  const buyN = n('BUY-MOM') + n('BUY-REV'), sellN = n('SELL-MOM') + n('SELL-REV');
+  /* cc#1745 scope A (RECO 5224): three numbers in the order 29448 states them — scanned, eligible
+     (every scored row: V1.1 filters nothing, so eligible = scanned), and how many WOULD qualify on
+     the full rule. "would qualify" is the word cc#1222 chose and cc#1601 dropped; "qualified" read
+     as an eligibility count and made a correct zero look like a broken page. The rule is named as
+     "bar + gates + cap" rather than by a version letter, because the badge beside it prints the
+     config's own version (V2 bars since cc#1746) and a typed "V1" would contradict it. */
+  set('hdrCounts', ' · ' + cfg.total + ' scanned · ' + cfg.total + ' eligible (V1.1 observation, nothing filtered) · '
+    + cfg.would_qualify + ' would qualify on bar + gates + cap (BUY ' + buyQ + ' · SELL ' + sellQ + ')');
+  /* The tab badge is the side's ELIGIBLE count — what the tab actually contains — not its
+     would-qualify count, which is already in the caption and again in the panel title. A "Buy 0"
+     tab over a panel listing 70 rows was the same drift as the caption. */
+  set('tabBuyN', buyN);
+  set('tabSellN', sellN);
+  paintProvenance();
+}
+
+/* cc#1745 scope D (RECO 5224): TWO dates, never one. The scores are re-computed on every load
+   (computed_at, the scan's own clock) while the three gates read v8_metrics as of the last
+   session (as_of). The old pill printed as_of alone, so a weekend live run wore a Thursday date —
+   the founder's 06-Sep screenshot "dated 2026-09-04" is exactly that confusion. */
+function stampLine(){
+  if (!data) return '—';
+  const c = data.computed_at, a = data.as_of;
+  if (c && a) return 'scores computed ' + c + ' · gates as of ' + a;
+  return c ? 'scores computed ' + c : (a ? 'gates as of ' + a : '—');
+}
+
+/* cc#1745 scope C (item 3, reworded per RECO 5224 after cc#1746): ONE short note saying which
+   population the header count describes, so a scanner count is never read as the trading book.
+   Since cc#1746 the book (tc_scanner_endpoints.run_scan) scores the SAME four score100 buckets
+   as this page; the difference is the RULE, not the score — the book ENTERS on the score bar
+   alone (TC_SCANNER_ENTRY_EXIT_V2, session_log 39467), this header counts bar AND all three side
+   gates AND rank within the per-bucket cap. Every number here is READ: bars from
+   /api/tc-scanner/config, the cap and the as-of from the scan payload. Nothing is typed. */
+function paintProvenance(){
+  const el = document.getElementById('provLine'); if (!el) return;
+  const c = (tcSpecCache && tcSpecCache.config) || null;
+  const cfg = (data && data.tc_config) || null;
+  const t = (c && c.score_thresholds) || {};
+  const bars = ['BUY-REV', 'BUY-MOM', 'SELL-REV', 'SELL-MOM'].filter(b => t[b] != null).map(b => b + ' ' + t[b]).join(' / ');
+  const cap = cfg && cfg.per_bucket_cap;
+  const asOf = data && data.as_of;
+  el.textContent = 'This count is the live score /100 scan of the full futures universe, re-computed on every load'
+    + (asOf ? '; the gates read v8_metrics as of ' + asOf : '') + '. '
+    + 'A row would qualify only on all three: its score bar' + (bars ? ' (' + bars + ')' : '')
+    + ', all three side gates' + (cap ? ', and rank ' + cap + ' or better in its bucket today' : '') + '. '
+    + 'The Open / Closed Book on the dashboard TC Scanner tab scores the same four buckets but enters on the score bar alone, '
+    + 'no gate and no cap (session_log 39467), so an empty book beside a non-zero count here, or the reverse, is both surfaces working.';
 }
 
 const GATE_SHORT = { sector_week: 'SW', sector_month: 'SM', rsi_month: 'RSI' };
 /* cc#1601 scope 2: Near Miss renders OPEN on every fresh load; a hand-collapse is remembered in
    memory only for this visit (the 30 s refresh re-renders the panel, so the state has to live
    outside the DOM), never in localStorage. */
-const NM_OPEN = { BUY: true, SELL: true };
-function nmToggle(side, el){ NM_OPEN[side] = !!(el && el.open); if (typeof postSize === 'function') postSize(); }
+/* cc#1745: keyed by BUCKET now (one Near-miss block per bucket); an unset key means open. */
+const NM_OPEN = {};
+function nmToggle(key, el){ NM_OPEN[key] = !!(el && el.open); if (typeof postSize === 'function') postSize(); }
 
 function gateStrip(x){
   const g = x && x.gate;
@@ -435,11 +505,20 @@ function renderPanel(side){
   if (!data) return '<div class="empty">No data</div>';
   const all = (data.results || []).filter(r => String(r.best_label || '').indexOf(side) === 0);
   const qual = all.filter(r => r.would_qualify);
+  /* cc#1745 scope B (RECO 5224, the one real spec violation on this card): NO CAP. The old
+     .slice(0, 25) was a filter — session_log 29448 says in the founder's words that no signal may
+     be filtered out, and on 04-Sep the cap hid ~80 rows a day. Every row that did not qualify is
+     listed, grouped by bucket (the config's own bucket order), strongest first inside each group,
+     with its annotations: score against its bar, the three gate chips, its rank in the bucket
+     today, and the one condition that failed. A long list is the spec; a hidden row is not. */
   const miss = all.filter(r => !r.would_qualify)
-                  .sort((a,b) => (b.best_score100 || 0) - (a.best_score100 || 0)).slice(0, 25);
+                  .sort((a,b) => (b.best_score100 || 0) - (a.best_score100 || 0));
+  const order = ((tcSpecCache && tcSpecCache.buckets) || ['BUY-MOM', 'BUY-REV', 'SELL-MOM', 'SELL-REV'])
+                  .filter(b => String(b).indexOf(side) === 0);
+  miss.forEach(x => { const b = String(x.best_label || '').toUpperCase(); if (order.indexOf(b) < 0) order.push(b); });
 
   const head = '<div class="ptitle">' + side + ' &middot; score /100 gated '
-    + '<span class="ct">' + qual.length + ' qualified &middot; ' + all.length + ' scored on this side</span></div>';
+    + '<span class="ct">' + all.length + ' eligible &middot; ' + qual.length + ' would qualify on bar + gates + cap</span></div>';
 
   const row = x => '<tr>'
     + '<td class="sym">' + esc(x.symbol) + '</td>'
@@ -458,28 +537,41 @@ function renderPanel(side){
     + '<td><span class="badge ' + (side === 'SELL' ? 'b-sell' : 'b-buy') + '">' + esc(x.best_label) + '</span></td>'
     + '<td>' + scoreCell(x) + '</td>'
     + '<td>' + gateStrip(x) + '</td>'
-    + '<td colspan="4" style="font-size:13px;color:var(--dim)">' + esc(missReason(x)) + '</td>'
+    // cc#1745: rank in bucket today is the third annotation 29448 names; it now rides on every row.
+    + '<td>' + (x.rank_in_bucket != null ? '#' + x.rank_in_bucket : '—') + '</td>'
+    + '<td style="font-size:13px;color:var(--dim)">' + esc(missReason(x)) + '</td>'
     + '</tr>';
 
   const qualSection = '<div class="scroll desktop-tbl"><table><thead><tr>'
     + '<th>Symbol</th><th>Bucket</th><th>Score /100 &middot; bar</th><th>Gates</th><th>Rank</th><th>CMP</th><th>Day %</th><th>Sector</th>'
     + '</tr></thead><tbody>'
     + (qual.map(row).join('') || '<tr><td colspan="8" class="empty">No ' + side
-       + ' signal clears both its score bar and its gates right now</td></tr>')
+       + ' signal would qualify right now (bar + gates + cap) &middot; every ' + side + ' signal is listed under Near miss</td></tr>')
     + '</tbody></table></div>';
 
   // cc#1530: Near Miss is a native <details> (cc#1601: OPEN by default, hand-collapse remembered
-  // in memory for the visit) with the existing "N shown,
-  // strongest first" chip kept verbatim. Per-side elements as before — both panels stay in the
-  // DOM at once. The ontoggle hook keeps the embed frame's height honest when it opens.
-  const missSection = '<details class="nm" id="missTbl' + side + '"' + (NM_OPEN[side] ? ' open' : '') + ' ontoggle="nmToggle(\'' + side + '\', this)">'
-    + '<summary>Near miss <span class="ct">'
-    + miss.length + ' shown, strongest first</span></summary>'
-    + '<div class="scroll desktop-tbl"><table><thead><tr>'
-    + '<th>Symbol</th><th>Bucket</th><th>Score /100 &middot; bar</th><th>Gates</th><th>Why not</th>'
-    + '</tr></thead><tbody>'
-    + (miss.map(missRow).join('') || '<tr><td colspan="5" class="empty">Nothing scored on this side</td></tr>')
-    + '</tbody></table></div></details>';
+  // in memory for the visit). Per-side elements as before — both panels stay in the DOM at once.
+  // The ontoggle hook keeps the embed frame's height honest when it opens.
+  // cc#1745: ONE <details> PER BUCKET (RECO 5224: "paginate or collapse by bucket — but no
+  // signal may be unreachable"). Each block names its bucket, how many it lists, that none are
+  // hidden, and the bucket's bar (read from the row's own `bar`, never typed); each opens by
+  // default (cc#1601) and remembers its own hand-collapse for the visit. The table is no longer
+  // desktop-only — a phone reaches every row too, scrolling sideways inside the card like the
+  // other tables at that width.
+  const nmHead = '<thead><tr><th>Symbol</th><th>Bucket</th><th>Score /100 &middot; bar</th><th>Gates</th><th>Rank</th><th>Why not</th></tr></thead>';
+  const missSection = !all.length
+    ? '<details class="nm" open><summary>Near miss <span class="ct">nothing scored on this side</span></summary></details>'
+    : (order.map(function(b){
+        const rows = miss.filter(x => String(x.best_label || '').toUpperCase() === b);
+        if (!rows.length) return '';
+        const bar = rows[0].bar;
+        const open = NM_OPEN[b] !== false;
+        return '<details class="nm" id="missTbl' + esc(b) + '"' + (open ? ' open' : '') + ' ontoggle="nmToggle(\'' + esc(b) + '\', this)">'
+          + '<summary>Near miss &middot; ' + esc(b) + ' <span class="ct">' + rows.length + ' listed, none hidden'
+          + (bar != null ? ' &middot; bar ' + esc(bar) : '') + ' &middot; strongest first</span></summary>'
+          + '<div class="scroll"><table>' + nmHead + '<tbody>' + rows.map(missRow).join('') + '</tbody></table></div></details>';
+      }).join('')
+      || '<details class="nm" open><summary>Near miss <span class="ct">0 listed &middot; every ' + side + ' signal would qualify</span></summary></details>');
 
   const mob = qual.map(x => '<div class="mob-card">'
     + '<div class="mob-card-head"><span class="mob-sym">' + esc(x.symbol) + '</span>'
@@ -491,7 +583,7 @@ function renderPanel(side){
     + '</div></div>').join('');
 
   return head + qualSection
-       + '<div class="mob-cards">' + (qual.length ? mob : '<div class="empty">No qualified ' + side + ' signal</div>') + '</div>'
+       + '<div class="mob-cards">' + (qual.length ? mob : '<div class="empty">No ' + side + ' signal would qualify right now &middot; every ' + side + ' signal is listed under Near miss</div>') + '</div>'
        + missSection;
 }
 

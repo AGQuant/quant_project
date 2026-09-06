@@ -1449,8 +1449,11 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          content and pushed tc13Box below the fold behind a dead gap (founder screenshot 31-Aug).
          The frame now sizes itself from the embedded page's own postMessage
          ({type:'tcscan-resize', h}) with a 200px floor before the first message lands.
-         cc#1289's engine note still holds: the frame is the V1.1 GATED score/100 scanner, the
-         box is TC13 (13-check binary, tc_scanner_holds) — two engines, badged apart (lock 7).
+         cc#1745 (after cc#1746): the box and the frame now read the SAME four score100 buckets
+         (tc_v4_dual.score_card) — no longer two engines. They differ by RULE, not by score: the
+         box is the book, which ENTERS on the score bar alone (TC_SCANNER_ENTRY_EXIT_V2,
+         session_log 39467); the frame's would-qualify count needs bar AND all three side gates
+         AND rank within the per-bucket cap. The framed page says so in its own one-line note.
          Pure render either way: /api/scanners/tc/holds computes, this pane formats. -->
     <div id="tc13Box" style="padding:8px 2px 10px"></div>
     <iframe id="tcscanFrame" title="TC Scanner" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
