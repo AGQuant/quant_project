@@ -709,7 +709,7 @@ body[data-theme]{
 .oic.mp .up i,.oic.mp .dn i{background:#FF9F45;opacity:1}
 .oiax{height:var(--bw-1);background:var(--line)}
 .oispot{position:absolute;top:0;bottom:0;width:0;border-left:var(--bw-1) dashed var(--cyan);pointer-events:none}
-.oiwall{position:absolute;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);
+.oiwall{position:absolute;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);
   letter-spacing:var(--track-px8);white-space:nowrap;transform:translateX(-50%);pointer-events:none}
 /* cc#1474: mirrors cc#1471 on the signal page — PUT WALL's word-tag joins the unified TOP row
    (the put BARS still grow down, the put strike number stays at the bottom); .stack is the
@@ -719,7 +719,7 @@ body[data-theme]{
 .oiwall.mpw{top:0;color:#FF9F45}
 .oiwall.bw{top:0;color:var(--txt,#E9EEFB)}   /* both walls on ONE strike — merged tag (cc#1475) */
 .oiwall.stack{top:13px}
-.oichg{position:absolute;transform:translateX(-50%);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);
+.oichg{position:absolute;transform:translateX(-50%);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);
   letter-spacing:var(--track-px8);white-space:nowrap;pointer-events:none}
 .oichg.ce{top:13px;color:var(--red)}
 .oichg.pe{bottom:13px;color:var(--grn)}
@@ -728,28 +728,41 @@ body[data-theme]{
    x, edge-clamped like .oix.lo/.hi. */
 .oisplb{position:relative;height:36px;margin-top:var(--space-2)}
 .oisplb span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);letter-spacing:var(--track-px8);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);letter-spacing:var(--track-px8);
   color:var(--cyan);pointer-events:none;text-align:center}
 .oisplb span i{display:block;font-style:normal}
-.oisplb span b{display:block;font-size:var(--type-10);font-weight:800}
+.oisplb span b{display:block;font-size:var(--type-105);font-weight:800}
+/* cc#1777 · LIGHT SETS ONLY. --cyan bridges to --brand, a dark-first hue: on the white panel it
+   measures 1.58 (Aqua White) / 2.64 (Silver Gold) / 4.42 (Blush) against AA 4.5. --blu bridges
+   to --accent, which clears on all three (5.08 / 4.87 / 4.98) and is the set's own accent, so
+   the Spot label and its dashed rule move to it there. Scoped to the three light data-theme
+   values so Gold Night / Midnight Blue / AI Night / Dusk Violet / Indigo Ash are a no-op.
+   The amber role (.oiwall.mpw / .oix.mp / .asof.stale, the raw amber hex = 2.04 on white) has NO token
+   that clears AA on all three light sets (--label is 3.21 on Silver Gold) — left as is and
+   STOPPED on the card per scope 3, not painted with an invented value. */
+body[data-theme="aquawhite"] .oisplb span,body[data-theme="silvergold"] .oisplb span,
+body[data-theme="blush"] .oisplb span{color:var(--blu)}
+body[data-theme="aquawhite"] .oispot,body[data-theme="silvergold"] .oispot,
+body[data-theme="blush"] .oispot{border-left-color:var(--blu)}
 .oisplb span.lo{transform:none;left:0;text-align:left}
 .oisplb span.hi{transform:none;left:auto;right:0;text-align:right}
 .oixs{position:relative;height:12px;margin-top:var(--space-3)}
 .oix{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-8);letter-spacing:var(--track-px8);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);letter-spacing:var(--track-px8);
   pointer-events:none}
 .oix.pw{color:var(--grn)}
 .oix.cw{color:var(--red)}
 .oix.mp{color:#FF9F45}
 .oix.lo{transform:none;left:0}
 .oix.hi{transform:none;left:auto;right:0}
-.oird{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mut);
+.oird{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--mut);
   margin-top:var(--space-10);line-height:1.6}
 .oird b{color:var(--txt,#E9EEFB)}
 .asof{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);letter-spacing:var(--track-px10);color:var(--mut)}
 .asof.stale{color:#FF9F45}
-/* cc#1361 · this card's own text chrome, one type step up from the shared classes */
-.oiasof{font-size:var(--type-10)}
+/* cc#1361 · this card's own text chrome, one type step up from the shared classes;
+   cc#1777 · one more step (founder: one notch) — the .asof base class stays at --type-9 */
+.oiasof{font-size:var(--type-105)}
 /* cc#1474: .oird.oifacts is gone with the footer it styled — the facts live on the chart now,
    same as the signal page after cc#1468. .oiib is the how-to-read button beside the stamp. */
 .oiib{min-width:22px;min-height:22px;border-radius:50%;border:var(--bw-1) solid var(--line);
