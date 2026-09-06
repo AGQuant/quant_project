@@ -830,6 +830,10 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .leg .kv b{color:var(--tx2);font-weight:500}
 #pane-index .leg .pnl{text-align:right;font:600 15px var(--f-m)}
 #pane-index .leg .pnl small{display:block;font-size:10.5px;font-weight:500}
+/* cc#1742: the row's chart glyph — its own grid column after the P&L, a 44px tap target */
+#pane-index .leg{grid-template-columns:auto 1fr auto auto}
+#pane-index .leg .lgch{width:44px;height:44px;margin:-8px -10px -8px 0;border:none;border-radius:8px;background:transparent;color:var(--mut);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit}
+#pane-index .leg .lgch:hover,#pane-index .leg .lgch:focus-visible{color:var(--blu);background:var(--well)}
 #pane-index .empty,#pane-index .unavail{padding:12px 14px;border-radius:9px;border:1px dashed var(--line2);color:var(--tx3);font:500 11.5px var(--f-m);line-height:1.6}
 #pane-index .ipf{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 #pane-index .btn{font:700 11px var(--f-m);letter-spacing:.06em;padding:9px 14px;min-height:36px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);color:var(--tx);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
@@ -1393,7 +1397,7 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
         <button id="v10tg-BANKNIFTY" onclick="setV10Sym('BANKNIFTY')" style="border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--mut);font-family:inherit">BANKNIFTY</button>
       </div>
       <div style="flex:1;min-width:10px"></div>
-      <div style="font-size:10px;color:var(--mut)">B / S entry at the index level · T target · SL stop · FLIP B / S = same-bar exit + entry · exit label = option P&amp;L · ○ open leg · pins on the spot bar</div>
+      <div id="v10ChartLegend" style="font-size:10px;color:var(--mut)">B / S entry · FLIP B / S = same-bar exit + entry · small square = exit (green target, red stop, grey other) · ○ OPEN leg · pins on the spot bar · hover or tap a marker for the index level and option P&amp;L</div>
       <button onclick="closeV10Chart()" title="Close (Esc)" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--line2);background:var(--surface2);color:var(--mut);cursor:pointer;font-size:14px;flex:none">&#10005;</button>
     </div>
     <div id="v10ChartBox" style="flex:1;min-height:0;position:relative"></div>
@@ -6820,10 +6824,18 @@ function buildV10Markers(candles, open, closed){
      V10_DISPLAY_OPTIONS_ONLY_V1 (36703) the rows are the OPT legs and the exit label carries the
      OPTION P&L; the pin sits on the spot bar the leg's timestamp snaps to, so the level printed
      is the index level, never the premium. ONE builder — no second marker path. */
+  /* cc#1742 (founder 06-Sep: "display only Buy Sell and Flip, dont show levels and P&L in chart"):
+     the on-plot label is the ACTION CODE only — B, S, FLIP B, FLIP S, and "· OPEN" on the live
+     leg (state, not history). Target / stop exits stay plotted as small unlabelled squares (green
+     target, red stop, grey other) so a trade never appears to open and never close. The index
+     level and the option P&L leave the plot but not the data: every marker's detail goes into
+     _v10Tips[time] and shows on hover / tap (loadV10Chart's crosshair tooltip). */
   const sym=_v10sym, ev=[];
+  _v10Tips={};
   const isOpt=r=>(((r.leg||r.type||'')+'').toUpperCase()==='OPT');
   const symMatch=r=>(((r.symbol||r.sym||'')+'').toUpperCase()===sym);
   const pnlTxt=p=>(p==null||isNaN(p))?'':' '+(p>=0?'+':'−')+num(Math.abs(p),0);
+  const tip=(t,line)=>{ (_v10Tips[t]=_v10Tips[t]||[]).push(line); };
   (closed||[]).filter(r=>symMatch(r)&&isOpt(r)).forEach(r=>{
     const long=_v10OptLong(r);
     const eBar=_v10SnapBar(candles,r.entry_ts);
@@ -6840,11 +6852,13 @@ function buildV10Markers(candles, open, closed){
     if(e.kind==='exit'){
       const code=e.reason==='TARGET'?'T':e.reason;
       const col=e.reason==='TARGET'?UP:(e.reason==='SL'?DN:C.mut);
-      return {time:e.time,position:e.long?'aboveBar':'belowBar',color:col,shape:e.long?'arrowDown':'arrowUp',text:code+pnlTxt(e.pnl)};
+      tip(e.time,(code==='T'?'Target':code==='SL'?'Stop':code)+' exit · option P&L'+(pnlTxt(e.pnl)||' n/a'));
+      return {time:e.time,position:e.long?'aboveBar':'belowBar',color:col,shape:'square',size:0.6,text:''};
     }
+    tip(e.time,(e.long?'B':'S')+' at '+num(e.level,0)+(e.kind==='open'?' · OPEN leg':''));
     return {time:e.time,position:e.long?'belowBar':'aboveBar',color:e.long?UP:DN,
       shape:e.kind==='open'?'circle':(e.long?'arrowUp':'arrowDown'),
-      text:(e.long?'B ':'S ')+num(e.level,0)+(e.kind==='open'?' · OPEN':'')};
+      text:(e.long?'B':'S')+(e.kind==='open'?' · OPEN':'')};
   };
   const byBar={}; ev.forEach(e=>{ (byBar[e.time]=byBar[e.time]||[]).push(e); });
   const out=[];
@@ -6852,14 +6866,17 @@ function buildV10Markers(candles, open, closed){
     const g=byBar[k]; let ent=null, ex=null; const rest=[];
     g.forEach(e=>{ if(!ex&&e.kind==='exit') ex=e; else if(!ent&&e.kind==='entry') ent=e; else rest.push(e); });
     if(ent&&ex){
-      // the flip: one glyph, the entry's direction and colour, the exit's option P&L on the label
+      // the flip: one glyph, the entry's direction and colour; the level and the closed leg's option P&L go to the tooltip
+      tip(ent.time,'FLIP '+(ent.long?'B':'S')+' at '+num(ent.level,0)+' · closed leg option P&L'+(pnlTxt(ex.pnl)||' n/a'));
       out.push({time:ent.time,position:ent.long?'belowBar':'aboveBar',color:ent.long?UP:DN,
-        shape:ent.long?'arrowUp':'arrowDown',text:'FLIP '+(ent.long?'B':'S')+' '+num(ent.level,0)+pnlTxt(ex.pnl)});
+        shape:ent.long?'arrowUp':'arrowDown',text:'FLIP '+(ent.long?'B':'S')});
       rest.forEach(e=>out.push(one(e)));
     } else g.forEach(e=>out.push(one(e)));
   });
+  window._v10Tips=_v10Tips;   // read by the crosshair tooltip and by the harness check
   return out.sort((a,b)=>a.time-b.time);   // LWC requires ascending-by-time markers
 }
+var _v10Tips={};
 function _v10IstKey(iso){
   // a trade's entry as 'DD-Mon HH:MI' IST — the exact string /api/v10/trades/legs prints as
   // entry_ist, so a log row can find its own trade in the chart's closed list without an id.
@@ -6910,7 +6927,22 @@ async function loadV10Chart(){
     let markers=[];
     try{ markers=buildV10Markers(candles, open, closed); }
     catch(me){ console.warn('[v10chart] markers',me&&me.message); }   // a bad trade row must not cost the whole chart
+    window._v10LastMarkers=markers;   // cc#1742: what is actually drawn, readable by a render check
     if(markers.length) series.setMarkers(markers);
+    /* cc#1742 scope 4 — detail on demand: the level and the option P&L that left the plot show in
+       a tooltip on the bar under the crosshair (hover on desktop, tap on touch — LWC fires the
+       crosshair move for both). Nothing is deleted from the data, only from the default view. */
+    const tipEl=document.createElement('div'); tipEl.id='v10Tip';
+    tipEl.style.cssText='position:absolute;display:none;z-index:5;pointer-events:none;padding:6px 9px;border-radius:7px;background:var(--surface2);border:1px solid var(--line2);color:var(--txt);font:600 11px var(--f-m);white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.35)';
+    box.appendChild(tipEl);
+    chart.subscribeCrosshairMove(function(p){
+      const lines=(p&&p.time!=null)?_v10Tips[p.time]:null;
+      if(!lines||!p.point){ tipEl.style.display='none'; return; }
+      tipEl.innerHTML=lines.map(esc).join('<br>'); tipEl.style.display='block';
+      const x=Math.max(8,Math.min(p.point.x+12, box.clientWidth-tipEl.offsetWidth-8));
+      const y=Math.max(8,p.point.y-12-tipEl.offsetHeight);
+      tipEl.style.left=x+'px'; tipEl.style.top=y+'px';
+    });
     chart.timeScale().fitContent();
     if(_v10pendingTrade){
       // cc#1573: the log row's glyph — find that OPT leg by symbol + entry minute, scroll to its entry bar
@@ -7420,10 +7452,13 @@ function ipLegs(key){
         + (l.sl ? '<span>stop <b>' + num(l.sl, 2) + '</b></span>' : '')
         + (l.tgt ? '<span>target <b>' + num(l.tgt, 2) + '</b></span>' : '')
         + '<span>qty <b>' + l.qty + '</b></span>';
+      /* cc#1742 scope 1: a chart glyph on every row opens the V10 trades chart on THIS index
+         (openV10Chart presets the toggle from `feed`); a 4th grid column, so the P&L keeps its place. */
       return '<div class="leg ' + cls + '"><span class="side">' + (cls === 'short' ? 'SELL' : 'BUY') + '</span>'
         + '<div><div class="what">' + what + '</div><div class="kv">' + kv + '</div></div>'
         + '<div class="pnl ' + (l.pnl >= 0 ? 'pos' : 'neg') + '">' + (l.pnl < 0 ? '−' : '+') + '₹' + num(Math.abs(l.pnl))
-        + '<small>' + sgn(l.pPct, 2) + '%</small></div></div>';
+        + '<small>' + sgn(l.pPct, 2) + '%</small></div>'
+        + '<button type="button" class="lgch" onclick="openV10Chart(\'' + feed + '\')" title="Open the V10 trades chart for ' + key + '" aria-label="Open the V10 trades chart for ' + key + '">&#128200;</button></div>';
     }).join('');
   } else if(sig.dir === 'LONG' || sig.dir === 'SHORT'){
     legsHtml = '<div class="empty">Live ' + sig.dir + ' signal — no open option leg.</div>';
