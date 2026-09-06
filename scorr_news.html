@@ -41,8 +41,12 @@
   /* cc#195: widen the center frame so the list fills the screen with small
      margins. Mobile (<768px) keeps the 760px cap = full-width with side padding;
      the sticky tab bar lives inside .wrap so it widens + stays aligned too. */
-  @media(min-width:768px){ .wrap{max-width:90vw;padding-left:24px;padding-right:24px} }
-  @media(min-width:1200px){ .wrap{max-width:1140px} }
+  /* cc#1754 (founder 06-Sep "i want full screen view"): the page is FULL WIDTH now — the cc#1716
+     QB treatment (max-width:none, the viewport minus the standard gutters), not a second one.
+     The 1140px cap is gone; the story list, its tabs and the masthead use the space. What stays
+     narrow is the READING column: .art-body keeps its cc#195 860px measure, .art-stand its 64ch,
+     and the headline gets a cap of its own below so prose is never stretched across 1900px. */
+  @media(min-width:768px){ .wrap{max-width:none;padding-left:24px;padding-right:24px} }
 
   .masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;
     padding-bottom:18px;border-bottom:2px solid var(--txt)}
@@ -92,7 +96,7 @@
 
   .art{padding:26px 0;border-bottom:1px solid var(--line);position:relative}
   .art.lead{padding:30px 0 28px}
-  .art-head{font-family:var(--serif);font-size:23px;font-weight:600;line-height:1.28;color:var(--txt);text-wrap:pretty;padding-right:40px}
+  .art-head{font-family:var(--serif);font-size:23px;font-weight:600;line-height:1.28;color:var(--txt);text-wrap:pretty;padding-right:40px;max-width:1100px}   /* cc#1754: headline measure on the full-width page */
   .art.lead .art-head{font-size:30px;line-height:1.18;letter-spacing:-.01em;text-wrap:balance}
   .imp-high .art-head{font-size:25px}
 

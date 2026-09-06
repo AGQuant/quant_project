@@ -1267,6 +1267,9 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          main nav to V8 nav, interchange positions"): the Intel TAB BUTTON is gone from this row —
          Intel is site-nav slot 3 now (pwa_endpoints NAV '/dashboard#intel') and still opens the
          same #pane-intel below via the hash route. Check takes this seat: an iframe of the live
+         [cc#1754: that Intel half was a Fable spec error — the founder wanted Intel DELINKED from
+         V8, full screen, like GVM. Intel is now its own page at /intel; the pane below is gone and
+         #intel redirects there. The Check half of cc#1747 stands.]
          /check page (?embed=1&full=1), sized by the cc#671 scorrTcHeight handshake — the same
          embed pattern as the TC Scanner tab, not a second mechanism. /check stays at its own URL. -->
     <button class="v8toptab" data-pane="check" onclick="showV8Pane('check')">Check</button>
@@ -1472,21 +1475,10 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   <div id="pane-alerts" style="display:none">
     <iframe id="alertsFrame" title="Alerts" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
   </div>
-  <!-- cc#1523: Intel pane — the same embed frame pattern.
-       cc#1730 (founder 06-Sep, "when i scroll through articles this All, AI Editorial, Domestic
-       tab should stick"): the /news category strip IS sticky inside this frame, but the frame
-       sat 160px down the page with a 640px floor, so on a 650-768px-tall viewport the OUTER page
-       had 118-236px of scroll of its own. The first wheel over the tab row scrolled the outer
-       page, the frame (and the strip pinned to its top edge) slid up under the sticky nav, and
-       every wheel after that scrolled the article inside a frame whose top was off-screen --
-       measured, not guessed. fitIntelFrame() below sizes the frame to exactly the viewport left
-       under it (minus the dashboard's own bottom padding), so the outer page has nothing to
-       scroll on this tab and all scrolling happens inside the frame, where the strip pins. The
-       640px floor is gone for the same reason -- it was the thing forcing the outer scroll;
-       a 360px floor keeps it usable on a very short window. calc() stays as the no-JS size. -->
-  <div id="pane-intel" style="display:none">
-    <iframe id="intelFrame" title="Intel" style="width:100%;height:calc(100vh - 150px);min-height:360px;border:0;background:var(--bg)"></iframe>
-  </div>
+  <!-- cc#1523's Intel pane (an iframe of /news?embed=1, sized by cc#1730's fitIntelFrame) is GONE
+       — cc#1754 (founder 06-Sep "intel should delink from V8 just like GVM ... i want full screen
+       view"): Intel is a standalone page at /intel under the canonical nav, no V8 chrome. The
+       #intel hash redirects there (see the tab controller below) so old links still land. -->
   <!-- cc#1747: Check inside the V8 shell — the live /check page in an iframe (lazy-loaded on first
        open, ?embed=1&full=1 keeps the page head + symbol input, strips only the site nav). Height
        follows the page's own scorrTcHeight postMessage (cc#671), source-checked below; 200px floor. -->
@@ -8526,30 +8518,14 @@ window.v14Boot=function(){
 </script>
 <script>
 /* cc#542+543: top-level V8 | Index Intel | V14 tab controller */
-/* cc#1730: size the Intel frame to the viewport left under it, so the OUTER page never scrolls
-   on this tab and the /news category strip (sticky inside the frame) stays pinned under the nav
-   + tab row. Two passes: first the frame takes everything from its top edge to the bottom of
-   the viewport; then whatever the document STILL overflows by (the dashboard's own bottom
-   padding under the frame -- read as real overflow, not as a content measurement, because the
-   body's min-height would otherwise inflate it) is taken back off. 360px floor. Runs on show,
-   on resize while the pane is open, and once more when the frame's document loads (fonts/late
-   layout above it can move `top`). */
-function fitIntelFrame(){
-  var pane=document.getElementById('pane-intel'),f=document.getElementById('intelFrame');
-  if(!pane||!f||pane.style.display==='none')return;
-  var top=f.getBoundingClientRect().top+window.scrollY,
-      h=Math.max(360,Math.floor(window.innerHeight-top));
-  f.style.height=h+'px';
-  var over=document.documentElement.scrollHeight-window.innerHeight;
-  if(over>0){h=Math.max(360,h-over);f.style.height=h+'px';}
-}
-window.addEventListener('resize',function(){fitIntelFrame();},{passive:true});
-document.addEventListener('DOMContentLoaded',function(){var f=document.getElementById('intelFrame');if(f)f.addEventListener('load',fitIntelFrame);});
+/* cc#1730's fitIntelFrame() (viewport-fit sizing of the Intel iframe) is RETIRED by cc#1754:
+   Intel is a standalone page now (/intel, the GVM pattern) and the frame it sized is gone. The
+   page's own category strip pins under the canonical nav via ScorrNavOffset, unchanged. */
 function showV8Pane(name){
   /* cc#1282: digest + trades join the pane map as embed frames (cc#740 tcscan pattern). */
   var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',tcscan:'pane-tcscan',bt:'pane-bt',
-             digest:'pane-digest',trades:'pane-trades',intel:'pane-intel',alerts:'pane-alerts',
-             model:'pane-model',check:'pane-check'};  /* cc#1523, cc#1585, cc#1584, cc#1747 */
+             digest:'pane-digest',trades:'pane-trades',alerts:'pane-alerts',
+             model:'pane-model',check:'pane-check'};  /* cc#1523, cc#1585, cc#1584, cc#1747; cc#1754 removed intel */
   Object.keys(panes).forEach(function(k){var el=document.getElementById(panes[k]);if(el)el.style.display=(k===name)?'':'none';});
   var btns=document.querySelectorAll('.v8toptab');
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
@@ -8563,7 +8539,6 @@ function showV8Pane(name){
   if(name==='tcscan'&&window.tc13Boot)window.tc13Boot();  // cc#1289: TC13 open/closed box, lazy on first open
   if(name==='digest'){var fd=document.getElementById('digestFrame');if(fd&&!fd.src)fd.src='/digest?embed=1';}  // cc#1282
   if(name==='trades'){var ft=document.getElementById('tradesFrame');if(ft&&!ft.src)ft.src='/trades?embed=1';}  // cc#1282
-  if(name==='intel'){var fi=document.getElementById('intelFrame');if(fi&&!fi.src)fi.src='/news?embed=1';fitIntelFrame();}  // cc#1523; cc#1730 fit-to-viewport
   if(name==='alerts'){var fa=document.getElementById('alertsFrame');if(fa&&!fa.src)fa.src='/alerts?embed=1';}  // cc#1585
   if(name==='model'){var mm=document.getElementById('mpMount');if(mm&&window.ScorrModelPortfolio)window.ScorrModelPortfolio.mount(mm);}  // cc#1677
 }
@@ -8575,7 +8550,9 @@ function showV8Pane(name){
    land on the Day Log table instead of a 404 or the default tab. Keys map to TAB_LABELS indices. */
 var INNER_TABS={master:0,buyrev:1,buymom:2,sellrev:4,sellmom:5,tradelog:7,daylog:8,rawdata:9,news:11,results:12,global:13,matrix:15};
 function openInnerTab(h){ if(!(h in INNER_TABS))return false; try{ showV8Pane('v8'); selectTab(INNER_TABS[h]); }catch(e){} return true; }
-(function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model','check'];var h=(location.hash||'').replace('#','');
+(function(){var TABS=['index','v14','tcscan','bt','digest','trades','alerts','model','check'];var h=(location.hash||'').replace('#','');
+  // cc#1754: Intel is a standalone page (/intel). The old V8 hash must not 404 or open a blank pane.
+  if(h==='intel'){location.replace('/intel');return;}
   if(openInnerTab(h))return;
   // cc#1207: the hidden V14 tab reveals itself only for a direct #v14 link, so the strip stays
   // clean for everyone else and the deep link still works with its tab visible.
@@ -8583,7 +8560,8 @@ function openInnerTab(h){ if(!(h in INNER_TABS))return false; try{ showV8Pane('v
   // cc#1293: same reveal-on-direct-link pattern for the now-hidden V6 BT tab.
   if(h==='bt'){var _bt=document.getElementById('bttab'); if(_bt) _bt.style.display='';}
   if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
-window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model','check'];var h=(location.hash||'').replace('#','');
+window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades','alerts','model','check'];var h=(location.hash||'').replace('#','');
+  if(h==='intel'){location.replace('/intel');return;}   // cc#1754
   if(openInnerTab(h))return;
   showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
 /* cc#1584's Model Portfolio chip strip (mpStrip/mpPick/mpBoot) is RETIRED here — superseded by
