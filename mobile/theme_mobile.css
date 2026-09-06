@@ -640,5 +640,9 @@ body[data-theme="electricviolet"]{ --ev-rim:rgba(200,180,255,.26); --ev-sink:rgb
  * their own state colour -> the colour), no glow */
 :root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--gold-hi), var(--brand) 55%, var(--wayfind)); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; }
 :root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm i{ color:transparent; -webkit-text-fill-color:transparent; }
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-vword,
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .hero-mood{ background-image:linear-gradient(180deg, color-mix(in srgb, currentColor 55%, var(--ink)) 0%, currentColor 65%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; text-shadow:none; }
+/* cc#1794 (P0, founder screenshot 06-Sep 23:14): the Home hero word is NOT gradient-clipped. On the large italic
+ * 900 heading the clipped paint area collapsed and BEARISH rendered as a one-character blob. The verdict word is
+ * the most important text in the app and must not depend on a paint trick: flat mood colour, permanently, no
+ * text-shadow (cc#1775). Only #ckp .c-vword keeps the clip (it renders whole; checked). */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-vword{ background-image:linear-gradient(180deg, color-mix(in srgb, currentColor 55%, var(--ink)) 0%, currentColor 65%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; text-shadow:none; }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .hero-mood{ background-image:none; -webkit-text-fill-color:currentColor; text-shadow:none; }
