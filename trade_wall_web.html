@@ -58,6 +58,12 @@
   tbody td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
   tbody tr:hover{background:var(--card2)}
   .num{text-align:right;font-variant-numeric:tabular-nums}
+  /* cc#1734: Closed book DETAIL is decoded text; it ellipsises (full text on hover) before the
+     numbers would shrink, so the tab fits a laptop width with no horizontal scroll. */
+  .tw-detail{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  @media(max-width:1280px){ .tw-detail{max-width:150px} }
+  .tw-csum{font-size:11.5px;color:var(--mut);margin:-4px 0 8px}
+  .tw-csum b{color:var(--txt)}
   .sym{font-weight:800}
   .pos{color:var(--grn)} .neg{color:var(--red)}
   /* cc#1735: Approved tab — inline level inputs, saved tick, warnings, greyed closed rows */
@@ -173,6 +179,7 @@
 
   <div class="card">
     <div class="meta" id="meta">Loading…</div>
+    <div class="tw-csum" id="closedSummary" hidden></div>   <!-- cc#1734: Closed book summary line -->
     <div class="scroll"><table id="tbl">
       <thead id="thead"></thead>
       <tbody id="body"></tbody>
@@ -264,10 +271,42 @@ function pnlCell(e){
   return '<td class="num">--</td>';
 }
 
+/* cc#1734: the two Closed-book P&L cells. Rupees ONLY when the engine served pnl; percent when it
+   served pnl_pct, else — for a rupee row whose entry and exit prices are both present — computed
+   from those prices and LABELLED computed. A blank is honest; a converted number would not be. */
+function rsCell(e){
+  if (e.pnl === null || e.pnl === undefined) return '<td class="num"></td>';
+  return '<td class="num ' + (Number(e.pnl) >= 0 ? 'pos' : 'neg') + '">' + inr(e.pnl) + '</td>';
+}
+function pctCell(e){
+  if (e.pnl_pct !== null && e.pnl_pct !== undefined)
+    return '<td class="num ' + (Number(e.pnl_pct) >= 0 ? 'pos' : 'neg') + '">' + pctFmt(e.pnl_pct) + '</td>';
+  if (e.pnl !== null && e.pnl !== undefined && e.entry_price && e.exit_price){
+    var p = (Number(e.exit_price) - Number(e.entry_price)) / Number(e.entry_price) * 100 * (e.side === 'SHORT' ? -1 : 1);
+    return '<td class="num ' + (p >= 0 ? 'pos' : 'neg') + '" title="computed from entry and exit price, not served by the engine">'
+      + pctFmt(Math.round(p * 100) / 100) + '<span class="tw-computed">computed</span></td>';
+  }
+  return '<td class="num"></td>';
+}
+/* cc#1734 scope 3: DETAIL decode — the map is SERVED (d.decode: engine close words + the shared
+   basket label map); a code missing from it prints raw, the raw codes stay on hover. */
+function decodeResult(code){
+  if (!code) return '';
+  var m = (STATE.decode || {}).exit_reasons || {};
+  if (m[code]) return m[code];
+  var i = String(code).indexOf(' (');
+  if (i > 0 && m[String(code).slice(0, i)]) return m[String(code).slice(0, i)] + String(code).slice(i);
+  return String(code);
+}
+function decodeTag(note){
+  if (!note) return '';
+  var t = (STATE.decode || {}).tags || {};
+  return t[note] || String(note);
+}
 function rowsHtml(list){
   /* cc#1525/cc#1537: open rows carry a Status cell (the read-only APPROVED badge), so the row
      width is status-dependent — the day separators must follow it or they misalign the grid. */
-  var cols = STATE.status === 'open' ? 10 : 9;
+  var cols = STATE.status === 'open' ? 10 : 10;   /* cc#1734: closed grew a second P&L column */
   var h = '', day = null;
   list.forEach(function(e){
     if (e.day !== day){
@@ -285,15 +324,18 @@ function rowsHtml(list){
       + (STATE.status === 'closed'
           ? '<td class="tw-tag">' + esc(e.exit.when_full || '--') + '</td>'
             + '<td class="num">' + px(e.exit_price) + '</td>'
-          : '<td class="num">' + qty(e.qty) + '</td><td></td>')
-      + pnlCell(e)
-      + '<td class="tw-tag">'
+            + rsCell(e) + pctCell(e)
+          : '<td class="num">' + qty(e.qty) + '</td><td></td>' + pnlCell(e))
+      + (STATE.status === 'closed'
+          ? '<td class="tw-tag tw-detail" title="' + esc((e.result || '') + (e.note ? ' · ' + e.note : '')) + '">'
+            + esc(decodeResult(e.result)) + (e.note ? (e.result ? ' · ' : '') + esc(decodeTag(e.note)) : '') + '</td>'
+          : '<td class="tw-tag">'
         + (e.reversal_of ? '<span class="tw-rev" title="Opposite direction to a position already approved and open — may be the exit signal">REVERSAL</span>' : '')
         + esc(e.result || '')
         + (e.note ? (e.result ? ' · ' : '') + esc(e.note) : '')
         + (e.reversal_of ? '<span class="tw-supp">vs open ' + heldTxt(e.reversal_of) + '</span>' : '')
         + (e.suppressed_by ? '<span class="tw-supp">in position: ' + heldTxt(e.suppressed_by) + '</span>' : '')
-        + '</td>'
+        + '</td>')
       + twCell(e)
       + '</tr>';
   });
@@ -301,9 +343,12 @@ function rowsHtml(list){
 }
 
 function theadHtml(){
+  /* cc#1734: the Closed book carries TWO P&L columns — rupees and percent — each filled only
+     with what the engine actually produced (V8/V10/QB emit rupees, TC Scanner / Investment
+     Scanner / Screeners emit percent only). Never converted between them. */
   return STATE.status === 'closed'
     ? '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
-      + '<th>Exited</th><th class="num">Exit</th><th class="num">P&amp;L</th><th>Detail</th></tr>'
+      + '<th>Exited</th><th class="num">Exit</th><th class="num">P&amp;L Rs</th><th class="num">P&amp;L %</th><th>Detail</th></tr>'
     : '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
       + '<th class="num">Qty</th><th></th><th class="num">P&amp;L</th><th>Detail</th><th>Status</th></tr>';
 }
@@ -466,8 +511,25 @@ function render(){
   }
   document.getElementById('body').innerHTML = view.length
     ? rowsHtml(view)
-    : '<tr><td colspan="' + (STATE.status === 'open' ? 10 : 9) + '" class="empty">' + emptyMsg + '</td></tr>';
+    : '<tr><td colspan="10" class="empty">' + emptyMsg + '</td></tr>';
   document.getElementById('more').innerHTML = moreHtml();
+  renderClosedSummary();
+}
+/* cc#1734 scope 4: one compact line above the Closed table for the ACTIVE instrument + engine,
+   from the SERVED closed_summary (whole closed wall, not the loaded slice). Rupees cover only
+   rows with a rupee value; percent-only rows are counted, never summed into rupees. */
+function renderClosedSummary(){
+  var el = document.getElementById('closedSummary'); if (!el) return;
+  if (STATE.status !== 'closed' || !STATE.closedSummary){ el.innerHTML = ''; el.hidden = true; return; }
+  var rows = STATE.closedSummary.filter(function(r){ return r.instrument === STATE.instrument && (STATE.bucket === 'ALL' || r.engine === STATE.bucket); });
+  var a = { n: 0, wins: 0, losses: 0, flat: 0, rs_rows: 0, rs_total: 0, pct_only: 0, unpriced: 0 };
+  rows.forEach(function(r){ Object.keys(a).forEach(function(k){ a[k] += Number(r[k] || 0); }); });
+  el.hidden = false;
+  el.innerHTML = '<b>' + a.n + '</b> closed · <b>' + a.wins + '</b> wins · <b>' + a.losses + '</b> losses' + (a.flat ? ' · ' + a.flat + ' flat' : '')
+    + ' · realised <b class="' + (a.rs_total >= 0 ? 'pos' : 'neg') + '">' + inr(a.rs_total) + '</b> over ' + a.rs_rows + ' rows with a rupee value'
+    + ' · <b>' + a.pct_only + '</b> rows percent-only (not in the rupee total)'
+    + (a.unpriced ? ' · ' + a.unpriced + ' rows unpriced' : '')
+    + ' · ' + esc(STATE.bucket === 'ALL' ? 'all engines' : STATE.bucket) + ' · ' + esc(STATE.instrument.charAt(0) + STATE.instrument.slice(1).toLowerCase());
 }
 
 function url(cursor){
@@ -548,6 +610,8 @@ function boot(keepCounts){
         STATE.total  = d.total;
       }
       STATE.byEngine = d.by_engine || {};
+      if (d.closed_summary) STATE.closedSummary = d.closed_summary;   /* cc#1734 */
+      if (d.decode) STATE.decode = d.decode;                            /* cc#1734 */
       STATE.asOf  = d.as_of;
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
