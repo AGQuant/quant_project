@@ -883,6 +883,10 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .sch h3{font:700 13.5px var(--f-d);color:var(--tx)}
 #pane-index .sch .sub{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3)}
 #pane-index .sch .ib{margin-left:auto}
+/* cc#1737: the Bullish / Bearish group heading above each OI Build Up row — the card h3 grammar
+   (same face, same tokens) lifted one level up so the two rows read as the app's two groups. */
+#pane-index .iigrp{display:flex;align-items:center;gap:8px;margin:4px 0 8px;font:700 13.5px var(--f-d);color:var(--tx)}
+#pane-index .iigrp .sub{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3)}
 #pane-index .tb{width:100%;min-width:0;border-collapse:collapse;font:500 11.5px var(--f-m)}   /* cc#1570: min-width:0 lifts the page-wide table{min-width:640px} floor (line ~290) that held every Index Intel card at 674px and clipped Bearish Flow's last column */
 #pane-index .tb th{font:600 8.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-align:right;padding:4px 3px;border-bottom:1px solid var(--line);text-transform:none}
 #pane-index .tb th:first-child,#pane-index .tb td:first-child{text-align:left;padding-left:0}
@@ -7603,13 +7607,21 @@ function buTh(label, key, k){
   return _sortTh(label, key, BU_SORT[k], "iiBuSort('" + k + "','" + key + "')");
 }
 function buTable(rows, k, full){
-  /* founder default (34998): the card face carries SYMBOL / CMP+day% / OI Δ% / Vol R only;
-     Vol P + Vol D live in the VIEW MORE sheet. cc#1466's CMP cell convention kept: price with
-     no comma and no brackets, the MINUS stays, percent one type step down. */
-  return '<table class="tb"><thead><tr>'
+  /* founder default (34998) put SYMBOL / CMP+day% / OI Δ% / Vol R on the face and Vol P + Vol D
+     in the VIEW MORE sheet. cc#1737 (founder 06-Sep "keep column as per app Symbol, CMP, OI
+     change, Vol R, Vol P, Vol D"): the face now carries all six — the card is half-width like the
+     Volume Flow cards, so the six-at-half-width shape is already proven on this page. `full` is
+     kept for the sheet caller; both paths render the same six columns. Vol P / Vol D are the
+     SAME numbers the Volume Flow cards show: /api/v10/buildup fills them from
+     rvol_engine.closing_rvol_batch and volume_flow_endpoints.deliv_ratio_batch (v10_endpoints.py
+     :855-887), the identical batch functions /api/volume-flow reads (volume_flow_endpoints.py
+     :214-224) — nothing is recomputed here. A null prints the page's missing-value dash, never
+     0, never Vol R. cc#1466's CMP cell convention kept: price with no comma and no brackets,
+     the MINUS stays, percent one type step down. */
+  return '<div style="overflow-x:auto"><table class="tb"><thead><tr>'
     + buTh('SYMBOL', 'SYMBOL', k) + buTh('CMP', 'CMP', k)
     + buTh('OI Δ%', 'OI', k) + buTh('Vol R', 'RVOL', k)
-    + (full ? buTh('Vol P', 'VOLP', k) + buTh('Vol D', 'VOLD', k) : '')
+    + buTh('Vol P', 'VOLP', k) + buTh('Vol D', 'VOLD', k)
     + '</tr></thead><tbody>'
     + rows.map(function(r){
         var d = r.day_1d, cmp = (r.price != null ? String(Math.round(Number(r.price))) : '—');
@@ -7621,10 +7633,10 @@ function buTable(rows, k, full){
           /* cc#1509 (32043): OI Δ% is SINCE-OPEN at 2dp - same field the sorts read */
           + buNum(r.oi_chg_pct, 2, '%', true)
           + (r.rvol == null ? '<td>—</td>' : '<td class="am">' + Number(r.rvol).toFixed(1) + '×</td>')
-          + (full ? (r.vol_p == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
-                  + (r.vol_d == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>') : '')
+          + (r.vol_p == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
+          + (r.vol_d == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>')
           + '</tr>';
-      }).join('') + '</tbody></table>';
+      }).join('') + '</tbody></table></div>';
 }
 function buMore(k){
   var pool = _sortByState(buPool(k), BU_SORT[k], BU_SORT_GETTERS);
@@ -7680,9 +7692,22 @@ function rBuildUps(){
     ? '<span class="badge ' + (st.amber ? 'stale' : 'b-live') + '">'
       + (st.amber ? '' : '<span class="dot"></span>') + esc(st.txt) + '</span>'
     : '';
+  /* cc#1737 (founder 06-Sep "instead of 4 boxes in a row show 2 boxes in a row Bullish and then
+     Bearish just like Volume Flow"): two rows of two, the Volume Flow .two grid (II_TWO_COLS)
+     reused rather than a second half-width card. Row 1 BULLISH = Long Build Up + Short
+     Covering (price up); row 2 BEARISH = Short Buildup + Long Unwinding (price down). Each
+     card keeps its own PRICE/OI subtitle so the mechanic stays visible under the group label.
+     Classification, sorts, VIEW MORE, (i) and the as-of stamp are untouched. */
+  var grp = function(label, cls, mark, sub){
+    return '<div class="iigrp"><span class="' + cls + '">' + mark + '</span> ' + label + '<span class="sub">' + sub + '</span></div>';
+  };
   return '<section class="iisec"><div class="sh"><span class="st">OI Build Ups</span>' + badge
     + '<span class="asof">OI Δ% since open · top 5 by |OI Δ%|</span></div>'
-    + '<div class="four">' + BU_STATES.map(buCard).join('') + '</div></section>';
+    + grp('Bullish', 'pos', '▲', 'PRICE UP')
+    + '<div class="two" style="' + II_TWO_COLS + '">' + buCard(BU_STATES[0]) + buCard(BU_STATES[1]) + '</div>'
+    + grp('Bearish', 'neg', '▼', 'PRICE DOWN')
+    + '<div class="two" style="margin-top:14px;' + II_TWO_COLS + '">' + buCard(BU_STATES[2]) + buCard(BU_STATES[3]) + '</div>'
+    + '</section>';
 }
 
 /* ── VOLUME FLOW - the app's vfCard family (cc#1368/1430), ticks chips ONCE on the section
