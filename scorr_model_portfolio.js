@@ -12,6 +12,11 @@
    /quant-basket's own Holdings tab uses, cc#1299). The block/HSL markup is the cc#1709 renderer
    from quant_basket.html carried over line for line (same .rb-* classes; the CSS is injected once
    below because that page's styles are not shared) — one look, two surfaces.
+   cc#1728 (founder 06-Sep, screenshot of the pane): the registry notes left the header for an (i)
+   sheet (cc#1708 ScorrInfoSheet) sectioned SELECTION / SIZING / EXITS / CADENCE; the KPI strip is
+   CAPITAL | HOLDING VALUE (open positions at CMP, no cash) | CASH | P&L | RETURN % | ALPHA |
+   POSITIONS; NEXT REVIEW and STATE are hidden behind SHOW_REVIEW_STATE; the near-HS1 count is a
+   chip beside the title only when > 0; the tag shows the served TYPE once.
    ─────────────────────────────────────────────────────────────────────────────────────────────
    cc#1677 (kept below, unchanged): EMPTY LAUNCHER + two table views
    ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -260,7 +265,11 @@
       + '#mpMount .rb-foot{font-size:11px;color:var(--mut);padding:8px 14px 10px;border-top:1px solid var(--line,#1E2A44);white-space:normal}'
       + '#mpMount .rb-tag{display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:5px;background:rgba(148,166,210,.14);color:var(--mut);white-space:nowrap}'
       + '#mpMount .rb-ver{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;border:1px solid var(--line,#1E2A44);color:var(--mut)}'
-      + '#mpMount .mp-msg{font-size:11px;color:var(--mut);padding:10px 0}';
+      + '#mpMount .mp-msg{font-size:11px;color:var(--mut);padding:10px 0}'
+      // cc#1728: the (i) button uses the shared cc#1708 .ibtn look; ScorrInfoSheet injects that CSS
+      // only on first OPEN, so the same rule is carried here for the button's idle state.
+      + '#mpMount .ibtn{width:20px;height:20px;border-radius:50%;border:1px solid var(--line,#243049);background:var(--panel,#0E1526);color:var(--mut,#94a3b8);font-size:11px;font-weight:800;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none}'
+      + '#mpMount .ibtn:hover{color:var(--txt,#e6ecf5);border-color:var(--dim,#5E6B8F)}';
     document.head.appendChild(st);
   }
 
@@ -343,20 +352,78 @@
     return tableWrap('<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody>');
   }
 
-  function kpiHtml(reg, d, hs1cnt) {
+  // cc#1728: NEXT REVIEW and STATE left the strip (founder 06-Sep: "hide box Next Review and
+  // State"). Hidden behind a const, not deleted — flip to true and the two tiles come back in
+  // their old place at the end of the strip. Next review still shows inside the (i) sheet.
+  var SHOW_REVIEW_STATE = false;
+  function money2(v) { return v == null || isNaN(+v) ? '—' : '₹' + (+v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+  // cc#1728: the cash figure. Nothing SERVES qb_nav_daily.cash_value on its own —
+  // /api/performance/qb serves market_value = holdings_value + cash_value already added, and
+  // /api/qb/rebalance_history serves the cash the last rebalance/seed run wrote
+  // (blocks[].footer.cash_after, 159.60 for the 04-Sep seed). Endpoints are read-only on this
+  // card, so: CASH = the served ledger cash, cross-checked against the served NAV basis —
+  // HOLDING VALUE (sum of served current_value) + CASH must equal market_value within Rs 1
+  // (market_value is served rounded to the rupee). If the check fails (a nightly HS1 exit moves
+  // cash without a new rebalance block) the box shows the NAV-implied cash instead and the
+  // discrepancy is logged — the number on glass is never one the NAV basis disagrees with.
+  function cashFigure(mktVal, holdVal, ledgerCash) {
+    var navCash = (mktVal != null && holdVal != null) ? (mktVal - holdVal) : null;
+    if (ledgerCash == null) return { cash: navCash, sub: navCash == null ? 'uninvested' : 'uninvested · NAV-implied', ok: navCash != null, diff: null };
+    if (navCash == null) return { cash: ledgerCash, sub: 'uninvested', ok: true, diff: null };
+    var diff = (holdVal + ledgerCash) - mktVal;
+    if (Math.abs(diff) <= 1) return { cash: ledgerCash, sub: 'uninvested', ok: true, diff: diff };
+    try { console.warn('cc#1728 cash assert: holdings ' + holdVal.toFixed(2) + ' + ledger cash ' + ledgerCash.toFixed(2)
+      + ' = ' + (holdVal + ledgerCash).toFixed(2) + ' vs NAV-basis market value ' + mktVal.toFixed(2) + ' (off by ' + diff.toFixed(2) + ')'); } catch (e) {}
+    return { cash: navCash, sub: 'uninvested · NAV-implied (ledger ' + money2(ledgerCash) + ')', ok: false, diff: diff };
+  }
+
+  function kpiHtml(reg, d, hs1cnt, holdVal, cashInfo, nHold) {
     var cap = Number(reg.capital) || 0, maxN = reg.max_stocks != null ? reg.max_stocks : '—';
     var tile = function (k, v, sub, extra) { return '<div class="mp-kpi"><div class="k">' + k + '</div><div class="v ' + (extra || 'neu') + '">' + v + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') + '</div>'; };
     var badge = hs1cnt > 0 ? '<span class="mp-badge risk">' + hs1cnt + ' near HS1</span>' : '<span class="mp-badge ok">No risk</span>';
-    return '<div class="mp-kpis">'
+    // cc#1728 order: CAPITAL | HOLDING VALUE | CASH | P&L | RETURN % | ALPHA | POSITIONS
+    var h = '<div class="mp-kpis">'
       + tile('Capital', '₹' + cap.toLocaleString('en-IN'), 'Rs 5,000 slots')
-      + tile('Mkt Value', inr(d.market_value), 'holdings + cash (NAV basis)')
+      + tile('Holding Value', money2(holdVal), nHold + ' holding' + (nHold === 1 ? '' : 's') + ' at CMP')
+      + tile('Cash', money2(cashInfo.cash), esc(cashInfo.sub))
       + tile('P&amp;L', inr(d.pnl), null, cls(d.pnl))
       + tile('Return %', pct(d.return_pct), 'on ₹' + cap.toLocaleString('en-IN'), cls(d.return_pct))
       + tile('Alpha', d.alpha == null ? '—' : pct(d.alpha), 'vs basket benchmark', cls(d.alpha))
-      + tile('Positions', (d.positions != null ? d.positions : '—') + '/' + maxN, 'cap ' + maxN)
-      + tile('Next Review', fmtDMY(reg.next_rebalance), esc(reg.rebalance_freq || 'monthly'))
-      + '<div class="mp-kpi"><div class="k">State</div><div class="v" style="margin-top:6px">' + badge + '</div><div class="s">HS1 −20% nightly</div></div>'
-      + '</div>';
+      + tile('Positions', (d.positions != null ? d.positions : '—') + '/' + maxN, 'cap ' + maxN);
+    if (SHOW_REVIEW_STATE) {
+      h += tile('Next Review', fmtDMY(reg.next_rebalance), esc(reg.rebalance_freq || 'monthly'))
+        + '<div class="mp-kpi"><div class="k">State</div><div class="v" style="margin-top:6px">' + badge + '</div><div class="s">HS1 −20% nightly</div></div>';
+    }
+    return h + '</div>';
+  }
+
+  // cc#1728: the (i) sheet body — registry.notes sectioned SELECTION / SIZING / EXITS / CADENCE.
+  // The text is the served notes string split into sentences and sorted by keyword (the cc#1708
+  // basketInfoHtml pattern: pulled by keyword, never typed here). Registry fields that also
+  // matter to the reader — max positions, weight band, next review, frequency — are appended as
+  // served bullets in the section they belong to. A section with nothing in it is not rendered.
+  function rulesHtml(reg) {
+    var S = window.ScorrInfoSheet, sec = S ? S.section : function (k, h) { return '<div class="isheet-sec"><div class="isheet-k">' + esc(k) + '</div><div class="isheet-v">' + h + '</div></div>'; };
+    var sents = String(reg.notes || '').split(/(?<=\.)\s+(?=[A-Z(])/).map(function (x) { return x.trim(); }).filter(Boolean);
+    var buckets = { SELECTION: [], SIZING: [], EXITS: [], CADENCE: [] };
+    sents.forEach(function (x) {
+      if (/\bHS[12]\b|stop|exit/i.test(x)) buckets.EXITS.push(x);
+      else if (/equal weight|weight band|\bslot|whole shares|\bRs ?\d|₹|capital|\/\d+\b/i.test(x)) buckets.SIZING.push(x);
+      else if (/monthly|quarterly|nightly|weekly|rebalanc|review|rescreen/i.test(x)) buckets.CADENCE.push(x);
+      else buckets.SELECTION.push(x);
+    });
+    if (reg.max_stocks != null || reg.weight_band) buckets.SIZING.push('Max ' + (reg.max_stocks != null ? reg.max_stocks : '—') + ' positions' + (reg.weight_band ? ' · ' + reg.weight_band + ' weight band' : '') + (reg.capital != null ? ' · capital ₹' + Number(reg.capital).toLocaleString('en-IN') : ''));
+    if (reg.next_rebalance || reg.rebalance_freq) buckets.CADENCE.push('Next review ' + fmtDMY(reg.next_rebalance) + (reg.rebalance_freq ? ' · ' + reg.rebalance_freq : ''));
+    var h = '';
+    ['SELECTION', 'SIZING', 'EXITS', 'CADENCE'].forEach(function (k) {
+      if (buckets[k].length) h += sec(k, '<ul>' + buckets[k].map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>');
+    });
+    return h || sec('RULES', esc(reg.notes || '—'));
+  }
+  function openRules(reg) {
+    if (!window.ScorrInfoSheet) return;
+    window.ScorrInfoSheet.open(MP_LABEL + ' · Rules', rulesHtml(reg));
   }
 
   function loadBasketPane(el) {
@@ -380,13 +447,26 @@
       var hs1cnt = (qb.positions || []).filter(function (p) { return p.basket === MP_BASKET && p.pnl_pct != null && +p.pnl_pct < -20; }).length;
       var mktVal = d.market_value != null ? +d.market_value : pos.reduce(function (s, p) { return s + (+p.current_value || 0); }, 0);
       var rh = a[4] || {};
+      // cc#1728: HOLDING VALUE = sum of the served open positions at CMP (current_value), no cash.
+      var holdVal = pos.reduce(function (s, p) { return s + (p.current_value != null ? +p.current_value : 0); }, 0);
+      // the ledger cash the latest served block wrote (blocks are newest-first from the endpoint)
+      var blk = ((rh && rh.blocks) || []).filter(function (b) { return b && b.footer && b.footer.cash_after != null; })[0];
+      var cashInfo = cashFigure(d.market_value != null ? +d.market_value : null, holdVal, blk ? +blk.footer.cash_after : null);
+      // cc#1728: TYPE once — the served `type` (Quant/Discretionary), not phase + type.
+      var tag = String(reg.type || 'Discretionary');
       el.innerHTML =
-        '<div style="font-size:15px;font-weight:800;color:var(--txt)">' + MP_LABEL + ' <span style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-left:6px">Discretionary · ' + esc(reg.type || 'Discretionary') + '</span></div>'
-        + '<div style="font-size:11.5px;color:var(--mut);margin-top:3px">' + esc(reg.notes || '') + '</div>'
-        + kpiHtml(reg, d, hs1cnt)
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+        + '<span style="font-size:15px;font-weight:800;color:var(--txt)">' + MP_LABEL + '</span>'
+        + '<button type="button" class="ibtn" id="mpInfoBtn" aria-label="Rules" title="Rules">i</button>'
+        + (hs1cnt > 0 ? '<span class="mp-badge risk" id="mpHs1Chip">' + hs1cnt + ' near HS1</span>' : '')
+        + '<span id="mpTag" style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)">' + esc(tag) + '</span>'
+        + '</div>'
+        + kpiHtml(reg, d, hs1cnt, holdVal, cashInfo, pos.length)
         + '<div class="mp-sec">Holdings · ' + pos.length + '</div><div id="mpHoldings">' + holdingsHtml(pos.slice(), mktVal) + '</div>'
         + '<div class="mp-tabs" id="mpTabs"><button type="button" class="mp-tab active" data-mp-tab="rebalance">Rebalance History</button><button type="button" class="mp-tab" data-mp-tab="hsl">HSL History</button></div>'
         + '<div id="mpHist">' + (rh.error ? '<div class="mp-msg">Rebalance history unavailable — ' + esc(rh.error) + '</div>' : rebalanceHtml(rh)) + '</div>';
+      var ib = el.querySelector('#mpInfoBtn');
+      if (ib) ib.addEventListener('click', function () { openRules(reg); });
       var hold = el.querySelector('#mpHoldings');
       hold.addEventListener('click', function (e) {
         var t = e.target && e.target.closest ? e.target.closest('[data-mp-sort]') : null;
@@ -466,5 +546,5 @@
     });
   }
 
-  window.ScorrModelPortfolio = { mount: mount };
+  window.ScorrModelPortfolio = { mount: mount, rulesHtml: rulesHtml, cashFigure: cashFigure };   // cc#1728: builders exposed for the render check
 })();
