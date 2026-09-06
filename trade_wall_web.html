@@ -272,8 +272,16 @@ function sideCls(s){ return s === 'SHORT' ? 'short' : 'long'; }
 function pnlCell(e){
   if (e.pnl !== null && e.pnl !== undefined){
     var cls = Number(e.pnl) >= 0 ? 'pos' : 'neg';
-    return '<td class="num ' + cls + '">' + inr(e.pnl) + '</td>';
+    /* cc#1762: an open row's rupee is INDICATIVE (engine entry -> CMP as of); the hover says so */
+    var ttl = e.pnl_basis === 'indicative'
+      ? ' title="' + esc('indicative: engine entry ' + px2(e.entry_price) + (e.entry && e.entry.when_full ? ' on ' + e.entry.when_full : '')
+          + ' -> CMP' + (e.cmp != null ? ' ' + px2(e.cmp) : '') + (e.cmp_ts ? ' as of ' + e.cmp_ts + ' IST' : '') + ' x ' + (e.qty != null ? e.qty : '?')) + '"'
+      : '';
+    return '<td class="num ' + cls + '"' + ttl + '>' + inr(e.pnl) + '</td>';
   }
+  /* cc#1762 item 5: a V8 row whose symbol has no CMP is BLANK — never entry price standing in
+     for CMP (that renders a false 0.00), never a stale mark carried forward unsaid. */
+  if (e.pnl_basis === 'no-cmp') return '<td class="num tw-nocmp" title="no CMP for ' + esc(e.symbol) + ' — both P&L cells blank"></td>';
   if (e.pnl_pct !== null && e.pnl_pct !== undefined){
     var cls2 = Number(e.pnl_pct) >= 0 ? 'pos' : 'neg';
     return '<td class="num ' + cls2 + '">' + pctFmt(e.pnl_pct) + '</td>';
@@ -335,7 +343,7 @@ function rowsHtml(list){
           ? '<td class="tw-tag">' + esc(e.exit.when_full || '--') + '</td>'
             + '<td class="num">' + px(e.exit_price) + '</td>'
             + rsCell(e) + pctCell(e)
-          : '<td class="num">' + qty(e.qty) + '</td><td></td>' + pnlCell(e))
+          : '<td class="num">' + qty(e.qty) + '</td>' + pnlCell(e) + pnlApprovedCell(e))   /* cc#1762 */
       + (STATE.status === 'closed'
           ? '<td class="tw-tag tw-detail" title="' + esc((e.result || '') + (e.note ? ' · ' + e.note : '')) + '">'
             + esc(decodeResult(e.result)) + (e.note ? (e.result ? ' · ' : '') + esc(decodeTag(e.note)) : '') + '</td>'
@@ -360,7 +368,31 @@ function theadHtml(){
     ? '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
       + '<th>Exited</th><th class="num">Exit</th><th class="num">P&amp;L Rs</th><th class="num">P&amp;L %</th><th>Detail</th></tr>'
     : '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
-      + '<th class="num">Qty</th><th></th><th class="num">P&amp;L</th><th>Detail</th><th>Status</th></tr>';
+      + '<th class="num">Qty</th>'
+      /* cc#1762: TWO P&L columns with DIFFERENT bases, never conflated. Indicative = the engine's
+         entry at entry.ts to CMP as of cmp_as_of, x qty (the app home V8 OPEN BOOK formula, served
+         by the API — this page computes nothing). Approved = trade_alerts.approved_price at
+         approved_at to the SAME CMP, same qty — blank until approved. No CMP = both blank. */
+      + '<th class="num" title="' + pnlBasisTitle('indicative') + '">P&amp;L (indicative)</th>'
+      + '<th class="num" title="' + pnlBasisTitle('approved') + '">P&amp;L (approved)</th>'
+      + '<th>Detail</th><th>Status</th></tr>';
+}
+function pnlBasisTitle(which){
+  var b = STATE.pnlBasis || {};
+  var t = which === 'approved'
+    ? (b.approved || 'from the approved price at approval time to CMP, x qty; blank until approved')
+    : (b.indicative || 'from the engine entry at entry time to CMP, x qty');
+  return esc(t + (STATE.cmpAsOf ? ' · CMP as of ' + STATE.cmpAsOf + ' IST' : ''));
+}
+/* cc#1762 item 3: the approved-basis rupee — only when the API served one (an approved,
+   position-sized row with a CMP). Everything else is an EMPTY cell: blank, never zero. */
+function pnlApprovedCell(e){
+  var ap = e.approval;
+  if (!ap || ap.pnl_approved === null || ap.pnl_approved === undefined) return '<td class="num tw-pnl-ap"></td>';
+  var cls = Number(ap.pnl_approved) >= 0 ? 'pos' : 'neg';
+  return '<td class="num tw-pnl-ap ' + cls + '" title="' + esc('approved @ ' + (ap.approved_price != null ? px2(ap.approved_price) : '--')
+    + (ap.approved_at ? ' on ' + twStampFull(ap.approved_at) + ' IST' : '') + ' -> CMP' + (e.cmp != null ? ' ' + px2(e.cmp) : '')
+    + (e.cmp_ts ? ' as of ' + e.cmp_ts + ' IST' : '') + ' x ' + (e.qty != null ? e.qty : '?')) + '">' + inr(ap.pnl_approved) + '</td>';
 }
 
 function statusTabsHtml(){
@@ -511,7 +543,9 @@ function render(){
     'showing ' + view.length + ' of ' + (bucketTotal == null ? '--' : bucketTotal) + ' ' + STATE.status + ' positions'
     + ' · ' + STATE.bucket
     + ' · since 10 Aug 2026'
-    + (STATE.asOf ? ' · as of ' + STATE.asOf + ' IST' : '');
+    + (STATE.asOf ? ' · as of ' + STATE.asOf + ' IST' : '')
+    /* cc#1762 item 2: the CMP as-of, on the page — on a weekend it is Friday's last bar */
+    + (STATE.status === 'open' && STATE.cmpAsOf ? ' · P&L vs CMP as of ' + STATE.cmpAsOf + ' IST' : '');
 
   var emptyMsg = 'No ' + STATE.status + ' positions for ' + esc(STATE.bucket === 'ALL' ? 'any engine' : STATE.bucket)
     + (STATE.status === 'open' && STATE.stateFilter !== 'all' ? ' in state ' + esc(STATE.stateFilter.replace('-approval', '')) : '') + '.';
@@ -614,6 +648,9 @@ function boot(keepCounts){
         return boot(false);
       }
       STATE.approvedAsOf = d.approved_as_of || null;
+      STATE.cmpAsOf = d.cmp_as_of || null;            /* cc#1762: newest V8 mark, stated in the meta line */
+      if (d.pnl_basis) STATE.pnlBasis = d.pnl_basis;  /* cc#1762: the two bases, in the API's words */
+      if (d.v8_open_book) STATE.v8OpenBook = d.v8_open_book;
       if (d.approval_counts) STATE.approvalCounts = d.approval_counts;
       STATE.events = d.events || [];
       if (!keepCounts || STATE.total == null){
@@ -721,7 +758,9 @@ function approvedTabRowsHtml(list){
       + '<td class="tw-tag">' + esc(r.approved_at || '--') + (r.approved_via ? '<span class="tw-cmp-lbl">' + esc(r.approved_via) + '</span>' : '') + '</td>'
       + '<td class="num">' + px2(r.entry_level) + '</td>'
       + cmpCell + tgt + sl
-      + '<td class="num ' + pnlCls + '">' + pnlTxt + (r.pnl_basis === 'realised' ? '<span class="tw-cmp-lbl">realised</span>' : '') + '</td>'
+      + '<td class="num ' + pnlCls + '">' + pnlTxt + (r.pnl_basis === 'realised' ? '<span class="tw-cmp-lbl">realised</span>' : '')
+        /* cc#1762: what the rupee is multiplied by — position qty for a V8-linked alert, else per share */
+        + (r.pnl == null ? '' : '<span class="tw-cmp-lbl">' + (r.qty != null ? 'x ' + esc(String(r.qty)) + ' qty' : 'per share') + '</span>') + '</td>'
       + closeCell
       + '</tr>';
   }).join('');

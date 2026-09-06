@@ -142,27 +142,62 @@ def tradewall_approved(request: Request):
                        ORDER BY a.approved_at DESC NULLS LAST, a.id DESC""")
         rows = _rows(cur)
         import price_resolver
+        # cc#1762 item 4 (PARITY, this is the side that CHANGED): a V8-engine alert is linked back to
+        # its position through source_ref (= symbol@entry_ts, the key every approve surface writes)
+        # so its rupee P&L is (mark - approved_price) x POSITION QTY, sign-aware, through the ONE
+        # shared formula (v8_book_canon.unrealised_rupees) against the ONE V8 mark (open_marks) —
+        # identical to the Wall of Trades "P&L (approved)" column to the paise. Before this card the
+        # tab printed PER-SHARE rupees off the display resolver, which could never equal a
+        # position-sized number. A closed V8 row keeps the qty too (realised = close_price basis).
+        # Manual / non-V8 alerts have no position size and stay per share, labelled so.
+        import v8_book_canon
+        v8_link, v8_marks = {}, {}
+        v8_refs = sorted({r["source_ref"] for r in rows if (r["source_engine"] or "") == "V8" and r["source_ref"]})
+        if v8_refs:
+            try:
+                cur.execute("""SELECT ref, symbol, qty, book FROM (
+                                   SELECT symbol || '@' || to_char(entry_ts, 'YYYY-MM-DD HH24:MI:SS') AS ref,
+                                          symbol, qty, 'open' AS book
+                                   FROM v8_paper_positions WHERE status = 'OPEN' AND entry_ts IS NOT NULL
+                                   UNION ALL
+                                   SELECT symbol || '@' || to_char(entry_ts, 'YYYY-MM-DD HH24:MI:SS'),
+                                          symbol, qty, 'closed'
+                                   FROM v8_paper_trades WHERE entry_ts IS NOT NULL
+                               ) x WHERE ref = ANY(%s)""", (v8_refs,))
+                for x in _rows(cur):
+                    v8_link.setdefault(x["ref"], {"symbol": x["symbol"], "qty": _f(x["qty"]), "book": x["book"]})
+                v8_marks = v8_book_canon.open_marks(cur, sorted({x["symbol"] for x in v8_link.values()}))
+            except Exception as e:   # link unavailable -> rows fall back to per share, labelled
+                log.warning("cc#1762 V8 link failed: %s", e)
+                v8_link, v8_marks = {}, {}
         out, n_open, n_closed = [], 0, 0
         for r in rows:
             side = _side(r["direction"])
             sign = 1 if side == "LONG" else (-1 if side == "SHORT" else None)
             entry = _f(r["approved_price"])
             closed = r["closed_ist"] is not None
+            lk = v8_link.get(r["source_ref"]) if (r["source_engine"] or "") == "V8" else None
+            qty = lk["qty"] if lk else None
             cmp_px = cmp_label = cmp_date = None
             cmp_live = False
             if not closed:
-                try:
-                    pr = price_resolver.resolve_price(cur, r["symbol"]) or {}
-                    cmp_px = _f(pr.get("price"))
-                    cmp_label, cmp_date, cmp_live = pr.get("label"), pr.get("date"), bool(pr.get("is_live"))
-                except Exception as e:   # no price path -> blank, never a carried-forward number
-                    log.warning("cc#1735 resolver failed for %s: %s", r["symbol"], e)
-                    cmp_px = None
+                if lk:   # cc#1762: the V8 book mark — the same CMP the wall and the app home use
+                    mk = v8_marks.get(r["symbol"]) or {}
+                    cmp_px, cmp_label, cmp_date = mk.get("cmp"), "V8 book CMP", mk.get("cmp_ts")
+                else:
+                    try:
+                        pr = price_resolver.resolve_price(cur, r["symbol"]) or {}
+                        cmp_px = _f(pr.get("price"))
+                        cmp_label, cmp_date, cmp_live = pr.get("label"), pr.get("date"), bool(pr.get("is_live"))
+                    except Exception as e:   # no price path -> blank, never a carried-forward number
+                        log.warning("cc#1735 resolver failed for %s: %s", r["symbol"], e)
+                        cmp_px = None
             mark = _f(r["close_price"]) if closed else cmp_px
             pnl = pnl_pct = None
             if entry and mark is not None and sign is not None:
-                pnl = round((mark - entry) * sign, 2)
                 pnl_pct = round((mark - entry) / entry * 100.0 * sign, 2)
+                pnl = (v8_book_canon.unrealised_rupees(entry, mark, side, qty) if (lk and qty is not None)
+                       else round((mark - entry) * sign, 2))
             if closed:
                 n_closed += 1
             else:
@@ -178,6 +213,10 @@ def tradewall_approved(request: Request):
                 "closed": closed, "closed_at": _stamp(r["closed_ist"]),
                 "close_price": _f(r["close_price"]), "close_reason": r["close_reason"],
                 "pnl": pnl, "pnl_pct": pnl_pct, "pnl_basis": "realised" if closed else ("mark" if pnl is not None else None),
+                # cc#1762: what the rupee is multiplied by. V8-linked = the position's qty; else per share.
+                "qty": qty,
+                "qty_basis": ("position qty (v8_paper_positions)" if (lk and lk["book"] == "open")
+                              else "position qty (v8_paper_trades)" if lk else "per share"),
                 "levels_updated_at": _stamp(r["updated_ist"]), "notes": r["notes"],
             })
     return {
@@ -186,6 +225,7 @@ def tradewall_approved(request: Request):
         "entry_level_note": "Entry level = approved_price, the resolver price at the moment of approval — never a later price, never the trigger price.",
         "price_source": "price_resolver.resolve_price (cmp_resolver), per row; cmp_label/cmp_date say what each price is; blank when no path resolves the symbol",
         "pnl_rule": "sign-aware: LONG = mark - entry, SHORT = entry - mark; realised on closed rows uses the recorded close_price",
+        "qty_rule": "cc#1762: a V8-engine alert is linked to its position by source_ref (symbol@entry_ts) and its rupee P&L is x position qty through v8_book_canon.unrealised_rupees against the V8 book CMP (v8_book_canon.open_marks) — identical to the Wall of Trades P&L (approved) column; manual / non-V8 alerts stay per share (qty_basis says which)",
         "storage": "trade_alert_levels sidecar (CREATE TABLE IF NOT EXISTS); trade_alerts is read only here",
     }
 
