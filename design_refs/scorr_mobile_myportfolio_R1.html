@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DESIGN REF · My Portfolio R1</title>
+<style>
+:root{--r:12px}
+body[data-theme="goldnight"]{
+  --field:#0A0A0C; --panel:#141418; --hi:#1C1C22; --edge:#2A2A32;
+  --ink:#EDE7DA; --muted:#9A9285; --dim:#6E675C;
+  --accent:#D8B25C; --accent-soft:rgba(216,178,92,.12);
+  --win:#3DD68C; --loss:#FF6B7A;}
+body[data-theme="aquawhite"]{
+  --field:#F2F6F8; --panel:#FFFFFF; --hi:#E9EFF3; --edge:#D3DEE5;
+  --ink:#12222B; --muted:#4A606C; --dim:#6E828C;
+  --accent:#0E7C8C; --accent-soft:rgba(14,124,140,.10);
+  --win:#127A4D; --loss:#B3261E;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--field);color:var(--ink);
+     font:14px/1.5 ui-monospace,"SF Mono",Menlo,monospace;padding-bottom:70px}
+.bar{position:sticky;top:0;z-index:9;display:flex;align-items:center;gap:10px;
+     background:var(--panel);border-bottom:1px solid var(--edge);padding:12px 14px}
+.bar .bk{color:var(--muted);font-size:17px}
+.bar h1{font:italic 700 15px/1 system-ui,sans-serif;letter-spacing:.02em;flex:1}
+.tg{font-size:10px;letter-spacing:.06em;border:1px solid var(--edge);color:var(--muted);
+    background:var(--hi);padding:5px 8px;border-radius:7px;cursor:pointer}
+.wrap{padding:14px}
+.sect{display:flex;align-items:center;gap:10px;margin:22px 2px 9px}
+.sect b{font:700 11px/1 ui-monospace,monospace;letter-spacing:.14em;color:var(--accent)}
+.sect i{flex:1;height:1px;background:var(--edge)}
+.card{background:var(--panel);border:1px solid var(--edge);border-radius:var(--r);padding:14px}
+.hero{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hero .b{background:var(--hi);border:1px solid var(--edge);border-radius:10px;padding:10px 11px}
+.hero .b.wide{grid-column:1/-1}
+.k{font-size:10px;letter-spacing:.1em;color:var(--dim);margin-bottom:5px}
+.v{font:700 21px/1.1 ui-monospace,monospace;letter-spacing:-.01em}
+.v.sm{font-size:17px}
+.up{color:var(--win)} .dn{color:var(--loss)}
+.asof{font-size:10.5px;color:var(--dim);margin-top:9px;line-height:1.5}
+.chartwrap{margin-top:2px}
+.chartcap{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;gap:10px}
+.chartcap .t{font:700 11px/1 ui-monospace,monospace;letter-spacing:.1em;color:var(--muted)}
+.chartcap .r{font-size:10.5px;color:var(--dim)}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.note{margin-top:9px;padding:9px 10px;border-radius:9px;background:var(--accent-soft);
+      border:1px solid var(--edge);font-size:10.5px;line-height:1.55;color:var(--muted)}
+.note b{color:var(--ink);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.st{background:var(--hi);border:1px solid var(--edge);border-radius:9px;padding:8px 9px}
+.st .k{font-size:9px;margin-bottom:4px}
+.st .v{font-size:14px}
+.pos{border:1px solid var(--edge);border-radius:var(--r);background:var(--panel);
+     padding:12px;margin-bottom:10px;position:relative;overflow:hidden}
+.pos::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--loss)}
+.prow{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.sym{font:italic 800 15px/1 system-ui,sans-serif;letter-spacing:.01em}
+.chip{font-size:9.5px;letter-spacing:.08em;border:1px solid var(--edge);color:var(--muted);
+      background:var(--hi);border-radius:6px;padding:3px 6px}
+.chip.l{color:var(--win)}
+.pnl{margin-left:auto;font:700 14px/1 ui-monospace,monospace}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:9px}
+.cardbtns{display:flex;gap:6px}
+.cb{flex:0 0 auto;width:30px;height:30px;border-radius:8px;background:var(--hi);
+    border:1px solid var(--edge);color:var(--muted);font-size:11px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;cursor:pointer}
+.filters{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.f{font-size:10.5px;padding:5px 9px;border-radius:7px;border:1px solid var(--edge);
+   background:var(--hi);color:var(--muted);cursor:pointer}
+.f.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{text-align:left;font-size:9px;letter-spacing:.1em;color:var(--dim);font-weight:600;
+   padding:0 0 7px;border-bottom:1px solid var(--edge)}
+th.n,td.n{text-align:right}
+td{padding:9px 0;border-bottom:1px solid var(--edge);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.tsym{font-weight:700;font-size:12px}
+.tsub{font-size:10px;color:var(--dim);margin-top:2px}
+.more{margin-top:10px;text-align:center;font-size:11px;color:var(--accent);
+      border:1px solid var(--edge);border-radius:9px;padding:9px;cursor:pointer}
+.absent{font-size:10.5px;color:var(--dim);font-style:italic;padding:6px 0}
+</style></head>
+<body data-theme="goldnight">
+<div class="bar">
+  <span class="bk">&#8249;</span>
+  <h1>My Portfolio</h1>
+  <span class="tg" onclick="document.body.dataset.theme=document.body.dataset.theme==='goldnight'?'aquawhite':'goldnight'">THEME</span>
+</div>
+<div class="wrap">
+  <div class="card">
+    <div class="hero">
+      <div class="b wide"><div class="k">COMBINED P&amp;L</div><div class="v up">+&#8377;8,164</div></div>
+      <div class="b"><div class="k">REALISED</div><div class="v sm up">+&#8377;9,764</div></div>
+      <div class="b"><div class="k">OPEN MTM</div><div class="v sm dn">&#8722;&#8377;1,600</div></div>
+      <div class="b"><div class="k">POSITION VALUE</div><div class="v sm">&#8377;1,63,790</div></div>
+      <div class="b"><div class="k">OPEN / CLOSED</div><div class="v sm">2 <span style="color:var(--dim);font-size:13px">/ 60</span></div></div>
+    </div>
+    <div class="asof">Prices as of 04-Sep 15:30 IST &middot; last close. Realised covers 20-Jul to 01-Sep.</div>
+  </div>
+  <div class="sect"><b>PERFORMANCE</b><i></i></div>
+  <div class="card chartwrap">
+    <div class="chartcap">
+      <span class="t">REALISED P&amp;L &middot; CUMULATIVE</span>
+      <span class="r">20-Jul &rarr; 01-Sep &middot; 20 trading days</span>
+    </div>
+    <svg id="eq" viewBox="0 0 340 130" preserveAspectRatio="none"></svg>
+    <div class="note">
+      <b>Closed trades only.</b> This line is realised profit banked on exits, not the value of the
+      portfolio. Open positions are excluded, so it does not move when a held stock does.
+      There is no stored daily portfolio value, so a true equity curve cannot be drawn yet.
+    </div>
+    <div class="stats">
+      <div class="st"><div class="k">WIN RATE</div><div class="v">51.7%</div></div>
+      <div class="st"><div class="k">AVG WIN</div><div class="v up">&#8377;1,205</div></div>
+      <div class="st"><div class="k">AVG LOSS</div><div class="v dn">&#8722;&#8377;952</div></div>
+      <div class="st"><div class="k">BEST</div><div class="v up">&#8377;7,400</div></div>
+      <div class="st"><div class="k">WORST</div><div class="v dn">&#8722;&#8377;4,550</div></div>
+      <div class="st"><div class="k">SYMBOLS</div><div class="v">32</div></div>
+      <div class="st"><div class="k">PEAK</div><div class="v">&#8377;18,431</div></div>
+      <div class="st"><div class="k">FROM PEAK</div><div class="v dn">&#8722;&#8377;12,119</div></div>
+      <div class="st"><div class="k">AVG HOLD</div><div class="v" style="color:var(--dim)">&mdash;</div></div>
+    </div>
+    <div class="absent">Avg hold is blank because holding_days is not populated on these rows. Absent, not zero.</div>
+  </div>
+  <div class="sect"><b>OPEN &middot; 2</b><i></i></div>
+  <div class="pos">
+    <div class="prow"><span class="sym">ETERNAL</span><span class="chip l">LONG</span><span class="chip">300</span><span class="pnl dn">&#8722;&#8377;1,290</span></div>
+    <div class="grid3">
+      <div class="b st"><div class="k">ENTRY &rarr; LTP</div><div class="v" style="font-size:13px">329 &rarr; 324</div></div>
+      <div class="b st"><div class="k">VALUE</div><div class="v" style="font-size:13px">&#8377;97,290</div></div>
+      <div class="b st"><div class="k">RETURN</div><div class="v dn" style="font-size:13px">&#8722;1.31%</div></div>
+    </div>
+    <div class="cardbtns"><span class="cb">C</span><span class="cb">A</span><span class="cb">R</span><span class="cb">D</span></div>
+  </div>
+  <div class="pos">
+    <div class="prow"><span class="sym">JSWSTEEL</span><span class="chip l">LONG</span><span class="chip">50</span><span class="pnl dn">&#8722;&#8377;310</span></div>
+    <div class="grid3">
+      <div class="b st"><div class="k">ENTRY &rarr; LTP</div><div class="v" style="font-size:13px">1,336 &rarr; 1,330</div></div>
+      <div class="b st"><div class="k">VALUE</div><div class="v" style="font-size:13px">&#8377;66,500</div></div>
+      <div class="b st"><div class="k">RETURN</div><div class="v dn" style="font-size:13px">&#8722;0.46%</div></div>
+    </div>
+    <div class="cardbtns"><span class="cb">C</span><span class="cb">A</span><span class="cb">R</span><span class="cb">D</span></div>
+  </div>
+  <div class="sect"><b>CLOSED &middot; 60</b><i></i></div>
+  <div class="card">
+    <div class="filters">
+      <span class="f on">All 60</span><span class="f">Wins 31</span><span class="f">Losses 29</span>
+      <span class="f">Long</span><span class="f">Short</span>
+    </div>
+    <table>
+      <thead><tr><th>TRADE</th><th class="n">ENTRY &rarr; EXIT</th><th class="n">P&amp;L</th></tr></thead>
+      <tbody id="tb"></tbody>
+    </table>
+    <div class="more">Show all 60 closed trades</div>
+  </div>
+</div>
+<script>
+const SERIES=[["20-Jul",-360],["21-Jul",-845],["22-Jul",-767],["23-Jul",1883],["24-Jul",1863],
+["27-Jul",2963],["28-Jul",7531],["29-Jul",10071],["30-Jul",15268],["31-Jul",15917],
+["03-Aug",15809],["04-Aug",18431],["05-Aug",13211],["06-Aug",11261],["11-Aug",11536],
+["13-Aug",11056],["17-Aug",10322],["18-Aug",10532],["24-Aug",6312],["01-Sep",9764]];
+(function(){
+  const W=340,H=130,PT=8,PB=18,PL=2,PR=2;
+  const vals=SERIES.map(d=>d[1]);
+  const lo=Math.min(0,...vals), hi=Math.max(...vals);
+  const x=i=>PL+i*(W-PL-PR)/(SERIES.length-1);
+  const y=v=>PT+(hi-v)*(H-PT-PB)/(hi-lo);
+  const pts=SERIES.map((d,i)=>[x(i),y(d[1])]);
+  const line=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+  const area=line+` L ${W-PR} ${y(0)} L ${PL} ${y(0)} Z`;
+  const peak=pts[vals.indexOf(hi)];
+  const last=pts[pts.length-1];
+  document.getElementById("eq").innerHTML=`
+   <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+     <stop offset="0" stop-color="var(--win)" stop-opacity=".22"/>
+     <stop offset="1" stop-color="var(--win)" stop-opacity="0"/></linearGradient></defs>
+   <line x1="${PL}" y1="${y(0)}" x2="${W-PR}" y2="${y(0)}" stroke="var(--edge)" stroke-width="1"/>
+   <path d="${area}" fill="url(#g)"/>
+   <path d="${line}" fill="none" stroke="var(--win)" stroke-width="1.8"
+         stroke-linejoin="round" stroke-linecap="round"/>
+   <circle cx="${peak[0]}" cy="${peak[1]}" r="2.6" fill="var(--panel)" stroke="var(--muted)" stroke-width="1.4"/>
+   <text x="${peak[0]}" y="${peak[1]-6}" fill="var(--muted)" font-size="8"
+         font-family="ui-monospace,monospace" text-anchor="middle">peak 18,431</text>
+   <circle cx="${last[0]}" cy="${last[1]}" r="3.2" fill="var(--win)"/>
+   <text x="${last[0]}" y="${last[1]-7}" fill="var(--win)" font-size="8.5" font-weight="700"
+         font-family="ui-monospace,monospace" text-anchor="end">9,764</text>
+   <text x="${PL}" y="${H-4}" fill="var(--dim)" font-size="8" font-family="ui-monospace,monospace">20-Jul</text>
+   <text x="${W-PR}" y="${H-4}" fill="var(--dim)" font-size="8" font-family="ui-monospace,monospace" text-anchor="end">01-Sep</text>
+   <text x="${PL+3}" y="${y(0)-3}" fill="var(--dim)" font-size="7.5" font-family="ui-monospace,monospace">0</text>`;
+})();
+const CLOSED=[
+ ["01-Sep","NYKAA","LONG",150,"338.65","339.35",105],
+ ["01-Sep","BANKNIFTY","SHORT",5,"57,610","57,762",-758],
+ ["01-Sep","BAJAJ-AUTO","LONG",10,"12,015","12,352",3375],
+ ["01-Sep","JSWSTEEL","LONG",100,"1,320.3","1,327.6",730],
+ ["24-Aug","ETERNAL","LONG",200,"328.60","329.55",190],
+ ["24-Aug","FEDERALBNK","SHORT",50,"359.30","359.70",-20]];
+document.getElementById("tb").innerHTML=CLOSED.map(r=>{
+ const win=r[6]>0;
+ return `<tr>
+  <td><div class="tsym">${r[1]}</div><div class="tsub">${r[2]} ${r[3]} &middot; ${r[0]}</div></td>
+  <td class="n"><div>${r[4]}</div><div class="tsub">&rarr; ${r[5]}</div></td>
+  <td class="n"><span class="pnl ${win?'up':'dn'}" style="font-size:12.5px">${win?'+':'&#8722;'}&#8377;${Math.abs(r[6]).toLocaleString('en-IN')}</span></td>
+ </tr>`;}).join("");
+</script>
+</body></html>
