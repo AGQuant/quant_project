@@ -179,6 +179,16 @@ def pcr_mood_endpoint(underlying: str = "NIFTY"):
         except Exception as e:
             out["interpret"] = {"error": str(e)[:200], "state": None,
                                 "headline": "The read is not available this tick.", "read": [], "evidence_line": None}
+        # cc#1797: the app (i) sheet reads ONLY this block (sentences + footer + as_of).
+        try:
+            out["confidence"] = compose_confidence(cur, underlying)
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            out["confidence"] = {"error": str(e)[:200], "sentences": [], "text": None,
+                                 "footer": CONFIDENCE_FOOTER, "as_of": None}
     out.update({"underlying": underlying, "basis": basis, "as_of": as_of,
                 "spec": "session_log 36200 + 36294"})
     return out
@@ -627,6 +637,159 @@ def compose_read(cur, underlying, pcr, as_of=None):
     out["note"] = "Descriptive read only. Not a trading signal."
     return out
 
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# cc#1797 · PCR_WRITER_CONFIDENCE_READ_V1 (session_log 39783) — the (i) read behind the app PCR card.
+# Supersedes the cc#1576/cc#1740 `interpret` read for the APP sheet (that block stays above for the
+# web Index Intel popover, which this card does not touch).
+#
+# FOUR RULES, each side INDEPENDENT, each needing a day-over-day rise in that side's OI from
+# pcr_daily PLUS a price condition from the ONE shared return function (nifty_dwm.live_nifty_dwm —
+# the same call that feeds the Home DAY/WK chips through v8_endpoints.market_mood):
+#   put_confident   put OI up AND day > 0
+#   put_cautious    put OI up AND day < 0 AND week < 0
+#   call_confident  call OI up AND day < 0
+#   call_cautious   call OI up AND day > 0 AND week > 0
+# A side whose OI did not rise, or whose day/week do not cleanly satisfy one rule, says NOTHING.
+# There is no nearer-bucket fallback: silence is a correct output for a side.
+#
+# ROLLOVER. pcr_daily put_oi/call_oi is the CURRENT MONTHLY series only, so the level resets when
+# the series rolls (25-Aug-2026 143,020,085 -> 26-Aug 32,949,850 is the roll, not unwinding). The
+# cycle of a row is pcr_backfill._current_expiry(price_date) — the engine's own last-Tuesday rule,
+# the same one worker/fyers_feed.current_expiry builds the option symbols from (verified against
+# option_chain.expiry = 2026-09-29 for every Sep row). Different cycle => today has NO PRIOR and
+# no side can fire. No second rollover detector.
+#
+# DISPLAY RULE (a gate, founder-ruled twice): the surface prints ONLY the sentence(s) that fired,
+# put first, plus the footer and the as-of. The `inputs` block below exists for Fable's
+# verification query and is never rendered.
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+PUT_CONFIDENT = ("Put writers are confident. They expect the market to hold or rise, "
+                 "so they are comfortable selling puts.")
+PUT_CAUTIOUS = ("Put writers are turning cautious. Rising put buying here looks like protection "
+                "for existing long positions, not confident writing.")
+CALL_CONFIDENT = ("Call writers are confident. They expect the market to hold or fall, "
+                  "so they are comfortable selling calls.")
+CALL_CAUTIOUS = ("Call writers are turning cautious. Rising call buying here looks like protection "
+                 "for existing short positions, not confident writing.")
+NO_SHIFT = "No clear shift in put or call positioning today."
+CONFIDENCE_FOOTER = "Describes today's mood, not a forecast."
+CONFIDENCE_SPEC = "PCR_WRITER_CONFIDENCE_READ_V1 (session_log 39783)"
+_CONF_TEXT = {("put", "confident"): PUT_CONFIDENT, ("put", "cautious"): PUT_CAUTIOUS,
+              ("call", "confident"): CALL_CONFIDENT, ("call", "cautious"): CALL_CAUTIOUS}
+
+
+def confidence_side(side, oi, oi_prev, day_pct, week_pct):
+    """'confident' | 'cautious' | None for one side. Pure. None whenever an input is missing, the
+    OI did not RISE (equal is not a rise), or neither rule is cleanly met."""
+    o, op, d, w = _f(oi), _f(oi_prev), _f(day_pct), _f(week_pct)
+    if o is None or op is None or d is None or o <= op:
+        return None
+    if side == "put":
+        if d > 0:
+            return "confident"
+        if d < 0 and w is not None and w < 0:
+            return "cautious"
+        return None
+    if side == "call":
+        if d < 0:
+            return "confident"
+        if d > 0 and w is not None and w > 0:
+            return "cautious"
+        return None
+    return None
+
+
+def confidence_read(put_oi, put_oi_prev, call_oi, call_oi_prev, day_pct, week_pct, comparable=True):
+    """{put, call, sentences, text}. `comparable` False (rollover, or no prior row) silences both
+    sides. sentences is [] with text=NO_SHIFT when nothing fired; put sentence first when both do."""
+    put = confidence_side("put", put_oi, put_oi_prev, day_pct, week_pct) if comparable else None
+    call = confidence_side("call", call_oi, call_oi_prev, day_pct, week_pct) if comparable else None
+    sentences = []
+    if put:
+        sentences.append(_CONF_TEXT[("put", put)])
+    if call:
+        sentences.append(_CONF_TEXT[("call", call)])
+    return {"put": put, "call": call, "sentences": sentences,
+            "text": None if sentences else NO_SHIFT}
+
+
+def _expiry_cycle(d):
+    """The engine's own monthly-series rule (pcr_backfill._current_expiry). None if unavailable —
+    an unknown cycle is treated as not comparable, never guessed."""
+    try:
+        from pcr_backfill import _current_expiry
+        return _current_expiry(d)
+    except Exception:
+        return None
+
+
+def compose_confidence(cur, underlying="NIFTY"):
+    """Gather the live inputs for the latest pcr_daily row and return confidence_read() plus the
+    provenance a verifier needs (dates, cycles, the return source, the raw inputs)."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    ist = _tz(_td(hours=5, minutes=30))
+    today = _dt.now(ist).date()
+    out = {"spec": CONFIDENCE_SPEC, "underlying": underlying, "date": None, "prev_date": None,
+           "cycle": None, "prev_cycle": None, "comparable": False, "reason": None,
+           "put": None, "call": None, "sentences": [], "text": None,
+           "footer": CONFIDENCE_FOOTER, "as_of": None, "returns_source": None, "inputs": None}
+    cur.execute("""SELECT price_date, put_oi, call_oi, computed_at FROM pcr_daily
+                   WHERE underlying=%s AND put_oi IS NOT NULL AND call_oi IS NOT NULL
+                     AND quality='ok'
+                   ORDER BY price_date DESC LIMIT 2""", (underlying,))
+    rows = cur.fetchall()
+    if not rows:
+        out["text"] = "No put and call positioning data yet."
+        out["reason"] = "no pcr_daily row"
+        return out
+    d, put_oi, call_oi, computed_at = rows[0]
+    out["date"] = str(d)
+    out["as_of"] = computed_at.strftime("%Y-%m-%d %H:%M") if computed_at else str(d)
+    prev = rows[1] if len(rows) > 1 else None
+    put_prev = call_prev = None
+    if prev:
+        dp, put_prev, call_prev, _c = prev
+        out["prev_date"] = str(dp)
+        cyc, cycp = _expiry_cycle(d), _expiry_cycle(dp)
+        out["cycle"] = str(cyc) if cyc else None
+        out["prev_cycle"] = str(cycp) if cycp else None
+        if cyc is None or cycp is None:
+            out["reason"] = "expiry cycle unknown; no prior to compare"
+        elif cyc != cycp:
+            out["reason"] = "first session of a new expiry cycle; the series reset, so no prior to compare"
+        else:
+            out["comparable"] = True
+    else:
+        out["reason"] = "no prior pcr_daily row"
+    # Day/week for THE ROW'S DATE through the one shared function. A past date reads the EOD
+    # closes anchored on that date; today reads live in session. Outside the session on a
+    # trading day raw_prices may not yet hold today's close (the EOD engine runs ~21:00 IST), and
+    # the fallback would then describe YESTERDAY's move — so the read checks the newest close
+    # date and stays silent rather than fire on the wrong day.
+    day_pct = week_pct = None
+    src = None
+    try:
+        from nifty_dwm import live_nifty_dwm
+        day_pct, week_pct, _m, src = live_nifty_dwm(cur, "NIFTY50", as_of=d)
+        if src == "eod":
+            cur.execute("SELECT MAX(price_date) FROM raw_prices WHERE symbol='NIFTY50' AND price_date <= %s", (d,))
+            r = cur.fetchone()
+            if not r or r[0] != d:
+                day_pct = week_pct = None
+                out["reason"] = (out["reason"] or "") + ("; " if out["reason"] else "") + \
+                    "closing price for %s has not arrived yet" % d
+    except Exception as e:
+        out["reason"] = (out["reason"] or "") + ("; " if out["reason"] else "") + ("returns unavailable: " + str(e)[:120])
+    out["returns_source"] = src
+    out["inputs"] = {"put_oi": put_oi, "put_oi_prev": put_prev, "call_oi": call_oi, "call_oi_prev": call_prev,
+                     "day_pct": _f(day_pct), "week_pct": _f(week_pct), "today": str(today)}
+    out.update(confidence_read(put_oi, put_prev, call_oi, call_prev, day_pct, week_pct, out["comparable"]))
+    if out["comparable"] and day_pct is None:
+        out["text"] = "The market move for this day is not available yet, so there is no read."
+    return out
+
+
 if __name__ == "__main__":
     # Unit table from the card (P2). Run: python pcr_mood.py
     cases = [(1.46, -1.36, GREED), (1.55, -1.36, CAUTIOUS), (1.55, 0.2, EXTREME_GREED),
@@ -641,5 +804,25 @@ if __name__ == "__main__":
         print(f"{flag}  pcr={pcr!s:>5} week={wk!s:>6} -> {got['label']!s:<13} band={got['band']!s:<4}"
               f" top={got['dial_segments'][-1]['colour'] if got['dial_segments'] else '-':<5}"
               f" reason={got['reason'] or ''}{(' note=' + got['note']) if got['note'] else ''}")
+    # cc#1797: the 39783 clean window (pcr_daily NIFTY x raw_prices NIFTY50, 26-Aug..04-Sep-2026),
+    # day = t vs t-1 close, week = t vs t-5 close — the EOD formula nifty_dwm uses. 26-Aug is the
+    # rollover row: comparable=False, both sides silent by construction.
+    window = [  # (date, put_oi, call_oi, day_pct, week_pct, comparable, want_put, want_call)
+        ("2026-08-26", 32949850, 31405855, -0.521, -0.099, False, None, None),
+        ("2026-08-27", 35949990, 33848620, -0.483, -0.582, True, "cautious", "confident"),
+        ("2026-08-28", 36776365, 33532395, 0.352, -0.315, True, "confident", None),
+        ("2026-08-31", 38665270, 35069905, -0.394, -0.573, True, "cautious", "confident"),
+        ("2026-09-01", 46135015, 36868910, -0.102, -1.146, True, "cautious", "confident"),
+        ("2026-09-02", 46945990, 32481280, -0.588, -1.212, True, "cautious", None),
+        ("2026-09-03", 47240920, 35192495, -0.171, -0.902, True, "cautious", "confident"),
+        ("2026-09-04", 46698270, 34834410, 0.102, -1.150, True, None, None),
+    ]
+    prev_p, prev_c = 143020085, 137664735       # 25-Aug, the old series' last row
+    for d, p_oi, c_oi, dp, wp, comp, wp_, wc_ in window:
+        got = confidence_read(p_oi, prev_p, c_oi, prev_c, dp, wp, comp)
+        flag = "PASS" if (got["put"], got["call"]) == (wp_, wc_) else "FAIL"
+        ok = ok and flag == "PASS"
+        print(f"{flag}  {d} put={got['put']!s:<9} call={got['call']!s:<9} lines={len(got['sentences'])} {'' if got['sentences'] else got['text']}")
+        prev_p, prev_c = p_oi, c_oi
     print("ALL PASS" if ok else "FAILURES")
     raise SystemExit(0 if ok else 1)
