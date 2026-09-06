@@ -1298,8 +1298,10 @@ def wall_engine_rules(cur):
                 "investment_scanner_universe on " + str(_d) + ": " + str(_nsym) + " symbols, tag kinds " + str(_kinds),
                 "mom_score > " + _fmt_num(_IR.ENTRY_MOM) + " or rev_score > " + _fmt_num(_IR.ENTRY_REV)
                 + " | price gates logged per signal (" + str(_gk or _NOT_IN_CONFIG) + "); gate bounds " + _NOT_IN_CONFIG + " -- coded in inv_scanner_rules.run",
-                "momentum track: mom_score < " + _fmt_num(_IR.EXIT_MOM) + "; reversal track: rev_score < " + _fmt_num(_IR.EXIT_REV)
-                + "; dual-track exits only when both fail; no SL/target legs in V1",
+                "hard stop first (cc#1768): " + _fmt_num(_IR.HARD_STOP_ABS_PCT) + " pct from entry or alpha " + _fmt_num(_IR.HARD_STOP_ALPHA_PCT)
+                + " pct vs " + str(_IR.BENCHMARK_SYMBOL) + "; then momentum track: mom_score < " + _fmt_num(_IR.EXIT_MOM)
+                + "; reversal track: rev_score < " + _fmt_num(_IR.EXIT_REV)
+                + "; dual-track exits only when both fail; no target leg",
                 "inv_scanner_rules.ENTRY_MOM/ENTRY_REV/EXIT_MOM/EXIT_REV + investment_scanner_universe + investment_scanner_signals.gates")
         except Exception as e:
             row("Investment Scanner", None, "EQUITY", _NOT_IN_CONFIG, _NOT_IN_CONFIG, _NOT_IN_CONFIG, "error reading config: " + str(e)[:160])
