@@ -43,6 +43,47 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 ENTRY_MOM, ENTRY_REV = 85.0, 80.0
 EXIT_MOM, EXIT_REV = 80.0, 75.0
 
+# cc#1767: the four price gates, NAMED ONCE. Fixed order (the page renders a capsule per gate in
+# this order, so position carries meaning), the short label each capsule prints, and the rule in
+# words the tooltip states. The pass/fail arithmetic itself lives in evaluate_gates() below — the
+# same call run() makes at entry time and /api/inv-scanner/board makes per row, so the column and
+# the engine cannot disagree.
+GATE_ORDER = ("day_return", "week_return", "month_return", "segment_month")
+GATE_LABELS = {"day_return": "DAY", "week_return": "WEEK", "month_return": "MO", "segment_month": "SECT"}
+GATE_RULES = {"day_return": "> 0", "week_return": "0 to 5", "month_return": "0 to 7", "segment_month": "> 0"}
+GATE_UNITS = {"day_return": "%", "week_return": "%", "month_return": "%", "segment_month": "% (sector month avg)"}
+
+
+def evaluate_gates(cur, sym, wk, mo, segment, seg_cache=None) -> dict:
+    """THE four entry gates for one symbol (session_log 30147): day return > 0 · week return in
+    [0,5] · month return in [0,7] · the segment's month average > 0. Lifted verbatim out of run()
+    by cc#1767 so the board column reads the SAME arithmetic and the SAME sources the entry engine
+    does: day from _day_return (cmp vs last close when cmp is newer, else the last two EOD closes),
+    week/month from universe_technicals (passed in), segment month from
+    invest_check_v2._segment_month (the IC source, cached per segment via seg_cache). A missing
+    input is value None and pass False — UNCOMPUTABLE never passes, and the caller can tell
+    "failed" from "not measured" by whether value is None."""
+    if seg_cache is None:
+        seg_cache = {}
+    day, day_src = _day_return(cur, sym)
+    if segment not in seg_cache:
+        seg_cache[segment] = _segment_month(cur, segment) if segment else (None, 0)
+    seg_mo, seg_n = seg_cache[segment]
+    return {
+        "day_return":   {"value": None if day is None else round(day, 3), "source": day_src,
+                         "pass": day is not None and day > 0},
+        "week_return":  {"value": wk, "pass": wk is not None and 0 <= wk <= 5},
+        "month_return": {"value": mo, "pass": mo is not None and 0 <= mo <= 7},
+        "segment_month": {"value": None if seg_mo is None else round(seg_mo, 3),
+                          "members": seg_n, "segment": segment,
+                          "pass": seg_mo is not None and seg_mo > 0},
+    }
+
+
+def gates_passed(gates: dict) -> int:
+    """How many of the four gates pass. A missing input counts as NOT passed (cc#1767 scope 6)."""
+    return sum(1 for k in GATE_ORDER if (gates.get(k) or {}).get("pass"))
+
 
 def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
@@ -173,19 +214,9 @@ def run(conn=None) -> dict:
                     tracks.append("reversal")
                 if not tracks:
                     continue
-                day, day_src = _day_return(cur, sym)
-                if segment not in seg_cache:
-                    seg_cache[segment] = _segment_month(cur, segment) if segment else (None, 0)
-                seg_mo, seg_n = seg_cache[segment]
-                gates = {
-                    "day_return":   {"value": None if day is None else round(day, 3), "source": day_src,
-                                     "pass": day is not None and day > 0},
-                    "week_return":  {"value": wk, "pass": wk is not None and 0 <= wk <= 5},
-                    "month_return": {"value": mo, "pass": mo is not None and 0 <= mo <= 7},
-                    "segment_month": {"value": None if seg_mo is None else round(seg_mo, 3),
-                                      "members": seg_n, "segment": segment,
-                                      "pass": seg_mo is not None and seg_mo > 0},
-                }
+                # cc#1767: the gate arithmetic moved into evaluate_gates() (identical dict, same
+                # sources) so the board column calls the very same function this entry check does.
+                gates = evaluate_gates(cur, sym, wk, mo, segment, seg_cache)
                 all_pass = all(gx["pass"] for gx in gates.values())
                 score = mom if "momentum" in tracks else rev
                 if all_pass:
