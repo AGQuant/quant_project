@@ -1792,6 +1792,41 @@ function _finFmt(v, unit) {
 // cc#518 Part 2 (row-chart): renders from the SAME row.values the table cell renders -- no second
 // fetch. Bar for absolute Rs rows, line for %/days/EPS rows; the TTM point (when present) renders
 // visually distinct (gold, dashed baseline / hollow-ish ring) and labelled TTM on the x-axis.
+// ── cc#1771 · THE X-AXIS LABEL RULE (founder 06-Sep: every bar read "Mar 20") ─────────────────
+// An abbreviation that makes two distinct periods print the same string is not an abbreviation,
+// it is a data error. The old String(p).slice(0, 6) kept the MONTH and dropped the YEAR, so
+// "Mar 2020".."Mar 2026" all rendered "Mar 20" and the quarterly axis cycled Jun/Mar/Dec/Sep 20.
+// The label is the backend's period_label IN FULL ("Mar 2026", "TTM"). If the axis genuinely
+// cannot fit the full form, the fallback keeps the part that disambiguates — the YEAR: "FY26"
+// for a March fiscal end, "Jun'25" for a quarter — and beyond that ticks are THINNED (every
+// other label blanked), never collapsed. The uniqueness assertion below is the invariant this
+// rule protects: the visible tick labels must be as many as their de-duplicated set, and if a
+// future width-fitting transform ever breaks that it logs loudly and the FULL labels win.
+// One helper, used by both chart surfaces (FinRowChart and the shared FinChartModal, Line and
+// Bar alike), and by every statement table that opens the modal: Quarterly, Profit & Loss,
+// Balance Sheet, Cash Flow, Ratios buckets, Shareholding.
+const FIN_TICK_FULL_MAX = 10;    // up to 10 columns the full label fits the 640-wide viewBox at 8.5px
+const FIN_TICK_COMPACT_MAX = 20; // up to 20 the compact form fits; beyond that every other tick is blanked
+function _finTickCompact(s, fiscal) {
+  const m = /^([A-Z][a-z]{2}) (\d{4})$/.exec(s);
+  if (!m) return s;                                   // "TTM", "Current", "5Y CAGR" stay as they are
+  return (fiscal && m[1] === "Mar") ? "FY" + m[2].slice(2) : m[1] + "'" + m[2].slice(2);
+}
+function _finTicks(periods) {
+  const full = (periods || []).map(p => String(p == null ? "" : p));
+  // an ANNUAL axis (every dated label a March year-end) compacts to FY26; a quarterly axis keeps
+  // the month — Mar'26 — so a March quarter is never dressed up as a fiscal year
+  const dated = full.filter(s => /^[A-Z][a-z]{2} \d{4}$/.test(s));
+  const fiscal = dated.length > 0 && dated.every(s => s.startsWith("Mar "));
+  let labels = full.length <= FIN_TICK_FULL_MAX ? full.slice() : full.map(s => _finTickCompact(s, fiscal));
+  if (labels.length > FIN_TICK_COMPACT_MAX) labels = labels.map((l, i) => (i % 2 === 0 || i === labels.length - 1) ? l : "");
+  const shown = labels.filter(l => l !== "");
+  if (new Set(shown).size !== shown.length) {          // the invariant — fail loudly, and never ship a collapsed axis
+    console.error("cc#1771 x-axis labels collapsed — falling back to the full period labels", labels);
+    return full;
+  }
+  return labels;
+}
 function FinRowChart({ row, periods }) {
   const W = 640, H = 130, padL = 10, padR = 10, padT = 12, padB = 22;
   const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -1804,11 +1839,12 @@ function FinRowChart({ row, periods }) {
   const xStep = plotW / n;
   const xAt = i => padL + xStep * i + xStep / 2;
   const isTtmCol = i => periods[i] === "TTM";
+  const ticks = _finTicks(periods);   // cc#1771: full period_label, never a year-dropping truncation
 
   const axis = (
     <React.Fragment>
       {periods.map((p, i) => (
-        <text key={i} x={xAt(i)} y={H - 6} fontSize="8.5" fill={C.muted} textAnchor="middle">{p === "TTM" ? "TTM" : String(p).slice(0, 6)}</text>
+        <text key={i} x={xAt(i)} y={H - 6} fontSize="8.5" fill={C.muted} textAnchor="middle">{ticks[i]}</text>
       ))}
     </React.Fragment>
   );
@@ -1900,13 +1936,14 @@ function FinChartModal({ title, periods, rows, onClose }) {
     const line = vals.map((v, i) => v == null ? "" : ((i === 0 || vals[i - 1] == null ? "M" : "L") + X(i).toFixed(1) + "," + Y(v).toFixed(1))).join(" ");
     const y0 = Y(bar ? Math.max(0, ymin) : ymin);
     const ticks = [0, 1, 2, 3].map(t => ymin + (ymax - ymin) * t / 3);
+    const xTicks = _finTicks(periods);   // cc#1771: the same labels in Line and Bar mode — the full period_label
     bodySvg = (
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
         {ticks.map((tv, i) => (<g key={i}>
           <line x1={L} y1={Y(tv)} x2={W - R} y2={Y(tv)} stroke={C.gridLine} strokeWidth="0.5" strokeOpacity="0.5" />
           <text x={L - 6} y={Y(tv) + 3} fontSize="9" fill={C.muted} textAnchor="end" fontFamily="monospace">{tv.toFixed(isPct || isX ? 1 : 0)}</text>
         </g>))}
-        {vals.map((v, i) => (<text key={"x" + i} x={X(i)} y={H - 8} fontSize="8.5" fill={C.muted} textAnchor="middle">{String(periods[i] == null ? "" : periods[i]).slice(0, 6)}</text>))}
+        {vals.map((v, i) => (<text key={"x" + i} x={X(i)} y={H - 8} fontSize="8.5" fill={C.muted} textAnchor="middle">{xTicks[i]}</text>))}
         {bar
           ? vals.map((v, i) => v == null ? null : (<rect key={i} x={X(i) - bw / 2} y={Math.min(Y(v), y0)} width={bw} height={Math.abs(Y(v) - y0)} fill={v >= 0 ? C.accent : C.red} opacity="0.85" rx="2"><title>{periods[i]}: {_finFmt(v, row.unit)}</title></rect>))
           : <path d={line} fill="none" stroke={C.accent} strokeWidth="2" strokeLinejoin="round" />}
