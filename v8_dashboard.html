@@ -1263,7 +1263,13 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          Digest/Trades pattern verbatim. /news is de-listed from the site NAV in the same change —
          this tab is now the single Intel entry on the web surface (rule 2987); the /news route
          itself stays live for typed URLs and the /m/intel app screen is untouched. -->
-    <button class="v8toptab" data-pane="intel" onclick="showV8Pane('intel')">Intel</button>
+    <!-- cc#1747 (founder 06-Sep "Shift Intel in main Nav from V8 nav and Trade Check shift from
+         main nav to V8 nav, interchange positions"): the Intel TAB BUTTON is gone from this row —
+         Intel is site-nav slot 3 now (pwa_endpoints NAV '/dashboard#intel') and still opens the
+         same #pane-intel below via the hash route. Check takes this seat: an iframe of the live
+         /check page (?embed=1&full=1), sized by the cc#671 scorrTcHeight handshake — the same
+         embed pattern as the TC Scanner tab, not a second mechanism. /check stays at its own URL. -->
+    <button class="v8toptab" data-pane="check" onclick="showV8Pane('check')">Check</button>
 
     <!-- cc#1584 (founder 02-Sep 11:50) put Model Portfolio in the row after Intel (cc#1585 owns the
          order) as a folded /quant-basket embed under a chip strip. cc#1677 (founder 04-Sep 09:35)
@@ -1477,6 +1483,12 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
        a 360px floor keeps it usable on a very short window. calc() stays as the no-JS size. -->
   <div id="pane-intel" style="display:none">
     <iframe id="intelFrame" title="Intel" style="width:100%;height:calc(100vh - 150px);min-height:360px;border:0;background:var(--bg)"></iframe>
+  </div>
+  <!-- cc#1747: Check inside the V8 shell — the live /check page in an iframe (lazy-loaded on first
+       open, ?embed=1&full=1 keeps the page head + symbol input, strips only the site nav). Height
+       follows the page's own scorrTcHeight postMessage (cc#671), source-checked below; 200px floor. -->
+  <div id="pane-check" style="display:none">
+    <iframe id="checkFrame" title="Check" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#1677 (founder 04-Sep 09:35 IST): Model Portfolio is now an EMPTY LAUNCHER, not a folded
        copy of /quant-basket -- superseded cc#1584's chip strip + iframe embed below. Mounted by
@@ -8534,11 +8546,13 @@ function showV8Pane(name){
   /* cc#1282: digest + trades join the pane map as embed frames (cc#740 tcscan pattern). */
   var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',tcscan:'pane-tcscan',bt:'pane-bt',
              digest:'pane-digest',trades:'pane-trades',intel:'pane-intel',alerts:'pane-alerts',
-             model:'pane-model'};  /* cc#1523, cc#1585, cc#1584 */
+             model:'pane-model',check:'pane-check'};  /* cc#1523, cc#1585, cc#1584, cc#1747 */
   Object.keys(panes).forEach(function(k){var el=document.getElementById(panes[k]);if(el)el.style.display=(k===name)?'':'none';});
   var btns=document.querySelectorAll('.v8toptab');
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
   try{history.replaceState(null,'',(name==='v8')?(location.pathname+location.search):('#'+name));}catch(e){}
+  try{window.dispatchEvent(new CustomEvent('scorr:pane',{detail:{pane:name}}));}catch(e){}   // cc#1747: the site nav re-marks its lit item (Intel is a hash entry)
+  if(name==='check'){var fc=document.getElementById('checkFrame');if(fc&&!fc.src)fc.src='/check?embed=1&full=1';}  // cc#1747: lazy-load the live Check page once
   if(name==='index'&&window.idxBoot)window.idxBoot();
   if(name==='v14'&&window.v14Boot)window.v14Boot();
   if(name==='bt'&&window.btBoot)window.btBoot();
@@ -8558,7 +8572,7 @@ function showV8Pane(name){
    land on the Day Log table instead of a 404 or the default tab. Keys map to TAB_LABELS indices. */
 var INNER_TABS={master:0,buyrev:1,buymom:2,sellrev:4,sellmom:5,tradelog:7,daylog:8,rawdata:9,news:11,results:12,global:13,matrix:15};
 function openInnerTab(h){ if(!(h in INNER_TABS))return false; try{ showV8Pane('v8'); selectTab(INNER_TABS[h]); }catch(e){} return true; }
-(function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model'];var h=(location.hash||'').replace('#','');
+(function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model','check'];var h=(location.hash||'').replace('#','');
   if(openInnerTab(h))return;
   // cc#1207: the hidden V14 tab reveals itself only for a direct #v14 link, so the strip stays
   // clean for everyone else and the deep link still works with its tab visible.
@@ -8566,7 +8580,7 @@ function openInnerTab(h){ if(!(h in INNER_TABS))return false; try{ showV8Pane('v
   // cc#1293: same reveal-on-direct-link pattern for the now-hidden V6 BT tab.
   if(h==='bt'){var _bt=document.getElementById('bttab'); if(_bt) _bt.style.display='';}
   if(TABS.indexOf(h)>-1){showV8Pane(h);}})();
-window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model'];var h=(location.hash||'').replace('#','');
+window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan','bt','digest','trades','intel','alerts','model','check'];var h=(location.hash||'').replace('#','');
   if(openInnerTab(h))return;
   showV8Pane(TABS.indexOf(h)>-1?h:'v8');});
 /* cc#1584's Model Portfolio chip strip (mpStrip/mpPick/mpBoot) is RETIRED here — superseded by
@@ -9151,6 +9165,15 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     if(!f || !ev.data || ev.data.type!=='tcscan-resize') return;
     if(ev.source !== f.contentWindow) return;
     var h=Number(ev.data.h);
+    if(h>0) f.style.height=Math.max(200,Math.ceil(h))+'px';
+  });
+  // cc#1747: the Check tab's frame, same handshake shape — the /check page already posts
+  // {type:'scorrTcHeight', height} when embedded (cc#671); source-checked, 200px floor.
+  window.addEventListener('message', function(ev){
+    var f=document.getElementById('checkFrame');
+    if(!f || !ev.data || ev.data.type!=='scorrTcHeight') return;
+    if(ev.source !== f.contentWindow) return;
+    var h=Number(ev.data.height);
     if(h>0) f.style.height=Math.max(200,Math.ceil(h))+'px';
   });
 

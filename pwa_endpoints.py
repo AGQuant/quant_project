@@ -341,9 +341,13 @@ PWA_JS = """
     // below moved WITH the entry each one precedes; none rewritten, none dropped.
     ['/', '\\u2302', 'Home'],
     ['/dashboard', '\\u26a1', 'V8'],
-    // cc#1695 (founder 04-Sep 20:50 IST "display trade check tab after v8"): Check moves here,
-    // directly after V8. Was after Adaptive Dashboard; label kept exactly ('Check', not renamed).
-    ['/check', '\\u2713', 'Check'],
+    // cc#1695 (founder 04-Sep 20:50 IST "display trade check tab after v8"): Check moved here,
+    // directly after V8. cc#1747 (founder 06-Sep "Shift Intel in main Nav from V8 nav and Trade
+    // Check shift from main nav to V8 nav, interchange positions"): the two swap seats — Intel
+    // takes slot 3 (it opens the same V8 pane as before, /dashboard#intel; isActive is hash-aware
+    // for it) and Check moves into the V8 tab row (slot 7, /dashboard#check, an iframe of /check).
+    // /check stays live at its own URL for bookmarks and deep links.
+    ['/dashboard#intel', '\\u2139\\ufe0e', 'Intel'],
     // cc#1536 (founder 31-Aug): Alerts (approve surface, NEW desktop page) + Wall of Trades
     // (display) as ADJACENT desktop tabs, Alerts leading (the cc#1526 approve-surface-leads
     // precedent). Both 'd'-flagged: the mobile placements are cc#1535's (grid tile / bottom nav),
@@ -435,10 +439,17 @@ PWA_JS = """
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).
   ];
   var p = location.pathname, qs = location.search;
+  // cc#1747: hash-aware. An entry like '/dashboard#intel' is active only when that pane is open
+  // (path AND hash match), and the plain '/dashboard' entry (V8) steps back while a hash that has
+  // its own nav entry is open — one item lit at a time. Re-marked on hashchange / scorr:pane.
+  function hashOwned(h) { if (!h) return false; for (var i = 0; i < NAV.length; i++) { if (NAV[i][0] === p + h) return true; } return false; }
   function isActive(route) {
-    var base = route.split('?')[0];
+    var base = route.split('?')[0], hash = '';
+    var hi = base.indexOf('#'); if (hi > -1) { hash = base.slice(hi); base = base.slice(0, hi); }
     if (route.indexOf('model=gvm') > -1) return p === '/cio2' && qs.indexOf('model=gvm') > -1;
     if (base === '/') return p === '/';
+    if (hash) return p === base && location.hash === hash;
+    if (hashOwned(location.hash)) return false;
     return p === base || p.indexOf(base + '/') === 0;   // prefix match: sub-views highlight
   }
   function navByPath(pp) { for (var i = 0; i < NAV.length; i++) { if (NAV[i][0] === pp) return NAV[i]; } return null; }
@@ -711,6 +722,18 @@ PWA_JS = """
     // NOT added to the NAV array — item 7 requires the desktop top-nav itself to be unchanged, and
     // a NAV entry would also duplicate it into the mobile More sheet.
     + '';
+    // cc#1747: the lit item follows the open pane. showV8Pane writes the hash with replaceState (no
+    // hashchange event), so the dashboard also dispatches scorr:pane; both re-mark the bar in place.
+    function markActive() {
+      var links = host.querySelectorAll('a[href]');
+      for (var i = 0; i < links.length; i++) {
+        var href = links[i].getAttribute('href') || '';
+        if (href.charAt(0) !== '/') continue;
+        links[i].classList.toggle('active', isActive(href));
+      }
+    }
+    window.addEventListener('hashchange', markActive);
+    window.addEventListener('scorr:pane', markActive);
     // cc#995 (founder 10-Aug): the far-right "Models" launcher button is REMOVED. It was appended
     // HERE by pwa.js, OUTSIDE the NAV array (the cc#860 append above) \u2014 so THIS was the web "Models"
     // the founder pointed at, not a NAV-array entry. The ScorrModels overlay, /api/models/status and
@@ -849,6 +872,11 @@ PWA_JS = """
 NAV_TOGGLE_JS = """
 (function () {
   if (window.__scorrNavToggle) return; window.__scorrNavToggle = true;
+  // cc#1747: an EMBEDDED page (an iframe inside the V8 shell — Check, TC Scanner, Intel, Digest,
+  // Wall of Trades, Alerts) has no site nav of its own (main.py's embed rule strips pwa.js), so
+  // the reveal strip had nothing to reveal and drew a second purple bar inside the frame. No strip
+  // when framed; the host page keeps its own.
+  if (window.self !== window.top) return;
   // cc#311: model-nav is HIDDEN BY DEFAULT on every browser open / login. "Show" is remembered
   // only for the CURRENT tab session (sessionStorage) — so a fresh browser or new tab always
   // starts hidden and the user reveals the nav via the button when needed; the choice still
