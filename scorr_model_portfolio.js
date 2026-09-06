@@ -78,11 +78,12 @@
     finz_dividend: 'FINZ Dividend', finz_defence: 'FINZ Defence', finz_etf: 'FINZ ETF Basket'
   };
 
-  function tableWrap(inner) {
+  function tableWrap(inner, cls) {
     // cc#330 .mtable pattern (sticky first column, data-pri priorities, horizontal scroll on
     // narrow) — first real consumer on a dark-token page, so --mtable-bg is set locally to the
     // site's own panel token rather than the pattern's white default.
-    return '<div class="tw mtable-wrap" style="--mtable-bg:var(--panel,#121A33);margin-top:10px">'
+    // cc#1731: `cls` = 'mp-sticky' for a table whose THEAD pins on scroll (see the CSS note).
+    return '<div class="tw mtable-wrap' + (cls ? ' ' + cls : '') + '" style="--mtable-bg:var(--panel,#121A33);margin-top:10px">'
       + '<table class="mtable" style="width:100%;border-collapse:collapse;font-size:12.5px">' + inner + '</table></div>';
   }
   function th(label, extra) {
@@ -241,6 +242,28 @@
       + '#mpMount .mp-tab{font:inherit;font-size:11px;font-weight:700;color:var(--mut);background:transparent;border:1px solid var(--line2,#243049);border-radius:8px;padding:5px 12px;cursor:pointer}'
       + '#mpMount .mp-tab.active{color:var(--blu,#4D7CFE);border-color:var(--blu,#4D7CFE)}'
       + '#mpMount .mtable th[data-mp-sort]{cursor:pointer;user-select:none}'
+      // cc#1731 (founder 06-Sep "similarly in model portfolio tab table header rows should stick"):
+      // the HOLDINGS thead pins on vertical scroll. Offset = --scorr-nav-bottom, the ONE live
+      // measurement cc#1730 put in scorr_card_common.js (window.ScorrNavOffset): the canonical
+      // #scorr-nav bottom edge (44 shown, 20 = the cc#1718 Show strip when hidden, 0 when cc#926
+      // has slid it away). Measured on this page: the V8 sub-nav row (.v8toptabs) is NOT sticky,
+      // so it contributes nothing to the offset — nothing is hardcoded here, the static values
+      // are the no-JS fallback. Sticky is on the TH elements, so the table layout never changes
+      // and the columns stay aligned with the body (item 4). Page background + a 1px bottom line
+      // (inset shadow — a border on a sticky th does not travel with it under border-collapse)
+      // so rows never show through (item 3). At desktop widths the .mtable-wrap must not be a
+      // scroll container (overflow-x:auto makes it the sticky containing block and the header
+      // would pin to the wrap, not the viewport); below 768px the pattern's horizontal scroll is
+      // kept and the header simply does not pin — the mobile pane is out of scope.
+      + '@media(min-width:768px){#mpMount .mtable-wrap.mp-sticky{overflow:visible}}'
+      + '#mpMount .mp-sticky thead th{position:sticky;top:var(--scorr-nav-bottom,44px);z-index:5;'
+      + '  background:var(--bg,#070C1A);box-shadow:inset 0 -1px 0 var(--line,#1E2A44)}'
+      // cc#1731 item 5: the rebalance-block Buy table is 20 rows on the seed block, so it gets the
+      // same treatment. .rb-block dropped overflow:hidden (a clipped ancestor kills sticky); the
+      // header keeps its rounded top on its own. HSL History has 0 rows today — skipped.
+      + '@media(min-width:768px){#mpMount .rb-wrap .rb-block{overflow:visible}#mpMount .rb-hd{border-radius:12px 12px 0 0}'   /* .rb-wrap .rb-block outranks the base overflow:hidden rule declared later */
+      + '  #mpMount .rb-tbl thead th{position:sticky;top:var(--scorr-nav-bottom,44px);z-index:5;'
+      + '  background:var(--bg,#070C1A);box-shadow:inset 0 -1px 0 var(--line,#1E2A44)}}'
       + '#mpMount .mtable td.sym{text-align:left;font-weight:700;white-space:nowrap}'
       // cc#1709 block + HSL classes, carried over from quant_basket.html so the two surfaces match
       + '#mpMount .rb-wrap{padding:4px 0 0}'
@@ -349,7 +372,7 @@
         + td('<span class="' + cls(r.pnl) + '">' + inr2(r.pnl) + '</span>') + td('<span class="' + cls(r.pnl_pct) + '">' + pct(r.pnl_pct) + '</span>')
         + td(r.weight == null ? '—' : (+r.weight).toFixed(1) + '%') + td(num2(r.stop_loss_price)) + '</tr>';
     }).join('');
-    return tableWrap('<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody>');
+    return tableWrap('<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody>', 'mp-sticky');   // cc#1731: pinned header
   }
 
   // cc#1728: NEXT REVIEW and STATE left the strip (founder 06-Sep: "hide box Next Review and
