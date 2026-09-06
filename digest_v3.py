@@ -993,6 +993,40 @@ def _results_analysed(cur) -> Dict[str, Any]:
     # result-first ruling), applied to the merged list via stable multi-pass sorts. Within one
     # result date, polished (L2) rows sort ahead of L1 rows, which is the right read: the
     # written analysis is the richer row for the same day.
+    # ── cc#1758 · SALES YoY + MARGIN vs LY ON EVERY ROW, from screener_raw ────────────────────
+    # (founder 06-Sep: "Sales YoY and margin blank, check issue"). Neither number was on this payload:
+    # the web Result Corner printed a literal em dash in both columns for every row while PAT YoY
+    # rendered from dot_inputs (the fundamentals_history year-ago quarter, rule 29519). Not a data
+    # gap — screener_raw holds both for the rows the founder saw.
+    #   sales_yoy    = screener_raw.qoq_sales_growth. A QoQ-looking NAME holding a YoY VALUE (latest
+    #                  quarter vs the year-ago quarter; founder basis change 11-Aug-2026, cc#1005).
+    #                  Read as-is, never recomputed (YOY_BASIS_RULE_V1, cc#1759).
+    #   margin_vs_ly = opm - opm_prev_year_q in percentage POINTS, signed: 10.14 -> 11.44 is -1.30
+    #                  pts, never -11.4%. The card's own formula (LGEINDIA -1.30 is its check
+    #                  figure). NOTE for the record: opm_latest_q - opm_prev_year_q (the pair
+    #                  gvm_nightly.opm_expansion uses) gives +1.06 for the same symbol; both raw
+    #                  margins ride along so the surface can say what was compared.
+    # NULL source -> None: never 0, never another field. The two miss counts are published on the
+    # section so a genuine gap is a number, not a guess.
+    syms = sorted({r["symbol"] for r in out})
+    scr = {}
+    if syms:
+        cur.execute("SELECT UPPER(nse_code), qoq_sales_growth, opm, opm_prev_year_q "
+                    "FROM screener_raw WHERE UPPER(nse_code) = ANY(%s)", (syms,))
+        for sym, sg, o, oy in cur.fetchall():
+            scr[sym] = (sg, o, oy)
+    sales_missing = margin_missing = 0
+    for r in out:
+        sg, o, oy = scr.get(r["symbol"], (None, None, None))
+        r["sales_yoy"] = None if sg is None else round(float(sg), 2)
+        r["margin_now"] = None if o is None else round(float(o), 2)
+        r["margin_ly"] = None if oy is None else round(float(oy), 2)
+        r["margin_vs_ly"] = None if (o is None or oy is None) else round(float(o) - float(oy), 2)
+        if r["sales_yoy"] is None:
+            sales_missing += 1
+        if r["margin_vs_ly"] is None:
+            margin_missing += 1
+
     out.sort(key=lambda r: r["symbol"])
     out.sort(key=lambda r: r.get("polished_at") or "", reverse=True)
     out.sort(key=lambda r: r.get("ex_date") or "", reverse=True)
@@ -1020,6 +1054,10 @@ def _results_analysed(cur) -> Dict[str, Any]:
         "l2_rows": len(rows),
         "l1_rows": len(l1_raw),
         "l1_with_sentence": l1_with_sentence,
+        # cc#1758: rows whose SALES YoY / MARGIN vs LY still print a dash after the attach above —
+        # a real gap stated as a number (screener_raw NULL or no screener row), never hidden.
+        "sales_yoy_missing": sales_missing,
+        "margin_vs_ly_missing": margin_missing,
         # cc#1319: no longer out[0] -- the deck is sorted by ex_date now, not polished_at, so the
         # first row is not necessarily the most recently polished one any more. polished_at is
         # astimezone(IST).isoformat() with a fixed offset on every row, so a plain string max()

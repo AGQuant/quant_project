@@ -257,6 +257,15 @@ section{margin-top:26px}
    the card, never a column silently dropped. */
 .rtab th.vfsort{cursor:pointer;user-select:none}
 .rtab th.vfsort.on{color:var(--tx)}
+/* cc#1758 scope 4 (founder 06-Sep "increase font size all column similar to verdict column"): the
+   whole table reads at ONE size. The verdict cell reads a plain 11.5px (this page has no type
+   ramp — the --type-* scale lives in scorr_themes.css, which the web digest does not load), so the
+   one size is written ONCE as a custom property on the table and every cell reads it: header row,
+   ticker, company line, result-date chip, tier pill, the three numeric columns, the pending text
+   and the verdict itself. Change --rc-fs and the table moves together. Declared after the
+   per-class rules above so it wins on every cell. */
+.rtab{--rc-fs:11.5px}
+.rtab th,.rtab td,.rtab .tk,.rtab .cn,.rtab .num,.rtab .pill,.rtab .pend,.rtab .rc-verdict,.rtab td b{font-size:var(--rc-fs)}
 .rtdot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
 .rtdot.g{background:var(--gr)} .rtdot.a{background:var(--am)} .rtdot.r{background:var(--rd)}
 .rc-rbtn{font-family:var(--f-m);font-size:10px;font-weight:700;letter-spacing:.04em;
@@ -961,10 +970,11 @@ document.addEventListener('keydown',function(e){ if(e.key==='Enter'&&e.target&&e
        VERDICT column here is the analyst/auto-verdict SENTENCE (c.verdict), the exact text the R
        button shows, truncated to 2 lines with the full text on hover — that IS "the same text as
        the app", since the app shows the identical field.
-   (2) SALES YoY and MARGIN vs LY are not on this payload for any row (L1's calc CTE computes a
+   (2) SALES YoY and MARGIN vs LY were not on this payload for any row (L1's calc CTE computes a
        margin delta and PAT YoY transiently to build the auto-verdict sentence, then discards both;
-       no sales/revenue YoY is computed anywhere in _results_analysed). Both columns render, both
-       read em dash for every row until a backend follow-up card exposes them — never fabricated.
+       no sales/revenue YoY is computed anywhere in _results_analysed). Both columns rendered an
+       em dash for every row until a backend card exposed them — cc#1758 did: sales_yoy and
+       margin_vs_ly now ride on every row from screener_raw (see rcSalesYoy / rcMargin below).
    (3) there is no market-cap FIGURE on this payload, only `tier` (LARGE/MID/SMALL, a rank bucket).
        The TIER column is the honest substitute for "M-Cap"; the default sort's "then market cap
        desc" clause falls back to the payload's own natural secondary order (written analysis
@@ -1036,6 +1046,22 @@ function rcPatYoy(c){
   var v=c.dot_inputs&&c.dot_inputs.pat_yoy;
   return v==null ? '—' : '<span class="'+(v>0?'pos':(v<0?'neg':'flat'))+'">'+(v>0?'+':'')+Number(v).toFixed(1)+'%</span>';
 }
+/* cc#1758 (founder 06-Sep "Sales YoY and margin blank"): both columns printed a LITERAL em dash
+   because the payload never carried them (the cc#1690 note above). digest_v3._results_analysed now
+   ships sales_yoy (screener_raw.qoq_sales_growth — a QoQ-looking name holding a YoY value, read
+   as-is) and margin_vs_ly (opm minus opm_prev_year_q, in percentage POINTS, signed) on every row.
+   A missing value still prints the dash: never 0, never another field. Margin is suffixed "pts"
+   so it cannot be read as a percent change, and the cell's title states the two margins compared. */
+function rcSalesYoy(c){
+  var v=c.sales_yoy;
+  return v==null ? '—' : '<span class="'+(v>0?'pos':(v<0?'neg':'flat'))+'">'+(v>0?'+':'')+Number(v).toFixed(1)+'%</span>';
+}
+function rcMargin(c){
+  var v=c.margin_vs_ly;
+  if(v==null) return '—';
+  var t=(c.margin_now!=null&&c.margin_ly!=null)?('OPM '+Number(c.margin_now).toFixed(2)+'% now vs '+Number(c.margin_ly).toFixed(2)+'% in the year-ago quarter'):'';
+  return '<span class="'+(v>0?'pos':(v<0?'neg':'flat'))+'" title="'+esc(t)+'">'+(v>0?'+':'')+Number(v).toFixed(2)+' pts</span>';
+}
 function rcSort(key){
   if(RC_SORT.key===key) RC_SORT.dir*=-1; else { RC_SORT.key=key; RC_SORT.dir=1; }
   RC_SHOWN=RC_PAGE;
@@ -1082,16 +1108,16 @@ function secResults(s,n){
         '<span class="asof" id="rcStat">'+stat+'</span>'+rcTierChips(all)+'</div>';
   h += '<div class="card"><table class="rtab"><thead><tr>'+
        '<th>Company</th>'+rcTh('Result Date','DATE')+rcTh('Tier','TIER')+
-       '<th class="r">Sales YoY</th>'+rcTh('PAT YoY','PAT')+'<th class="r">Margin vs LY</th>'+
+       '<th class="r">Sales YoY</th>'+rcTh('PAT YoY','PAT')+'<th class="r" title="OPM now minus OPM in the year-ago quarter, in percentage points">Margin vs LY (pts)</th>'+
        rcTh('Verdict','VERDICT')+'<th class="c">Dot</th><th class="c">R</th>'+
        '</tr></thead><tbody>';
   h += shown.map(function(c){
     return '<tr><td><span class="tk">'+esc(c.symbol||'')+'</span><span class="cn">'+esc(c.company||'')+'</span></td>'+
            '<td>'+rcDateChip(c)+'</td>'+
            '<td>'+(c.tier?'<span class="pill p-neu">'+esc(c.tier)+'</span>':'—')+'</td>'+
-           '<td class="r num">—</td>'+
+           '<td class="r num">'+rcSalesYoy(c)+'</td>'+
            '<td class="r num">'+rcPatYoy(c)+'</td>'+
-           '<td class="r num">—</td>'+
+           '<td class="r num">'+rcMargin(c)+'</td>'+
            '<td><div class="rc-verdict" title="'+esc(c.verdict||'')+'">'+
              (c.verdict?esc(c.verdict):'<span class="pend">'+(c.l2?'Written up, no computable verdict.':'Reported — analysis not yet on the desk')+'</span>')+
            '</div></td>'+
