@@ -857,6 +857,104 @@ def _resolve_origin(cur, row):
     return None
 
 
+# ── cc#1781 · TRADE_ALERT_CLOSE_PRIORITY_V1 (session_log 39672, founder-locked 06-Sep) ──────────
+# ONE resolver for "is this approved alert open or closed, and which target/stop does it show",
+# called from exactly two places: trade_wall_approved.tradewall_approved (the Approved tab) and
+# alerts_ideas below (the app Ideas cards). Never reimplemented a third time.
+#   1. HIGHEST  — trade_alert_levels.closed_at set (the manual /api/tradewall/approved/close
+#                 endpoint, or an earlier engine mirror). Final; nothing below overrides it.
+#   2. DISCRET. — not closed, and trade_alert_levels.target_price / stop_loss set: those are the
+#                 target/stop shown, instead of the origin engine's own. Display only: no price
+#                 watch, nothing auto-closes on a discretionary level (out of scope by the card).
+#   3. DEFAULT  — target/stop from the origin engine; AND when the origin shows an exit (exit_ts),
+#                 the close is MIRRORED into trade_alert_levels ONCE — closed_at = the engine's
+#                 exit time, close_price = exit_price, close_reason = "engine: " + its own reason —
+#                 guarded by closed_at IS NULL (the same guard the manual close uses), so it can
+#                 never fire twice and never overwrite a genuine manual close. A manual alert
+#                 (no source_engine) has no origin and can only close through rule 1.
+# close_source is read back off the stored record: a reason carrying the "engine: " prefix is an
+# engine mirror, anything else was written by hand — no second column, no schema change.
+# The origin row is returned too, so a caller that needs it (evidence, style, instrument) does
+# not look it up a second time. The write's audit row reuses trade_wall_approved._audit (the ONE
+# logger for that sidecar), imported at call time: trade_wall_approved imports THIS module at
+# load, so a module-level import here would be the circular import the card asks about.
+_ENGINE_REASON_PREFIX = "engine: "
+
+
+def _close_record(out, closed_at, close_price, close_reason):
+    reason = str(close_reason or "")
+    out.update({"closed": True, "closed_at": _ist_naive(closed_at), "close_price": _fnum(close_price),
+                "close_reason": (close_reason if close_reason else None),
+                "close_source": "engine" if reason.startswith(_ENGINE_REASON_PREFIX) else "manual"})
+    # target/stop stay as the levels IN FORCE at the close (the app's track bar draws the journey
+    # against them); the Approved tab blanks them on a closed row, since there the close record
+    # replaces the levels on display.
+    return out
+
+
+def resolve_close_state(cur, row):
+    """row: a trade_alerts row dict with id / source_engine / source_ref. Returns
+    {closed, closed_at (naive IST), close_price, close_reason (as stored), close_source
+     ('manual' | 'engine' | None), target, stop, level_source ('discretionary' | 'engine' | None),
+     levels {target_price, stop_loss} (the sidecar values, set or None), origin (the
+     _resolve_origin row or None), hidden (V10 futures leg, 36703), mirrored (True when THIS call
+     wrote the engine mirror — the caller commits)}."""
+    alert_id = row.get("id")
+    out = {"closed": False, "closed_at": None, "close_price": None, "close_reason": None,
+           "close_source": None, "target": None, "stop": None, "level_source": None,
+           "levels": {"target_price": None, "stop_loss": None}, "origin": None, "hidden": False,
+           "mirrored": False}
+    cur.execute("""SELECT target_price, stop_loss, closed_at AT TIME ZONE 'Asia/Kolkata', close_price, close_reason
+                   FROM trade_alert_levels WHERE alert_id = %s""", (alert_id,))
+    lv = cur.fetchone()
+    lv_t, lv_s = (_fnum(lv[0]), _fnum(lv[1])) if lv else (None, None)
+    out["levels"] = {"target_price": lv_t, "stop_loss": lv_s}
+    # the origin is resolved on EVERY call — a closed card still needs its style / instrument /
+    # evidence for display — but it only ever WRITES under rule 3 below.
+    o = _resolve_origin(cur, row)
+    out["origin"] = o
+    disc = (lv_t is not None or lv_s is not None)
+    o_t = o.get("target") if (o and not o.get("hidden")) else None
+    o_s = o.get("stop") if (o and not o.get("hidden")) else None
+    out["target"] = lv_t if lv_t is not None else o_t
+    out["stop"] = lv_s if lv_s is not None else o_s
+    out["level_source"] = "discretionary" if disc else ("engine" if (o and not o.get("hidden")) else None)
+    if lv and lv[2] is not None:                       # rule 1: a recorded close is final
+        return _close_record(out, lv[2], lv[3], lv[4])
+    if o and o.get("hidden"):                          # 36703: a V10 futures leg is never rendered;
+        out["hidden"] = True                           # its exit fields are not exposed, so no mirror
+        return out
+    if o and o.get("exit_ts"):                         # rule 3: mirror the engine exit, once
+        exit_ts = _ist_naive(o.get("exit_ts"))
+        reason = _ENGINE_REASON_PREFIX + str(o.get("exit_reason") or "exit")
+        cur.execute("""INSERT INTO trade_alert_levels (alert_id, closed_at, close_price, close_reason, updated_at)
+                       VALUES (%s, (%s::timestamp AT TIME ZONE 'Asia/Kolkata'), %s, %s, NOW())
+                       ON CONFLICT (alert_id) DO UPDATE SET
+                           closed_at = EXCLUDED.closed_at, close_price = EXCLUDED.close_price,
+                           close_reason = EXCLUDED.close_reason, updated_at = NOW()
+                       WHERE trade_alert_levels.closed_at IS NULL
+                       RETURNING closed_at AT TIME ZONE 'Asia/Kolkata', close_price, close_reason""",
+                    (alert_id, exit_ts, o.get("exit_price"), reason))
+        got = cur.fetchone()
+        if got:
+            from trade_wall_approved import _audit    # the one sidecar logger; call-time import, see above
+            _audit(cur, alert_id, "auto_close_engine_mirror",
+                   {"symbol": row.get("symbol"), "engine": row.get("source_engine"), "source_ref": row.get("source_ref"),
+                    "origin_table": o.get("table"), "origin_id": o.get("id"),
+                    "exit_ts": str(exit_ts), "exit_price": o.get("exit_price"), "exit_reason": o.get("exit_reason")},
+                   "engine_mirror", None)
+            out["mirrored"] = True
+            return _close_record(out, got[0], got[1], got[2])
+        # lost the race to a real manual close between the read above and this write: it wins
+        cur.execute("""SELECT closed_at AT TIME ZONE 'Asia/Kolkata', close_price, close_reason
+                       FROM trade_alert_levels WHERE alert_id = %s""", (alert_id,))
+        ex = cur.fetchone()
+        if ex and ex[0] is not None:
+            return _close_record(out, ex[0], ex[1], ex[2])
+        return out                                     # unreachable in practice; stays honest (open)
+    return out                                         # open: rule 2 over rule 3, set above
+
+
 def _why_line(kind, direction, o, ev, row, extra):
     """ONE plain-words line: setup + evidence, never the engine (37072; 36283 plain_words_v2).
     Templates filed for Fable OK in cc_task_logs (cc#1620 P1). A missing field drops its
@@ -969,6 +1067,9 @@ def alerts_ideas(limit: int = 100):
     today = now_ist.date()
     with _conn() as conn, conn.cursor() as cur:
         _ensure_schema(conn)
+        from trade_wall_approved import _ensure as _ensure_levels   # cc#1781: CREATE TABLE IF NOT EXISTS only
+        _ensure_levels(conn)
+        mirrored = 0
         cur.execute(f"""SELECT {_COLS} FROM trade_alerts
                         WHERE status IN ('approved', 'pending', 'triggered')
                         ORDER BY COALESCE(approved_at, created_at) DESC, id DESC LIMIT %s""", (limit,))
@@ -1012,14 +1113,21 @@ def alerts_ideas(limit: int = 100):
                 continue
             # approved ────────────────────────────────────────────────────────────────────────
             entry = row["approved_price"]
-            o = _resolve_origin(cur, row)
-            if o and o.get("hidden"):
+            # cc#1781: ONE resolver decides open/closed and which target/stop shows (manual close >
+            # discretionary levels > engine default, with the engine exit mirrored once). Before
+            # this, `closed` came from the origin alone — a manual alert closed by hand stayed
+            # LIVE here forever, and a discretionary level set on the Approved tab never showed.
+            st = resolve_close_state(cur, row)
+            o = st["origin"]
+            if st["hidden"]:
                 hidden += 1                     # a V10 futures leg: stored, never shown (36703)
                 continue
+            if st["mirrored"]:
+                mirrored += 1
             ev = (o or {}).get("evidence") or {}
-            closed = bool(o and o.get("exit_ts"))
-            final_price = o["exit_price"] if closed else None
-            exit_ts = _ist_naive(o["exit_ts"]) if closed else None
+            closed = st["closed"]
+            final_price = st["close_price"] if closed else None
+            exit_ts = st["closed_at"] if closed else None
             ref_price = final_price if closed else cmp_v
             card.update({
                 "status": "closed" if closed else "live",
@@ -1030,12 +1138,21 @@ def alerts_ideas(limit: int = 100):
                 "spark": _spark(cur, sym, approved_at, exit_ts),
             })
             if closed:
+                # cc#1781: an engine mirror carries the engine's own reason behind the "engine: "
+                # prefix and reads through _CLOSE_WORDS as before; a manual close reads plainly
+                # ("closed by hand"), with the founder's own typed note after it when there is one.
+                if st["close_source"] == "manual":
+                    _note = str(st["close_reason"] or "").strip()
+                    _reason_words = _CLOSE_WORDS["MANUAL"] + (" · " + _note if _note else "")
+                else:
+                    _raw = str(st["close_reason"] or "")[len(_ENGINE_REASON_PREFIX):] if str(st["close_reason"] or "").startswith(_ENGINE_REASON_PREFIX) else str(st["close_reason"] or "")
+                    _reason_words = _CLOSE_WORDS.get(_raw.upper(), (_raw or "closed").replace("_", " ").lower())
                 card["closed"] = {"at_ist": _fmt_ist(exit_ts), "price": final_price,
-                                  "final_pct": card["since_pct"],
-                                  "reason": _CLOSE_WORDS.get(str(o.get("exit_reason") or "").upper(),
-                                                             str(o.get("exit_reason") or "closed").replace("_", " ").lower())}
+                                  "final_pct": card["since_pct"], "reason": _reason_words,
+                                  "source": st["close_source"]}
+            card["level_source"] = st["level_source"]
             if o:
-                target, stop = o.get("target"), o.get("stop")
+                target, stop = st["target"], st["stop"]   # cc#1781: RESOLVED (discretionary-aware), not the raw origin
                 rr = (round(abs(target - entry) / abs(entry - stop), 2)
                       if (target is not None and stop is not None and entry not in (None, stop)) else None)
                 card.update({
@@ -1067,7 +1184,13 @@ def alerts_ideas(limit: int = 100):
                                      {"triggered_day": (" ".join(_fmt_ist(triggered_at).split(" ")[:2]) if triggered_at else None)}),
                     "origin_unresolved": (not is_manual),
                 })
+                if st["level_source"] == "discretionary":   # cc#1781: levels set by hand on an alert with no origin
+                    card.update({"target": st["target"], "stop": st["stop"],
+                                 "to_target_pct": _to_target_pct(ref_price, st["target"], direction),
+                                 "track": _track(entry, st["stop"], st["target"], ref_price)})
             ideas.append(card)
+        if mirrored:
+            conn.commit()                      # cc#1781: the engine mirrors written by this read
     live_cards = [c for c in ideas if c["status"] == "live" and c.get("since_pct") is not None]
     best = max(live_cards, key=lambda c: c["since_pct"]) if live_cards else None
     stats = {

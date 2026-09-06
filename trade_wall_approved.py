@@ -37,6 +37,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from mobile_endpoints import _conn, _rows, _ist_now, _guard, _json_safe
+# cc#1781: the ONE close-priority resolver (manual close > discretionary levels > engine default,
+# engine exit mirrored once). trade_alerts_endpoints imports nothing from this module at load
+# (its call-time import of _audit is the only edge back), so this is not a circular import;
+# main.py imports trade_alerts_endpoints (L65) before this module (L135) either way.
+from trade_alerts_endpoints import resolve_close_state
 
 log = logging.getLogger("scorr.trade_wall_approved")
 router = APIRouter()
@@ -170,12 +175,19 @@ def tradewall_approved(request: Request):
             except Exception as e:   # link unavailable -> rows fall back to per share, labelled
                 log.warning("cc#1762 V8 link failed: %s", e)
                 v8_link, v8_marks = {}, {}
-        out, n_open, n_closed = [], 0, 0
+        out, n_open, n_closed, mirrored = [], 0, 0, 0
         for r in rows:
             side = _side(r["direction"])
             sign = 1 if side == "LONG" else (-1 if side == "SHORT" else None)
             entry = _f(r["approved_price"])
-            closed = r["closed_ist"] is not None
+            # cc#1781: open/closed and the levels on display come from the shared resolver, not the
+            # raw LEFT JOIN alone — before this, a V8 position the engine had already exited stayed
+            # OPEN on this tab forever with a ticking CMP against a flat position (gap_1).
+            st = resolve_close_state(cur, {"id": r["id"], "symbol": r["symbol"],
+                                           "source_engine": r["source_engine"], "source_ref": r["source_ref"]})
+            if st["mirrored"]:
+                mirrored += 1
+            closed = st["closed"]
             lk = v8_link.get(r["source_ref"]) if (r["source_engine"] or "") == "V8" else None
             qty = lk["qty"] if lk else None
             cmp_px = cmp_label = cmp_date = None
@@ -192,7 +204,7 @@ def tradewall_approved(request: Request):
                     except Exception as e:   # no price path -> blank, never a carried-forward number
                         log.warning("cc#1735 resolver failed for %s: %s", r["symbol"], e)
                         cmp_px = None
-            mark = _f(r["close_price"]) if closed else cmp_px
+            mark = st["close_price"] if closed else cmp_px
             pnl = pnl_pct = None
             if entry and mark is not None and sign is not None:
                 pnl_pct = round((mark - entry) / entry * 100.0 * sign, 2)
@@ -208,10 +220,12 @@ def tradewall_approved(request: Request):
                 "approved_at": _stamp(r["approved_ist"]), "approved_via": r["approved_via"],
                 "entry_level": entry,                       # = approved_price, the price AT approval
                 "cmp": cmp_px, "cmp_label": cmp_label, "cmp_date": cmp_date, "cmp_live": cmp_live,
-                "target_price": _f(r["target_price"]), "stop_loss": _f(r["stop_loss"]),
-                "levels_set": (r["target_price"] is not None or r["stop_loss"] is not None),
-                "closed": closed, "closed_at": _stamp(r["closed_ist"]),
-                "close_price": _f(r["close_price"]), "close_reason": r["close_reason"],
+                # cc#1781: resolved levels — discretionary when set on this tab, else the origin
+                # engine's, None once closed (the close record replaces them on display).
+                "target_price": (None if closed else st["target"]), "stop_loss": (None if closed else st["stop"]),
+                "levels_set": (st["level_source"] == "discretionary"), "level_source": st["level_source"],
+                "closed": closed, "closed_at": _stamp(st["closed_at"]),
+                "close_price": st["close_price"], "close_reason": st["close_reason"], "close_source": st["close_source"],
                 "pnl": pnl, "pnl_pct": pnl_pct, "pnl_basis": "realised" if closed else ("mark" if pnl is not None else None),
                 # cc#1762: what the rupee is multiplied by. V8-linked = the position's qty; else per share.
                 "qty": qty,
@@ -219,6 +233,8 @@ def tradewall_approved(request: Request):
                               else "position qty (v8_paper_trades)" if lk else "per share"),
                 "levels_updated_at": _stamp(r["updated_ist"]), "notes": r["notes"],
             })
+        if mirrored:
+            conn.commit()                      # cc#1781: engine mirrors written by this read
     return {
         "rows": out, "count": len(out), "open_count": n_open, "closed_count": n_closed,
         "as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -227,6 +243,7 @@ def tradewall_approved(request: Request):
         "pnl_rule": "sign-aware: LONG = mark - entry, SHORT = entry - mark; realised on closed rows uses the recorded close_price",
         "qty_rule": "cc#1762: a V8-engine alert is linked to its position by source_ref (symbol@entry_ts) and its rupee P&L is x position qty through v8_book_canon.unrealised_rupees against the V8 book CMP (v8_book_canon.open_marks) — identical to the Wall of Trades P&L (approved) column; manual / non-V8 alerts stay per share (qty_basis says which)",
         "storage": "trade_alert_levels sidecar (CREATE TABLE IF NOT EXISTS); trade_alerts is read only here",
+        "close_rule": "cc#1781 TRADE_ALERT_CLOSE_PRIORITY_V1: manual close (closed_at on the sidecar) > discretionary target/stop on the sidecar > the origin engine's levels; an engine exit is mirrored into the sidecar once (close_reason 'engine: <reason>', logged as auto_close_engine_mirror) and never overwrites a manual close",
     }
 
 
