@@ -85,6 +85,18 @@ from mobile_endpoints import _conn, _rows, _ist_now, _guard, _json_safe, _page
 log = logging.getLogger("scorr.tradewall")
 router = APIRouter()
 
+
+def _approval_window():
+    """cc#1760: the approval window for the payload — guards.approval_window, the ONE check the
+    approve POST enforces too. A failure here reads as CLOSED with the error named, never as open."""
+    try:
+        import guards
+        return guards.approval_window()
+    except Exception as e:   # never let the window helper take the wall down, never guess it open
+        return {"open": False, "rule": "Approvals open 09:15-15:15 IST on trading days",
+                "reason": "approval window state unavailable (%s) — treated as closed" % type(e).__name__,
+                "error": str(e)[:120]}
+
 # The instrument classes the filter chips offer. Derived from the union below, not typed twice.
 INSTRUMENTS = ("EQUITY", "FUTURES", "OPTIONS")
 
@@ -879,6 +891,10 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                              + " are not shown; if that row is absent, only baskets with a quant_basket_config row are shown",
         # cc#1609: the approval surface — header counts + how state was joined, so no surface guesses.
         "approval_counts": approval_counts,
+        # cc#1760: the approval window as the server sees it at this response — the wall renders
+        # the APPROVE button's enabled / disabled state and its reason from this, never from a
+        # client clock or a weekday test (guards.approval_window; nse_holidays for the day).
+        "approval_window": _approval_window(),
         "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed | suppressed-in-position (cc#1736)",
         # cc#1734: the Closed book summary (see the SQL above) and the DECODE map the renderer
         # applies to DETAIL — read from the engines' own words, never typed into the page:

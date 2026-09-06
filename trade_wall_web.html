@@ -117,6 +117,11 @@
 .twa-btn{font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.5px;padding:4px 9px;border-radius:5px;cursor:pointer;border:1px solid var(--line,#2A2A31);background:transparent}
 .twa-approve{color:var(--grn,#2FD48B);border-color:var(--grn,#2FD48B)}
 .twa-dismiss{color:var(--mut,#8A8A93)}
+/* cc#1760: the approval window — a disabled APPROVE keeps its place and its colour at reduced
+   strength; the header note states the rule and the server's clock beside the subline. */
+.twa-approve[disabled]{opacity:.42;cursor:not-allowed}
+.tw-win{display:inline-block;margin-top:6px;font:600 11px var(--f-m,ui-monospace,monospace);letter-spacing:.02em;padding:3px 9px;border-radius:6px;border:1px solid var(--line2,#2a3350);color:var(--mut,#8A8A93)}
+.tw-win.open{color:var(--grn,#2FD48B);border-color:var(--grn,#2FD48B)}
 .twa-btn:disabled{opacity:.5;cursor:default}
 .twa-msg{font-size:10px;color:var(--mut,#8A8A93)}
   @media(max-width:760px){
@@ -225,6 +230,11 @@ var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: nul
                  The mode is read from the API response, never assumed, so widening the flag
                  brings the old wall back with no deploy. */
               mode: 'approved', approvedAsOf: null,
+              /* cc#1760: the approval window as the SERVER states it (payload approval_window, refreshed
+                 from /api/alerts/approval_window every minute) — the APPROVE button reads this, never a
+                 client clock. null until the first payload = treated as closed, so a button is never
+                 enabled on a guess. */
+              approvalWindow: null,
               /* cc#1609: engine 'ALL' = every engine of the instrument; stateFilter over open rows */
               stateFilter: 'pending-approval', approvalCounts: null,
               /* cc#1735: the Approved tab's own payload */
@@ -459,7 +469,8 @@ function setSubline(){
               + ' · ' + ac.approved_today + ' approved today'
               + (ac.newest_signal_ts ? ' · as of ' + esc(twStampFull(ac.newest_signal_ts)) + ' IST (newest signal)' : '')
             : '')
-      + '. Engine signals with an Approve per row; an approval prints in Alerts. ' + SUB_ENGINES;
+      + '. Engine signals with an Approve per row; an approval prints in Alerts. ' + SUB_ENGINES
+      + twWindowNote();   /* cc#1760: the approval window, stated beside the header */
     if (ib) ib.style.display = '';
   }
 }
@@ -591,6 +602,7 @@ function boot(keepCounts){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (d.error) throw new Error(d.error);
+      if (d.approval_window) STATE.approvalWindow = d.approval_window;   /* cc#1760 */
       /* cc#1587: the server says which buckets are on. Approved-only = the flat list; anything
          wider = the engine hierarchy. The first fetch is always approved-shaped (ALL/ALL); if the
          flag turns out to be wider, switch mode and refetch with the hierarchy's own scope. */
@@ -871,15 +883,27 @@ function twCell(e){
   var k = esc(e.id);
   /* cc#1736: a suppressed row keeps APPROVE / DISMISS (item 5) — the rule declutters, it does not disarm */
   var supp = st === 'suppressed-in-position' ? '<span class="tw-supp">suppressed · already in position</span>' : '';
+  /* cc#1760 (founder 06-Sep "approve button ... enable between 9.15 to 15.15 during market hours
+     only"): APPROVE is DISABLED, not hidden, outside the window the server states — a missing
+     button looks broken, a disabled one with its reason teaches the rule. The reason rides on the
+     title (hover / tap) and in the header note. DISMISS is never gated: it is housekeeping on a
+     queue, not a position, and blocking it would leave stale signals stuck overnight. */
+  var aw = STATE.approvalWindow, awOpen = !!(aw && aw.open);
+  var awTitle = awOpen ? 'Approve at the live price' : ((aw && aw.reason) || 'Approvals open 09:15-15:15 IST on trading days · window state not loaded yet');
   return '<td><div class="twa twa-act" data-rowid="' + k + '">' + supp
-    + '<button type="button" class="twa-btn twa-approve" data-act="approve" data-rowid="' + k + '">APPROVE</button>'
-    + '<button type="button" class="twa-btn twa-dismiss" data-act="dismiss" data-rowid="' + k + '">DISMISS</button>'
+    + '<button type="button" class="twa-btn twa-approve" data-act="approve" data-rowid="' + k + '"' + (awOpen ? '' : ' disabled aria-disabled="true"') + ' title="' + esc(awTitle) + '">APPROVE</button>'
+    + '<button type="button" class="twa-btn twa-dismiss" data-act="dismiss" data-rowid="' + k + '" title="Dismiss — always available">DISMISS</button>'
     + '<span class="twa-msg" id="twa-msg-' + k + '"></span></div></td>';
 }
 function twFind(id){ for (var i = 0; i < STATE.events.length; i++) if (String(STATE.events[i].id) === String(id)) return STATE.events[i]; return null; }
 function twAct(act, id, btn){
   var e = twFind(id); if (!e) return;
   var msg = document.getElementById('twa-msg-' + id);
+  if (act === 'approve' && !(STATE.approvalWindow && STATE.approvalWindow.open)){
+    /* cc#1760: belt and braces — the server refuses too (403 with the same reason) */
+    if (msg) msg.textContent = 'not recorded: ' + ((STATE.approvalWindow && STATE.approvalWindow.reason) || 'approvals open 09:15-15:15 IST on trading days');
+    return;
+  }
   var wrap = btn && btn.parentNode; if (wrap) [].forEach.call(wrap.querySelectorAll('button'), function(b){ b.disabled = true; });
   if (msg) msg.textContent = act === 'approve' ? 'approving at live price…' : 'dismissing…';
   var body = { source_engine: e.engine, source_ref: twRef(e), symbol: e.symbol, direction: twDirection(e), kind: 'entry' };
@@ -920,6 +944,36 @@ function twLoadApproved(){
 }
 
 boot(false);
+
+/* ── cc#1760 · THE APPROVAL WINDOW ON THE PAGE ──────────────────────────────────────────────
+   The state comes from the SERVER (payload approval_window = guards.approval_window: 09:15-15:15
+   IST on an NSE trading day, holidays from nse_holidays), never from a browser clock or a weekday
+   test, so the button and the POST that refuses outside the window agree by construction. This
+   page does not poll, so the window is re-read every minute from /api/alerts/approval_window:
+   a page opened at 15:10 disables APPROVE at 15:15 on its own, and one opened at 09:10 enables
+   it at 09:15. A flip re-renders the rows; otherwise only the note's clock is refreshed. */
+function twWindowNote(){
+  var w = STATE.approvalWindow;
+  if (!w) return '<div class="tw-win">Approve: window state not loaded yet — treated as closed</div>';
+  var when = w.now_ist ? ' · server ' + esc(String(w.now_ist).slice(11, 16)) + ' IST' : '';
+  return w.open
+    ? '<div class="tw-win open">Approve open · closes ' + esc(w.closes || '15:15') + ' IST' + when + '</div>'
+    : '<div class="tw-win">Approve disabled · ' + esc(w.reason || (w.rule || 'Approvals open 09:15-15:15 IST on trading days')) + '</div>';
+}
+function twRefreshWindow(){
+  fetchWithTimeout('/api/alerts/approval_window')
+    .then(function(r){ return r.json(); })
+    .then(function(w){
+      if (!w || typeof w.open !== 'boolean') return;
+      var was = STATE.approvalWindow ? STATE.approvalWindow.open : null;
+      STATE.approvalWindow = w;
+      if (STATE.mode !== 'engines') return;
+      if (was !== w.open) { render(); return; }
+      var el = document.querySelector('.tw-win'); if (el) el.outerHTML = twWindowNote();
+    })
+    .catch(function(){ /* keep the last server-stated window; never guess it open */ });
+}
+setInterval(twRefreshWindow, 60000);
 </script>
 </body>
 </html>

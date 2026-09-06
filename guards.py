@@ -41,6 +41,49 @@ def is_trading_day(d: date) -> bool:
     return nse_holidays.is_trading_day(d)
 
 
+# ── cc#1760 · THE APPROVAL WINDOW (founder 06-Sep: "put a condition approve button in wall of
+# trades is enable between 9.15 to 15.15 during market hours only") ─────────────────────────────
+# ONE check, shared by the button (client reads it off the payload) and the POST (server refuses
+# outside it) — a disabled button alone is cosmetic; a stale page left open past 15:15, or anyone
+# with the endpoint, could still write. Open 09:15:00 inclusive to 15:15:00 exclusive IST on a
+# TRADING DAY: the day test is nse_holidays.is_trading_day (weekend + the notified NSE holiday
+# set) — the same source /api/now and the scheduler gate on, never a bare weekday test. The cut
+# is the entry cut (ENTRY_CUT_HM): an approval records a position at a price, and after 15:15
+# there is no continuous market to take it in. Dismiss is NOT gated (housekeeping, not a position).
+APPROVAL_OPEN_HM = ENTRY_OPEN_HM   # (9, 15)
+APPROVAL_CUT_HM = ENTRY_CUT_HM     # (15, 15)
+
+
+def approval_window(now_ist: datetime = None) -> dict:
+    """State of the approval window at `now_ist` (default: the live IST clock). Returns a dict a
+    surface can render verbatim: open (bool), reason (str, None when open), now_ist, opens, closes,
+    trading_day, weekend, holiday, day. Pure: no I/O, so a test can pass any clock."""
+    if now_ist is None:
+        from zoneinfo import ZoneInfo
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+    d = now_ist.date()
+    weekend = d.weekday() >= 5
+    holiday = nse_holidays.is_nse_holiday(d)
+    trading = nse_holidays.is_trading_day(d)
+    hm = (now_ist.hour, now_ist.minute)
+    in_hours = APPROVAL_OPEN_HM <= hm < APPROVAL_CUT_HM
+    opens = "%02d:%02d" % APPROVAL_OPEN_HM
+    closes = "%02d:%02d" % APPROVAL_CUT_HM
+    rule = "Approvals open %s-%s IST on trading days" % (opens, closes)
+    now_txt = now_ist.strftime("%H:%M IST, %a %d %b")
+    if not trading:
+        why = "NSE holiday" if holiday else ("weekend" if weekend else "not a trading day")
+        reason = "%s · now %s · %s" % (rule, now_txt, why)
+    elif not in_hours:
+        reason = "%s · now %s · %s" % (rule, now_txt,
+                                        "before the open" if hm < APPROVAL_OPEN_HM else "after the 15:15 cut")
+    else:
+        reason = None
+    return {"open": bool(trading and in_hours), "reason": reason, "rule": rule,
+            "now_ist": now_ist.strftime("%Y-%m-%d %H:%M:%S"), "opens": opens, "closes": closes,
+            "trading_day": trading, "weekend": weekend, "holiday": holiday, "day": now_ist.strftime("%a")}
+
+
 def in_entry_window(now_ist: datetime, open_hm=ENTRY_OPEN_HM, cut_hm=ENTRY_CUT_HM) -> bool:
     """True iff now_ist is within [09:15, 15:15] IST AND at or after the 09:30 entry cool-off.
 
