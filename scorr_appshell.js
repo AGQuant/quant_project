@@ -74,20 +74,54 @@
     document.body.setAttribute('data-theme', themeOk(k) ? k : 'goldnight');
   }
 
+  /* cc#1801 (THEME_MENU_FEATURED4_V1, session_log 39801): 4 named themes on top, the other 6
+     behind a "More themes" toggle. Hardcoded, not derived by filtering themeList()'s current
+     order for "the first 4" or similar — a future theme addition must land somewhere on
+     purpose, and the safe default (falling through to `collapsed`, since that's everything
+     NOT in this list) is exactly what happens without anyone having to touch this card again. */
+  var FEATURED_KEYS = ['dark', 'ainight', 'silvergold', 'duskday'];
+  function splitFeatured() {
+    var all = themeList(), featured = [], collapsed = [];
+    all.forEach(function (t) {
+      (FEATURED_KEYS.indexOf(t[0]) > -1 ? featured : collapsed).push(t);
+    });
+    // featured renders in FEATURED_KEYS' own order, not themeList()'s
+    featured.sort(function (a, b) { return FEATURED_KEYS.indexOf(a[0]) - FEATURED_KEYS.indexOf(b[0]); });
+    return { featured: featured, collapsed: collapsed };
+  }
+  function themeRowHtml(t) {
+    return '<button type="button" class="as-th" data-k="' + t[0] + '">'
+      + '<span class="ic">' + (THEME_GLYPH[t[0]] || '◆') + '</span>' + t[1]
+      + '<span class="as-tick" aria-hidden="true"></span></button>';
+  }
   function buildMenu(wm) {
     var menu = document.createElement('div');
     menu.className = 'as-menu';
+    var split = splitFeatured();
     /* the theme row sits ABOVE Log out: it is the thing you come back to, and Log out is the
        thing you press once. A separator keeps a mis-tap off the exit. */
-    menu.innerHTML = themeList().map(function (t) {
-        return '<button type="button" class="as-th" data-k="' + t[0] + '">'
-          + '<span class="ic">' + (THEME_GLYPH[t[0]] || '◆') + '</span>' + t[1]
-          + '<span class="as-tick" aria-hidden="true"></span></button>';
-      }).join('')
+    menu.innerHTML = split.featured.map(themeRowHtml).join('')
+      + '<button type="button" class="as-more"><span class="ic">⋯</span>More themes<span class="as-crt" aria-hidden="true">▾</span></button>'
+      + '<div class="as-more-wrap">' + split.collapsed.map(themeRowHtml).join('') + '</div>'
       + '<div class="as-sep"></div>'
       + '<button type="button" id="as-lo"><span class="ic">⏏</span>Log out</button>';
     wm.classList.add('as-has-menu');
     wm.appendChild(menu);
+
+    var moreBtn = menu.querySelector('.as-more');
+    var moreWrap = menu.querySelector('.as-more-wrap');
+    var collapsedKeys = split.collapsed.map(function (t) { return t[0]; });
+    function setMoreOpen(open) {
+      moreBtn.classList.toggle('open', open);
+      moreWrap.classList.toggle('open', open);
+    }
+    moreBtn.onclick = function () { setMoreOpen(!moreWrap.classList.contains('open')); };
+    /* item 5: re-checked on every OPEN, not once at build time — a theme picked from the
+       collapsed group must still show its tick the next time the menu is opened. */
+    function autoExpandIfNeeded() {
+      var cur = themeOk(storedTheme()) ? storedTheme() : 'goldnight';
+      setMoreOpen(collapsedKeys.indexOf(cur) > -1);
+    }
 
     function markCurrent() {
       var cur = themeOk(storedTheme()) ? storedTheme() : 'goldnight';
@@ -122,7 +156,9 @@
     wm.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
+      var willOpen = !menu.classList.contains('open');
       menu.classList.toggle('open');
+      if (willOpen) autoExpandIfNeeded();   // item 5: re-checked on every open
     });
     /* cc#1783 · THE MENU LIVES INSIDE THE WORDMARK ANCHOR (wm.appendChild(menu) above), so a tap on
        a theme row is a click INSIDE <a href="/m/home">. stopPropagation() alone only stops the

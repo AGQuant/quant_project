@@ -2084,6 +2084,13 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
   font-size:13px;font-weight:700;cursor:pointer;text-align:left}
 .lgm button:active{background:var(--panel2)}
 .lgm .ic{width:16px;text-align:center;font-size:14px;color:var(--mut)}
+/* cc#1801 (THEME_MENU_FEATURED4_V1, session_log 39801): 4 featured theme rows, a "More themes"
+   toggle row, then the other 6 collapsed until tapped. .lgm-more reuses .lgm button's geometry. */
+.lgm-more{color:var(--mut)}
+.lgm-crt{margin-left:auto;font-size:10px;transition:transform .15s}
+.lgm-more.open .lgm-crt{transform:rotate(180deg)}
+.lgm-more-wrap{display:none}
+.lgm-more-wrap.open{display:block}
 
 /* ── cc#898: the universal symbol-tap sheet ──────────────────────────────────────────────────
    A bottom sheet, not a centre modal: on a phone the reachable half of the screen is the bottom
