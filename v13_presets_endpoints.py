@@ -57,9 +57,36 @@ def _ensure_table():
         # (the nightly universe-technicals job also adds it; this covers the deploy->02:05 window).
         try:
             cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS vol_ratio_21 NUMERIC")
+            # cc#1727: same deploy->02:05 cover for the two sector-return columns.
+            cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS sector_month_return NUMERIC")
+            cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS sector_year_return NUMERIC")
         except Exception:
             pass
         conn.commit()
+    _fill_sector_returns_if_empty()
+
+
+def _fill_sector_returns_if_empty():
+    """cc#1727: the nightly job (universe_technicals 02:05 IST) owns these two columns. The one gap
+    is the window between a deploy that adds them and the next 02:05 run — the latest score_date
+    would be NULL for every symbol and a preset filtering on sector_month_return would honestly
+    return 0. So at startup, ONLY when the latest date has no value at all, run the same set-based
+    pass the nightly job runs (one statement, ~1,800 rows). Idempotent: a second worker booting
+    finds the rows filled and does nothing. Never per request — this is startup, once."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT MAX(score_date),
+                                  COUNT(sector_month_return) FILTER (WHERE score_date = (SELECT MAX(score_date) FROM universe_technicals))
+                           FROM universe_technicals""")
+            latest, filled = cur.fetchone()
+        if latest is None or (filled or 0) > 0:
+            return
+        import universe_technicals
+        with _conn() as conn:
+            res = universe_technicals.compute_sector_returns(conn, latest)
+        _log.info(f"cc#1727: sector returns filled at startup for {latest}: {res}")
+    except Exception as e:
+        _log.error(f"cc#1727: startup sector-return fill FAILED: {e}. The 02:05 universe_technicals run fills them.")
 
 
 # cc#879 (cc#869 finding 3 / P0-A): this used to run at IMPORT time, and every handler below ALSO
@@ -202,6 +229,20 @@ _FIELD_MAP = {
     # below with their min/max preserved — same 1.x scale, canon derivation, full universe.
     "day_1d": ("m", "day_1d"),
     "sector_week": ("m", "sector_week"), "sector_month": ("m", "sector_month"),
+    # cc#1727: FULL-universe sector aggregates (gvm_scores.segment, equal-weight member average,
+    # computed nightly into universe_technicals by universe_technicals.compute_sector_returns).
+    # These are what the Multibagger Hunt gates 6-7 (SectorMonth%>0 / SectorYear%>5, session_log
+    # 5065) filter on. sector_week/sector_month above stay the FUTURES-only v8 fields — different
+    # universe, different key, so a saved preset always says which one it meant.
+    "sector_month_return": ("u", "sector_month_return"), "sector_year_return": ("u", "sector_year_return"),
+    # cc#1727: latest-quarter change in TOTAL institutional holding, percentage points =
+    # screener_raw fii_change + dii_change ("Change in FII holding" + "Change in DII holding" in the
+    # screener.in export, mapped by gvm_nightly). NULL only when BOTH are NULL — the same
+    # inst_holding_change expression the GVM company report uses (gvm_company_report.py), so a
+    # preset and the report agree. Gate "InstitutionChange=Rise" = {inst_change_pct: {min: 0.0001}}.
+    # "sx" = a ready SQL expression over the screener_raw alias (see _col_expr).
+    "inst_change_pct": ("sx", 'CASE WHEN s."fii_change" IS NULL AND s."dii_change" IS NULL THEN NULL '
+                               'ELSE COALESCE(s."fii_change",0)+COALESCE(s."dii_change",0) END'),
     "gvm_score": ("g", "gvm_score"), "g_score": ("g", "g_score"), "v_score": ("g", "v_score"),
     "m_score": ("g", "m_score"), "market_cap": ("g", "market_cap"),
     "return_1y": ("s", "return_1y", "year_return"), "return_3y": ("s", "return_3y", "return_3y"),
@@ -226,6 +267,8 @@ def _col_expr(src, col, native=None):
     if src == "s":   # screener_raw is a wide TEXT dump -> strip non-numeric, cast, NULL if not numeric
         expr = f"NULLIF(REGEXP_REPLACE(s.\"{col}\"::text, '[^0-9.\\-]', '', 'g'), '')::numeric"
         return f'COALESCE({expr}, u."{native}")' if native else expr
+    if src == "sx":  # cc#1727: a complete SQL expression over the screener_raw alias (numeric columns)
+        return f"({col})"
     return f'{src}."{col}"'
 
 
@@ -271,7 +314,7 @@ def _screen_sql(filters, sort_key=None, sort_dir=-1):
                 where.append(f"{expr} >= %s"); params.append(crit["min"])
             if crit.get("max") is not None:
                 where.append(f"{expr} <= %s"); params.append(crit["max"])
-    uses_screener = any(_FIELD_MAP[k][0] == "s" for k in filters)
+    uses_screener = any(_FIELD_MAP[k][0] in ("s", "sx") for k in filters)
     uses_fut = any(_FIELD_MAP[k][0] == "m" for k in filters) or (sort_key and _FIELD_MAP.get(sort_key, ("",))[0] == "m")
     # g (gvm) is INNER (every u row is GVM-scored); s + m are LEFT (m = futures-only fields, NULL for
     # the ~1,600 non-futures names — a filter on an m-field therefore narrows back to the futures set).
@@ -311,7 +354,10 @@ def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
     return {"count": count, "scope_used": scope, "rows": rows,
             "note": "dma_* = %-distance from the MA; base is the full ~1,811 GVM universe (universe_technicals). "
                     "Futures-only fields (vol_ratio/sector_week/sector_month/day_1d) are LEFT-joined from v8_metrics "
-                    "and are NULL for the ~1,600 non-futures names — filtering on them narrows back to the futures set."}
+                    "and are NULL for the ~1,600 non-futures names — filtering on them narrows back to the futures set. "
+                    "Full-universe sector aggregates are sector_month_return / sector_year_return (cc#1727, "
+                    "gvm_scores.segment equal-weight average, EOD 02:05); institutional change is inst_change_pct "
+                    "(fii_change + dii_change, percentage points, latest quarter)."}
 
 
 @router.post("/api/v13/theme/run")
