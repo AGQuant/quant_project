@@ -482,6 +482,10 @@ body[data-theme]{
   text-transform:uppercase;white-space:nowrap}
 .v10c .rsn2.bad{background:color-mix(in srgb, var(--red) 16%, transparent);color:var(--heat, #FF5C6C)}
 .v10c .rsn2.good{background:color-mix(in srgb, var(--grn) 16%, transparent);color:var(--volt, #2FD48B)}
+/* cc#1743: direction capsule on the option-leg card — muted tint + caret, never the P&L pair */
+.v10c .dircap{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;font:600 9px var(--f-m,ui-monospace,monospace);letter-spacing:.06em;color:var(--muted,#94A6D2);background:var(--hi,rgba(255,255,255,.06));border:1px solid var(--line,#1E2A44);line-height:14px;vertical-align:1px}
+.v10c .dircap.up{border-color:var(--accent,#7C5CFF)}
+.v10c .dircap.dn{border-color:var(--label,#FF9F45)}
 .v10c .rsn2.open{background:color-mix(in srgb, var(--blu) 16%, transparent);color:var(--pulse, #4D7CFE)}
 .v10c .rsn2.neut{background:color-mix(in srgb, var(--ink) 7%, transparent);color:var(--txt,#E9EEFB)}
 .v10c .c2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);white-space:nowrap;
@@ -3926,6 +3930,10 @@ function v10OptCard(t){
     + '<span class="rl"></span><span class="v10cb">'
     + '<div class="c1"><span class="sym">' + title + '</span>'
       + '<span class="pill ' + (buy ? 'lg' : 'sh') + '">' + (buy ? 'BUY' : 'SELL') + '</span>'
+      /* cc#1743: the same direction capsule the web Record shows — one shared rule
+         (ScorrV10Dir, scorr_card_common.js): SELL PE / BUY CE = Bullish, SELL CE / BUY PE =
+         Bearish; a missing option type renders nothing. Not the P&L colours. */
+      + (window.ScorrV10Dir ? window.ScorrV10Dir.capsule(t.side, t.opt_type, null, 'dircap') : '')
       + '<span class="rsn2 ' + v10ReasonCls(t.reason) + '">' + esc(t.reason || 'EXIT') + '</span></div>'
     + '<div class="c2">' + px2(t.entry_price) + ' \u2192 ' + (t.exit_price == null ? 'open' : px2(t.exit_price))
       + ' <span style="color:var(--txt,#E9EEFB)">premium</span></div>'
