@@ -497,6 +497,70 @@ def option_price(underlying="NIFTY"):
     return out
 
 
+def writer_read(opt, pcr, pcr_prev_day, band, state, evidence=None):
+    """cc#1740 (founder 06-Sep: "keep pcr commentary crisp and sell side perspective"). The (i)
+    sheet's commentary, GENERATED from the live numbers for the reader's actual seat — Scorr's index
+    engine is a net option WRITER. Order: (1) the writer's number first — ATM put and call against
+    fair, as the multiples already computed, fair defined once in a clause; (2) what that means for a
+    writer, branched on the PUT's pricing tag so cheap premium flips the framing to the buyer;
+    (3) PCR in one or two lines — level, change, band, and an honest verdict that a NEUTRAL /
+    unscored day carries no direction. No textbook paragraph (the definitions live in `help`), no
+    instruction to trade, short sentences. Pure: every input is passed in, so both branches can be
+    proven with fixtures (python pcr_mood.py)."""
+    out = []
+    p, pp = _f(pcr), _f(pcr_prev_day)
+    pe = (opt or {}).get("pe") if isinstance(opt, dict) else None
+    ce = (opt or {}).get("ce") if isinstance(opt, dict) else None
+
+    def _leg(o, name):
+        if not o or o.get("ltp") is None:
+            return None
+        r = _f(o.get("ratio"))
+        if o.get("fair") is None or r is None:
+            return "%s %s, fair n/a" % (name, o.get("ltp"))
+        return "%s %s vs fair %s (%.2fx)" % (name, o.get("ltp"), o.get("fair"), r)
+
+    put_line, call_line = _leg(pe, "put"), _leg(ce, "call")
+    if put_line or call_line:
+        out.append("ATM " + "; ".join([x for x in (put_line, call_line) if x])
+                   + ". Fair = what the last 20 sessions' moves justify.")
+        lead = pe if (pe and pe.get("ltp") is not None) else ce
+        tag = str((lead or {}).get("tag") or "").upper()
+        r = _f((lead or {}).get("ratio"))
+        if tag == "EXPENSIVE" or (not tag and r is not None and r >= 1.25):
+            out += ["Premium is above the historical cost of the risk, which favours writing while the range holds.",
+                    "An edge, not a forecast: it pays only if the move stays away, and one gap can take a month of premium."]
+        elif tag == "CHEAP" or (not tag and r is not None and r < 1.0):
+            out += ["Premium is below the historical cost of the risk, which favours the buyer and warns the writer off.",
+                    "Cheap premium does not pay for the move it insures."]
+        elif tag or r is not None:
+            out += ["Premium is about the historical cost of the risk; no edge either way."]
+    else:
+        out.append("ATM option prices are not available this tick, so there is no premium read.")
+
+    if p is None:
+        out.append("No PCR reading yet.")
+        return out
+    if pp is not None:
+        d = p - pp
+        verb = "up from" if d > PCR_MOVE_CUT else ("down from" if d < -PCR_MOVE_CUT else "flat against")
+        out.append("PCR %.2f, %s %.2f, band %s." % (p, verb, pp, band or "n/a"))
+    else:
+        out.append("PCR %.2f, band %s; no reading for yesterday." % (p, band or "n/a"))
+    ev = evidence or {}
+    scored = bool(ev.get("scored")) and int(ev.get("n") or 0) >= EVIDENCE_MIN
+    if state == NEUTRAL_STATE or state is None or not scored:
+        out.append("No directional signal today.")
+    else:
+        head = _STATE_TEXT.get(state, ("", []))[0]
+        if head:
+            out.append(head + " A record, not a forecast.")
+    return out
+
+
+HELP_LINE = "PCR = put buying against call buying; a put is a bet on a fall."
+
+
 def compose_read(cur, underlying, pcr, as_of=None):
     """Gather the live inputs and return read() + the evidence tables + the option line."""
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
@@ -551,6 +615,14 @@ def compose_read(cur, underlying, pcr, as_of=None):
     out["evidence_sessions"] = ev_tables["sessions"]
     out["evidence_window"] = {"from": ev_tables["from"], "to": ev_tables["to"], "max_sessions": EVIDENCE_SESSIONS}
     out["option_price"] = option_price(underlying)
+    # cc#1740: the commentary the sheet prints is the writer's read, generated from the live numbers
+    # (premium first, then PCR). The pre-1740 paragraph stays under `legacy_read` for parity checks;
+    # change_line folds into the read (the PCR line carries level + change + band).
+    out["legacy_read"] = out["read"]
+    out["read"] = writer_read(out["option_price"], pcr, pcr_prev, out["band"], out["state"], ev)
+    out["read_text"] = " ".join(out["read"])
+    out["change_line"] = None
+    out["help"] = HELP_LINE
     out["framework_only"] = not ev["scored"]
     out["note"] = "Descriptive read only. Not a trading signal."
     return out
