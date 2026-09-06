@@ -1331,11 +1331,32 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    block, with the button's own floor and the button itself below that — nothing about this rule
    needed to change for that to be true, since #heroPositionsBody only ever claimed the space
    between .chd and .c2body's own end, wherever that end currently is. */
-#heroPositionsBody{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;justify-content:flex-start}   /* cc#1738: content-sized, no stretch */
+/* cc#1752: the body takes the card's spare height (Card 4 is levelled to the tallest sibling
+   again) and CENTRES the two index blocks as a group in it — equal space above and below — while
+   .chd stays at the top of .c2body and VIEW LOGS stays pinned to the card bottom. min-width:0 so
+   the body can never push the card wider than its siblings (a flex item's auto min-width was the
+   right-edge overflow the founder photographed). */
+#heroPositionsBody{flex:1 1 auto;min-height:0;min-width:0;display:flex;flex-direction:column;justify-content:center}
+#heroCardPositions{min-width:0;max-width:100%;overflow:hidden}
+/* cc#1752 · WIDTH GUARDS: nothing inside may exceed the card box. The name row wraps before it
+   grows; the strike chip shrinks and ellipsises before it grows; the written / grown / now row
+   wraps before it grows. At the narrowest supported width the chip drops one step first. */
+#heroPositionsBody .leghd{flex-wrap:wrap;row-gap:var(--space-4);min-width:0}
+#heroPositionsBody .dirbadge{flex:0 1 auto;min-width:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#heroPositionsBody .declb{flex-wrap:wrap;column-gap:var(--space-6);row-gap:var(--space-2);min-width:0}
+#heroPositionsBody .decwrap,#heroPositionsBody .legfoot{min-width:0}
+/* cc#1752 · ONE NOTCH UP on the app type scale (scorr_themes.css --type-*), Card 4 only: index
+   name --type-11 -> --type-115, strike chip --type-9 -> --type-95, written / grown / now
+   --type-9 -> --type-95. The rupee P&L (.legfoot, --type-10) is already the larger line and
+   stays. No other card is touched — every rule is scoped to #heroPositionsBody. */
+#heroPositionsBody .leghd .nm{font-size:var(--type-115)}
+#heroPositionsBody .dirbadge{font-size:var(--type-95)}
+#heroPositionsBody .declb{font-size:var(--type-95)}
+@media (max-width:360px){#heroPositionsBody .dirbadge{font-size:var(--type-9)}}
 /* cc#1738 · the two stacked index blocks: a thin rule between them, a mono "no open position"
    line for an index with nothing written, the index label in the section-name grammar. */
 #heroPositionsBody .ixblk{margin-top:var(--space-10)}
-#heroPositionsBody .ixblk:first-child{margin-top:var(--space-6)}
+#heroPositionsBody .ixblk:first-child{margin-top:0}   /* cc#1752: no own top margin, so justify-content:center gives equal space above and below the group */
 #heroPositionsBody .legdiv{height:1px;background:var(--line);margin-top:var(--space-10)}
 #heroPositionsBody .posnone{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);color:var(--mut);margin-top:var(--space-6)}
 /* cc#1386 · CARD "INDEX POSITIONS" (was Cards 4/5, cc#1383) — design_refs/scorr_index_positions_R1.html.
@@ -4839,11 +4860,12 @@ function syncHeroCardHeights(){
   cards.forEach(function(c){ c.style.minHeight = ''; });
   var max = cards.reduce(function(m, c){ return Math.max(m, c.getBoundingClientRect().height); }, 0);
   HERO_LAST_MAX = max;
-  /* cc#1738 item 4: the Index Positions card is NOT levelled up to the tallest sibling -- that
-     min-height was the ~600px of blank above VIEW LOGS (the .c2body flexes to fill it and the
-     button sits at the bottom). It keeps its natural height: two blocks plus the button. It still
-     takes part in `max` so a genuinely taller Card 4 levels the others, never the reverse. */
-  cards.forEach(function(c){ if (c.id !== 'heroCardPositions') c.style.minHeight = max + 'px'; });
+  /* cc#1752 (founder 06-Sep: "Length of index pos card should be equal in line with other hero
+     cards and keep pos in middle"): EVERY card, Card 4 included, is levelled to the tallest — the
+     same measured min-height mechanism, no hardcoded number. cc#1738's exemption is withdrawn:
+     the blank it avoided is now the centring space (#heroPositionsBody centres the two index
+     blocks inside .c2body; VIEW LOGS stays pinned to the card bottom like its siblings). */
+  cards.forEach(function(c){ c.style.minHeight = max + 'px'; });
 
   /* THE GUARD MUST OUTLIVE THIS FUNCTION, not just its synchronous body — clearing then
      re-applying min-height above is a real resize on whichever cards were shorter, and the
