@@ -433,6 +433,18 @@ def _peer_counts(rows, self_symbol):
             "peers_dn05": dn05, "peers_dn": dn, "peer_count": n}
 
 
+def _slot_before_0930(rv):
+    """39713: the Vol R live read is 'early' when its slot is before 09:30 IST and the read is
+    live (not closed / not a stale day). Slot arrives as 'HH:MM' from live_rvol via r6_read."""
+    try:
+        if not rv or bool(rv.get("rvol_closed")):
+            return False
+        slot = str(rv.get("rvol_slot") or "")[:5]
+        return bool(slot) and slot < "09:30"
+    except Exception:
+        return False
+
+
 def _vol_reads(cur, symbol, d):
     """cc#1785: fill d['vol_r'], d['vol_p'], d['vol_d'], d['vol_ad'] for one symbol. Call-time
     imports: volume_flow_endpoints and deriv_metrics are app modules that import nothing from
@@ -443,6 +455,10 @@ def _vol_reads(cur, symbol, d):
         from r6_volume import r6_read
         rv = r6_read(cur, symbol) or {}
         d["vol_r"], d["vol_p"] = _f(rv.get("rvol")), _f(rv.get("vol_p"))
+        # 39713 early guard input: True only for a LIVE read anchored at a slot before 09:30 IST
+        # (09:15 / 09:20 / 09:25). Compared on the slot itself, not live_rvol's `early` flag,
+        # whose EARLY_SLOTS names only 09:15 and 09:20.
+        d["vol_r_early"] = _slot_before_0930(rv)
     except Exception as e:
         log.warning("cc#1785 r6_read %s: %s", symbol, e)
     try:
@@ -463,34 +479,55 @@ def _vol_reads(cur, symbol, d):
 # (<= 45, the same 45 _ad_21d labels on). One helper, two callers, no second derivation.
 VOL_R_MIN, VOL_P_MIN, VOL_D_MIN, VOL_AD_MIN = 1.2, 1.0, 1.1, 55.0
 VOL_AD_MAX_DIST = 45.0
+# TC_BUY_WEIGHTS_FINAL_V1 (39713, founder-locked 06-Sep) volume_split: the 15 volume points on
+# each BUY card are split BY CHECK, by style. TC_VOLUME_WEIGHT_FINAL (39699): the SELL cards carry
+# 8 volume points, 2 per check. credit = the points of the checks passed; the registry weight
+# equals the max, so the rule contributes exactly those points on the /100 scale.
+VOL_POINTS = {"BUY-MOM": {"r": 5, "p": 4, "d": 3, "ad": 3},
+              "BUY-REV": {"r": 3, "p": 3, "d": 4, "ad": 5},
+              "SELL":    {"r": 2, "p": 2, "d": 2, "ad": 2}}
 
 
-def _vol_checks(d, side):
-    """The four volume checks on the loader fields vol_r / vol_p / vol_d / vol_ad, each pass/fail.
-    side BUY: Vol AD >= 55 (Accumulation). side SELL: Vol AD <= 45 (Distribution). Returns
-    (credit = checks passed, value dict, required string). A missing input FAILS its check and is
-    named in value['no_data'] — never a fabricated pass."""
+def _vol_checks(d, side, style=None):
+    """The four volume checks on the loader fields vol_r / vol_p / vol_d / vol_ad, each pass/fail,
+    each worth its own points (VOL_POINTS). side BUY: Vol AD >= 55 (Accumulation), points by
+    style. side SELL: Vol AD <= 45 (Distribution), 2 points each. Returns (credit = points of the
+    checks passed, value dict, required string, max points). A missing input FAILS its check and
+    is named in value['no_data'] — never a fabricated pass.
+    39713 vol_r_early_guard (BUY): a Vol R pass whose live read is anchored before 09:30 IST
+    (d['vol_r_early']) earns HALF its points; from 09:30, and for any off-market read, full."""
+    key = "SELL" if side == "SELL" else ("BUY-MOM" if style == "MOMENTUM" else "BUY-REV")
+    pts = VOL_POINTS[key]
     ad_v = d.get("vol_ad")
     ad_ok = (ad_v is not None) and ((ad_v <= VOL_AD_MAX_DIST) if side == "SELL" else (ad_v >= VOL_AD_MIN))
-    chk = [("vol_r", "Vol R", d.get("vol_r"), (d.get("vol_r") is not None and d.get("vol_r") >= VOL_R_MIN)),
-           ("vol_p", "Vol P", d.get("vol_p"), (d.get("vol_p") is not None and d.get("vol_p") >= VOL_P_MIN)),
-           ("vol_d", "Vol D", d.get("vol_d"), (d.get("vol_d") is not None and d.get("vol_d") >= VOL_D_MIN)),
-           ("vol_ad", "Vol AD", ad_v, ad_ok)]
-    val, no_data, passed = {}, [], 0
-    for key, name, v, ok in chk:
-        val[key] = _r(v)
-        val["pass_" + key[4:]] = bool(ok)
+    chk = [("vol_r", "Vol R", d.get("vol_r"), (d.get("vol_r") is not None and d.get("vol_r") >= VOL_R_MIN), pts["r"]),
+           ("vol_p", "Vol P", d.get("vol_p"), (d.get("vol_p") is not None and d.get("vol_p") >= VOL_P_MIN), pts["p"]),
+           ("vol_d", "Vol D", d.get("vol_d"), (d.get("vol_d") is not None and d.get("vol_d") >= VOL_D_MIN), pts["d"]),
+           ("vol_ad", "Vol AD", ad_v, ad_ok, pts["ad"])]
+    early = bool(d.get("vol_r_early")) and side != "SELL"
+    val, no_data, passed, credit = {}, [], 0, 0.0
+    for key_, name, v, ok, p in chk:
+        earned = (p / 2.0 if (key_ == "vol_r" and early) else float(p)) if ok else 0.0
+        val[key_] = _r(v)
+        val["pass_" + key_[4:]] = bool(ok)
+        val["pts_" + key_[4:]] = earned
         if v is None:
             no_data.append(name)
         passed += int(bool(ok))
+        credit += earned
     val["passed"] = passed
+    val["points"] = credit
+    if early:
+        val["early_slot"] = True          # Vol R read before 09:30 IST: its pass counted half
     if no_data:
         val["no_data"] = no_data
+    mx = float(sum(pts.values()))
     ad_txt = (f"Vol AD <= {VOL_AD_MAX_DIST:.0f}% (Distribution)" if side == "SELL"
               else f"Vol AD >= {VOL_AD_MIN:.0f}%")
-    req = (f"Vol R >= {VOL_R_MIN:.1f} · Vol P >= {VOL_P_MIN:.1f} · Vol D >= {VOL_D_MIN:.1f} · "
-           f"{ad_txt} (1 each, pass/fail; 15 pts x passed/4)")
-    return float(passed), val, req
+    req = (f"Vol R >= {VOL_R_MIN:.1f} ({pts['r']:g}) · Vol P >= {VOL_P_MIN:.1f} ({pts['p']:g}) · "
+           f"Vol D >= {VOL_D_MIN:.1f} ({pts['d']:g}) · {ad_txt} ({pts['ad']:g}); points of passed checks, max {mx:g}"
+           + ("; Vol R before 09:30 IST = half" if side != "SELL" else ""))
+    return credit, val, req, mx
 
 
 def _load_one(cur, symbol):
@@ -746,11 +783,11 @@ def _sell_rules(d, style):
 
     # R5V — cc#1786 / TC_VOLUME_SIMPLE_SELL_V1 (session_log 39692), BOTH SELL cards: the same four
     # volume checks the BUY cards score (cc#1785, same loader fields, same helper), with Vol AD
-    # flipped to Distribution (<= 45). credit = checks passed of max 4; registry weight 15, so the
-    # rule is worth 15 x passed/4 — a hard cap. LOCK_VOLUME (vol_ratio_today, the legacy T-factor
+    # flipped to Distribution (<= 45). 39699 (founder 20:09): 8 volume points on the SELL cards,
+    # 2 per check — credit = points of the checks passed, max 8, registry weight 8 — a hard cap. LOCK_VOLUME (vol_ratio_today, the legacy T-factor
     # read) is removed from both cards below and its registry rows are active=false, not deleted.
-    c5v, val5v, req5v = _vol_checks(d, "SELL")
-    out.append(_R("R5V", "Volume (4 checks)", c5v, val5v, required=req5v, max_credit=4.0))
+    c5v, val5v, req5v, mx5v = _vol_checks(d, "SELL")   # 39699: 8 points, 2 per check
+    out.append(_R("R5V", "Volume (4 checks)", c5v, val5v, required=req5v, max_credit=mx5v))
 
     if MOM:
         # ── SELL-MOM · 27977 · ignition shorts: momentum begins, short the break ──────────────
@@ -999,8 +1036,8 @@ def _rules(d, style, side):
     # leaves on the first line for _sell_rules), so the old `not BUY` mirror here was dead code
     # and is not carried over — SELL's LOCK_VOLUME is untouched.
     if BUY:
-        c5, val, req = _vol_checks(d, "BUY")   # cc#1786: shared with the SELL cards' R5V
-        out.append(_R("R5", "Volume (4 checks)", c5, val, required=req, max_credit=4.0))
+        c5, val, req, mx5 = _vol_checks(d, "BUY", style)   # 39713: points by check, by style; max 15
+        out.append(_R("R5", "Volume (4 checks)", c5, val, required=req, max_credit=mx5))
 
     # R7 — RSI. cc#513 cross-cutting fix: MOM (both sides) now reads true_weekly_rsi, not the
     # synthetic rsi_weekly (~16pt off, cc#353) -- synthetic must not appear in any rule after this.

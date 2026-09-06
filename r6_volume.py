@@ -92,7 +92,12 @@ def r6_read(cur, symbol: str) -> dict:
     else:
         vol_p, vol_p_asof = pair.get("rvol"), pair.get("asof")
     return {"rvol": rvol, "vol_p": vol_p, "vol_p_asof": vol_p_asof,
-            "partial": (rvol is None) != (vol_p is None)}
+            "partial": (rvol is None) != (vol_p is None),
+            # cc#1785 (39713 vol_r_early_guard): the live read's slot flags, passed through as
+            # live_rvol reports them — early = slot before 09:30 (EARLY_SLOTS), closed = off-market
+            # or a stale day. Additive; the 3-tier readers above ignore them.
+            "rvol_slot": (lv or {}).get("slot"), "rvol_early": bool((lv or {}).get("early")),
+            "rvol_closed": bool((lv or {}).get("closed"))}
 
 
 def r6_state(vr):
