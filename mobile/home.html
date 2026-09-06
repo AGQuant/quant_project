@@ -1327,7 +1327,13 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    block, with the button's own floor and the button itself below that — nothing about this rule
    needed to change for that to be true, since #heroPositionsBody only ever claimed the space
    between .chd and .c2body's own end, wherever that end currently is. */
-#heroPositionsBody{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;justify-content:space-between}
+#heroPositionsBody{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;justify-content:flex-start}   /* cc#1738: content-sized, no stretch */
+/* cc#1738 · the two stacked index blocks: a thin rule between them, a mono "no open position"
+   line for an index with nothing written, the index label in the section-name grammar. */
+#heroPositionsBody .ixblk{margin-top:var(--space-10)}
+#heroPositionsBody .ixblk:first-child{margin-top:var(--space-6)}
+#heroPositionsBody .legdiv{height:1px;background:var(--line);margin-top:var(--space-10)}
+#heroPositionsBody .posnone{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);color:var(--mut);margin-top:var(--space-6)}
 /* cc#1386 · CARD "INDEX POSITIONS" (was Cards 4/5, cc#1383) — design_refs/scorr_index_positions_R1.html.
    Selectors and structure match the ref one-for-one; colours are this file's own live theme
    tokens wherever an equivalent already exists (--grn/--red/--mut/--amber/--panel2/--line2/
@@ -3231,57 +3237,39 @@ function posFeedAlertHtml(fa){
     + '</div>';
 }
 function renderHeroPositions(){
-  var rec = POS.data[POS.sym] || {};
-  var cmp = posCmp(POS.sym);
-  var fut = rec.fut, opt = rec.opt;
-  var futBadge = fut ? dirBadge(fut.side, fut.side === 'BUY' ? 'LONG' : 'SHORT') : '';
-  var optBadge = opt ? dirBadge(opt.side, Math.round(Number(opt.opt_strike)) + ' ' + opt.opt_type
-      + (opt.side === 'SELL' ? ' · wrt' : ' · bot')) : '';
-  /* cc#1569 · EMPTY STATE PER SECTION. "Empty" is the exact condition posRangeBar()/posDecayBar()
-     already treat as no-position (fut with no stop/target; opt absent) -- an OPT leg with a missing
-     live premium is a real open position and keeps its own unavail line. An empty section renders
-     ONE centred block (.legempty: muted section name above, message below) that fills that
-     section's share of #heroPositionsBody (.legwrap.empty grows), with the .leghd heading left in
-     flow above it. Sections WITH rows are byte-identical to before -- only the empty branch moved. */
-  var futEmpty = !fut || fut.stop == null || fut.target == null;
-  var optEmpty = !opt;
-  var legEmpty = function(nm, msg){
-    return '<div class="legempty"><span class="nm">' + nm + '</span><span class="msg">' + msg + '</span></div>';
-  };
+  /* cc#1738 · BOTH INDICES, STACKED, NO TOGGLE. Source is unchanged: /api/mobile/v10chart, whose
+     open legs are v10_positions WHERE status = 'OPEN' (mobile_home2.py ~:636-642), the OPT leg
+     picked per symbol in loadHeroPositions() -- never v10_trades, which is the CLOSED log and
+     holds zero open rows. V10_DISPLAY_OPTIONS_ONLY_V1 (36703): the option leg only; the FUT hedge
+     stays off the card. NIFTY first, then BANKNIFTY, each block = index label + the same elements
+     the single view shipped (strike/type/side chip, decay bar, written / grown / now line, rupee
+     P&L). An index with NO open OPT row prints a short "no open position" line -- a missing block
+     would read as a rendering fault and would hide half the book. Per-index P&L stays per index;
+     nothing is summed across the two (item 6). The card is sized by its content, not by the
+     tallest sibling (see syncHeroCardHeights). */
   var body = document.getElementById('heroPositionsBody');
-  /* cc#1569 P3 · BOTH EMPTY collapses to ONE centred block: "No open <symbol> position" with a muted
-     "Futures or options" line under it. The two section blocks and the divider are not rendered at
-     all (divider hidden by absence, not by a style toggle). VIEW LOGS is outside this body and keeps
-     its pinned place. Mixed (one leg open, one empty) never comes here -- it uses the P2 block. */
-  /* cc#1569 P4 · the symbol word is the toggle's own LABEL (POS_SYMS: NIFTY50 -> "NIFTY"), not the
-     internal key — the card must read "No open NIFTY position", the same word the pill shows. */
-  var symLabel = (POS_SYMS.filter(function(s){ return s.key === POS.sym; })[0] || {}).label || POS.sym;
-  /* cc#1598 + V10_DISPLAY_OPTIONS_ONLY_V1 (36703, tightened 4503): this card is the OPTION leg
-     only. The FUTURES section, its badge and its range bar are not rendered — a futures leg is a
-     stored context, never a display. futBadge / posRangeBar stay defined for the spec sheet. */
-  if (body && optEmpty){
-    body.innerHTML = posFeedAlertHtml(rec.feed_alert)
-      + '<div class="posempty"><span class="msg">No open ' + esc(symLabel) + ' position</span>'
-      + '<span class="sub">Options</span></div>';
-  } else if (body) body.innerHTML =
-      posFeedAlertHtml(rec.feed_alert)
-      + '<div class="legwrap"><div class="leghd"><span class="nm">OPTIONS</span>' + optBadge + '</div>'
-      + posDecayBar(opt) + '</div>';
-  var tg = document.getElementById('heroPositionsToggle');
-  if (tg) tg.innerHTML = posToggleHtml();
-  var btn = document.getElementById('heroPositionsBtn');
-  /* cc#1403 · RESTORED (cc#1393 removed it with the button, now back as VIEW LOGS). cc#1386 scope
-     item 5's own note still applies unchanged: the card does not say which leg the founder was
-     last looking at, so VIEW LOGS opens on FUT — same default openV10()/the modal itself already
-     carried before cc#1383 gave it an explicit-leg 3rd param. */
-  /* cc#1480 (founder 30-Aug): VIEW LOGS opens the OPTIONS log only, switch hidden — was 'FUT'. */
-  if (btn) btn.setAttribute('onclick', "openV10(event,'" + POS.sym + "','OPT',true)");
-  /* cc#1382's lesson again: this swap can shrink the card (Loading -> a real, possibly shorter,
-     range/decay layout; a symbol toggle to a leg with no open position -> a much shorter unavail
-     block), and ResizeObserver does not fire on a shrink pinned at the old min-height -- explicit
-     resync, rAF-wrapped so the write commits before syncHeroCardHeights measures. Re-levels ALL 4
-     cards via cc#1382's generalized loop, not just this one -- confirmed in this task's own
-     verification, not assumed from the function's name. */
+  if (!body) return;
+  var fa = null;
+  POS_SYMS.forEach(function(s){ var r = POS.data[s.key]; if (!fa && r && r.feed_alert) fa = r.feed_alert; });
+  var blocks = POS_SYMS.map(function(s){
+    var rec = POS.data[s.key] || {};
+    var opt = rec.opt;
+    var badge = opt ? dirBadge(opt.side, Math.round(Number(opt.opt_strike)) + ' ' + opt.opt_type
+        + (opt.side === 'SELL' ? ' · wrt' : ' · bot')) : '';
+    var inner;
+    if (rec.error) {
+      /* a fetch error is NOT "no position" -- an unknown book stays visibly unknown */
+      inner = '<div class="unavail">Could not load the ' + esc(s.label) + ' book.</div>';
+    } else if (!opt) {
+      inner = '<div class="posnone">No open ' + esc(s.label) + ' position</div>';
+    } else {
+      inner = posDecayBar(opt);
+    }
+    return '<div class="legwrap ixblk" data-ix="' + s.key + '">'
+      + '<div class="leghd"><span class="nm">' + esc(s.label) + ' · OPTIONS</span>' + badge + '</div>'
+      + inner + '</div>';
+  });
+  body.innerHTML = posFeedAlertHtml(fa) + blocks.join('<div class="legdiv"></div>');
   requestAnimationFrame(syncHeroCardHeights);
 }
 /* Paint-then-fill, same pattern as loadIndexBook()/loadHeroV10Cards(). BOTH symbols fetched up
@@ -4727,11 +4715,15 @@ function heroCard3(d){
 function heroCardPositions(d){
   /* cc#1673: id added so syncHeroPositionsCardVisibility() can find/remove/re-add this ONE card
      without touching Cards 1-3, which carry no id of their own and are never hidden. */
-  return '<div class="c" id="heroCardPositions"><div class="c2body"><div class="chd"><div class="t">Index Positions</div>'
-    + '<div class="rgt pstg" id="heroPositionsToggle">' + posToggleHtml() + '</div></div>'
+  /* cc#1738 (founder 06-Sep "instead of switch display both nifty bank nifty option pe sell open
+     position in 4th card without toggle"): the NIFTY/BANKNIFTY segmented toggle is GONE. The body
+     stacks both indices (renderHeroPositions), and VIEW LOGS opens the OPTIONS log on NIFTY with
+     the NIFTY 50 / BANK NIFTY switch inside the log itself (openV10's own pills) -- one button for
+     both books, not a deep-link to a toggled index. */
+  return '<div class="c" id="heroCardPositions"><div class="c2body"><div class="chd"><div class="t">Index Positions</div></div>'
     + '<div id="heroPositionsBody"><div class="unavail">Loading&hellip;</div></div>'
     + '</div>'
-    + '<button type="button" class="digl slab" id="heroPositionsBtn" onclick="openV10(event,\'' + POS.sym + '\',\'OPT\',true)">VIEW LOGS &#8594;</button>'
+    + '<button type="button" class="digl slab" id="heroPositionsBtn" onclick="openV10(event,\'NIFTY50\',\'OPT\',true)">VIEW LOGS &#8594;</button>'
     + '</div>';
 }
 /* the deck: five cards, snap-scrolled, with a dot that follows the finger */
@@ -4836,7 +4828,11 @@ function syncHeroCardHeights(){
   cards.forEach(function(c){ c.style.minHeight = ''; });
   var max = cards.reduce(function(m, c){ return Math.max(m, c.getBoundingClientRect().height); }, 0);
   HERO_LAST_MAX = max;
-  cards.forEach(function(c){ c.style.minHeight = max + 'px'; });
+  /* cc#1738 item 4: the Index Positions card is NOT levelled up to the tallest sibling -- that
+     min-height was the ~600px of blank above VIEW LOGS (the .c2body flexes to fill it and the
+     button sits at the bottom). It keeps its natural height: two blocks plus the button. It still
+     takes part in `max` so a genuinely taller Card 4 levels the others, never the reverse. */
+  cards.forEach(function(c){ if (c.id !== 'heroCardPositions') c.style.minHeight = max + 'px'; });
 
   /* THE GUARD MUST OUTLIVE THIS FUNCTION, not just its synchronous body — clearing then
      re-applying min-height above is a real resize on whichever cards were shorter, and the
