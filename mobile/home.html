@@ -63,6 +63,11 @@ body[data-theme]{
   --blu:var(--t-accent); --cyan:var(--t-brand);
   --chalk:var(--t-ink); --mute:var(--t-muted); --card:var(--t-panel);
   --up:var(--t-win); --down:var(--t-loss); --veil:rgba(0,0,0,.55);
+  /* cc#1778: --surface2 is a :root LITERAL in mobile_app.css (the navy one) and was never in this
+     bridge, so the shared C·A·R·D tiles (scorr_card_strip.js reads var(--surface2)) painted navy on
+     every set — including the three light ones, where the muted letter on that navy measured
+     2.14 / 2.57 / 2.15. Bridged to --hi, the same rung --panel2 already maps to. */
+  --surface2:var(--t-hi);
 }
 /* cc#1629: the wrapper no longer re-paints the field flat over the body. theme_mobile.css paints
    <body> in this theme's --field with the R5 grain, so the field is one continuous grained ground
@@ -580,7 +585,9 @@ body[data-theme]{
    ONLY thing that opens /m/holdings; a row tap opens the shared C·A·R·D strip in place.
    44px target per framework 15913 core rule 5. */
 .h-exp{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;
-  color:var(--txt,#E9EEFB);font-size:var(--type-15);text-decoration:none}
+  color:var(--txt,#E9EEFB);font-size:var(--type-22);text-decoration:none}
+/* cc#1778: the ⤢ glyph at --type-15 drew a 12×18px mark inside the 44×44 target — founder could not
+   see it. --type-22 on the same scale; the target box was already 44×44 and does not change. */
 .pfrow{cursor:pointer}
 .pfrow:active{background:var(--panel2)}
 .pfcard{padding:var(--space-4) var(--space-2) var(--space-10)}
