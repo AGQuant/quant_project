@@ -132,6 +132,7 @@ from v8_era import router as v8_era_router                    # cc#1604 V8_ERA_C
 from v8_daylog_extras import router as v8_daylog_extras_router   # cc#1561 /api/v8/daylog/series
 from mobile_ext import router as mobile_ext_router             # cc#892 breadth + cc#893 depth
 from trade_wall_endpoints import router as trade_wall_router    # cc#991 Wall of Trades
+from trade_wall_approved import router as trade_wall_approved_router   # cc#1735 Approved tab (sidecar levels + close)
 from model_launcher import router as model_launcher_router   # cc#860 model launcher (read-only)
 from global_heatstrip import router as heatstrip_router   # cc#842 global day/week heat strip (read-only)
 from chart_peers import router as chart_peers_router   # cc#845 chart card Peers tab (read-only)
@@ -821,6 +822,7 @@ app.include_router(v8_era_router)   # cc#1604: era caption + suspension flag, on
 app.include_router(v8_daylog_extras_router)   # cc#1561: Day Log P&L series + return facts
 app.include_router(mobile_ext_router)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
+app.include_router(trade_wall_approved_router)   # cc#1735: /api/tradewall/approved + /levels + /close
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
 app.include_router(heatstrip_router)   # cc#842: /api/global/heatstrip* · cc#849: /api/global/chart/{sym}?tf=
 app.include_router(chart_peers_router)   # cc#845: /api/chart/peers/{symbol}
