@@ -24,7 +24,7 @@ from fastapi import APIRouter
 from nifty_dwm import live_nifty_dwm
 import logging as _logging
 log = _logging.getLogger("scorr.tc_v4_scan")
-from tc_v4_dual import (_f, _r, _derive, score_card, _verdict, _slot_before_0930,
+from tc_v4_dual import (_f, _r, _derive, score_card, _verdict, _slot_before_0930, M_TREND_1M_DAYS, M_TREND_3M_DAYS,
                         STYLES, _ist, SPEC_REF, VERSION,
                         _sector_aggs, _nifty_ret63,   # cc#586: R18/R19 sector + nifty-RS shared helpers
                         _segment_peer_rows, _peer_counts)   # cc#717 part_3: shared R3 peer helpers (parity)
@@ -120,6 +120,15 @@ def _load_bulk(cur):
     mh180 = {r[0]: _f(r[1]) for r in cur.fetchall()}
     for s in syms:
         D[s]["m180"] = mh180.get(s)
+    # cc#1787 R25: m_score at the ~1-month and ~3-month anchors — same at-or-before rule and the same
+    # day constants as tc_v4_dual._m_at, so the scanner and /check resolve the identical snapshots.
+    for key, days in (("m_1m", M_TREND_1M_DAYS), ("m_3m", M_TREND_3M_DAYS)):
+        cur.execute("""SELECT DISTINCT ON (symbol) symbol, m_score FROM gvm_history
+                       WHERE symbol = ANY(%s) AND m_score IS NOT NULL AND score_date <= CURRENT_DATE - %s
+                       ORDER BY symbol, score_date DESC""", (syms, days))
+        mh = {r[0]: _f(r[1]) for r in cur.fetchall()}
+        for s in syms:
+            D[s][key] = mh.get(s)
 
     # peers: cc#717 part_3 — same shared helpers as the single-symbol loader (gvm_scores top-10-mcap
     # peers + live bulk day%, NOT the old gvm_scores⋈v8_metrics INNER JOIN that zeroed cash peers).

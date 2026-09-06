@@ -1123,6 +1123,12 @@ const TC_RULE_DEFS={
     BR:[['1','Δ > +0.5'],['0.5','0 to +0.5'],['0','< 0 (or no 180d history)']],
     SM:[['1','Δ < −0.5'],['0.5','−0.5 to 0'],['0','> 0 (or no 180d history)']],
     SR:[['1','Δ < −0.5'],['0.5','−0.5 to 0'],['0','> 0 (or no 180d history)']]},
+  R25:{n:'R25 · M-score trend (Δ1m / Δ3m)',m:'Momentum pillar (gvm_history.m_score) now vs ~1 month ago (dM1, anchor on/before today−30d) and ~3 months ago (dM3, today−91d). BUY cards only (cc#1787, TC_BUY_WEIGHTS_FINAL_V1 39713). No anchor → 0.',s:'gvm_history m_score at the 30d and 91d at-or-before anchors',w:'Momentum still building over one and three months is a trend with fuel left; momentum rolling over is spending it.',
+    BM:[['1','dM1 > 0 AND dM3 > 0'],['0.5','exactly one'],['0','neither (or no history)']],
+    BR:[['1','dM3 ≥ 0 AND dM1 ≥ −0.5'],['0.5','exactly one'],['0','neither (or no history)']]},
+  R26:{n:'R26 · 5/20 DMA',m:'Mean of the last 5 daily closes vs the mean of the last 20 (raw_prices). BUY cards only (cc#1787, 39713). Fewer than 20 closes → 0.',s:'raw_prices: 5-close avg vs 20-close avg',w:'Price above its own short-term average is the simplest read that the recent bid is real, not a single day.',
+    BM:[['1','5DMA > 20DMA'],['0.5','5DMA below 20DMA by < 1%'],['0','below by ≥ 1%']],
+    BR:[['1','5DMA > 20DMA'],['0.5','5DMA below 20DMA by < 1%'],['0','below by ≥ 1%']]},
 
   /* ══ cc#1173 · THE LOCKED SELL RULEBOOKS ═══════════════════════════════════════════════════
      Both SELL rulebooks were REPLACED by the founder's sweep (27976 SELL-REV, 27977 SELL-MOM),
