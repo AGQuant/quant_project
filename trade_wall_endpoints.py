@@ -347,7 +347,66 @@ WOT_BUCKETS_KEY = "wot_buckets_enabled"
 # APPROVAL SURFACE — the engine signals with an Approve per row — and Alerts is the approved
 # book. approved_alerts is therefore NOT a bucket any more (an approval is a STATE on an engine
 # row, joined from trade_alerts below), and the default is the engine set. Reverses cc#1587.
-WOT_BUCKETS_DEFAULT = ["v8", "index_intel", "tc_scanner"]
+# cc#1732 (founder 06-Sep "why Equity no signal in WOT"): the two EQUITY buckets join the default.
+# They were fully wired in WOT_BUCKETS since cc#1295 but absent from both this default and the
+# app_config row, so the Equity chip filtered a set that was never allowed in and every engine
+# under it read 0 — config drift from the locked spec (36394 names Equity explicitly), not a bug.
+WOT_BUCKETS_DEFAULT = ["v8", "index_intel", "tc_scanner", "qb_basket", "investment_scanner"]
+
+# ── cc#1732 EQUITY: fresh signals only + quant-run baskets only ──────────────────────────────
+# WOT_EQUITY_EPOCH — a SECOND display epoch, applied to the qb_basket and investment_scanner
+# branches ONLY, alongside WALL_EPOCH (which is untouched and still gates every bucket). The
+# founder does not want the historical equity book landing in the pending queue on the day the
+# buckets switch on: a row ENTERED before this date is not shown on the wall; rows from this
+# date onward arrive as pending-approval normally. Read from app_config `wot_equity_epoch` (a
+# YYYY-MM-DD date) per request; the constant below is the in-code fallback and is the date the
+# card shipped. This is a DISPLAY filter — nothing is written to trade_alerts to achieve it
+# (inserting synthetic approved/dismissed rows would put positions the founder never approved
+# into the approved book that feeds Alerts; that is a data-honesty violation, not a shortcut).
+WOT_EQUITY_EPOCH_KEY = "wot_equity_epoch"
+WOT_EQUITY_EPOCH_DEFAULT = "2026-09-06"
+
+# QB_DISCRETIONARY — the qb_basket bucket is narrowed to QUANT-RUN baskets. FINZ baskets and the
+# Model Portfolio are discretionary, founder-picked books whose holdings were decided by hand, so
+# they are not signals awaiting approval. The exclusion is DERIVED, never a name list in this
+# file: the SQL in _wall_sql reads app_config `qb_discretionary_baskets` (today the six finz_*
+# plus model_portfolio) and, if that row is ever absent, falls back to "has a quant_basket_config
+# row" (the registry test — only quant-run baskets have one). A new discretionary basket added to
+# that config drops off the wall automatically with no code change, which is exactly why the
+# list is not inline here.
+QB_DISCRETIONARY_KEY = "qb_discretionary_baskets"
+
+
+def wot_equity_epoch(cur):
+    """The equity display epoch from app_config as 'YYYY-MM-DD'. Returns (date_str, missing_flag).
+
+    A value that is not a real ISO date is treated as MISSING (falls to the shipped default),
+    never composed into SQL — the wall SQL runs with no parameters on the count path, so the only
+    thing allowed into the text is a value this function has validated.
+    """
+    from datetime import date as _date
+    cur.execute("SELECT value FROM app_config WHERE key=%s", (WOT_EQUITY_EPOCH_KEY,))
+    row = cur.fetchone()
+    raw = (str(row[0]).strip() if row and row[0] else "")
+    try:
+        return _date.fromisoformat(raw[:10]).isoformat(), False
+    except Exception:
+        if raw:
+            log.warning("wot_equity_epoch: %r is not a YYYY-MM-DD date, using default %s", raw, WOT_EQUITY_EPOCH_DEFAULT)
+        return WOT_EQUITY_EPOCH_DEFAULT, True
+
+
+# The derived QB exclusion, as SQL, so the wall never carries a basket name of its own. Reads the
+# app_config JSON list without a jsonb cast (a hand-edited value that is not valid JSON must not
+# 500 the wall — stray tokens simply match no basket), and falls back to the quant_basket_config
+# registry only when the app_config row is absent. w.note IS basket_name on the quant branch.
+# No percent character anywhere in here — see PERCENT_SIGNS_IN_SQL above.
+_QB_EXCLUDED_SQL = """(SELECT TRIM(BOTH ' "' FROM x) FROM app_config c,
+        LATERAL REGEXP_SPLIT_TO_TABLE(REGEXP_REPLACE(c.value, '[\\[\\]]', '', 'g'), ',') AS x
+        WHERE c.key = '""" + QB_DISCRETIONARY_KEY + """' AND TRIM(BOTH ' "' FROM x) <> '')"""
+_QB_NARROW_SQL = (" AND NOT (w.src = 'quant' AND (w.note IN " + _QB_EXCLUDED_SQL + "\n"
+                  "     OR (NOT EXISTS (SELECT 1 FROM app_config c2 WHERE c2.key = '" + QB_DISCRETIONARY_KEY + "')\n"
+                  "         AND w.note NOT IN (SELECT basket_name FROM quant_basket_config))))\n")
 
 
 def wot_buckets_enabled(cur):
@@ -387,7 +446,7 @@ def wot_buckets_enabled(cur):
     return known, False
 
 
-def _wall_sql(names):
+def _wall_sql(names, equity_epoch=None):
     """_WALL_SQL narrowed to the enabled buckets.
 
     The src keys are literals from WOT_BUCKETS above — never config text — so quoting them into
@@ -395,14 +454,25 @@ def _wall_sql(names):
     with NO parameters, and psycopg leaves a bare placeholder verbatim on that path (see
     PERCENT_SIGNS_IN_SQL). An empty list yields a wall with no rows, stated as such, not the full
     union.
+
+    cc#1732: `equity_epoch` ('YYYY-MM-DD', already validated by wot_equity_epoch()) gates the
+    qb_basket + investment_scanner branches to rows ENTERED on or after it; the QB narrowing to
+    quant-run baskets (_QB_NARROW_SQL, derived from app_config / quant_basket_config) is always
+    composed. Both sit here, at the same composition point as WALL_EPOCH, so every consumer —
+    page, chip counts, by_engine, the pending count — inherits them from one place.
     """
     srcs = sorted({s for n in names for s in WOT_BUCKETS.get(n, ())})
     if not srcs:
         return _WALL_SQL + " AND false\n"
     # cc#1609 + V10_DISPLAY_OPTIONS_ONLY_V1 (36703): an Index Intel row on the wall is the OPTION
     # leg only. Futures legs stay in v10_trades (record) and never reach a display.
-    return (_WALL_SQL + " AND w.src IN (" + ", ".join("'" + s + "'" for s in srcs) + ")\n"
-            + " AND NOT (w.src = 'v10' AND w.instrument = 'FUTURES')\n")
+    sql = (_WALL_SQL + " AND w.src IN (" + ", ".join("'" + s + "'" for s in srcs) + ")\n"
+           + " AND NOT (w.src = 'v10' AND w.instrument = 'FUTURES')\n")
+    if equity_epoch:
+        sql += (" AND NOT (w.src IN ('quant', 'invscan') AND w.entry_ts < '" + str(equity_epoch)[:10]
+                + "'::timestamp)\n")
+    sql += _QB_NARROW_SQL
+    return sql
 
 
 # The guard that makes PERCENT_SIGNS_IN_SQL enforceable instead of merely written down. This
@@ -538,7 +608,9 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         # cc#1587: the enabled-bucket list is read per request so an app_config edit takes effect
         # on the next load, no redeploy.
         buckets, buckets_missing = wot_buckets_enabled(cur)
-        wall_sql = _wall_sql(buckets)
+        # cc#1732: equity epoch + QB narrowing ride the same composition point (see _wall_sql).
+        equity_epoch, epoch_missing = wot_equity_epoch(cur)
+        wall_sql = _wall_sql(buckets, equity_epoch=equity_epoch)
         rows = _fetch(cur, limit, cur_ts, cur_sk, inst, st, wall_sql)
         has_more = len(rows) > limit
         rows = rows[:limit]
@@ -580,8 +652,13 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             _n = cur.fetchone()
             approval_counts = {"pending": int(_p[0] or 0), "approved_today": int(_a[0] or 0),
                                "newest_signal_ts": _n[0].strftime("%Y-%m-%d %H:%M:%S") if (_n and _n[0]) else None}
+            # cc#1732: the basket names the QB narrowing is excluding RIGHT NOW, read from the same
+            # subselect the wall SQL uses, so the response states the live rule rather than a claim.
+            cur.execute("SELECT DISTINCT x FROM " + _QB_EXCLUDED_SQL + " AS q(x) ORDER BY 1")
+            qb_excluded = [r[0] for r in cur.fetchall()]
         else:
             approval_counts = None
+            qb_excluded = None
 
         events = [_shape(r) for r in rows]
         # cc#1609 scope 2: STATE per engine row from trade_alerts — pending-approval | approved |
@@ -641,6 +718,14 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         "buckets_known": list(WOT_BUCKETS),
         "buckets_source": "default" if buckets_missing else "app_config",
         "approved_as_of": approved_as_of,
+        # cc#1732: the equity gates, stated. equity_epoch applies to qb_basket + investment_scanner
+        # rows only (by ENTRY date); qb_excluded_baskets is the live discretionary list (app_config
+        # qb_discretionary_baskets; registry fallback = baskets with no quant_basket_config row).
+        "equity_epoch": equity_epoch,
+        "equity_epoch_source": "default" if epoch_missing else "app_config",
+        "qb_excluded_baskets": qb_excluded,
+        "qb_exclusion_rule": "quant rows whose basket_name is in app_config." + QB_DISCRETIONARY_KEY
+                             + " are not shown; if that row is absent, only baskets with a quant_basket_config row are shown",
         # cc#1609: the approval surface — header counts + how state was joined, so no surface guesses.
         "approval_counts": approval_counts,
         "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed",
