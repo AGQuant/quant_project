@@ -238,9 +238,13 @@
     /* cc#1068: .r5-idxbox styling removed with its mover — nothing can create that element any
        more, so the rules were dead weight shipped to every page. The card now carries its own
        .r5-idxcard styling in mobile/home.html, next to the markup it styles. */
-    + '.r5-tab-on{color:#C8F542!important;position:relative}'
+    /* cc#1749: the active tab and its underline read the theme's accent token (--brand, the same
+       token the tab glyph already resolves to), not the goldnight lime literal — on Silver Gold the
+       literal leaked as a lime bar under a gold glyph (founder 06-Sep screenshot). One read, every
+       theme follows its own accent; the lime stays only as the no-token fallback. */
+    + '.r5-tab-on{color:var(--brand,#C8F542)!important;position:relative}'
     + '.r5-tab-on::after{content:"";position:absolute;top:-1px;left:25%;right:25%;height:3px;'
-    +   'background:#C8F542;clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}';
+    +   'background:var(--brand,#C8F542);clip-path:polygon(0 0,100% 0,calc(100% - 3px) 100%,3px 100%)}';
 
   function injectCss() {
     if (document.getElementById('r5sig-css')) return;

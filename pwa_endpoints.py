@@ -2610,7 +2610,13 @@ APP_THEME_RESOLVE_JS = """(function(){
   function apply(){
     var b=document.body;
     if(!b||!b.hasAttribute('data-theme'))return;
-    b.setAttribute('data-theme',resolve());
+    var k=resolve();
+    if(b.getAttribute('data-theme')===k)return;
+    b.setAttribute('data-theme',k);
+    /* cc#1749: a correcting write is announced like a switcher write, so any menu that marked its
+       tick off the page's inline boot (the deferred app-shell menu runs before this listener)
+       re-reads. No change, no event. */
+    try{window.dispatchEvent(new CustomEvent('scorr:theme',{detail:{theme:k}}));}catch(e){}
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',apply);
   else apply();
