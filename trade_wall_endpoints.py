@@ -611,6 +611,26 @@ def _shape(r):
     }
 
 
+# ── cc#1736 SUPPRESS-IN-POSITION (founder 06-Sep: "if position already approved and open then no
+# new signals for that position should display in WOT") ─────────────────────────────────────────
+# approved_and_open = trade_alerts.status = 'approved' AND no trade_alert_levels.closed_at (the
+# cc#1735 sidecar; LEFT JOIN so an alert with no levels row counts as open). Direction BUY/SELL on
+# trade_alerts is mapped to the wall's LONG/SHORT. Position-level rule: both instruments, every
+# engine bucket. Nothing is written here — the state is computed per request and the rows are
+# still served (excluded from the default pending list, counted, revealable on the page).
+_HELD_SQL = """SELECT a.id, a.symbol, UPPER(a.direction) AS direction,
+       CASE WHEN UPPER(a.direction) = 'BUY' THEN 'LONG' WHEN UPPER(a.direction) = 'SELL' THEN 'SHORT' ELSE UPPER(a.direction) END AS side,
+       a.source_engine, a.source_ref,
+       a.approved_at AT TIME ZONE 'Asia/Kolkata' AS approved_ist, a.approved_price
+  FROM trade_alerts a LEFT JOIN trade_alert_levels l ON l.alert_id = a.id
+ WHERE a.status = 'approved' AND l.closed_at IS NULL"""
+# Appended to the undecided-open-rows count in tradewall() (alias w). No percent character.
+_SUPPRESSED_WHERE = ("AND EXISTS (SELECT 1 FROM trade_alerts a LEFT JOIN trade_alert_levels l ON l.alert_id = a.id "
+                     "WHERE a.status = 'approved' AND l.closed_at IS NULL AND a.symbol = w.symbol "
+                     "AND (CASE WHEN UPPER(a.direction) = 'BUY' THEN 'LONG' WHEN UPPER(a.direction) = 'SELL' THEN 'SHORT' END) = w.side "
+                     "AND NOT (a.source_engine = w.engine AND a.source_ref = w.symbol || '@' || to_char(w.entry_ts, 'YYYY-MM-DD HH24:MI:SS')))")
+
+
 @router.get("/api/tradewall")
 @_json_safe
 def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: str = "", status: str = "open"):
@@ -690,12 +710,26 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                         "AND a.source_ref = w.symbol || '@' || to_char(w.entry_ts, 'YYYY-MM-DD HH24:MI:SS') "
                         "AND a.status IN ('approved', 'dismissed'))")
             _p = cur.fetchone()
+            # cc#1736: of those undecided rows, how many are SUPPRESSED — same symbol + same side as
+            # an approved-and-open alert (see _SUPPRESSED_WHERE). Counted over the WHOLE wall, and
+            # subtracted from `pending` below so the header number keeps meaning "awaiting a
+            # decision". THE PENDING FIGURE DROPS BY THIS NUMBER FROM THIS CARD ON — that is the
+            # rule working, not data going missing; `suppressed` is served beside it.
+            cur.execute("SELECT COUNT(*) n FROM (" + wall_sql + ") w WHERE w.status = 'open' AND w.src <> 'alert' "
+                        "AND NOT EXISTS (SELECT 1 FROM trade_alerts a WHERE a.kind = 'entry' "
+                        "AND a.source_engine = w.engine "
+                        "AND a.source_ref = w.symbol || '@' || to_char(w.entry_ts, 'YYYY-MM-DD HH24:MI:SS') "
+                        "AND a.status IN ('approved', 'dismissed')) " + _SUPPRESSED_WHERE)
+            _sup = cur.fetchone()
             cur.execute("SELECT COUNT(*) n FROM trade_alerts WHERE status = 'approved' AND source_engine IS NOT NULL "
                         "AND (approved_at AT TIME ZONE 'Asia/Kolkata')::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
             _a = cur.fetchone()
             cur.execute("SELECT MAX(w.entry_ts) FROM (" + wall_sql + ") w WHERE w.status = 'open' AND w.src <> 'alert'")
             _n = cur.fetchone()
-            approval_counts = {"pending": int(_p[0] or 0), "approved_today": int(_a[0] or 0),
+            approval_counts = {"pending": int(_p[0] or 0) - int(_sup[0] or 0),   # cc#1736: excludes suppressed
+                               "pending_including_suppressed": int(_p[0] or 0),
+                               "suppressed": int(_sup[0] or 0),
+                               "approved_today": int(_a[0] or 0),
                                "newest_signal_ts": _n[0].strftime("%Y-%m-%d %H:%M:%S") if (_n and _n[0]) else None}
             # cc#1732: the basket names the QB narrowing is excluding RIGHT NOW, read from the same
             # subselect the wall SQL uses, so the response states the live rule rather than a claim.
@@ -721,12 +755,30 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                         ([k[1] for k in keys],))
             for a in _rows(cur):
                 amap[(a["source_engine"], a["source_ref"])] = a
+        # cc#1736: the approved-and-OPEN book — every approved alert with no closed_at on the
+        # cc#1735 sidecar (before cc#1735 there was no close concept, so this dependency is stated
+        # here rather than assumed: the LEFT JOIN is what lets suppression LIFT after an exit).
+        held_same, held_sym = {}, {}
+        if events:
+            from trade_wall_approved import _ensure as _ensure_levels   # CREATE TABLE IF NOT EXISTS only
+            _ensure_levels(conn)
+            cur.execute(_HELD_SQL)
+            for h in _rows(cur):
+                hd = {"id": h["id"], "symbol": h["symbol"], "side": h["side"], "direction": h["direction"],
+                      "engine": h["source_engine"] or "Manual", "source_ref": h["source_ref"],
+                      "approved_at": h["approved_ist"].strftime("%Y-%m-%d %H:%M") if h["approved_ist"] else None,
+                      "approved_price": float(h["approved_price"]) if h["approved_price"] is not None else None}
+                held_same.setdefault((h["symbol"], h["side"]), hd)
+                held_sym.setdefault(h["symbol"], []).append(hd)
         for e in events:
+            e["suppressed_by"] = None
+            e["reversal_of"] = None
             if e["src"] == "alert":
                 e["state"] = "approved"
                 e["approval"] = None
                 continue
-            a = amap.get((e["engine"], e["symbol"] + "@" + (e["entry"]["ts"] or "")))
+            ref = e["symbol"] + "@" + (e["entry"]["ts"] or "")
+            a = amap.get((e["engine"], ref))
             if a:
                 e["state"] = a["status"]
                 e["approval"] = {"id": a["id"],
@@ -736,6 +788,22 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             else:
                 e["state"] = "pending-approval"
                 e["approval"] = None
+                # cc#1736 MATCH KEY = SYMBOL + DIRECTION (Fable decision on the card): an undecided
+                # row is SUPPRESSED when an approved-and-open alert holds the SAME symbol in the SAME
+                # direction, whatever engine produced either — the founder cannot take the same
+                # position twice. The row itself is never that alert (its own row carries a decision
+                # above), the source_ref check just says so explicitly. An OPPOSITE-direction row on a
+                # held symbol is NOT suppressed: it may be the signal to get out, so it stays pending
+                # and carries a REVERSAL tag naming the position it contradicts. Full per-symbol
+                # suppression would be: drop the side from the key (held_sym instead of held_same).
+                hd = held_same.get((e["symbol"], e["side"]))
+                if hd and not (hd["engine"] == e["engine"] and hd["source_ref"] == ref):
+                    e["state"] = "suppressed-in-position"
+                    e["suppressed_by"] = hd
+                else:
+                    opp = [x for x in held_sym.get(e["symbol"], []) if x["side"] != e["side"]]
+                    if opp:
+                        e["reversal_of"] = opp[0]
     last = rows[-1] if rows else None
     return {
         "events": events,
@@ -773,7 +841,9 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                              + " are not shown; if that row is absent, only baskets with a quant_basket_config row are shown",
         # cc#1609: the approval surface — header counts + how state was joined, so no surface guesses.
         "approval_counts": approval_counts,
-        "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed",
+        "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed | suppressed-in-position (cc#1736)",
+        # cc#1736: the suppression rule, stated where the states are stated.
+        "suppression_rule": "an undecided open row whose SYMBOL + SIDE matches an approved-and-open alert (trade_alerts status=approved with no trade_alert_levels.closed_at) is state suppressed-in-position: counted in approval_counts.suppressed, excluded from approval_counts.pending, served with suppressed_by; an opposite-side row on a held symbol stays pending with reversal_of set",
         "v10_display": "OPT legs only (V10_DISPLAY_OPTIONS_ONLY_V1 36703)",
     }
 

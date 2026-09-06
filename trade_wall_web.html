@@ -72,6 +72,11 @@
     font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap}
   .tw-close-btn:hover{border-color:var(--red);color:var(--red)}
   tr.tw-closed td{opacity:.55}
+  /* cc#1736: suppressed-in-position rows (revealed on demand) are greyed; the note names the position */
+  tr.tw-suppressed td{opacity:.55}
+  .tw-supp{display:block;font-size:10px;color:#eab308;margin-top:2px}
+  .tw-rev{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9.5px;font-weight:800;letter-spacing:.5px;color:#eab308;border:1px solid #eab308;margin-right:4px}
+  .tw-supp-link{cursor:pointer;text-decoration:underline dotted;color:#eab308}
   .tw-cmp-lbl{display:block;font-size:10px;color:var(--mut)}
   .long{color:var(--grn);font-weight:700} .short{color:var(--red);font-weight:700}
   .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
@@ -269,7 +274,7 @@ function rowsHtml(list){
       day = e.day;
       h += '<tr class="tw-day"><td colspan="' + cols + '">' + esc(day || 'undated') + '</td></tr>';
     }
-    h += '<tr>'
+    h += '<tr' + (e.state === 'suppressed-in-position' ? ' class="tw-suppressed"' : '') + '>'
       + '<td class="sym">' + esc(e.symbol) + '</td>'
       + '<td class="' + sideCls(e.side) + '">' + esc(e.side || '') + '</td>'
       + '<td>' + esc(e.engine) + '</td>'
@@ -282,8 +287,13 @@ function rowsHtml(list){
             + '<td class="num">' + px(e.exit_price) + '</td>'
           : '<td class="num">' + qty(e.qty) + '</td><td></td>')
       + pnlCell(e)
-      + '<td class="tw-tag">' + esc(e.result || '')
-        + (e.note ? (e.result ? ' · ' : '') + esc(e.note) : '') + '</td>'
+      + '<td class="tw-tag">'
+        + (e.reversal_of ? '<span class="tw-rev" title="Opposite direction to a position already approved and open — may be the exit signal">REVERSAL</span>' : '')
+        + esc(e.result || '')
+        + (e.note ? (e.result ? ' · ' : '') + esc(e.note) : '')
+        + (e.reversal_of ? '<span class="tw-supp">vs open ' + heldTxt(e.reversal_of) + '</span>' : '')
+        + (e.suppressed_by ? '<span class="tw-supp">in position: ' + heldTxt(e.suppressed_by) + '</span>' : '')
+        + '</td>'
       + twCell(e)
       + '</tr>';
   });
@@ -319,15 +329,19 @@ function instrumentTabsHtml(){
 function stateTabsHtml(){
   if (STATE.status !== 'open') return '';
   var view = STATE.events.filter(function(e){ return STATE.bucket === 'ALL' || e.engine === STATE.bucket; });
-  var n = { 'pending-approval': 0, approved: 0, dismissed: 0 };
+  var n = { 'pending-approval': 0, approved: 0, dismissed: 0, 'suppressed-in-position': 0 };
   view.forEach(function(e){ var st = e.state || 'pending-approval'; if (n[st] != null) n[st]++; });
-  return [['pending-approval','Pending'],['approved','Approved'],['dismissed','Dismissed'],['all','All']].map(function(p){
+  /* cc#1736: Suppressed is its own state chip so the hidden rows are one click away */
+  return [['pending-approval','Pending'],['suppressed-in-position','Suppressed'],['approved','Approved'],['dismissed','Dismissed'],['all','All']].map(function(p){
     var c = p[0] === 'all' ? view.length : n[p[0]];
     return '<button class="tab' + (p[0] === STATE.stateFilter ? ' on' : '') + '" onclick="pickState(\'' + p[0] + '\')">'
       + p[1] + ' <span class="n">' + c + '</span></button>';
   }).join('');
 }
 function pickState(k){ if (k === STATE.stateFilter) return; STATE.stateFilter = k; render(); }
+/* cc#1736: the header's suppressed count toggles the reveal in place (back to Pending on a second click) */
+function toggleSuppressed(){ pickState(STATE.stateFilter === 'suppressed-in-position' ? 'pending-approval' : 'suppressed-in-position'); }
+function heldTxt(h){ return h ? (esc(h.symbol) + ' ' + esc(h.side) + ' · approved ' + esc(h.approved_at || '') + (h.approved_price != null ? ' @ ' + px2(h.approved_price) : '') + ' · ' + esc(h.engine || '') + ' · alert #' + h.id) : ''; }
 function bucketTabsHtml(){
   var list = ['ALL'].concat(BUCKETS[STATE.instrument] || []);
   return list.map(function(eng){
@@ -393,7 +407,11 @@ function setSubline(){
     /* cc#1609 scope 6: the approval-surface header line, numbers from the API head-of-feed. */
     var ac = STATE.approvalCounts;
     el.innerHTML = '<b>Approval surface</b>'
-      + (ac ? ' · ' + ac.pending + ' pending · ' + ac.approved_today + ' approved today'
+      + (ac ? ' · ' + ac.pending + ' pending'
+              /* cc#1736: M suppressed (already in position) — a click reveals them in place */
+              + (ac.suppressed ? ', <span class="tw-supp-link" onclick="toggleSuppressed()" title="Signals on a symbol already approved and open in the same direction — click to reveal">'
+                                 + ac.suppressed + ' suppressed (already in position)</span>' : '')
+              + ' · ' + ac.approved_today + ' approved today'
               + (ac.newest_signal_ts ? ' · as of ' + esc(twStampFull(ac.newest_signal_ts)) + ' IST (newest signal)' : '')
             : '')
       + '. Engine signals with an Approve per row; an approval prints in Alerts. ' + SUB_ENGINES;
@@ -787,7 +805,9 @@ function twCell(e){
     return '<td><div class="twa"><span class="twa-no">DISMISSED</span></div></td>';
   }
   var k = esc(e.id);
-  return '<td><div class="twa twa-act" data-rowid="' + k + '">'
+  /* cc#1736: a suppressed row keeps APPROVE / DISMISS (item 5) — the rule declutters, it does not disarm */
+  var supp = st === 'suppressed-in-position' ? '<span class="tw-supp">suppressed · already in position</span>' : '';
+  return '<td><div class="twa twa-act" data-rowid="' + k + '">' + supp
     + '<button type="button" class="twa-btn twa-approve" data-act="approve" data-rowid="' + k + '">APPROVE</button>'
     + '<button type="button" class="twa-btn twa-dismiss" data-act="dismiss" data-rowid="' + k + '">DISMISS</button>'
     + '<span class="twa-msg" id="twa-msg-' + k + '"></span></div></td>';
