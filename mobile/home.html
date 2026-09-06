@@ -1195,6 +1195,11 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
 .dots{display:flex;justify-content:center;gap:var(--space-6);margin-top:var(--space-7)}
 .dots i{width:5px;height:5px;border-radius:50%;background:var(--line2);transition:.2s}
 .dots i.on{background:var(--blu,#4D7CFE);width:16px;border-radius:var(--radius-3)}
+/* cc#1799 (GOLD_NIGHT_TWOTONE_ACCENT_V1, session_log 39790): the V8 Open Book deck's own active
+   dot only — #bookDots, not the shared .dots class .dots feeds #heroDots (the market mood
+   carousel) too, and this card names the Book deck alone, so the selector is ID-scoped rather
+   than widening .dots i.on itself, which would have leaked the gradient onto the hero dot. */
+body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var(--brand),var(--wayfind))}
 /* cc#1374: .irowpair/.icol/.ibar/.isr REMOVED — idxRowPair no longer has a caller (see the
    note by idxFooter/heroCard2). .ixpv below is the one line of this rule set still needed —
    the pivot-side tag, now inline in Card 1's own index row instead of a column of its own. */

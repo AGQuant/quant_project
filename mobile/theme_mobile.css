@@ -597,10 +597,11 @@ body[data-theme]{
  * (2) a 1px lit rim (inset 0 1px 0) on every top edge — cards, slabs, chips, the bottom nav; (3) a
  * diagonal sheen overlay across each card (::after, pointer-events none; the Home hero deck keeps its
  * own #heroTrack ::after glitter, which outranks this by id); (4) INSET shadows in the progress bars
- * and the A/D pipe so they read as cut into the surface; (5) the wordmark and the verdict words are
- * gradient-clipped text — via -webkit-text-fill-color so the inline / state colour still drives the
- * hue (pass stays green, watch amber, fail red, mood colour unchanged) and NO text-shadow is added:
- * the hero glow stays off (cc#1775 scope 4). The four rgba literals are the set's own surface values,
+ * and the A/D pipe so they read as cut into the surface; (5) WAS gradient-clipped text on the wordmark and
+ * the verdict words — withdrawn by cc#1794 (.hero-mood) and cc#1798 (.as-wm, #ckp .c-vword): the clip's
+ * transparent fill is inherited and blanked the theme menu built inside the wordmark, and 39772 bars paint
+ * tricks on anything a person reads or operates. Text on this set is flat colour, no text-shadow (cc#1775
+ * scope 4). The four rgba literals are the set's own surface values,
  * declared once as custom properties on body (the cc#1637 / cc#1641 pattern); every rule reads a var().
  * Never on P&L numbers. */
 body[data-theme="electricviolet"]{ --ev-rim:rgba(200,180,255,.26); --ev-sink:rgba(0,0,0,.5); --ev-cut:rgba(0,0,0,.55); --ev-sheen:rgba(215,200,255,.11); }
@@ -638,11 +639,89 @@ body[data-theme="electricviolet"]{ --ev-rim:rgba(200,180,255,.26); --ev-sink:rgb
 :root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-bar i{ box-shadow:inset 0 var(--bw-1) 0 var(--ev-rim), inset 0 calc(-1 * var(--bw-1)) 0 var(--ev-sink); }
 /* (5) gradient-clipped text: wordmark (brand -> partner blue), verdict word and hero mood word (a lit tint of
  * their own state colour -> the colour), no glow */
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--gold-hi), var(--brand) 55%, var(--wayfind)); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; }
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm i{ color:transparent; -webkit-text-fill-color:transparent; }
+/* cc#1798 (P0, founder screenshot 06-Sep 23:39: the theme menu opened BLANK on this set). The wordmark is NOT
+ * gradient-clipped any more. scorr_appshell.js builds the theme/logout menu INSIDE a.as-wm, and
+ * -webkit-text-fill-color is inherited, so the transparent fill above reached every menu label and the
+ * caret. The wordmark is the menu handle, not pure ornament, so per HERO_NO_PAINT_TRICKS_RULE (39772) it is
+ * flat: the two ends of the old gradient as solid tokens — brand violet, the O in the partner blue. */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm{ color:var(--brand); }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm i{ color:var(--wayfind); }
 /* cc#1794 (P0, founder screenshot 06-Sep 23:14): the Home hero word is NOT gradient-clipped. On the large italic
  * 900 heading the clipped paint area collapsed and BEARISH rendered as a one-character blob. The verdict word is
  * the most important text in the app and must not depend on a paint trick: flat mood colour, permanently, no
- * text-shadow (cc#1775). Only #ckp .c-vword keeps the clip (it renders whole; checked). */
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-vword{ background-image:linear-gradient(180deg, color-mix(in srgb, currentColor 55%, var(--ink)) 0%, currentColor 65%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; text-shadow:none; }
+ * text-shadow (cc#1775). cc#1798: #ckp .c-vword (the Check verdict word) is flattened too — 39772 names the
+ * verdict word load-bearing, and no load-bearing text carries a paint trick on this set any more. */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-vword{ background-image:none; -webkit-text-fill-color:currentColor; text-shadow:none; }
 :root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .hero-mood{ background-image:none; -webkit-text-fill-color:currentColor; text-shadow:none; }
+
+/* ══ cc#1800 · THEME_INDIGOASH_METALLIC_V1 (session_log 39792) · Indigo Ash's own metallic
+ * dual-shade surface — same 168deg graded panel / lit rim / diagonal sheen / inset-bar recipe
+ * cc#1792 established for Electric Violet, on Indigo Ash's OWN two tokens (--brand #8CA6DB
+ * steel-blue, --wayfind #6FB0C4 soft cyan) blended rather than treated as one accent hue. NO
+ * colour token changed — --field/--panel/--hi/--edge/--ink/--muted/--brand/--wayfind/--win/
+ * --loss/--sunk are byte-identical to scorr_themes.css before this card (locked 39650).
+ * Design ref: design_refs/theme_indigoash_metallic_R1.html (Fable, founder-approved 06-Sep ~00:1x).
+ * --ia-rim/--ia-sheen/--ia-glow are the ref's own rim/sheen/glowc rgba, declared once on body
+ * (the cc#1637/cc#1641/cc#1792 pattern), every rule below reads a var(). */
+body[data-theme="indigoash"]{ --ia-rim:rgba(190,215,235,.24); --ia-sheen:rgba(200,225,240,.10); --ia-glow:rgba(140,166,219,.30); }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"]{ background-image:var(--field-grad), var(--texture); background-attachment:fixed; }
+/* graded panels + lit rim + sheen — same four selectors cc#1792 used */
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .c,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .card,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .m,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .pf-card{ position:relative; background:linear-gradient(168deg, var(--t-hi) 0%, var(--t-panel) 48%, var(--t-sunk) 100%); border-color:var(--t-edge); box-shadow:var(--panel-shadow); }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .slab{ background:linear-gradient(168deg, var(--t-hi) 0%, var(--t-panel) 48%, var(--t-sunk) 100%); box-shadow:inset 0 var(--bw-1) 0 var(--ia-rim), 0 var(--space-5) 0 0 var(--gold-lo), 0 var(--space-5) 0 var(--bw-15) var(--line); }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .c::after,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .card::after,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .m::after,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .pf-card::after{ content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(108deg, transparent 38%, var(--ia-sheen) 50%, transparent 62%); }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .chip,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .hchips .hc,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .pill,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .pf-hero .b,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .pf-st{ box-shadow:inset 0 var(--bw-1) 0 var(--ia-rim); }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .bnav,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .as-nav{ background:linear-gradient(180deg, var(--hi), var(--panel)); border-top-color:var(--edge); box-shadow:inset 0 var(--bw-1) 0 var(--ia-rim); }
+/* inset bars cut into the surface — same four selectors cc#1792 used */
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .adrpipe,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .decbar,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .posbar,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] #ckp .c-meter,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] #ckp .c-rule .c-bar,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] #ckp .c-ic .c-bar{ background:var(--sunk); box-shadow:inset 0 var(--bw-1) var(--space-3) rgba(0,0,0,.5), inset 0 calc(-1 * var(--bw-1)) 0 var(--ia-rim); }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .adrpipe .adv,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .adrpipe .dec,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .decbar i,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] #ckp .c-meter i,
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] #ckp .c-bar i{ box-shadow:inset 0 var(--bw-1) 0 var(--ia-rim), inset 0 calc(-1 * var(--bw-1)) 0 rgba(0,0,0,.5); }
+/* the V8 Open Book mini-tile rail — wayfind->brand (reverse direction from the dot, per the ref)
+ * on .trio .st, which had NO ::before of its own (confirmed by the cc#1799 discovery same night) */
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .trio .st{ position:relative; overflow:hidden; }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .trio .st::before{ content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:linear-gradient(180deg, var(--wayfind), var(--brand)); }
+/* the active carousel dot — brand->wayfind. Not deck-scoped (this card, unlike cc#1799, does not
+ * name one deck): every .dots i.on on this theme reads the same two-tone gradient. */
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .dots i.on{ background:linear-gradient(90deg, var(--brand), var(--wayfind)); box-shadow:0 0 10px var(--ia-glow); }
+/* the wordmark is ORNAMENT (rule 3) and may clip — but cc#1798 (this same night) proved that
+ * -webkit-text-fill-color:transparent on a.as-wm is INHERITED into the theme menu built inside
+ * it and blanks every label. The safe pattern (proven working on winepurple/blush, whose menus
+ * render fine): set color:transparent for the clip but leave -webkit-text-fill-color UNSET, so
+ * it inherits as the keyword currentColor and each descendant (the menu's own buttons, which set
+ * their own `color`) resolves it against ITS OWN colour rather than the wordmark's transparent
+ * one. Never repeat cc#1798's mistake here. */
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .as-hdr a.as-wm{ background:linear-gradient(100deg, var(--brand) 0%, var(--ink) 42%, var(--wayfind) 100%); -webkit-background-clip:text; background-clip:text; color:transparent; }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .as-hdr a.as-wm i{ color:transparent; }
+/* the verdict word is LOAD-BEARING (the gate) — flat colour, no clip, no glow, always. Stated
+ * explicitly here (matching cc#1792/cc#1794/cc#1798's own precedent) even though nothing above
+ * touches these selectors, so the guarantee is self-documenting per theme rather than relying on
+ * "nothing happens to clip it" being true by omission. */
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] #ckp .c-vword{ background-image:none; -webkit-text-fill-color:currentColor; text-shadow:none; }
+:root:root:not([data-theme="light"]) body[data-theme="indigoash"] .hero-mood{ background-image:none; -webkit-text-fill-color:currentColor; text-shadow:none; }
+
+/* cc#1799 follow-up (same night, GOLD_NIGHT_TWOTONE_ACCENT_V1, session_log 39790): the design
+ * ref filed for cc#1800 (theme_indigoash_metallic_R1) independently confirms the "tile rail" that
+ * card's discovery could not find is meant to be a NEW .mini::before-style element, not an
+ * existing one to recolour — .mini::before there is byte-identical in shape to the .trio .st::before
+ * just added above for indigoash. Closing that card's open question with the same element, on
+ * goldnight, wayfind->brand per that card's own scope item 2. */
+:root:root:not([data-theme="light"]) body[data-theme="goldnight"] .trio .st{ position:relative; overflow:hidden; }
+:root:root:not([data-theme="light"]) body[data-theme="goldnight"] .trio .st::before{ content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:2px; background:linear-gradient(180deg, var(--wayfind), var(--brand)); }
