@@ -252,7 +252,7 @@ def _is_embedded(request: Request) -> bool:
 
 # cc#176: /screener /intraday /structure /performance /ask were missing -- those
 # pages never got the PWA bootstrap (no mobile bottom-nav / manifest / SW).
-_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
+_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/intel", "/v10", "/v9", "/v14",   # cc#1754: /intel
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
                      "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner",
@@ -278,6 +278,7 @@ PROTECTED.add("/inv-scanner")   # cc#1286: gate + no-store
 PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
 PROTECTED.add("/alerts")   # cc#1536: Alerts, web — gate + no-store
+PROTECTED.add("/intel")    # cc#1754: Intel standalone page — gate + no-store (same as /news, which now 301s to it)
 # cc#1086: the room carries internal engineering discussion and unreleased spec detail. Gated for
 # that reason, not by habit — a logged-out request must reach login, never the thread.
 PROTECTED.add("/room")
@@ -1292,9 +1293,14 @@ def performance():
 def quant_basket():
     return _page("quant_basket.html")
 
-@app.get("/news", response_class=HTMLResponse)
-def news_page():
+@app.get("/intel", response_class=HTMLResponse)   # cc#1754: Intel standalone, the GVM pattern (canonical nav, then the page — no V8 chrome)
+def intel_page():
     return _page("scorr_news.html")
+
+@app.get("/news")   # cc#1754: old links (Home / Holdings / CIO tiles, bookmarks) land on the new route; query kept
+def news_page(request: Request):
+    q = request.url.query
+    return RedirectResponse(url="/intel" + ("?" + q if q else ""), status_code=301)
 
 @app.get("/v10", response_class=HTMLResponse)
 def v10_dashboard_page():
@@ -1443,8 +1449,13 @@ NAV_REGISTRY = {
     # placement). Route unchanged, still PROTECTED + injected; /m/intel app entry untouched.
     # cc#1747: Intel is back on the site nav (slot 3, after V8) as '/dashboard#intel' — the same V8
     # pane (an iframe of /news?embed=1) it opened from the tab row; the Intel tab button is gone.
-    "/news":         ("Intel · site nav slot 3 via /dashboard#intel (V8 pane, iframe embed)", "v8-pane"),
-    "/dashboard#intel": ("Intel", "nav"),   # cc#1523 rule id=2987; cc#1747 promoted to the site nav
+    # cc#1754 (founder 06-Sep "intel should delink from V8 just like GVM ... i want full screen
+    # view"; corrects the cc#1747 spec): Intel is a STANDALONE page at /intel — canonical nav, then
+    # the page, no V8 header / strapline / status strip / sub-nav. The V8 pane is removed. Old
+    # links do not 404: /news 301s to /intel (query kept) and /dashboard#intel client-redirects.
+    "/intel":        ("Intel", "nav"),   # cc#1754 rule id=2987
+    "/news":         ("(-> /intel, 301 · old Home / Holdings / CIO links and bookmarks)", "typed-url"),   # cc#1754
+    "/dashboard#intel": ("(-> /intel, client redirect · the old V8 pane hash)", "typed-url"),   # cc#1523 -> cc#1747 -> cc#1754
     "/dashboard#model": ("Model Portfolio (V8 tab · /quant-basket folded in)", "tab"),   # cc#1584 rule id=2987
     "/v10":          ("(-> /dashboard#index · Index Intel tab; standalone retired)", "typed-url"),   # cc#542
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)

@@ -347,7 +347,11 @@ PWA_JS = """
     // takes slot 3 (it opens the same V8 pane as before, /dashboard#intel; isActive is hash-aware
     // for it) and Check moves into the V8 tab row (slot 7, /dashboard#check, an iframe of /check).
     // /check stays live at its own URL for bookmarks and deep links.
-    ['/dashboard#intel', '\\u2139\\ufe0e', 'Intel'],
+    // cc#1754 (founder 06-Sep "intel should delink from V8 just like GVM ... i want full screen
+    // view"; corrects the cc#1747 spec): Intel is its OWN page now, /intel, served standalone under
+    // the canonical nav with no V8 chrome — the GVM pattern. The V8 pane is gone; /dashboard#intel
+    // client-redirects here and /news 301s here, so no old link 404s.
+    ['/intel', '\\u2139\\ufe0e', 'Intel'],
     // cc#1536 (founder 31-Aug): Alerts (approve surface, NEW desktop page) + Wall of Trades
     // (display) as ADJACENT desktop tabs, Alerts leading (the cc#1526 approve-surface-leads
     // precedent). Both 'd'-flagged: the mobile placements are cc#1535's (grid tile / bottom nav),
@@ -388,6 +392,7 @@ PWA_JS = """
     // as an embed pane after Wall of Trades (/dashboard#intel), the cc#853 Digest placement
     // pattern. The /news route is UNCHANGED (typed URL + iframe still serve it) and the /m/intel
     // app entry below stays. Recorded as v8-tab in main.py NAV_REGISTRY (rule id=2987).
+    // cc#1754: superseded — Intel is the standalone /intel page (slot 3 above); /news now 301s to it.
     ['/v13', '\\u25a4', 'V13'],
     // cc#1520 (founder 31-Aug): Health REMOVED from the nav, same pattern as cc#822 Holdings —
     // the /health route is UNCHANGED and still loads by typed URL; its one visible entry point
