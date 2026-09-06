@@ -148,7 +148,8 @@ def _score_record(rec, peers):
     filters.append({"code": "F2", "name": "Growth score (G)", "max": 2, "points": f2,
                     "value": _rnd(g), "peer": None, "note": None})
 
-    # F3 result rating (max 2) — QoQ sales AND profit both > top-3 peer avg -> 2 ; one -> 1 ; else 0
+    # F3 result rating (max 2) — YoY sales AND profit (latest quarter vs the same quarter last year;
+    # the qoq_* keys are a misnomer, see yoy_basis.py — cc#1759) both > top-3 peer avg -> 2 ; one -> 1 ; else 0
     qs, qp = rec.get("qoq_sales"), rec.get("qoq_profit")
     peer_qs = _top3_peer_avg(peers, "qoq_sales")
     peer_qp = _top3_peer_avg(peers, "qoq_profit")

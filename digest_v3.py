@@ -1008,20 +1008,26 @@ def _results_analysed(cur) -> Dict[str, Any]:
     #                  margins ride along so the surface can say what was compared.
     # NULL source -> None: never 0, never another field. The two miss counts are published on the
     # section so a genuine gap is a number, not a guess.
+    # cc#1759 (YOY_BASIS_RULE_V1): the column names and the accessors come from yoy_basis — the one
+    # place that says these columns are YoY despite the qoq_ prefix — so this reader never types
+    # the misnomer itself.
+    from yoy_basis import (SALES_GROWTH_YOY_COL, MARGIN_NOW_COL, MARGIN_LY_COL,
+                           sales_growth_yoy, margin_change_pts)
     syms = sorted({r["symbol"] for r in out})
     scr = {}
     if syms:
-        cur.execute("SELECT UPPER(nse_code), qoq_sales_growth, opm, opm_prev_year_q "
+        cur.execute(f"SELECT UPPER(nse_code), {SALES_GROWTH_YOY_COL}, {MARGIN_NOW_COL}, {MARGIN_LY_COL} "
                     "FROM screener_raw WHERE UPPER(nse_code) = ANY(%s)", (syms,))
         for sym, sg, o, oy in cur.fetchall():
-            scr[sym] = (sg, o, oy)
+            scr[sym] = {SALES_GROWTH_YOY_COL: sg, MARGIN_NOW_COL: o, MARGIN_LY_COL: oy}
     sales_missing = margin_missing = 0
     for r in out:
-        sg, o, oy = scr.get(r["symbol"], (None, None, None))
-        r["sales_yoy"] = None if sg is None else round(float(sg), 2)
+        row = scr.get(r["symbol"], {})
+        r["sales_yoy"] = sales_growth_yoy(row)
+        o, oy = row.get(MARGIN_NOW_COL), row.get(MARGIN_LY_COL)
         r["margin_now"] = None if o is None else round(float(o), 2)
         r["margin_ly"] = None if oy is None else round(float(oy), 2)
-        r["margin_vs_ly"] = None if (o is None or oy is None) else round(float(o) - float(oy), 2)
+        r["margin_vs_ly"] = margin_change_pts(row)
         if r["sales_yoy"] is None:
             sales_missing += 1
         if r["margin_vs_ly"] is None:

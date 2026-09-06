@@ -658,13 +658,18 @@ def _load_merged_df(target_date: date) -> pd.DataFrame:
     else:
         df["opm_expansion"] = np.nan
 
-    # cc#1005: G-pillar QoQ -> YoY (founder decision 11-Aug-2026). The stored qoq_sales_growth /
-    # qoq_profit_growth are SEQUENTIAL (latest quarter vs the immediately preceding quarter), so
-    # seasonality distorts Growth (e.g. KIRLPNU -57% seasonal Q4-heavy vs +7-10% YoY). Re-derive
-    # here on the SAME quarter-vs-year-ago pattern as opm_expansion, from screener_raw's own
-    # latest/preceding-year-quarter columns, OVERRIDING the stored sequential value so a plain
-    # `gvm_recompute` applies the new basis with no CSV re-import. Internal keys unchanged
-    # (qoq_sales_growth / qoq_profit_growth) -> no schema change, only the basis.
+    # cc#1005: G-pillar QoQ -> YoY (founder decision 11-Aug-2026). At the time of that card the
+    # stored qoq_sales_growth / qoq_profit_growth were SEQUENTIAL (latest quarter vs the immediately
+    # preceding quarter), so seasonality distorted Growth (e.g. KIRLPNU -57% seasonal Q4-heavy vs
+    # +7-10% YoY). Re-derive here on the SAME quarter-vs-year-ago pattern as opm_expansion, from
+    # screener_raw's own latest/preceding-year-quarter columns, so a plain `gvm_recompute` applies
+    # the YoY basis with no CSV re-import. Internal keys unchanged (qoq_sales_growth /
+    # qoq_profit_growth) -> no schema change, only the basis.
+    # cc#1759 (YOY_BASIS_RULE_V1, 06-Sep-2026): the STORED columns are YoY today too — the CSV
+    # header is "YOY Quarterly sales / profit growth" (screener_loader) and Fable's Finkhoz check
+    # matches them exactly — so this re-derivation and the stored value now agree on basis; the
+    # override stays as the guard. The name is the only misnomer left; yoy_basis.py is the one
+    # place readers get the honest name.
     # Guards: missing/zero denominator -> NULL; profit base <= 0 -> NULL (a % move off a loss
     # base is meaningless). NULL scores neutral (5.0) via the blank rule downstream.
     def _yoy(latest_col, prev_col, positive_base_only):

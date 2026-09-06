@@ -447,7 +447,10 @@ def compute(cur, symbol) -> Dict[str, Any]:
             {"name": "ROCE 15 or better" + (" (BFSI exempt)" if bfsi else ""),
              "value": rec["roce"], "vs": 15,
              "pass": (True if bfsi else (None if rec["roce"] is None else rec["roce"] >= 15))},
-            {"name": "QoQ sales and profit both positive",
+            # cc#1759 (YOY_BASIS_RULE_V1): qoq_sales / qoq_profit are screener_raw.qoq_*_growth,
+            # which hold YoY (latest quarter vs the same quarter last year) despite the name —
+            # see yoy_basis.py. The caption said QoQ over a YoY number; it now says what it is.
+            {"name": "YoY sales and profit both positive (latest quarter vs the same quarter last year)",
              "value": [rec["qoq_sales"], rec["qoq_profit"]], "vs": 0,
              "pass": (None if rec["qoq_sales"] is None or rec["qoq_profit"] is None
                       else (rec["qoq_sales"] > 0 and rec["qoq_profit"] > 0))},

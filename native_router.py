@@ -32,8 +32,8 @@ FIXES v10 (13-Jun-2026) — research-driven dictionary expansion (FIX Q):
     debt                      → "Debt"  (distinct from d/e → "Debt to equity")
     cfo pat / cash flow       → "Cfo by Pat"  (cash conversion quality)
     profit growth 3y          → profit_growth_3y
-    qoq sales                 → qoq_sales_growth
-    qoq profit                → qoq_profit_growth
+    qoq sales / yoy sales     → qoq_sales_growth   (YoY despite the name — cc#1759, yoy_basis.py)
+    qoq profit / yoy profit   → qoq_profit_growth  (YoY despite the name — cc#1759, yoy_basis.py)
   LOOKUP_TRIGGER_WORDS +16 judgment/research words:
     research, study, multibagger, gem, turnaround, oversold, moat,
     fundamentals, fundamentally, quality, bargain, prospects, outlook,
@@ -264,6 +264,15 @@ METRIC_MAP = {
     "qoq sales growth": ("s", "qoq_sales_growth",       "screener"),
     "qoq profit":       ("s", "qoq_profit_growth",      "screener"),
     "qoq profit growth":("s", "qoq_profit_growth",      "screener"),
+    # cc#1759 (YOY_BASIS_RULE_V1): the two columns above are YoY despite the qoq_ prefix (see
+    # yoy_basis.py), so a reader who asks for the number by its real name must land on them too.
+    # The qoq phrasings stay so an old query still resolves.
+    "yoy sales":        ("s", "qoq_sales_growth",       "screener"),
+    "yoy sales growth": ("s", "qoq_sales_growth",       "screener"),
+    "sales growth yoy": ("s", "qoq_sales_growth",       "screener"),
+    "yoy profit":       ("s", "qoq_profit_growth",      "screener"),
+    "yoy profit growth":("s", "qoq_profit_growth",      "screener"),
+    "profit growth yoy":("s", "qoq_profit_growth",      "screener"),
     "2d mom":           ("v", "mom_2d",                 "v8"),
     "2d momentum":      ("v", "mom_2d",                 "v8"),
     "mom 2d":           ("v", "mom_2d",                 "v8"),

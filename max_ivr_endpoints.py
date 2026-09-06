@@ -206,7 +206,7 @@ _PORTFOLIO = [
 # only leaves whose answer is authored text rather than a DB read, so they ship complete in phase A.
 _LEARN = [
     ("ln_gvm",   "What is GVM?",               1, "**GVM** is Scorr's single quality score, 0-10, rebuilt every night.\n\n"
-     "- **G — Growth**: sales and profit CAGR, QoQ momentum, margins, and the two institutional-holding metrics.\n"
+     "- **G — Growth**: sales and profit CAGR, latest-quarter YoY momentum (vs the same quarter last year), margins, and the two institutional-holding metrics.\n"
      "- **V — Valuation**: PE against the company's OWN history first, then against its segment median.\n"
      "- **M — Momentum**: 1Y/3Y returns, 52W vs index, distance from the 50 and 200 DMA, monthly RSI.\n\n"
      "Each metric is scored against the fine-grained SEGMENT peer median — not the whole market — so a "
