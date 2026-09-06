@@ -106,6 +106,14 @@ html,body{overflow-x:hidden;max-width:100%}
   .grp .note{flex:1 0 100%;text-align:left}
 }
 .tile{background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-8) var(--space-9);clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
+/* cc#1780 · THE TILE FILL CARRIES DIRECTION. One token pair, resolved per theme: --volt/--heat
+   (this page's up/down names, aliased to the set's --win/--loss) mixed 16% into --hi, so a light
+   set gets a light green / light red and a dark set a dark green / dark red from the same rule —
+   never one fill hardcoded and reused. Flat (|chg| < 0.005, i.e. a value that prints 0.00%) and
+   the VIX "mid" band keep the neutral --hi. 16% is the strongest mix at which the NUMBER still
+   clears AA on all eight sets once it is pulled 30% toward --ink (see tile()); measured, not guessed. */
+.tile.up{background:color-mix(in srgb,var(--volt) 16%,var(--hi));border-color:color-mix(in srgb,var(--volt) 40%,var(--edge))}
+.tile.dn{background:color-mix(in srgb,var(--heat) 16%,var(--hi));border-color:color-mix(in srgb,var(--heat) 40%,var(--edge))}
 /* APP_QA_R5 P5 · ref design_refs/scorr_digest_mobile_R2.html @ c77cae9.
    9.5px is the FLOOR — the tile label and the wk line were at 9px, which is the drift R2 names. */
 .tile .lb{font-size:var(--type-105);font-weight:700;letter-spacing:var(--track-px12);color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -700,8 +708,38 @@ function tile(t){
            :(band?(String(band)==='mid'?'var(--amber)'
                   :(String(band).indexOf('up')===0?'var(--volt)':(String(band).indexOf('down')===0?'var(--heat)':'var(--muted)')))
                  :cx(v));
-  return `<div class="tile well"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
-    <div class="vv" style="color:${col}">${v!=null?sgn(v)+'%':'—'}</div></div>`;
+  /* cc#1780 · direction CLASS for the fill, from the same band/sign the number colour uses so the
+     two can never disagree (INDIA VIX down = up-band = green fill, same as its number). FLAT when
+     the value is null, the band is mid/flat, or |v| < 0.005 — the half-unit of the 2-dp display,
+     so a tile that prints 0.00% is never tinted (FTSE, 06-Sep). The number on a tinted tile is the
+     same token pulled 30% toward --ink: the win/loss hue on its own tint measured under AA 4.5 on
+     Aqua White (4.34 at 16%); mixed, it clears 4.86 or better on all eight sets. */
+  const dir=(v==null||Math.abs(v)<0.005)?'flat'
+           :(band?(String(band).indexOf('up')===0?'up':(String(band).indexOf('down')===0?'dn':'flat'))
+                 :(v>0?'up':'dn'));
+  const numCol=dir==='up'?'color-mix(in srgb, var(--volt) 70%, var(--ink))'
+              :dir==='dn'?'color-mix(in srgb, var(--heat) 70%, var(--ink))':col;
+  return `<div class="tile well ${dir}"><div class="lb">${esc(t.name||t.symbol||'—')}</div>
+    <div class="vv" style="color:${numCol}">${v!=null?sgn(v)+'%':'—'}</div></div>`;
+}
+/* cc#1780 · THE FOOTER FOLLOWS THE TOGGLE — wording AND count, from the SAME series the tiles
+   render (window.__TILES), so the two cannot drift. DAY mirrors digest_v3._global_tape's rule
+   exactly (day_chg_pct > 0 over all tiles: literal "higher", so a falling VIX is not "higher"
+   even though its band is green). WEEK counts week_chg_pct > 0 over the tiles that HAVE a week
+   value; global_heatstrip nulls a symbol under 6 sessions rather than shortening its window, and
+   a tile with no week value is named in the footer rather than folded into the day count. */
+function tapeRead(mode){
+  const ts=window.__TILES||[];
+  if(!ts.length) return window.__TAPE_READ||'No live global tiles available.';
+  if(mode==='week'){
+    const w=ts.filter(t=>t.week_chg_pct!=null||t.wk_chg_pct!=null);
+    const ups=w.filter(t=>Number(t.week_chg_pct!=null?t.week_chg_pct:t.wk_chg_pct)>0).length;
+    const miss=ts.length-w.length;
+    if(!w.length) return 'No week read yet — no tile has 5 sessions of history.';
+    return ups+' of '+w.length+' live tiles higher on the week'+(miss?' · '+miss+' without 5 sessions of history':'')+'.';
+  }
+  const ups=ts.filter(t=>Number(t.day_chg_pct)>0).length;
+  return ups+' of '+ts.length+' live tiles higher on the day.';
 }
 /* re-renders the grid IN PLACE: same cells, same order, only the % swaps (ref). */
 function setTapeMode(m){
@@ -709,6 +747,7 @@ function setTapeMode(m){
   TAPE_MODE=m;
   var g=document.getElementById('gtiles');
   if(g&&window.__TILES)g.innerHTML=window.__TILES.map(tile).join('');
+  var rd=document.getElementById('gread'); if(rd)rd.textContent=tapeRead(m);   /* cc#1780 */
   var bs=document.querySelectorAll('#gsw button');
   for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-v')===m);
 }
@@ -2443,6 +2482,7 @@ async function boot(){
 
   const tiles=(S.global_tape&&S.global_tape.tiles)||[];
   window.__TILES=tiles;   /* APP_QA_R5 P5: kept so the switch re-renders without a refetch */
+  window.__TAPE_READ=(S.global_tape&&S.global_tape.read)||'';   /* cc#1780: server day read, used only when there are no tiles */
   const eodNote=S.global_tape&&S.global_tape.eod_note;
   const lad=(S.ladders&&S.ladders.indexes)||[];
   const itl=S.internals||{}, adr=itl.adr||null, pcr=itl.pcr||[];
@@ -2499,7 +2539,7 @@ async function boot(){
     <!-- cc#1406: the two static clauses after S.global_tape.read (" · WEEK = close vs close 5
          sessions back, from the payload · no history shows an em-dash, never 0") are removed per
          the founder's struck-through screenshot -- dynamic tiles-higher text only, below. -->
-    <div style="font-size:9.5px;color:var(--chalk);font-family:'JetBrains Mono';margin-top:6px">${esc((S.global_tape&&S.global_tape.read)||'')}</div>
+    <div id="gread" style="font-size:9.5px;color:var(--chalk);font-family:'JetBrains Mono';margin-top:6px">${esc(tapeRead(TAPE_MODE))}</div>
   </div>
 
   <div class="eyebrow">TODAY'S MAP · PIVOT LADDERS</div>
