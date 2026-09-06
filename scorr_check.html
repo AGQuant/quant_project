@@ -476,6 +476,24 @@
   .tcinfo-band b{font-family:var(--mono);font-variant-numeric:tabular-nums;flex:none;width:28px;text-align:right}
   .tcinfo-band span{color:var(--txt);line-height:1.4}
   .tcinfo-band.g b{color:var(--grn)} .tcinfo-band.a b{color:var(--amber)} .tcinfo-band.r b{color:var(--dim)}
+  /* cc#1788 TC_RULE_SHEET_SIMPLE_V1 (session_log 39720): the rule (i) sheet is now line 1 name + points,
+     a FULL | HALF | NONE box row with the satisfied box lit, line 2 numbers. Volume = four check rows. */
+  .tcinfo-pts{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px;font-weight:700;color:var(--txt);margin:2px 0 12px}
+  .tcinfo-bxs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .tcinfo-bxs.two{grid-template-columns:repeat(2,1fr)}
+  .tcinfo-bx{border:1px solid var(--line2);border-radius:9px;padding:8px 9px;background:var(--panel2);opacity:.55}
+  .tcinfo-bx b{display:block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+  .tcinfo-bx span{font-size:11.5px;color:var(--txt);line-height:1.4}
+  .tcinfo-bx.on{opacity:1;border-width:2px}
+  .tcinfo-bx.on.full{border-color:var(--grn);background:var(--grn-d)} .tcinfo-bx.on.full b{color:var(--grn)}
+  .tcinfo-bx.on.half{border-color:var(--amber)} .tcinfo-bx.on.half b{color:var(--amber)}
+  .tcinfo-bx.on.none{border-color:var(--red);background:var(--red-d)} .tcinfo-bx.on.none b{color:var(--red)}
+  .tcinfo-nums{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11.5px;color:var(--mut);line-height:1.5}
+  .tcinfo-vrows{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+  .tcinfo-vrow{display:grid;grid-template-columns:1fr auto 18px auto;gap:8px;align-items:center;font-size:12px;padding:5px 0;border-top:1px solid var(--line)}
+  .tcinfo-vrow .k{color:var(--txt)} .tcinfo-vrow .v,.tcinfo-vrow .p{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .tcinfo-vrow .t{text-align:center;font-weight:700} .tcinfo-vrow .t.ok{color:var(--grn)} .tcinfo-vrow .t.no{color:var(--red)}
+  .tcinfo-vrow .p{color:var(--txt)} .tcinfo-vrow .p.z{color:var(--dim)}
   /* cc#1222 TC_SCANNER_GATED_CONFIG_V1.1 — OBSERVATION MODE marks. Every one of these is a MARK on
      a row that is shown anyway; none of them hides anything. Colour carries pass/fail, and the
      third state (grey) is "not measured", which is deliberately NOT the same as fail. */
@@ -1043,11 +1061,11 @@ const TC_RULE_DEFS={
     BR:[['1','above DMA200'],['0','below DMA200']],
     SM:[['1','below ≥2 of 3 DMAs'],['0.5','below exactly 1'],['0','below none']],
     SR:[['1','below DMA200'],['0','above DMA200']]},
-  R5:{n:'R5 · Volume 1M (up/down)',m:'21-session average volume on up-close days vs down-close days.',s:'raw_prices close & volume (21 sessions)',w:'Volume leaning to the trade direction shows real participation, not drift.',
-    BM:[['1','up/down vol ≥1.1'],['0.5','0.9–1.1'],['0','<0.9']],
-    BR:[['1','up/down vol ≥1.1'],['0.5','0.9–1.1'],['0','<0.9']],
-    SM:[['1','down/up vol >1.05'],['0.5','0.95–1.05'],['0','<0.95']],
-    SR:[['1','down/up vol >1.05'],['0.5','0.95–1.05'],['0','<0.95']]},
+  R5:{n:'R5 · Volume (4 checks)',m:'Four pass/fail checks, points per check passed (cc#1785, session_log 39684/39713): Vol R today\'s pace ≥ 1.2× (half before 09:30), Vol P yesterday ≥ 1.0×, Vol D delivery pickup ≥ 1.1×, Vol AD accumulation ≥ 55%.',s:'rvol_engine slot pace, raw_prices volume, delivery ratio, 21-day accumulation/distribution',w:'Volume leaning to the trade direction shows real participation, not drift.',
+    BM:[['5','Vol R ≥ 1.2×'],['4','Vol P ≥ 1.0×'],['3','Vol D ≥ 1.1×'],['3','Vol AD ≥ 55%']],
+    BR:[['3','Vol R ≥ 1.2×'],['3','Vol P ≥ 1.0×'],['4','Vol D ≥ 1.1×'],['5','Vol AD ≥ 55%']],
+    SM:[['2','Vol R ≥ 1.2×'],['2','Vol P ≥ 1.0×'],['2','Vol D ≥ 1.1×'],['2','Vol AD ≤ 45%']],
+    SR:[['2','Vol R ≥ 1.2×'],['2','Vol P ≥ 1.0×'],['2','Vol D ≥ 1.1×'],['2','Vol AD ≤ 45%']]},
   R6:{n:'R6 · Volume today',m:'Today’s time-adjusted intraday volume ratio (BUY-only rule).',s:'intraday volume_ratio (r6_volume)',w:'Fresh demand showing up today, not just historically.',
     BM:[['1','vol ratio ≥1.5'],['0.5','1.1–1.5'],['0','<1.1']],
     BR:[['1','vol ratio ≥1.5'],['0.5','1.1–1.5'],['0','<1.1']],
@@ -1255,6 +1273,65 @@ function tcRuleInfo(rule, side, style){
   document.getElementById('tcInfoOv').classList.add('open');
 }
 function closeTcInfo(){document.getElementById('tcInfoOv').classList.remove('open');}
+
+/* cc#1788 · TC_RULE_SHEET_SIMPLE_V1 (session_log 39720, design ref design_refs/tc_rule_sheet_simple_R1.html).
+   Web twin of mobile/check.html ruleSheet(): LINE 1 = rule name · points earned of points available (the
+   registry weight — never a typed number); a FULL | HALF | NONE box row whose condition text is the engine's
+   own `required` string (full = text before the bracket, half = the bracket, none = otherwise; two boxes when
+   the rule has no half tier) with the box the stock satisfied lit and the others muted; LINE 2 = the deciding
+   numbers, the engine's value fields on one line. Volume (R5 / R5V) = LINE 1 + four rows check · value ·
+   tick · points from the engine's per-check pass_* / pts_* / max_*. Nothing else. Falls back to the old
+   definition card (tcRuleInfo) only when the rule object is not on hand. */
+function _tcEsc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function _tcPtsFmt(x){if(x==null||isNaN(Number(x)))return '—';x=Number(x);return Math.abs(x-Math.round(x))<0.005?String(Math.round(x)):x.toFixed(2);}
+function _tcPtsText(r){
+  const w=Number(r.weight),mx=Number(r.max),cr=Number(r.credit);
+  if(r.weight==null||isNaN(w)||!(mx>0))return mx>0?(cr>=mx?'FULL':cr>0?'HALF':'NONE'):'N/A';
+  return _tcPtsFmt(w*(cr/mx))+' of '+_tcPtsFmt(w);
+}
+function _tcLadder(required){
+  const s=String(required||''),i=s.indexOf('(');
+  const full=(i>0?s.slice(0,i):s).trim(),half=(i>0?s.slice(i+1).replace(/\)\s*$/,''):'').trim();
+  return {full:full||'—',half:half||null,none:'otherwise'};
+}
+const _TC_VOLROWS={
+  BUY:[['vol_r',"Today's pace ≥ 1.2×",'x'],['vol_p','Yesterday ≥ 1.0×','x'],['vol_d','Delivery pickup ≥ 1.1×','x'],['vol_ad','Accumulation ≥ 55%','%']],
+  SELL:[['vol_r',"Today's pace ≥ 1.2×",'x'],['vol_p','Yesterday ≥ 1.0×','x'],['vol_d','Delivery pickup ≥ 1.1×','x'],['vol_ad','Distribution ≤ 45%','%']]
+};
+function tcRuleSheet(side, style, idx, rule){
+  const c=(window.__tcRules||{})[side+'|'+style];
+  const r=c&&(c.rules||[])[idx];
+  if(!r||r.rule!==rule){tcRuleInfo(rule,side,style);return;}
+  const d=TC_RULE_DEFS[r.rule]||{};
+  const name=d.n||r.label||r.rule;
+  const mx=Number(r.max)||0,cr=Number(r.credit)||0;
+  const ratio=mx>0?Math.max(0,Math.min(1,cr/mx)):null;
+  const on=ratio==null?'':(ratio>=1?'full':ratio>0?'half':'none');
+  let body='';
+  const v=r.value||{};
+  if((r.rule==='R5'||r.rule==='R5V')&&typeof v.passed==='number'){
+    body='<div class="tcinfo-vrows">'+_TC_VOLROWS[side==='SELL'?'SELL':'BUY'].map(k=>{
+      const key=k[0],sfx=key.slice(4),x=v[key],ok=!!v['pass_'+sfx],pts=v['pts_'+sfx],mxk=v['max_'+sfx];
+      const val=x==null?'—':(k[2]==='%'?Math.round(Number(x))+'%':Number(x).toFixed(2)+'x');
+      return '<div class="tcinfo-vrow"><span class="k">'+_tcEsc(k[1])+(key==='vol_r'&&v.early_slot?' (before 09:30: half)':'')+'</span>'
+        +'<span class="v">'+val+'</span><span class="t '+(ok?'ok':'no')+'">'+(ok?'✓':'✗')+'</span>'
+        +'<span class="p'+(pts?'':' z')+'">'+_tcPtsFmt(pts==null?0:pts)+' / '+_tcPtsFmt(mxk==null?0:mxk)+'</span></div>';
+    }).join('')+'</div>';
+  }else{
+    const lad=_tcLadder(r.required),hasHalf=!!lad.half;
+    const box=(tier,text)=>'<div class="tcinfo-bx'+(on===tier?' on '+tier:'')+'"><b>'+tier.toUpperCase()+'</b><span>'+_tcEsc(text)+'</span></div>';
+    body='<div class="tcinfo-bxs'+(hasHalf?'':' two')+'">'+box('full',lad.full)+(hasHalf?box('half',lad.half):'')+box('none',lad.none)+'</div>';
+    let line2=_v4Actual(r.value);
+    if(on==='')line2='not applicable'+(line2&&line2!=='—'?' · '+line2:'');
+    body+='<div class="tcinfo-nums">'+_tcEsc(line2)+'</div>';
+  }
+  document.getElementById('tcInfoBox').innerHTML=
+    '<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
+    +'<div class="tcinfo-h">'+_tcEsc(name)+'</div>'
+    +'<div class="tcinfo-pts">'+_tcEsc(_tcPtsText(r))+'</div>'
+    +body;
+  document.getElementById('tcInfoOv').classList.add('open');
+}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTcInfo();});
 
 // cc#451: concise per-gate fail phrase for the GATED banner. The chips carry the full gate detail;
@@ -1279,7 +1356,10 @@ function renderV4Dual(d, uiMode){
   const cards=(d.cards||[]);
   const cardHtml=c=>{
     const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
-    const rules=(c.rules||[]).map(r=>{
+    /* cc#1788: the (i) sheet reads the live rule object (credit, max, weight, required, value) — kept per
+       card here so the click handler never re-derives anything from the row text. */
+    window.__tcRules=window.__tcRules||{}; window.__tcRules[side+'|'+c.style]=c;
+    const rules=(c.rules||[]).map((r,ri)=>{
       // cc#452/cc#513: row tint by score (1.0 green · 0.5 amber · 0 light red) + per-rule (i) definition button
       const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
       return '<div class="v4-rrow '+rt+'">'
@@ -1295,7 +1375,7 @@ function renderV4Dual(d, uiMode){
            something different and false. */
         +'<span class="rl" title="'+(r.legacy_id||r.rule)+'">'+(r.seq!=null?r.seq:r.rule)
           +(r.weight!=null?'<span class="rw" title="Registry weight">w'+r.weight+'</span>':'')
-          +'<span class="v4-ibtn" onclick="tcRuleInfo(\''+r.rule+'\',\''+side+'\',\''+c.style+'\')" title="Rule definition">i</span></span>'
+          +'<span class="v4-ibtn" onclick="tcRuleSheet(\''+side+'\',\''+c.style+'\','+ri+',\''+r.rule+'\')" title="Rule sheet">i</span></span>'
         +'<span class="rreq">'+r.label+' — '+(r.required||'—')+'</span>'
         +'<span class="ract">'+_v4Actual(r.value)+'</span>'
         +'<span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span></div>';

@@ -2495,6 +2495,31 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 .c-sheet .c-ladder div.on.full{border-color:var(--up);background:color-mix(in srgb, var(--grn) 14%, transparent)}.c-sheet .c-ladder div.on.full b{color:var(--up)}
 .c-sheet .c-ladder div.on.none{border-color:var(--down);background:color-mix(in srgb, var(--red) 14%, transparent)}.c-sheet .c-ladder div.on.none b{color:var(--down)}
 .c-sheet .c-swhy{font-size:var(--type-13);line-height:1.5}.c-sheet .c-swhy b{color:var(--accent)}
+/* cc#1788 · TC_RULE_SHEET_SIMPLE_V1 (39720) — design_refs/tc_rule_sheet_simple_R1.html, token-driven: the
+   line-1 head, the FULL | HALF | NONE boxes (the satisfied one filled with a 14% mix of its state colour
+   into the well, the same color-mix the mock uses and this sheet already uses for its ladder), the
+   line-2 numbers, and the four Volume rows. Old .c-shd/.c-kv/.c-ladder/.c-swhy/.c-sfoot rules stay for
+   the (i) sheet and the invest sheet. */
+.c-sheet .c-sh{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-10);margin:var(--space-2) 0 var(--space-12);padding-right:36px}
+.c-sheet .c-shn{font-family:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;font-style:italic;font-size:var(--type-19);letter-spacing:.01em;color:var(--chalk)}
+.c-sheet .c-shs{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:var(--type-18);white-space:nowrap;color:var(--chalk)}
+.c-sheet .c-bxs{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-8)}
+.c-sheet .c-bxs.two{grid-template-columns:repeat(2,1fr)}
+.c-sheet .c-bx{border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-10) var(--space-9);min-height:92px;background:var(--well);opacity:.55}
+.c-sheet .c-bx b{display:block;font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);letter-spacing:.12em;margin-bottom:var(--space-6);color:var(--mute)}
+.c-sheet .c-bx span{font-size:var(--type-115);line-height:1.4;color:var(--mute);overflow-wrap:anywhere}
+.c-sheet .c-bx.on{opacity:1;border-width:2px}
+.c-sheet .c-bx.on span{color:var(--chalk)}
+.c-sheet .c-bx.on.full{border-color:var(--up);background:color-mix(in srgb, var(--up) 14%, var(--well))}.c-sheet .c-bx.on.full b{color:var(--up)}
+.c-sheet .c-bx.on.half{border-color:var(--amber);background:color-mix(in srgb, var(--amber) 14%, var(--well))}.c-sheet .c-bx.on.half b{color:var(--amber)}
+.c-sheet .c-bx.on.none{border-color:var(--down);background:color-mix(in srgb, var(--down) 14%, var(--well))}.c-sheet .c-bx.on.none b{color:var(--down)}
+.c-sheet .c-nums{margin-top:var(--space-12);font-size:var(--type-115);color:var(--mute);text-align:center;line-height:1.5}
+.c-sheet .c-vrows{margin-top:var(--space-2)}
+.c-sheet .c-vrow{display:grid;grid-template-columns:1fr auto auto auto;gap:var(--space-10);align-items:center;padding:var(--space-9) var(--space-2);border-bottom:var(--bw-1) solid var(--line);font-size:var(--type-125)}
+.c-sheet .c-vrow:last-child{border-bottom:0}
+.c-sheet .c-vrow .k{color:var(--chalk)}.c-sheet .c-vrow .v{color:var(--mute);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace}
+.c-sheet .c-vrow .t{font-weight:700;width:16px;text-align:center}.c-sheet .c-vrow .t.ok{color:var(--up)}.c-sheet .c-vrow .t.no{color:var(--down)}
+.c-sheet .c-vrow .p{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-weight:700;min-width:44px;text-align:right;color:var(--chalk)}.c-sheet .c-vrow .p.z{color:var(--dim)}
 .c-sheet .c-sfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4) var(--space-10);margin-top:var(--space-12);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim)}
 .c-sheet .c-x{position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:var(--bw-1) solid var(--line);background:var(--well);color:var(--mute);display:flex;align-items:center;justify-content:center;cursor:pointer}
 

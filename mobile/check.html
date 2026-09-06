@@ -302,7 +302,7 @@ function renderTC(){
   h += '<section class="slab" id="tc-rules"><div class="c-grp"><span>RULE · CREDIT · WEIGHT</span><span>bar = credit earned</span></div>'
     + (c.rules || []).map(function(r, i){
         var st = ruleState(r);
-        return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id' + (String(r.rule).indexOf('LOCK_') === 0 ? ' lk' : '') + '">' + esc(String(r.rule).replace('LOCK_', '')) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + st.word + ' · w' + wfmt(r.weight) + '</span>'
+        return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id' + (String(r.rule).indexOf('LOCK_') === 0 ? ' lk' : '') + '">' + esc(String(r.rule).replace('LOCK_', '')) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + ptsText(r) + '</span>'
           + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div><div class="c-why">' + whyLine(r, st, c) + '</div></div>';
       }).join('') + '</section>';
   if (c.unmapped_rules && c.unmapped_rules.length) h += '<div class="c-note">Rules with no registry row (scored at weight 1): ' + esc(c.unmapped_rules.join(', ')) + '.</div>';
@@ -594,21 +594,41 @@ function infoSheet(kind){
     + '<div class="c-sfoot"><span>score = weighted credits ÷ ' + (ws == null ? '?' : n1(ws)) + ' (registry) × 100 · full 1 · half ½</span><span>' + esc(t.price_basis || 'spot price, not futures') + '</span></div>';
 }
 function closeSheet(){ $('c-sheet').classList.remove('open'); $('c-scrim').classList.remove('open'); }
+/* cc#1788 · TC_RULE_SHEET_SIMPLE_V1 (session_log 39720, design ref design_refs/tc_rule_sheet_simple_R1.html):
+   LINE 1 = plain name · points earned of points available (the registry weight, never a typed number);
+   ROW = FULL | HALF | NONE boxes (two boxes when the rule has no half tier) with the condition text from the
+   engine's own `required` string — full = the text before the bracket, half = the bracket, none = otherwise —
+   the box the stock satisfied filled in colour, the others muted; LINE 2 = the deciding numbers, the same
+   plain line the row shows (TPL), else the engine values. Volume (R5 / R5V) = LINE 1 + four rows
+   check · value · tick · points, from the engine's per-check pts_* / max_*. Nothing else. */
+function ptsEarned(r){ var w = Number(r.weight), mx = Number(r.max); return (mx > 0 && !isNaN(w)) ? w * (Number(r.credit) / mx) : null; }
+function ptsFmt(x){ return x == null ? '—' : (Math.abs(x - Math.round(x)) < 0.005 ? String(Math.round(x)) : num(x, 2)); }
+function ptsText(r){ var e = ptsEarned(r); return (e == null || r.weight == null) ? (ruleState(r).word) : (ptsFmt(e) + ' of ' + ptsFmt(Number(r.weight))); }
+var VOLROWS = {
+  BUY:  [['vol_r', "Today's pace ≥ 1.2×", 'x'], ['vol_p', 'Yesterday ≥ 1.0×', 'x'], ['vol_d', 'Delivery pickup ≥ 1.1×', 'x'], ['vol_ad', 'Accumulation ≥ 55%', '%']],
+  SELL: [['vol_r', "Today's pace ≥ 1.2×", 'x'], ['vol_p', 'Yesterday ≥ 1.0×', 'x'], ['vol_d', 'Delivery pickup ≥ 1.1×', 'x'], ['vol_ad', 'Distribution ≤ 45%', '%']]
+};
 function ruleSheet(c, r){
-  var d = S.tc || {}, st = ruleState(r), lad = ladderText(r.required), def = DEFS[r.rule] || {};
-  var w = Number(r.weight), earned = (r.max > 0 && !isNaN(w)) ? w * (Number(r.credit) / Number(r.max)) : null;
-  var tierCls = st.cls === 'pass' ? 'full' : (st.cls === 'watch' ? 'half' : 'none');
-  var tiles = '';
-  if (r.value && typeof r.value === 'object'){
-    Object.keys(r.value).slice(0, 4).forEach(function(k){ tiles += '<div><div class="c-kk">' + esc(keyName(k)) + '</div><div class="c-kvv">' + esc(fmtVal(r.value[k])) + '</div></div>'; });
+  var st = ruleState(r), name = plainName(r), v = r.value || {};
+  var head = '<div class="c-sh"><div class="c-shn">' + esc(name) + '</div><div class="c-shs">' + esc(ptsText(r)) + '</div></div>';
+  if ((r.rule === 'R5' || r.rule === 'R5V') && typeof v.passed === 'number'){
+    var side = (c && String(c.side || c.label || '').indexOf('SELL') === 0) ? 'SELL' : 'BUY';
+    var rows = VOLROWS[side].map(function(k){
+      var key = k[0], sfx = key.slice(4), x = v[key], ok = !!v['pass_' + sfx], pts = v['pts_' + sfx], mx = v['max_' + sfx];
+      var val = x == null ? '—' : (k[2] === '%' ? tv(x, 0) + '%' : xs(x));
+      return '<div class="c-vrow"><span class="k">' + esc(k[1]) + (key === 'vol_r' && v.early_slot ? ' (before 09:30: half)' : '') + '</span><span class="v">' + val + '</span><span class="t ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '✗') + '</span><span class="p' + (pts ? '' : ' z') + '">' + ptsFmt(pts == null ? 0 : pts) + ' / ' + ptsFmt(mx == null ? 0 : mx) + '</span></div>';
+    }).join('');
+    return head + '<div class="c-vrows">' + rows + '</div>';
   }
-  return '<div class="c-shd"><div class="c-t">' + esc(plainName(r)) + '<small>' + esc(r.rule) + ' · ' + esc(c.label) + ' · WEIGHT ' + wfmt(r.weight) + ' OF ' + (c.weight_sum == null ? '?' : n1(c.weight_sum)) + '</small></div>'
-    + '<div class="c-credit"><div class="c-n ' + (st.cls === 'pass' ? 'up' : (st.cls === 'watch' ? 'am' : (st.cls === 'fail' ? 'dn' : 'mu'))) + '">' + (earned == null ? '—' : wfmt(Math.round(earned * 100) / 100)) + '</div><div class="c-l">OF ' + wfmt(r.weight) + ' EARNED · credit ' + wfmt(r.credit) + '/' + wfmt(r.max) + '</div></div></div>'
-    + '<div class="c-kv"><div class="wide"><div class="c-kk">REQUIRED</div><div class="c-kvv">' + esc(r.required || '—') + '</div></div>'
-    + '<div class="wide"><div class="c-kk">COMPANY</div><div class="c-kvv ' + (st.cls === 'pass' ? 'ok' : (st.cls === 'watch' ? 'half' : (st.cls === 'fail' ? 'no' : ''))) + '">' + esc(actualText(r.value)) + '</div></div>' + tiles + '</div>'
-    + '<div class="c-ladder"><div class="' + (tierCls === 'full' ? 'on full' : '') + '"><b>FULL</b>' + esc(lad.full) + '</div><div class="' + (tierCls === 'half' ? 'on' : '') + '"><b>HALF</b>' + esc(lad.half) + '</div><div class="' + (tierCls === 'none' ? 'on none' : '') + '"><b>NONE</b>' + esc(lad.none) + '</div></div>'
-    + '<div class="c-swhy"><b>' + (st.word === 'FULL' ? 'Full credit.' : (st.word === 'HALF' ? 'Half credit.' : (st.word === 'NONE' ? 'No credit.' : 'Not applicable.'))) + '</b> ' + whyLine(r, st, c) + (def.w ? '<br><span class="mu">Why it matters: ' + esc(def.w) + '</span>' : '') + '</div>'
-    + '<div class="c-sfoot"><span>' + esc(def.s ? 'source ' + def.s : 'source tc_v4_dual ' + r.rule) + '</span><span>scored ' + esc(hhmm(d.computed_at) || '—') + ' IST · spot</span></div>';
+  var lad = ladderText(r.required), hasHalf = (lad.half && lad.half !== 'no half tier');
+  var on = st.cls === 'pass' ? 'full' : (st.cls === 'watch' ? 'half' : (st.cls === 'fail' ? 'none' : ''));
+  var box = function(tier, text){ return '<div class="c-bx' + (on === tier ? ' on ' + tier : '') + '"><b>' + tier.toUpperCase() + '</b><span>' + esc(text) + '</span></div>'; };
+  var boxes = '<div class="c-bxs' + (hasHalf ? '' : ' two') + '">' + box('full', lad.full) + (hasHalf ? box('half', lad.half) : '') + box('none', lad.none) + '</div>';
+  var line2 = null, f = TPL[r.rule];
+  if (f){ try { line2 = f(r.value, c); } catch(e){ line2 = null; } }
+  if (!line2) line2 = actualText(r.value);
+  if (st.cls === 'na') line2 = 'not applicable' + (line2 && line2 !== '—' ? ' · ' + line2 : '');
+  return head + boxes + '<div class="c-nums">' + esc(line2) + '</div>';
 }
 $('c-sheet-x').addEventListener('click', closeSheet);
 $('c-scrim').addEventListener('click', closeSheet);
