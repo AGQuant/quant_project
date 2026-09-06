@@ -2617,7 +2617,23 @@ renderChips();
     var si=document.getElementById('sym'); if(si&&!full){var c=si.closest('.card'); if(c)c.style.display='none';}
     try{document.documentElement.style.background='transparent';document.body.style.background='transparent';}catch(e){}
     var W=document.querySelector('.wrap'); if(W){W.style.maxWidth='none';W.style.padding='6px 10px 10px';W.style.margin='0';}
-    var postH=function(){try{var h=Math.ceil(document.documentElement.scrollHeight);window.parent.postMessage({type:'scorrTcHeight',height:h},'*');}catch(e){}};
+    // cc#1764 (founder 06-Sep "Trade Check stretched, dont keep inside scroll line"): THE CAUSE.
+    // This page's html,body{min-height:100%} (line ~22) is right for a standalone tab, but inside
+    // a frame it makes the body at least the FRAME's height, so (a) the form was stretched to fill
+    // whatever box the shell gave it and (b) any height measured off the document could only ever
+    // grow, never shrink back after results collapse. Embedded, the body is content-height: the
+    // form sits at its natural height at the top, whitespace below if the viewport is taller.
+    try{document.documentElement.style.minHeight='0';document.body.style.minHeight='0';}catch(e){}
+    // The posted height is the body's FLOW BOTTOM (rect.bottom + margin), not
+    // documentElement.scrollHeight — the root scrollHeight is never below the viewport (= the
+    // frame), which is exactly the no-shrink trap above. Inside the V8 shell the parent now
+    // measures this document itself (cc#1765 ScorrFrameFit, same-origin) and ignores this message;
+    // the Analysis modal's result-only embed still reads it (scorr_analysis_card.js).
+    var postH=function(){try{
+        var b=document.body, r=b.getBoundingClientRect(), cs=getComputedStyle(b);
+        var h=Math.ceil(r.bottom+(document.documentElement.scrollTop||0)+(parseFloat(cs.marginBottom)||0));
+        window.parent.postMessage({type:'scorrTcHeight',height:h},'*');
+      }catch(e){}};
     window.addEventListener('load',function(){setTimeout(postH,80);});
     window.addEventListener('resize',postH);
     try{new MutationObserver(function(){clearTimeout(window.__tcHT);window.__tcHT=setTimeout(postH,90);})
