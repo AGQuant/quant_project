@@ -54,6 +54,58 @@ from fastapi import APIRouter
 from price_sources import NOT_FUT_SQL   # cc#1056 / cc#1053 source registry — one list, never retyped
 
 router = APIRouter()
+
+
+# ── cc#1762 · THE ONE V8 UNREALISED FORMULA, exported ───────────────────────────────────────────
+# The open-book SUM in book_canon() below is what the app home prints as V8 OPEN BOOK unrealised
+# (mobile_home2.py -> book_canon(conn, era="fresh")). The Wall of Trades (trade_wall_endpoints) and
+# the Approved tab (trade_wall_approved) now read the SAME two pieces instead of typing a second
+# formula: which price is "CMP" (V8_CMP_LATERAL_SQL / open_marks) and the side-aware maths
+# (unrealised_rupees). The SUM in book_canon() is, row for row, SUM(unrealised_rupees(entry, cmp,
+# side, qty)) with a missing CMP contributing 0 (COALESCE to entry); a per-row surface must show a
+# missing CMP as BLANK instead (card item 5), which is why the row twin returns None there.
+V8_CMP_LATERAL_SQL = """
+            LEFT JOIN LATERAL (
+                SELECT close AS cmp, ts AS cmp_ts FROM intraday_prices
+                WHERE symbol = p.symbol AND """ + NOT_FUT_SQL + """
+                ORDER BY ts DESC LIMIT 1
+            ) lp ON true"""
+
+
+def unrealised_rupees(entry, mark, side, qty):
+    """Row twin of the book_canon open-book SUM: (mark - entry) * qty, sign-flipped for SHORT.
+    None when entry, mark or qty is missing — never 0.00 off a substituted price (cc#1762 item 5)."""
+    if entry is None or mark is None or qty is None:
+        return None
+    try:
+        e, m, q = float(entry), float(mark), float(qty)
+    except (TypeError, ValueError):
+        return None
+    sign = -1.0 if str(side or "").upper() == "SHORT" else 1.0
+    return round((m - e) * q * sign, 2)
+
+
+def open_marks(cur, symbols=None) -> dict:
+    """{symbol: {"cmp": float|None, "cmp_ts": "YYYY-MM-DD HH:MM:SS"|None}} through V8_CMP_LATERAL_SQL —
+    the same latest intraday_prices close the book_canon SUM marks against. symbols=None marks every
+    symbol with an OPEN v8_paper_positions row; a list marks exactly those symbols (a symbol with no
+    bar comes back with cmp None, so the caller can print blank rather than skip the row)."""
+    cur.execute("""
+            WITH s AS (
+                SELECT DISTINCT symbol FROM v8_paper_positions
+                WHERE status = 'OPEN' AND %(syms)s::text[] IS NULL
+                UNION
+                SELECT DISTINCT x FROM unnest(COALESCE(%(syms)s::text[], ARRAY[]::text[])) AS x
+            )
+            SELECT p.symbol, lp.cmp, lp.cmp_ts
+            FROM s p
+            """ + V8_CMP_LATERAL_SQL + """
+    """, {"syms": list(symbols) if symbols is not None else None})
+    out = {}
+    for r in _rows(cur):
+        out[r["symbol"]] = {"cmp": _f(r["cmp"]),
+                            "cmp_ts": r["cmp_ts"].strftime("%Y-%m-%d %H:%M:%S") if r["cmp_ts"] else None}
+    return out
 log = logging.getLogger("v8_book_canon")
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -168,11 +220,7 @@ def book_canon(conn, era: str = "fresh", side: str = None, basket: str = None,
                 COALESCE(SUM(p.entry_price * p.qty)
                     FILTER (WHERE UPPER(p.side) = 'SHORT'), 0) AS dep_short
             FROM v8_paper_positions p
-            LEFT JOIN LATERAL (
-                SELECT close AS cmp FROM intraday_prices
-                WHERE symbol = p.symbol AND """ + NOT_FUT_SQL + """
-                ORDER BY ts DESC LIMIT 1
-            ) lp ON true
+            """ + V8_CMP_LATERAL_SQL + """
             WHERE p.status = 'OPEN'
               AND (%(cut)s::timestamp IS NULL OR p.entry_ts >= %(cut)s::timestamp)
               AND NOT (p.basket = ANY(%(retired)s))

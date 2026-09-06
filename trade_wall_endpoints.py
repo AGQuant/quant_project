@@ -81,6 +81,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from mobile_endpoints import _conn, _rows, _ist_now, _guard, _json_safe, _page
+import v8_book_canon   # cc#1762: THE V8 unrealised formula (open_marks + unrealised_rupees), never retyped here
 
 log = logging.getLogger("scorr.tradewall")
 router = APIRouter()
@@ -790,6 +791,57 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             closed_summary = None
 
         events = [_shape(r) for r in rows]
+        # cc#1762: INDICATIVE P&L on every open V8 row — the union serves v8_paper_positions with
+        # pnl NULL (no exit yet), so the row is marked HERE against the SAME price and SAME maths
+        # the app home's V8 OPEN BOOK total uses: v8_book_canon.open_marks (the canon's CMP lateral,
+        # latest intraday_prices close) + v8_book_canon.unrealised_rupees (the canon SUM's row twin).
+        # A symbol with no bar gets cmp None -> pnl None -> the page prints BLANK, never entry
+        # price standing in for CMP (item 5). cmp_as_of = the newest mark across the whole open V8
+        # book (on a weekend that is Friday's last bar), stated on the page beside the header.
+        marks, cmp_as_of, v8_open_book = {}, None, None
+        try:
+            marks = v8_book_canon.open_marks(cur)            # every OPEN V8 symbol, one query
+            for m in marks.values():
+                if m["cmp_ts"] and (cmp_as_of is None or m["cmp_ts"] > cmp_as_of):
+                    cmp_as_of = m["cmp_ts"]
+        except Exception as ex:   # the wall still renders; the P&L columns go blank, labelled
+            log.warning("cc#1762 open_marks failed: %s", ex)
+            marks = {}
+        for e in events:
+            e["cmp"] = e["cmp_ts"] = None
+            e["pnl_basis"] = None
+            if e["src"] != "v8open":
+                continue
+            m = marks.get(e["symbol"]) or {}
+            e["cmp"], e["cmp_ts"] = m.get("cmp"), m.get("cmp_ts")
+            e["pnl"] = v8_book_canon.unrealised_rupees(e["entry_price"], e["cmp"], e["side"], e["qty"])
+            e["pnl_basis"] = "indicative" if e["pnl"] is not None else "no-cmp"
+        # cc#1762 V3, served live on every response: the indicative column summed over ALL open V8
+        # positions (not just this page) beside the canon's own unrealised total — the two must
+        # match to the paise or this surface has drifted from the app home.
+        if st in (None, "open"):
+            try:
+                cur.execute("SELECT symbol, side, entry_price, qty FROM v8_paper_positions WHERE status = 'OPEN'")
+                _tot, _n, _nocmp = 0.0, 0, 0
+                for r0 in _rows(cur):
+                    _n += 1
+                    _v = v8_book_canon.unrealised_rupees(r0["entry_price"], (marks.get(r0["symbol"]) or {}).get("cmp"),
+                                                         r0["side"], r0["qty"])
+                    if _v is None:
+                        _nocmp += 1
+                    else:
+                        _tot += _v
+                _canon = v8_book_canon.book_canon(conn, era="fresh")
+                v8_open_book = {"open_rows": _n, "rows_without_cmp": _nocmp,
+                                "indicative_total": round(_tot, 2),
+                                "canon_unrealised": _canon.get("unrealised"), "canon_open": _canon.get("open"),
+                                "canon_era": "fresh (app home V8 OPEN BOOK)",
+                                "match": (_canon.get("unrealised") is not None
+                                          and abs(round(_tot, 2) - float(_canon.get("unrealised"))) < 0.01),
+                                "formula": "v8_book_canon.unrealised_rupees over v8_book_canon.open_marks (V8_CMP_LATERAL_SQL)"}
+            except Exception as ex:
+                log.warning("cc#1762 v8_open_book check failed: %s", ex)
+                v8_open_book = {"error": str(ex)[:160]}
         # cc#1609 scope 2: STATE per engine row from trade_alerts — pending-approval | approved |
         # dismissed — joined on the same key every approve surface writes: (source_engine = the
         # engine label as served, source_ref = symbol@entry.ts, kind = entry). An 'alert' row is
@@ -831,10 +883,18 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             a = amap.get((e["engine"], ref))
             if a:
                 e["state"] = a["status"]
+                _apx = float(a["approved_price"]) if a["approved_price"] is not None else None
                 e["approval"] = {"id": a["id"],
-                                 "approved_price": float(a["approved_price"]) if a["approved_price"] is not None else None,
+                                 "approved_price": _apx,
                                  "approved_at": a["approved_ist"].strftime("%Y-%m-%d %H:%M:%S") if a["approved_ist"] else None,
-                                 "approved_via": a["approved_via"], "notes": a["notes"]}
+                                 "approved_via": a["approved_via"], "notes": a["notes"],
+                                 # cc#1762 item 3: the SECOND figure — approved_price at approved_at to
+                                 # the SAME CMP as the indicative column, same maths, same qty. Only
+                                 # an approved V8 row (position-sized) gets a rupee; TC rows have no
+                                 # qty (item 6) and a row with no CMP stays None (item 5).
+                                 "pnl_approved": (v8_book_canon.unrealised_rupees(_apx, e.get("cmp"), e["side"], e["qty"])
+                                                  if (e["src"] == "v8open" and a["status"] == "approved") else None),
+                                 "pnl_approved_basis": "approved_price@approved_at -> cmp_as_of, x position qty"}
             else:
                 e["state"] = "pending-approval"
                 e["approval"] = None
@@ -895,6 +955,14 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         # the APPROVE button's enabled / disabled state and its reason from this, never from a
         # client clock or a weekday test (guards.approval_window; nse_holidays for the day).
         "approval_window": _approval_window(),
+        # cc#1762: the two P&L bases on an open row, stated once. cmp_as_of is the newest V8 mark
+        # (latest intraday_prices close over the open book); v8_open_book is the live V3 check.
+        "cmp_as_of": cmp_as_of,
+        "pnl_basis": {"indicative": "engine entry_price at entry.ts -> CMP as of cmp_as_of, x qty, sign-aware (v8_book_canon.unrealised_rupees, the app home V8 OPEN BOOK formula)",
+                      "approved": "trade_alerts.approved_price at approved_at -> the SAME CMP, same maths, same qty; blank until approved",
+                      "no_cmp": "a symbol with no CMP shows BOTH blank — entry price is never substituted",
+                      "tc_scanner": "no rupee position size; percent only (cc#1734)"},
+        "v8_open_book": v8_open_book,
         "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed | suppressed-in-position (cc#1736)",
         # cc#1734: the Closed book summary (see the SQL above) and the DECODE map the renderer
         # applies to DETAIL — read from the engines' own words, never typed into the page:
