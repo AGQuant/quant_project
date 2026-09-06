@@ -904,6 +904,12 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .tb td{padding:7px 3px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
 #pane-index .tb tr:last-child td{border-bottom:none}
 #pane-index .tb td.sym{font:700 12px var(--f-d)}
+/* cc#1743: the direction capsule — a muted tint with a caret, deliberately NOT the P&L green / red
+   (a bearish trade can be profitable; a green capsule beside a red P&L would read as a contradiction).
+   Inline in the first cell, so the row height and the table width are unchanged. */
+#pane-index .tb .dircap{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:9px;font:600 9px var(--f-m);letter-spacing:.06em;color:var(--tx2);background:var(--well);border:1px solid var(--line2);vertical-align:1px;line-height:14px}
+#pane-index .tb .dircap.up{border-color:var(--cy)}
+#pane-index .tb .dircap.dn{border-color:var(--am)}
 #pane-index .tb .vfsort{cursor:pointer;user-select:none}
 #pane-index .tb .vfsort.on{color:var(--tx)}
 #pane-index .cmpct{font-size:10px}
@@ -7562,7 +7568,15 @@ function rRecord(){
   var tagCls = function(r){ r = String(r || '').toUpperCase(); return r.indexOf('TARGET') === 0 ? 'pos' : (r === 'SL' ? 'neg' : ''); };
   var trs = shown.map(function(t){
     var buy = t.direction === 'LONG';
-    return '<tr><td>' + esc(t.exit_ist || t.entry_ist || '—') + (t.held ? ' <span style="opacity:.65">· ' + esc(t.held) + '</span>' : '') + '</td>'
+    /* cc#1743 (founder 06-Sep: "show direction small capsule in empty space Bullish/Bearish"): the
+       capsule sits inside the first cell after the timestamp · held, so no new column and no extra
+       width. SOURCE: the legs endpoint (/api/v10/trades/legs) carries the leg's own side
+       (`direction` LONG/SHORT) and opt_type but not the paired FUT leg, so the shared rule
+       ScorrV10Dir.direction(side, opt_type) is used — SELL PE / BUY CE = Bullish, SELL CE / BUY PE
+       = Bearish; a missing opt_type renders nothing. Checked against the FUT-leg join in
+       v10_trades on (symbol, entry_ts): 59 of 59 closed option rows agree. */
+    var cap = window.ScorrV10Dir ? window.ScorrV10Dir.capsule(t.direction, t.opt_type, null, 'dircap') : '';
+    return '<tr><td>' + esc(t.exit_ist || t.entry_ist || '—') + (t.held ? ' <span style="opacity:.65">· ' + esc(t.held) + '</span>' : '') + cap + '</td>'
       + '<td class="sym">' + esc(t.symbol === 'NIFTY50' ? 'NIFTY' : t.symbol) + ' <span style="font:600 11px var(--f-m);color:var(--tx2)">' + esc(t.label || '') + '</span></td>'
       + '<td><span class="' + (buy ? 'pos' : 'neg') + '">' + (buy ? 'BUY' : 'SELL') + '</span></td>'
       + '<td>' + (t.entry_price != null ? num(t.entry_price, 2) : '—') + ' → ' + (t.exit_price != null ? num(t.exit_price, 2) : '—') + '</td>'

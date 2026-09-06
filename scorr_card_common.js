@@ -1899,3 +1899,30 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
   }
   window.ScorrRailLabels = { separate: separate, separateAll: separateAll, meets: meets };
 })();
+
+/* ── cc#1743 · V10 DIRECTION OF AN OPTION LEG ─────────────────────────────────────────────────
+   One rule, shared by the web Record table and the app option-leg log, so the two never disagree.
+   Source order: the paired FUTURES leg's side when the caller has it (FUT BUY = Bullish, FUT SELL
+   = Bearish — the join in v10_trades on symbol + entry_ts); otherwise the leg's own side x option
+   type: SELL PE or BUY CE = Bullish, SELL CE or BUY PE = Bearish. Never "CE means bearish" —
+   that is only true while every leg is a write. Missing option type -> null (render nothing). */
+(function () {
+  function direction(side, optType, futSide) {
+    var f = String(futSide || '').toUpperCase();
+    if (f === 'BUY' || f === 'LONG') return 'Bullish';
+    if (f === 'SELL' || f === 'SHORT') return 'Bearish';
+    var s = String(side || '').toUpperCase(), o = String(optType || '').toUpperCase();
+    if (s === 'LONG') s = 'BUY'; else if (s === 'SHORT') s = 'SELL';
+    if (!o || (s !== 'BUY' && s !== 'SELL')) return null;
+    if (o !== 'CE' && o !== 'PE') return null;
+    var bullish = (s === 'SELL' && o === 'PE') || (s === 'BUY' && o === 'CE');
+    return bullish ? 'Bullish' : 'Bearish';
+  }
+  function capsule(side, optType, futSide, cls) {
+    var d = direction(side, optType, futSide);
+    if (!d) return '';
+    return '<span class="' + (cls || 'dircap') + ' ' + (d === 'Bullish' ? 'up' : 'dn') + '" title="' + (futSide ? 'from the paired futures leg' : 'from side and option type') + '">'
+      + (d === 'Bullish' ? '▴' : '▾') + ' ' + d + '</span>';
+  }
+  window.ScorrV10Dir = { direction: direction, capsule: capsule };
+})();
