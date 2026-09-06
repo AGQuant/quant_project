@@ -1442,9 +1442,20 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   <div id="pane-alerts" style="display:none">
     <iframe id="alertsFrame" title="Alerts" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
   </div>
-  <!-- cc#1523: Intel pane — the same embed frame pattern. -->
+  <!-- cc#1523: Intel pane — the same embed frame pattern.
+       cc#1730 (founder 06-Sep, "when i scroll through articles this All, AI Editorial, Domestic
+       tab should stick"): the /news category strip IS sticky inside this frame, but the frame
+       sat 160px down the page with a 640px floor, so on a 650-768px-tall viewport the OUTER page
+       had 118-236px of scroll of its own. The first wheel over the tab row scrolled the outer
+       page, the frame (and the strip pinned to its top edge) slid up under the sticky nav, and
+       every wheel after that scrolled the article inside a frame whose top was off-screen --
+       measured, not guessed. fitIntelFrame() below sizes the frame to exactly the viewport left
+       under it (minus the dashboard's own bottom padding), so the outer page has nothing to
+       scroll on this tab and all scrolling happens inside the frame, where the strip pins. The
+       640px floor is gone for the same reason -- it was the thing forcing the outer scroll;
+       a 360px floor keeps it usable on a very short window. calc() stays as the no-JS size. -->
   <div id="pane-intel" style="display:none">
-    <iframe id="intelFrame" title="Intel" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+    <iframe id="intelFrame" title="Intel" style="width:100%;height:calc(100vh - 150px);min-height:360px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#1677 (founder 04-Sep 09:35 IST): Model Portfolio is now an EMPTY LAUNCHER, not a folded
        copy of /quant-basket -- superseded cc#1584's chip strip + iframe embed below. Mounted by
@@ -8382,6 +8393,25 @@ window.v14Boot=function(){
 </script>
 <script>
 /* cc#542+543: top-level V8 | Index Intel | V14 tab controller */
+/* cc#1730: size the Intel frame to the viewport left under it, so the OUTER page never scrolls
+   on this tab and the /news category strip (sticky inside the frame) stays pinned under the nav
+   + tab row. Two passes: first the frame takes everything from its top edge to the bottom of
+   the viewport; then whatever the document STILL overflows by (the dashboard's own bottom
+   padding under the frame -- read as real overflow, not as a content measurement, because the
+   body's min-height would otherwise inflate it) is taken back off. 360px floor. Runs on show,
+   on resize while the pane is open, and once more when the frame's document loads (fonts/late
+   layout above it can move `top`). */
+function fitIntelFrame(){
+  var pane=document.getElementById('pane-intel'),f=document.getElementById('intelFrame');
+  if(!pane||!f||pane.style.display==='none')return;
+  var top=f.getBoundingClientRect().top+window.scrollY,
+      h=Math.max(360,Math.floor(window.innerHeight-top));
+  f.style.height=h+'px';
+  var over=document.documentElement.scrollHeight-window.innerHeight;
+  if(over>0){h=Math.max(360,h-over);f.style.height=h+'px';}
+}
+window.addEventListener('resize',function(){fitIntelFrame();},{passive:true});
+document.addEventListener('DOMContentLoaded',function(){var f=document.getElementById('intelFrame');if(f)f.addEventListener('load',fitIntelFrame);});
 function showV8Pane(name){
   /* cc#1282: digest + trades join the pane map as embed frames (cc#740 tcscan pattern). */
   var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',tcscan:'pane-tcscan',bt:'pane-bt',
@@ -8398,7 +8428,7 @@ function showV8Pane(name){
   if(name==='tcscan'&&window.tc13Boot)window.tc13Boot();  // cc#1289: TC13 open/closed box, lazy on first open
   if(name==='digest'){var fd=document.getElementById('digestFrame');if(fd&&!fd.src)fd.src='/digest?embed=1';}  // cc#1282
   if(name==='trades'){var ft=document.getElementById('tradesFrame');if(ft&&!ft.src)ft.src='/trades?embed=1';}  // cc#1282
-  if(name==='intel'){var fi=document.getElementById('intelFrame');if(fi&&!fi.src)fi.src='/news?embed=1';}  // cc#1523
+  if(name==='intel'){var fi=document.getElementById('intelFrame');if(fi&&!fi.src)fi.src='/news?embed=1';fitIntelFrame();}  // cc#1523; cc#1730 fit-to-viewport
   if(name==='alerts'){var fa=document.getElementById('alertsFrame');if(fa&&!fa.src)fa.src='/alerts?embed=1';}  // cc#1585
   if(name==='model'){var mm=document.getElementById('mpMount');if(mm&&window.ScorrModelPortfolio)window.ScorrModelPortfolio.mount(mm);}  // cc#1677
 }

@@ -55,20 +55,30 @@
   .meta{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);margin-top:13px;font-weight:600}
 
   /* cc#180: category tab bar stays visible while scrolling long articles (esp.
-     Learn). Sticks BELOW the 46px canonical nav on desktop; at top:0 on mobile
+     Learn). Sticks BELOW the canonical nav on desktop; at top:0 on mobile
      where that nav is hidden (<768px). Solid page-bg + border + z-index 30
      (below nav's 40) so article text never bleeds through. nav_toggle hidden
-     state -> stick at the 20px strip height. */
-  .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-top:12px;padding-top:10px;
-    overflow-x:auto;scrollbar-width:none;position:sticky;top:46px;z-index:30;background:var(--bg)}
+     state -> stick at the 20px strip height.
+     cc#1730 (founder 06-Sep "when i scroll through articles this All, AI Editorial, Domestic
+     tab should stick"): the pin offset is NOT hardcoded any more. The cc#180 value (46px) was
+     2px off the real 44px .scorr-cnav, went stale the moment cc#926 slid the nav away on
+     scroll-down (a 46px see-through gap above the strip), and meant nothing inside the
+     dashboard's Intel iframe (cc#1523) where the nav is display:none. The script at the foot
+     of the page measures the LIVE bottom edge of whatever nav chrome is actually on screen --
+     the canonical #scorr-nav, the 20px cc#1718 Show strip when it is hidden, 0 when it has
+     slid away or is not in this document -- and writes it to --scorr-nav-bottom on <html>.
+     The static values below are only the no-JS fallback. flex-wrap:nowrap is explicit so a
+     pinned strip can never break into two rows on a narrow width (it scrolls sideways). */
+  .tabs{display:flex;flex-wrap:nowrap;gap:24px;border-bottom:1px solid var(--line);margin-top:12px;padding-top:10px;
+    overflow-x:auto;scrollbar-width:none;position:sticky;top:var(--scorr-nav-bottom,46px);z-index:30;background:var(--bg)}
   @media(max-width:767px){
-    .tabs{top:0;-webkit-overflow-scrolling:touch;
+    .tabs{top:var(--scorr-nav-bottom,0px);-webkit-overflow-scrolling:touch;
       /* cc#334 P8: visible affordance the category chips scroll */
       -webkit-mask-image:linear-gradient(to right,transparent,#000 12px,#000 calc(100% - 12px),transparent);
       mask-image:linear-gradient(to right,transparent,#000 12px,#000 calc(100% - 12px),transparent)}
     .tab{min-height:40px;display:inline-flex;align-items:center;font-size:13px}
   }
-  html[data-scorr-nav-hidden] .tabs{top:20px}
+  html[data-scorr-nav-hidden] .tabs{top:var(--scorr-nav-bottom,20px)}
   .tabs::-webkit-scrollbar{display:none}
   .tab{padding:0 0 13px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap;
     border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .12s;background:none;border-top:0;border-left:0;border-right:0;font-family:inherit}
@@ -1036,5 +1046,52 @@ function openGalaxyArticle(a){
 function hideGalaxyArticle(){ var p=document.getElementById("galaxyArticle"); if(p) p.classList.remove("on"); }
 </script>
 <script src="/nav_toggle.js" defer></script>
+<script>
+/* cc#1730: the tab strip's pin offset, read from the LIVE nav (see the .tabs CSS note).
+   One number, --scorr-nav-bottom on <html>: the lowest on-screen bottom edge among the
+   canonical #scorr-nav (pwa.js, 44px, position:sticky -- its rect follows cc#926's
+   translateY slide, so the strip rides up to 0 as the nav leaves and back to 44 as it
+   returns) and the 20px #scorr-nav-strip cc#1718 shows while the nav is hidden. Anything
+   display:none or zero-height (the max-height:0 hidden nav, the embed=1 inline hide) counts
+   as 0. Re-measured on scroll and resize (rAF, one read per frame), and for 350ms after any
+   change to the nav's class/style, the html hidden attribute, or a body child insert (the
+   strip is inserted by nav_toggle.js; the nav is rebuilt by pwa.js) so the .2s transitions
+   are tracked to their end. Counter line (#meta) is untouched: it is not sticky by design. */
+(function(){
+  var root = document.documentElement, last = null, raf = 0, until = 0;
+  function edge(el){
+    if(!el) return 0;
+    var cs = getComputedStyle(el); if(cs.display === 'none' || cs.visibility === 'hidden') return 0;
+    var r = el.getBoundingClientRect(); if(r.height <= 0) return 0;
+    return r.bottom;
+  }
+  function measure(){
+    var b = Math.max(edge(document.getElementById('scorr-nav')), edge(document.getElementById('scorr-nav-strip')));
+    return Math.max(0, Math.round(b));
+  }
+  function tick(){
+    raf = 0;
+    var b = measure();
+    if(b !== last){ last = b; root.style.setProperty('--scorr-nav-bottom', b + 'px'); }
+    if(performance.now() < until) raf = requestAnimationFrame(tick);
+  }
+  function kick(ms){ until = Math.max(until, performance.now() + (ms || 0)); if(!raf) raf = requestAnimationFrame(tick); }
+  window.addEventListener('scroll', function(){ kick(0); }, { passive:true });
+  window.addEventListener('resize', function(){ kick(0); }, { passive:true });
+  var mo = new MutationObserver(function(){ kick(350); });
+  mo.observe(root, { attributes:true, attributeFilter:['data-scorr-nav-hidden'] });
+  function watch(){
+    var nav = document.getElementById('scorr-nav'), strip = document.getElementById('scorr-nav-strip');
+    if(nav) mo.observe(nav, { attributes:true, attributeFilter:['class','style'] });
+    if(strip) mo.observe(strip, { attributes:true, attributeFilter:['class','style'] });
+    mo.observe(document.body, { childList:true });
+  }
+  watch();
+  document.addEventListener('DOMContentLoaded', function(){ watch(); kick(1200); });
+  window.addEventListener('load', function(){ watch(); kick(800); });
+  kick(1200);
+  window.__scorrNavBottom = measure;   /* read-only probe for the cc#1730 verify harness */
+})();
+</script>
 </body>
 </html>
