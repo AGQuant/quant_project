@@ -668,9 +668,17 @@ function pickStatus(k){
   PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
   boot(true);
 }
+/* cc#1761 (founder 06-Sep "when click Future / Equity in Wall of Trades always keep default All"):
+   an INSTRUMENT click resets ENGINE to All and STATUS (the state row) to All — on EVERY click,
+   including the already-active instrument, so there is no second path that keeps a stale
+   selection. Before this the bucket jumped to the new instrument's FIRST engine and the state
+   row carried over, which landed the founder on "No open positions for QB Basket in state
+   pending" — an empty view that looked like a fault. BOOK (Open / Closed / Approved) is the
+   outer view he chose and means the same on both instruments, so it is NOT reset. The engine
+   chips re-render from BUCKETS[instrument] on the refetch, so no chip from the other instrument
+   survives the switch. */
 function pickInstrument(k){
-  if (k === STATE.instrument) return;
-  STATE.instrument = k; STATE.bucket = (BUCKETS[k] || [])[0];
+  STATE.instrument = k; STATE.bucket = 'ALL'; STATE.stateFilter = 'all';
   STATE.events = []; PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
   boot(true);
 }
