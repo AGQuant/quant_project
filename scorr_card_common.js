@@ -515,6 +515,22 @@ window.scorrAsofStamp = function (asof) {
     return k;
   }
 
+  /* cc#1801 (THEME_MENU_FEATURED4_V1, session_log 39801) -- identical split to scorr_appshell.js's
+     buildMenu, so the two menus never show a different list (cc#1657). See that file's own
+     FEATURED_KEYS comment for why this is hardcoded rather than derived from "the first 4". */
+  var FEATURED_KEYS = ['dark', 'ainight', 'silvergold', 'duskday'];
+  function splitFeatured() {
+    var all = themeList(), featured = [], collapsed = [];
+    all.forEach(function (t) {
+      (FEATURED_KEYS.indexOf(t[0]) > -1 ? featured : collapsed).push(t);
+    });
+    featured.sort(function (a, b) { return FEATURED_KEYS.indexOf(a[0]) - FEATURED_KEYS.indexOf(b[0]); });
+    return { featured: featured, collapsed: collapsed };
+  }
+  function themeRowHtml(t) {
+    return '<button type="button" class="lgm-th" data-k="' + t[0] + '"><span class="ic">' + (THEME_GLYPH[t[0]] || '\u25c6')
+      + '</span>' + t[1] + '<span class="lgm-tick" aria-hidden="true" style="margin-left:auto;color:var(--gold,#D4AF37);display:none">\u2713</span></button>';
+  }
   function build() {
     try {
       if (location.pathname.indexOf('/m/') !== 0) return;
@@ -523,17 +539,30 @@ window.scorrAsofStamp = function (asof) {
 
       var menu = document.createElement('div');
       menu.className = 'lgm';
+      var split = splitFeatured();
       /* four theme rows, the current one ticked in gold, then Log out behind a hairline */
       menu.innerHTML =
         '<div style="padding:8px 12px 2px;font-family:ui-monospace,monospace;font-size:9.5px;letter-spacing:1.4px;color:var(--mut,#8A8A93)">THEME</div>'
-        + themeList().map(function (t) {
-            return '<button type="button" class="lgm-th" data-k="' + t[0] + '"><span class="ic">' + (THEME_GLYPH[t[0]] || '\u25c6')
-              + '</span>' + t[1] + '<span class="lgm-tick" aria-hidden="true" style="margin-left:auto;color:var(--gold,#D4AF37);display:none">\u2713</span></button>';
-          }).join('')
+        + split.featured.map(themeRowHtml).join('')
+        + '<button type="button" class="lgm-more"><span class="ic">\u22ef</span>More themes<span class="lgm-crt" aria-hidden="true">\u25be</span></button>'
+        + '<div class="lgm-more-wrap">' + split.collapsed.map(themeRowHtml).join('') + '</div>'
         + '<div style="height:1px;background:var(--line,#2A2A31);margin:4px 0"></div>'
-        + '<button type="button" id="lgm-lo"><span class="ic">⏏</span>Log out</button>';
+        + '<button type="button" id="lgm-lo"><span class="ic">\u23cf</span>Log out</button>';
       h1.classList.add('lgt');
       h1.parentNode.appendChild(menu);
+
+      var moreBtn = menu.querySelector('.lgm-more');
+      var moreWrap = menu.querySelector('.lgm-more-wrap');
+      var collapsedKeys = split.collapsed.map(function (t) { return t[0]; });
+      function setMoreOpen(open) {
+        moreBtn.classList.toggle('open', open);
+        moreWrap.classList.toggle('open', open);
+      }
+      moreBtn.onclick = function () { setMoreOpen(!moreWrap.classList.contains('open')); };
+      function autoExpandIfNeeded() {
+        setMoreOpen(collapsedKeys.indexOf(curTheme()) > -1);
+      }
+
       function markCurrent() {
         var cur = curTheme();
         Array.prototype.forEach.call(menu.querySelectorAll('.lgm-th'), function (b) {
@@ -548,7 +577,9 @@ window.scorrAsofStamp = function (asof) {
 
       h1.addEventListener('click', function (e) {
         e.stopPropagation();
+        var willOpen = !menu.classList.contains('open');
         menu.classList.toggle('open');
+        if (willOpen) autoExpandIfNeeded();   // item 5: re-checked on every open
       });
       menu.addEventListener('click', function (e) { e.stopPropagation(); });
       // tap anywhere else (or press Escape) closes it

@@ -90,6 +90,14 @@ body.as-shell{padding-bottom:76px}
 .as-menu .as-tick{margin-left:auto;width:14px;text-align:center;color:var(--brand,var(--gold,#D4AF37))}
 .as-menu .as-th.on .as-tick::before{content:"\2713"}
 .as-sep{height:1px;margin:4px 0;background:var(--edge,rgba(148,166,210,.18))}
+/* cc#1801 (THEME_MENU_FEATURED4_V1, session_log 39801): 4 featured theme rows, a "More themes"
+   toggle row, then the other 6 collapsed until tapped. .as-more reuses the same button geometry
+   as every other row; only the chevron and the muted label colour are new. */
+.as-menu .as-more{color:var(--muted)}
+.as-menu .as-more .as-crt{margin-left:auto;font-size:10px;transition:transform .15s}
+.as-menu .as-more.open .as-crt{transform:rotate(180deg)}
+.as-more-wrap{display:none}
+.as-more-wrap.open{display:block}
 
 /* ── back control ──
    The shell had no way back at all: the wordmark goes to /m/home and the bottom nav does not
