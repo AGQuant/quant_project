@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Indigo Ash · metallic dual-shade</title>
+<style>
+body[data-t="metal"]{--field:#141A26;--panel:#1C2331;--hi:#252D3D;--sunk:#0E131D;--edge:#2E3849;
+ --ink:#D6DDE8;--muted:#9EAABC;--dim:#758194;--brand:#8CA6DB;--wayfind:#6FB0C4;
+ --win:#4FC08D;--loss:#E58292;
+ --rim:rgba(190,215,235,.24);--sheen:rgba(200,225,240,.10);--glowc:rgba(140,166,219,.30)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{color:var(--ink);font:14px/1.5 ui-monospace,"SF Mono",Menlo,monospace;padding-bottom:78px;
+ background:
+  radial-gradient(120% 55% at 50% -8%, color-mix(in srgb,var(--brand) 12%, transparent) 0%, transparent 62%),
+  linear-gradient(180deg, color-mix(in srgb,var(--panel) 55%, var(--field)) 0%, var(--field) 42%, var(--sunk) 100%);
+ background-attachment:fixed}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 10px}
+.wm{font:italic 900 21px system-ui,sans-serif;letter-spacing:.02em;
+background:linear-gradient(100deg,var(--brand) 0%,var(--ink) 42%,var(--wayfind) 100%);
+-webkit-background-clip:text;background-clip:text;color:transparent;
+filter:drop-shadow(0 1px 7px var(--glowc))}
+.pg{font:italic 800 17px system-ui,sans-serif;margin-left:7px}
+.bell{width:44px;height:44px;border-radius:13px;color:var(--ink);display:flex;align-items:center;justify-content:center;
+font-size:19px;background:linear-gradient(160deg,var(--hi),var(--panel));
+border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--rim),0 4px 14px rgba(0,0,0,.5)}
+.tape{display:flex;gap:8px;overflow-x:auto;padding:8px 14px 12px;scrollbar-width:none}
+.tape::-webkit-scrollbar{display:none}
+.tp{flex:0 0 auto;border:1px solid var(--edge);border-radius:9px;padding:8px 12px;font-size:11.5px;
+color:var(--muted);white-space:nowrap;background:linear-gradient(180deg,var(--hi),var(--panel));
+box-shadow:inset 0 1px 0 var(--sheen)}
+.tp b{font-weight:700;margin-left:6px}
+.tp b.up{color:var(--win)} .tp b.dn{color:var(--loss)}
+.wrap{padding:0 14px}
+.card{border-radius:15px;padding:17px 15px 18px;position:relative;overflow:hidden;
+background:linear-gradient(168deg,var(--hi) 0%,var(--panel) 46%,var(--sunk) 100%);
+border:1px solid var(--edge);
+box-shadow:inset 0 1px 0 var(--rim), inset 0 -1px 0 rgba(0,0,0,.5), 0 14px 34px rgba(0,0,0,.55)}
+.card::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;
+background:linear-gradient(90deg,transparent,var(--brand),var(--wayfind),transparent)}
+.card::after{content:"";position:absolute;left:-40%;top:-70%;width:70%;height:190%;transform:rotate(18deg);
+background:linear-gradient(90deg,transparent,var(--sheen),transparent);pointer-events:none}
+.top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;position:relative}
+.t1{font:italic 800 15px/1.12 system-ui,sans-serif}
+.asof{font-size:11px;color:var(--dim);text-align:right;line-height:1.4}
+.hero{font:italic 900 45px/1 system-ui,sans-serif;letter-spacing:-.025em;margin:10px 0 8px;color:var(--loss)}
+.sub{font-size:12px;color:var(--muted);margin-bottom:11px}
+.bar{height:7px;border-radius:4px;background:var(--sunk);overflow:hidden;margin-bottom:14px;
+box-shadow:inset 0 1px 2px rgba(0,0,0,.6)}
+.bar i{display:block;height:100%;width:75%;
+background:linear-gradient(90deg,var(--loss),color-mix(in srgb,var(--loss) 60%,#fff))}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chip{font-size:12px;padding:7px 11px;border-radius:9px;border:1px solid var(--edge);color:var(--muted);
+background:linear-gradient(180deg,var(--hi),var(--panel));box-shadow:inset 0 1px 0 var(--sheen)}
+.chip b{font-weight:700}
+.chip.up{border-color:color-mix(in srgb,var(--win) 40%,var(--edge))} .chip.up b{color:var(--win)}
+.chip.dn{border-color:color-mix(in srgb,var(--loss) 40%,var(--edge))} .chip.dn b{color:var(--loss)}
+.chip.nt b{color:var(--brand)}
+.rule{height:1px;margin:4px 0 13px;background:linear-gradient(90deg,transparent,var(--edge),transparent)}
+.idx{display:flex;align-items:baseline;gap:9px;margin-bottom:11px}
+.idx .nm{font-size:12px;letter-spacing:.07em;color:var(--muted);min-width:86px}
+.idx .px{font:700 21px/1 ui-monospace,monospace}
+.idx .ch{font-size:12.5px;font-weight:700}
+.idx .pv{margin-left:auto;font-size:11px;color:var(--dim)}
+.adl{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin:15px 0 6px}
+.adl span{color:var(--ink);font-weight:700}
+.ad{height:9px;border-radius:5px;display:flex;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.6)}
+.ad i{background:linear-gradient(180deg,color-mix(in srgb,var(--win) 70%,#fff),var(--win))}
+.ad u{background:linear-gradient(180deg,color-mix(in srgb,var(--loss) 70%,#fff),var(--loss))}
+.dots{display:flex;gap:6px;justify-content:center;margin:16px 0 20px}
+.dot{width:6px;height:6px;border-radius:3px;background:var(--edge)}
+.dot.on{width:22px;background:linear-gradient(90deg,var(--brand),var(--wayfind));box-shadow:0 0 10px var(--glowc)}
+.sect{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.sect b{font:700 12px ui-monospace,monospace;letter-spacing:.15em;color:var(--wayfind)}
+.sect i{flex:1;height:1px;background:linear-gradient(90deg,var(--wayfind),transparent)}
+.bk{border-radius:15px;padding:15px;border:1px solid var(--edge);
+background:linear-gradient(168deg,var(--hi),var(--panel) 55%,var(--sunk));
+box-shadow:inset 0 1px 0 var(--rim),0 12px 30px rgba(0,0,0,.5)}
+.bkh{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.bkh b{font:italic 800 16px system-ui,sans-serif}
+.bkh span{font-size:12px;color:var(--muted)}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.mini{border:1px solid var(--edge);border-radius:11px;padding:10px 8px;text-align:center;position:relative;overflow:hidden;
+background:linear-gradient(180deg,var(--hi),var(--panel));box-shadow:inset 0 1px 0 var(--sheen)}
+.mini::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;
+background:linear-gradient(180deg,var(--wayfind),var(--brand))}
+.mini .k{font-size:10px;letter-spacing:.09em;color:var(--wayfind);margin-bottom:7px;font-weight:600}
+.mini .v{font:700 16px ui-monospace,monospace}
+.mini .p{font-size:11px;margin-top:5px}
+</style></head>
+<body data-t="metal">
+<div class="hdr"><div><span class="wm">SCORR</span><span class="pg">HOME</span></div><div class="bell">&#9788;</div></div>
+<div class="tape">
+  <div class="tp">BANKNIFTY <b class="dn">−0.02%</b></div>
+  <div class="tp">INDIA VIX <b class="up">−5.80%</b></div>
+  <div class="tp">DOW <b class="dn">−0.51%</b></div>
+</div>
+<div class="wrap">
+  <div class="card">
+    <div class="top"><div class="t1">THE MARKET<br>TODAY</div>
+      <div class="asof">Market closed · 00:06 IST<br>feed closed</div></div>
+    <div class="hero">BEARISH</div>
+    <div class="sub">3 of 4 checks failed today.</div>
+    <div class="bar"><i></i></div>
+    <div class="chips">
+      <span class="chip nt">ADR <b>0.77</b></span>
+      <span class="chip up">DAY <b>+0.10%</b></span>
+      <span class="chip dn">WK <b>−1.15%</b></span>
+      <span class="chip dn">MO <b>−2.95%</b></span>
+      <span class="chip nt">PCR <b>1.15</b></span>
+      <span class="chip nt">VIX <b>10.7</b></span>
+    </div>
+    <div class="rule"></div>
+    <div class="idx"><span class="nm">NIFTY</span><span class="px">23,898</span>
+      <span class="ch" style="color:var(--win)">+0.10%</span><span class="pv">below pivot</span></div>
+    <div class="idx"><span class="nm">BANKNIFTY</span><span class="px">57,370</span>
+      <span class="ch" style="color:var(--loss)">−0.02%</span><span class="pv">below pivot</span></div>
+    <div class="adl"><span style="color:var(--muted);font-weight:400">ADVANCE / DECLINE</span><span>91 / 118</span></div>
+    <div class="ad"><i style="width:43.5%"></i><u style="width:56.5%"></u></div>
+  </div>
+  <div class="dots"><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+  <div class="sect"><b>THE BOOK</b><i></i></div>
+  <div class="bk">
+    <div class="bkh"><b>V8 OPEN BOOK</b><span>22 positions ›</span></div>
+    <div class="g3">
+      <div class="mini"><div class="k">UNREALISED</div><div class="v" style="color:var(--loss)">−₹61,572</div><div class="p" style="color:var(--loss)">−0.41%</div></div>
+      <div class="mini"><div class="k">LONG UNRL</div><div class="v" style="color:var(--loss)">−₹1.02L</div><div class="p" style="color:var(--loss)">−1.56%</div></div>
+      <div class="mini"><div class="k">SHORT UNRL</div><div class="v" style="color:var(--win)">₹40,765</div><div class="p" style="color:var(--win)">+0.47%</div></div>
+    </div>
+  </div>
+</div>
+</body></html>
