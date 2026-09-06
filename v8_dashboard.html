@@ -835,11 +835,22 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .leg .lgch{width:44px;height:44px;margin:-8px -10px -8px 0;border:none;border-radius:8px;background:transparent;color:var(--mut);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit}
 #pane-index .leg .lgch:hover,#pane-index .leg .lgch:focus-visible{color:var(--blu);background:var(--well)}
 #pane-index .empty,#pane-index .unavail{padding:12px 14px;border-radius:9px;border:1px dashed var(--line2);color:var(--tx3);font:500 11.5px var(--f-m);line-height:1.6}
-#pane-index .ipf{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+/* cc#1755: the row under the rail is ONE line — button | direction | instrument | P&L — and never
+   wraps (item 5). The direction chip takes the cc#1743 capsule tokens (neutral well fill, cyan /
+   amber border by direction), never the P&L green/red. The instrument is the only cell allowed to
+   give: it ellipsises before anything wraps, and drops one type step below 1366. The P&L is
+   pinned right. The V10 signal read sits on its own muted line under the row (.ipsig). */
+#pane-index .ipf{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;min-width:0}
 #pane-index .btn{font:700 11px var(--f-m);letter-spacing:.06em;padding:9px 14px;min-height:36px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);color:var(--tx);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
-#pane-index .btn.pri{border-color:var(--blu);color:var(--bg);background:var(--blu)}
-#pane-index .ipf .sig{margin-left:auto;font:500 10.5px var(--f-m);color:var(--tx3)}
-#pane-index .ipf .sig b{color:var(--tx2);font-weight:600}
+#pane-index .btn.pri{border-color:var(--blu);color:var(--bg);background:var(--blu);flex-shrink:0}
+#pane-index .ipf .ipdir{flex-shrink:0;display:inline-block;padding:3px 9px;border-radius:9px;font:600 10px var(--f-m);letter-spacing:.06em;color:var(--tx2);background:var(--well);border:1px solid var(--line2);white-space:nowrap;line-height:14px}
+#pane-index .ipf .ipdir.up{border-color:var(--cy)}
+#pane-index .ipf .ipdir.dn{border-color:var(--am)}
+#pane-index .ipf .ipinst{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:600 12.5px var(--f-m);color:var(--tx2)}
+@media (max-width:1365px){#pane-index .ipf .ipinst{font-size:11.5px}}
+#pane-index .ipf .ippnl{margin-left:auto;flex-shrink:0;white-space:nowrap;font:600 13px var(--f-m)}
+#pane-index .ipsig{margin-top:6px;font:500 10.5px var(--f-m);color:var(--tx3)}
+#pane-index .ipsig b{color:var(--tx2);font-weight:600}
 /* record strip */
 #pane-index .rec{display:grid;grid-template-columns:auto auto auto 1fr auto;gap:22px;align-items:center;padding:14px 18px}
 #pane-index .rec .k{font:600 9.5px var(--f-m);letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
@@ -7440,10 +7451,42 @@ function ipCard(key){
       + (d.cmp >= pvt.pp ? 'above' : 'below') + ' PP ' + Math.abs((d.cmp - pvt.pp) / pvt.pp * 100).toFixed(2) + '%</span>'
     : '';
   var since = sig.flipTs ? ' since ' + esc(String(sig.flipTs).slice(5, 16).replace('T', ' ')) : '';
+  /* cc#1755 (founder 06-Sep 16:05, "View on chart button, Position Direction (Long/Short),
+     Instrument PE 24000 PE wrt, then P&L in single row"): ONE row — button | direction |
+     instrument | P&L. DIRECTION IS DERIVED, never read off the option type: the paired FUT leg's
+     side where the book has one (same index, same entry_ts; FUT BUY = LONG, FUT SELL = SHORT),
+     else the option leg's own side x type through ScorrV10Dir (SELL PE or BUY CE = LONG). "PE
+     means long" holds only while the engine writes — the first bought put would silently invert a
+     hardcoded label. INSTRUMENT = strike + type + "wrt" for a written leg, "bot" for a bought one
+     (the founder's word for a write; nothing invented for the other case). The chip is a neutral
+     tinted capsule with a caret (the cc#1743 principle), NOT the P&L green/red: a LONG can be
+     losing, and a green chip beside a red P&L reads as a contradiction. The V10 signal text moves
+     to its own muted line BELOW (Fable: five items do not fit one row at 1280) — kept, not
+     dropped. No open option leg -> the button alone; nothing is printed for a position that is
+     not there. The P&L stays the option-leg total (cc#1597), same source, same number. */
+  var optLegs = legs.filter(function(l){ return l.type === 'OPT'; });
+  var futLegs = legs.filter(function(l){ return l.type === 'FUT'; });
+  var futFor = function(l){
+    var same = futLegs.filter(function(f){ return l.entryTs && f.entryTs && String(f.entryTs) === String(l.entryTs); });
+    return same[0] || (futLegs.length === 1 ? futLegs[0] : null);
+  };
+  var posCells = optLegs.map(function(l){
+    var fut = futFor(l);
+    var dd = window.ScorrV10Dir ? ScorrV10Dir.direction(l.side, l.opt, fut ? fut.side : null) : null;
+    var dirTxt = dd === 'Bullish' ? 'LONG' : (dd === 'Bearish' ? 'SHORT' : null);
+    var inst = (l.str != null ? String(Math.round(Number(l.str))) + ' ' : '') + esc(l.opt || '') + ' ' + (l.side === 'SHORT' ? 'wrt' : 'bot');
+    return (dirTxt
+        ? '<span class="ipdir ' + (dirTxt === 'LONG' ? 'up' : 'dn') + '" title="' + (fut ? 'from the paired futures leg' : 'from the option leg\'s side and type') + '">'
+          + (dirTxt === 'LONG' ? '▴' : '▾') + ' ' + dirTxt + '</span>'
+        : '')
+      + '<span class="ipinst" title="' + esc(l.sym) + ' option, ' + (l.side === 'SHORT' ? 'written' : 'bought') + '">' + inst + '</span>';
+  }).join('');
+  var pnlCell = optLegs.length
+    ? '<span class="ippnl ' + (tot >= 0 ? 'pos' : 'neg') + '">' + (tot < 0 ? '−' : '+') + '₹' + num(Math.abs(tot)) + ' open</span>'
+    : '';
   var foot = '<div class="ipf"><button type="button" class="btn pri" onclick="iiIpChart(\'' + feed + '\')">View on chart</button>'
-    + (legs.length ? '<span class="' + (tot >= 0 ? 'pos' : 'neg') + '" style="font:600 13px var(--f-m)">'
-        + (tot < 0 ? '−' : '+') + '₹' + num(Math.abs(tot)) + ' open</span>' : '')
-    + '<span class="sig">V10 · ST+EMA <b>' + esc(dir) + '</b>' + since + vsPp + '</span></div>';
+    + posCells + pnlCell + '</div>'
+    + '<div class="ipsig">V10 · ST+EMA <b>' + esc(dir) + '</b>' + since + vsPp + '</div>';
   return '<div class="card ip">' + head + rail + foot + '</div>';
 }
 /* cc#1571 P3: the open legs of one index, as they rendered inside the ip card until 02-Sep-2026.
@@ -7510,8 +7553,9 @@ function ipGuide(){
     + 'position read — above PP with room to R1 is a very different day from sitting on S1.</p>'
     + '<p><b>The legs.</b> The V10 paper book\'s open legs on this index — entry, stop, target, '
     + 'lot size and live P&amp;L — sit in the Open Positions section below Volume Flow &amp; Basis '
-    + '(cc#1741); this card shows the open total. Each V10 signal fires a futures leg and an '
-    + 'option write; they are peers, not a hedge.</p>'
+    + '(cc#1741); this card\'s row shows the direction (LONG / SHORT, read from the paired futures '
+    + 'leg), the option instrument (strike, type, wrt for a written leg) and the open total. Each '
+    + 'V10 signal fires a futures leg and an option write; they are peers, not a hedge.</p>'
     + '<p><b>View on chart.</b> Opens the same shared chart every symbol on Scorr opens — '
     + '5-minute candles with the V10 trade markers.</p>'
     /* cc#1572 (founder comment 3, 02-Sep-2026): the entry rule that used to sit in the flat-state
