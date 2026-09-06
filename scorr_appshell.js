@@ -124,7 +124,15 @@
       e.stopPropagation();
       menu.classList.toggle('open');
     });
-    menu.addEventListener('click', function (e) { e.stopPropagation(); });
+    /* cc#1783 · THE MENU LIVES INSIDE THE WORDMARK ANCHOR (wm.appendChild(menu) above), so a tap on
+       a theme row is a click INSIDE <a href="/m/home">. stopPropagation() alone only stops the
+       LISTENERS above the menu from running — it does not cancel the anchor's own default action —
+       and the one preventDefault() in the path (the wm handler below) is exactly what it stopped
+       from running. So the theme was applied and stored, then the browser followed the link to
+       /m/home (founder 06-Sep: "if I switch theme, page navigate to home"). Measured in Chromium:
+       stopPropagation only -> navigates; preventDefault + stopPropagation -> stays, theme applied.
+       Log out is unaffected: its onclick sets location.href itself. */
+    menu.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
     document.addEventListener('click', function () { menu.classList.remove('open'); });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') menu.classList.remove('open');
