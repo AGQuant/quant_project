@@ -64,7 +64,15 @@ section{margin-top:26px}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .asof{margin-left:auto;font-family:var(--f-m);font-size:10.5px;color:var(--tx3)}
 .asof b{color:var(--tx2);font-weight:500}
-.card{background:var(--well);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+/* cc#1757 (founder 06-Sep: "keep background of Global Tape, Index ladder box white in line with
+   other box"): the SECTION WRAPPER is --panel, the same white step the Result Corner rows, the
+   READ strip and the .f0 footer already sit on — not --well, the sunk grey-lavender that read as
+   a darker box around the tape tiles and the ladders. One class carries every section wrapper on
+   this page (Global Tape, Index Ladders, the Internals minis, the READ cards, News, Result
+   Corner), so the whole page moves to one family of white boxes in one declaration; the tile and
+   row tints inside (up / down / flat) are their own classes and are untouched. In dark the same
+   token resolves to the dark panel (#121A33), never literal white. */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .read{font-size:12.5px;color:var(--tx2);padding:10px 14px;border-top:1px solid var(--line);
   background:var(--panel);line-height:1.55}
 .read b{color:var(--tx);font-weight:600}
