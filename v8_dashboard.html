@@ -1478,21 +1478,27 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          AND rank within the per-bucket cap. The framed page says so in its own one-line note.
          Pure render either way: /api/scanners/tc/holds computes, this pane formats. -->
     <div id="tc13Box" style="padding:8px 2px 10px"></div>
-    <iframe id="tcscanFrame" title="TC Scanner" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
+    <iframe id="tcscanFrame" data-fit="1" title="TC Scanner" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#1282 (founder 24-Aug): Digest and Wall of Trades join the shell the same way TC Scanner
        did in cc#740 — an embed=1 iframe pane, lazy-loaded on first open. embed=1 strips every
        injection (nav, pills, pwa.js) server-side, so the framed page carries no second navbar.
-       The standalone /digest and /trades URLs are untouched and still serve the full pages. -->
+       The standalone /digest and /trades URLs are untouched and still serve the full pages.
+       cc#1765 (founder 06-Sep "remove inside scroll from daily digest and wall of trades"): THE
+       NO-NESTED-SCROLL RULE. Every embed frame in this shell is `data-fit="1"` with NO fixed
+       height — ScorrFrameFit (below, one block) sizes each frame to its page's content, so the
+       pane grows and the PAGE scrolls: one scrollbar on screen, ever. The old
+       height:calc(100vh - 150px) + min-height:640px on these three frames was the trap the
+       founder's two screenshots show. Model Portfolio (native, sizes to content) is the reference. -->
   <div id="pane-digest" style="display:none">
-    <iframe id="digestFrame" title="Daily Digest" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+    <iframe id="digestFrame" data-fit="1" title="Daily Digest" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
   </div>
   <div id="pane-trades" style="display:none">
-    <iframe id="tradesFrame" title="Wall of Trades" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+    <iframe id="tradesFrame" data-fit="1" title="Wall of Trades" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#1585: Alerts pane — the same embed frame pattern. -->
   <div id="pane-alerts" style="display:none">
-    <iframe id="alertsFrame" title="Alerts" style="width:100%;height:calc(100vh - 150px);min-height:640px;border:0;background:var(--bg)"></iframe>
+    <iframe id="alertsFrame" data-fit="1" title="Alerts" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#1523's Intel pane (an iframe of /news?embed=1, sized by cc#1730's fitIntelFrame) is GONE
        — cc#1754 (founder 06-Sep "intel should delink from V8 just like GVM ... i want full screen
@@ -1502,7 +1508,7 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
        open, ?embed=1&full=1 keeps the page head + symbol input, strips only the site nav). Height
        follows the page's own scorrTcHeight postMessage (cc#671), source-checked below; 200px floor. -->
   <div id="pane-check" style="display:none">
-    <iframe id="checkFrame" title="Check" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
+    <iframe id="checkFrame" data-fit="1" title="Check" style="width:100%;min-height:200px;border:0;background:var(--bg)"></iframe>
   </div>
   <!-- cc#1677 (founder 04-Sep 09:35 IST): Model Portfolio is now an EMPTY LAUNCHER, not a folded
        copy of /quant-basket -- superseded cc#1584's chip strip + iframe embed below. Mounted by
@@ -8683,6 +8689,7 @@ function showV8Pane(name){
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
   try{history.replaceState(null,'',(name==='v8')?(location.pathname+location.search):('#'+name));}catch(e){}
   try{window.dispatchEvent(new CustomEvent('scorr:pane',{detail:{pane:name}}));}catch(e){}   // cc#1747: the site nav re-marks its lit item (Intel is a hash entry)
+  if(window.ScorrFrameFit){ try{ ScorrFrameFit.refit(name); setTimeout(function(){ ScorrFrameFit.refit(name); }, 300); }catch(e){} }   // cc#1765: a revealed frame is measured now, and again after its first paint
   if(name==='check'){var fc=document.getElementById('checkFrame');if(fc&&!fc.src)fc.src='/check?embed=1&full=1';}  // cc#1747: lazy-load the live Check page once
   if(name==='index'&&window.idxBoot)window.idxBoot();
   if(name==='v14'&&window.v14Boot)window.v14Boot();
@@ -9312,27 +9319,81 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     }
   });
 
-  // cc#1530 scope 4: the V1.1 screener frame sizes itself from the embedded page's own
-  // postMessage ({type:'tcscan-resize', h}) — sent on load and after every height-changing
-  // repaint (side toggle, Near Miss expand). Source-checked against the frame's contentWindow
-  // so no other frame or origin can drive it; 200px floor so the frame never collapses before
-  // the first message lands.
-  window.addEventListener('message', function(ev){
-    var f=document.getElementById('tcscanFrame');
-    if(!f || !ev.data || ev.data.type!=='tcscan-resize') return;
-    if(ev.source !== f.contentWindow) return;
-    var h=Number(ev.data.h);
-    if(h>0) f.style.height=Math.max(200,Math.ceil(h))+'px';
-  });
-  // cc#1747: the Check tab's frame, same handshake shape — the /check page already posts
-  // {type:'scorrTcHeight', height} when embedded (cc#671); source-checked, 200px floor.
-  window.addEventListener('message', function(ev){
-    var f=document.getElementById('checkFrame');
-    if(!f || !ev.data || ev.data.type!=='scorrTcHeight') return;
-    if(ev.source !== f.contentWindow) return;
-    var h=Number(ev.data.height);
-    if(h>0) f.style.height=Math.max(200,Math.ceil(h))+'px';
-  });
+  // ── cc#1765 · ScorrFrameFit — THE no-nested-scroll rule for every embed frame in this shell ──
+  // One block, one rule: an <iframe data-fit="1"> is sized to its page's CONTENT, so the pane grows
+  // and the PAGE scrolls. Supersedes the two per-frame listeners this replaced (cc#1530 tcscan
+  // 'tcscan-resize' {h}; cc#1747 check 'scorrTcHeight' {height}) — both message shapes are still
+  // honoured, now for ANY data-fit frame whose contentWindow sent them, plus the generic
+  // {type:'scorr-frame-height', h}. Frames: tcscanFrame, digestFrame, tradesFrame, alertsFrame,
+  // checkFrame — and any frame a future tab marks data-fit, with no new code.
+  //   * SAME-ORIGIN OBSERVATION is the primary driver (every embed here is our own page): on
+  //     load the frame's document is measured, and a ResizeObserver created IN THE CHILD WINDOW
+  //     watches its body, so a filter, a tab switch or a load-more inside the page refits the
+  //     frame with no page-side poster. The measure is the body's flow bottom (rect.bottom +
+  //     margin), NOT documentElement.scrollHeight — the root scrollHeight is never smaller than
+  //     the viewport (= the frame), so it can grow a frame but never let it shrink back.
+  //   * MESSAGES are the fallback when the document is not readable (a cross-origin embed); a
+  //     readable frame ignores them so the two drivers never fight over one height.
+  //   * Refit on window resize and whenever showV8Pane reveals a pane (a frame inside
+  //     display:none has no layout, so its first measure has to wait for the reveal).
+  //   * 200px floor so a frame never collapses before its page has painted.
+  // KNOWN CONSEQUENCE, stated: a position:sticky header INSIDE an embedded page (the wall's and
+  // the alerts' thead th top:0) pins against the page's own scroll, and that page no longer
+  // scrolls — the shell does. Standalone /trades and /alerts still pin; inside the shell the
+  // header scrolls with its table. Pinning across the frame boundary is a separate card.
+  (function(){
+    var FLOOR=200, bound={};
+    function frames(){ return Array.prototype.slice.call(document.querySelectorAll('iframe[data-fit]')); }
+    function childDoc(f){ try{ var d=f.contentDocument; return (d && d.body) ? d : null; }catch(e){ return null; } }
+    function measure(d){
+      try{
+        var b=d.body, r=b.getBoundingClientRect(), cs=d.defaultView.getComputedStyle(b);
+        var top=(d.documentElement.scrollTop||0), mb=parseFloat(cs.marginBottom)||0;
+        return Math.ceil(r.bottom+top+mb);
+      }catch(e){ return 0; }
+    }
+    function apply(f,h){ if(h>0){ var px=Math.max(FLOOR,Math.ceil(h))+'px'; if(f.style.height!==px) f.style.height=px; } }
+    function fit(f){
+      if(!f || f.offsetParent===null) return;          // hidden pane: no layout to measure yet
+      var d=childDoc(f); if(!d) return;                 // not readable: the message path owns it
+      apply(f, measure(d));
+    }
+    function bind(f){
+      var d=childDoc(f); if(!d || bound[f.id]===d) return;
+      bound[f.id]=d;
+      try{
+        var W=d.defaultView;
+        if(W && W.ResizeObserver){ new W.ResizeObserver(function(){ fit(f); }).observe(d.body); }
+        if(W && W.MutationObserver){                     // belt and braces: DOM churn that changes no box size yet
+          var t=null; new W.MutationObserver(function(){ clearTimeout(t); t=setTimeout(function(){ fit(f); },120); })
+            .observe(d.body,{childList:true,subtree:true,attributes:true});
+        }
+      }catch(e){}
+      fit(f);
+    }
+    function refit(paneName){
+      frames().forEach(function(f){
+        if(paneName){ var pane=document.getElementById('pane-'+paneName); if(!pane || !pane.contains(f)) return; }
+        bind(f); fit(f);
+      });
+    }
+    frames().forEach(function(f){ f.addEventListener('load', function(){ bound[f.id]=null; bind(f); setTimeout(function(){ fit(f); },250); }); });
+    window.addEventListener('resize', function(){ refit(); }, {passive:true});
+    window.addEventListener('message', function(ev){
+      var data=ev.data; if(!data || typeof data!=='object') return;
+      var h = data.type==='tcscan-resize' ? Number(data.h)
+            : data.type==='scorrTcHeight' ? Number(data.height)
+            : data.type==='scorr-frame-height' ? Number(data.h) : NaN;
+      if(!(h>0)) return;
+      var f=frames().filter(function(x){ return x.contentWindow===ev.source; })[0];
+      if(!f) return;                                    // source-checked: only our own frames drive a height
+      if(childDoc(f)) return;                           // readable -> the observer owns it
+      apply(f,h);
+    });
+    window.ScorrFrameFit={refit:refit, fit:fit, measure:function(id){ var f=document.getElementById(id); var d=f&&childDoc(f); return d?measure(d):null; }};
+    document.addEventListener('DOMContentLoaded', function(){ refit(); });
+    setTimeout(function(){ refit(); }, 0);
+  })();
 
   // Same self-boot-on-deep-link guard as the BT module above: a direct #tcscan link can show the
   // pane before this script (loaded later in document order) has defined tc13Boot.
