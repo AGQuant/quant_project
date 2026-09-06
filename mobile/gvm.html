@@ -120,7 +120,7 @@ function loadCompany(sym){
 }
 /* ── HERO (ref hero; session_log 36513 hero + rule 4 of the card) ─────────────────────── */
 var CIRC = 2*Math.PI*56;   /* r=56 in the ref dial */
-var LBL = { sales_5y:'Sales 5Y growth', sales_3y:'Sales 3Y growth', profit_5y:'Profit 5Y CAGR', profit_3y:'Profit 3Y CAGR', qoq_sales:'Sales this year', qoq_profit:'Profit this year',
+var LBL = { sales_5y:'Sales 5Y growth', sales_3y:'Sales 3Y growth', profit_5y:'Profit 5Y CAGR', profit_3y:'Profit 3Y CAGR', qoq_sales:'Sales YoY · latest qtr', qoq_profit:'Profit YoY · latest qtr',   /* cc#1759: the qoq_ keys hold YoY (latest quarter vs the same quarter last year) — the label says so now */
   opm:'Operating margin', opm_exp:'Margin', pe:'PE', fwd_pe:'PE next year', hist_pe:'PE vs own 5y', sector_pe:'PE vs sector', pb:'Price / Book', annual_upside:'Upside to fair value',
   div_yield:'Dividend yield', roce:'Return on capital', int_cov:'Interest cover', inst_abs:'Institutions', inst_chg:'Institutional buying',
   ret_1y:'Return 1Y', ret_3y:'Return 3Y', ret_52w_idx:'vs Nifty 52W', ret_1m:'Return 1M', dma_50:'vs 50-day avg', dma_200:'vs 200-day avg', rsi_month:'Monthly RSI', vol_trend:'Volume trend' };
