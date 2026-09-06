@@ -340,14 +340,26 @@ body[data-theme="ainight"]{--field:#05070F;--panel:#0B1020;--hi:#111A30;--edge:#
    railgrad gold->transparent, texture light hairline, gold-lo = line2 #BFC3CC, gold-hi white, sunk
    one step below the field, wayfind = the accent text gold (see the --wayfind note below). The
    metallic panel edge (border-top 1px #FFFFFF) is not a contract key and is not declared here. */
-body[data-theme="silvergold"]{--field:#EEEFF2;--panel:#FFFFFF;--hi:#E4E6EB;--edge:#D3D6DD;
- --ink:#1B1D22;--muted:#5F646E;--brand:#D4AF37;--brandglow:rgba(212,175,55,.25);--accent:#7D6112;
+/* cc#1749 SILVER GOLD SHEEN (founder 06-Sep, phone: "in Silver Gold I want silver shining and
+   metallic type"). Value changes inside the cc#1722 depth contract, no new mechanism: --field-grad
+   = a cool metallic wash, silver-white at the top darkening to the field (#F7F8FA -> #ECEEF2 ->
+   #E3E6EC); --panel-shadow = brushed-metal lip (inset 1px near-white top, faint darker silver
+   bottom edge) plus a soft neutral drop; --accent-soft = a pale silver tint for chip fills (never
+   gold). muted and edge move one step cooler and brighter so the page reads as metal, not grey
+   card: muted #5F646E -> #5C6576 (4.55 on hi #E4E6EB, 5.02 on field, 6.2 on panel — still >= 4.5
+   on every ground); edge #D3D6DD -> #D5DAE4. Gold stays the accent only (CTAs, active nav glyph +
+   underline, tick, dots) — nothing gold is added to a fill. theme_mobile.css opts the panels and
+   chips in, the same way it does for Wine Purple and Midnight Blue. */
+body[data-theme="silvergold"]{--field:#EEEFF2;--panel:#FFFFFF;--hi:#E4E6EB;--edge:#D5DAE4;
+ --ink:#1B1D22;--muted:#5C6576;--brand:#D4AF37;--brandglow:rgba(212,175,55,.25);--accent:#7D6112;
  --label:#5B6471;--win:#147548;--loss:#C0263C;
  --railgrad:linear-gradient(90deg,#D4AF37,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
  --gold-lo:#BFC3CC;--gold-hi:#FFFFFF;--sunk:#E6E7EB;
  --wayfind:#7D6112;
- --panel-shadow:none;--field-grad:none;--accent-soft:transparent}
+ --panel-shadow:0 8px 22px rgba(38,44,58,.12), inset 0 1px 0 #FFFFFF, inset 0 -1px 0 #D5DAE4;
+ --field-grad:linear-gradient(180deg,#F7F8FA 0%,#ECEEF2 55%,#E3E6EC 100%);
+ --accent-soft:rgba(91,100,113,.10)}
 /* WINE PURPLE — cc#1722 (founder 05-Sep 20:36, phone: "Wine purple should be richer, look premium").
    The cc#1719 set was a washed lilac-grey with white panels and no depth. Fable's rich palette:
    field = deeper mauve-ivory #EBE2E8 (the metallic white is the PANEL #FBF9FA, not the field); hi =

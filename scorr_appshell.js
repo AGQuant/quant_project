@@ -96,6 +96,14 @@
       });
     }
     markCurrent();
+    /* cc#1749: this script is deferred, so it runs BEFORE the DOMContentLoaded listeners — and the
+       resolver's own apply() (pwa_endpoints APP_THEME_RESOLVE_JS) is one of those. A page whose
+       inline boot fell back to goldnight was therefore ticked at goldnight here, then repainted to
+       the stored theme a moment later with no re-mark (founder 06-Sep: page on Silver Gold, tick
+       on Gold Night). The mark now follows every later write: the resolver announces scorr:theme
+       when it changes the attribute, and load is a belt-and-braces re-read. */
+    window.addEventListener('scorr:theme', markCurrent);
+    window.addEventListener('load', markCurrent);
     Array.prototype.forEach.call(menu.querySelectorAll('.as-th'), function (b) {
       b.onclick = function () {
         var k = b.getAttribute('data-k');
