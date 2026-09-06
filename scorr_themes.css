@@ -282,16 +282,33 @@ body[data-theme="aquawhite"]{--field:#F4F9FB;--panel:#FFFFFF;--hi:#E9F3F7;--edge
    --panel-shadow = rose drop shadow + white top lip; --field-grad = header pink -> deeper pink wash;
    --accent-soft = raspberry chip fill. gold-lo = line2 #D99AAD, gold-hi white, sunk one step below
    the field. Wordmark raspberry -> plum is a scoped rule in theme_mobile.css (--brand -> --accent). */
-body[data-theme="blush"]{--field:#F7DCE3;--panel:#FFF8FA;--hi:#FBEAEF;--edge:#EBBFCB;
- --ink:#2B0E1A;--muted:#7A4658;--brand:#B5174E;--brandglow:rgba(181,23,78,.22);--accent:#7A2E9E;
- --label:#7A2E9E;--win:#126636;--loss:#B4223A;
- --railgrad:linear-gradient(90deg,#B5174E,transparent);
+/* cc#1751 BLUSH = SEASHELL (BLUSH_SEASHELL_V1, session_log 39474; founder picked candidate 4 of
+   design_refs/scorr_blush_seashell_R1.html, 06-Sep: "4 lock seashell theme"). Supersedes the cc#1723
+   values above — founder: too pink, reads as red/danger. Palette applied verbatim onto the contract
+   keys: field #FDF5F6 (almost white with a pink cast) · panel #FFFFFF · panel_hi #FBEEF1 -> --hi ·
+   line #F0DCE1 -> --edge · line2 #E4C7CF -> --gold-lo · chalk #2B0E1A -> --ink · muted #7A4658 ·
+   accent dusty rose #B75A78 -> --brand (CTAs, hero labels, active nav glyph + underline, tick,
+   section labels, bell badge) and --wayfind / --railgrad (card_rail) · accent2 plum #8460A8 ->
+   --accent and --label (dot, links, wordmark gradient partner — theme_mobile.css paints the
+   wordmark --brand -> --accent) · P&L #15753F / #B4223A unchanged, the hero word stays the only
+   strong red · panel_shadow 0 8px 22px rgba(183,90,120,.09) + panel_edge inset top 1px
+   rgba(255,255,255,.75) -> --panel-shadow · accent_soft rgba(183,90,120,.08) -> --accent-soft.
+   No field wash in the mock -> --field-grad none. Derived, not in the palette: --sunk one step
+   below the field #F6E6EA; --brandglow the rose at .22. CONTRAST on panel / field / hi: ink
+   17.8 / 16.6 / 15.8, muted 7.38 / 6.88 / 6.54, rose 4.42 / 4.12 / 3.92 (as locked; a text use
+   of the rose sits just under 4.5 — stated on the card, not altered), plum 4.98 / 4.64 / 4.41,
+   win 5.76 / 5.36 / 5.10, loss 6.50 / 6.06 / 5.76. The palette's dim #A87B8C and
+   accent_soft_line rgba(183,90,120,.28) have no contract slot (chips keep --brand as the line). */
+body[data-theme="blush"]{--field:#FDF5F6;--panel:#FFFFFF;--hi:#FBEEF1;--edge:#F0DCE1;
+ --ink:#2B0E1A;--muted:#7A4658;--brand:#B75A78;--brandglow:rgba(183,90,120,.22);--accent:#8460A8;
+ --label:#8460A8;--win:#15753F;--loss:#B4223A;
+ --railgrad:linear-gradient(90deg,#B75A78,transparent);
  --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
- --gold-lo:#D99AAD;--gold-hi:#FFFFFF;--sunk:#F1CFD8;
- --wayfind:#B5174E;
- --panel-shadow:0 8px 24px rgba(181,23,78,.14), inset 0 1px 0 #FFFFFF;
- --field-grad:linear-gradient(180deg,#FBE3E8 0%,#F3D3DC 100%);
- --accent-soft:rgba(181,23,78,.10)}
+ --gold-lo:#E4C7CF;--gold-hi:#FFFFFF;--sunk:#F6E6EA;
+ --wayfind:#B75A78;
+ --panel-shadow:0 8px 22px rgba(183,90,120,.09), inset 0 1px 0 rgba(255,255,255,.75);
+ --field-grad:none;
+ --accent-soft:rgba(183,90,120,.08)}
 body[data-theme="rosenight"]{--field:#0F0A0D;--panel:#1A1216;--hi:#241820;--edge:#2E1F27;
  --ink:#FBF1F4;--muted:#B08A98;--brand:#FF6B9D;--brandglow:rgba(255,107,157,.35);--accent:#FF6B9D;
  --label:#D98AA8;--win:#3DD68C;--loss:#FF5C6C;
