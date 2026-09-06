@@ -125,6 +125,7 @@ body[data-theme]{
 }
 .screen,.bnav{
   --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
+  --surface2:var(--t-hi);   /* cc#1778: the C·A·R·D tile fill; a :root literal in mobile_app.css until now */
   --line:var(--t-edge); --line2:var(--t-edge);
   --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
   --grn:var(--t-win); --red:var(--t-loss);
