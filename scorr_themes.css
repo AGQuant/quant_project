@@ -395,13 +395,35 @@ body[data-theme="silvergold"]{--field:#EDEEF2;--panel:#FFFFFF;--hi:#F7F8FA;--edg
    shadow + metallic top lip; --field-grad = the top-to-bottom field wash; --accent-soft = the chip
    fill behind wine text. gold-lo = line2 #B99FB1, gold-hi white, sunk one step below the field. The
    wordmark gradient (wine -> purple) is a scoped rule in theme_mobile.css reading --brand/--wayfind. */
-body[data-theme="winepurple"]{--field:#EBE2E8;--panel:#FBF9FA;--hi:#F1E9EF;--edge:#D2BFCC;
- --ink:#2A1226;--muted:#6A4A63;--brand:#6B1F35;--brandglow:rgba(107,31,53,.22);--accent:#5B3A9B;
- --label:#5B3A9B;--win:#15753F;--loss:#B4223A;
- --railgrad:linear-gradient(90deg,#6B1F35,transparent);
- --texture:repeating-linear-gradient(115deg,rgba(0,0,0,.012) 0 2px,transparent 2px 9px);
- --gold-lo:#B99FB1;--gold-hi:#FFFFFF;--sunk:#E2D6DE;
- --wayfind:#5B3A9B;
- --panel-shadow:0 8px 24px rgba(74,20,40,.14), inset 0 1px 0 #FFFFFF;
- --field-grad:linear-gradient(180deg,#F1EAEF 0%,#E6DBE3 100%);
- --accent-soft:rgba(107,31,53,.10)}
+/* cc#1753 WINE PURPLE = AUBERGINE, now a DARK set (WINE_PURPLE_AUBERGINE_V1, session_log 39478;
+   founder picked candidate 4 of design_refs/scorr_wine_purple_aubergine_R1.html, 06-Sep: "4
+   Aubergine"). Supersedes the cc#1722 light palette above — it sat too close to Seashell (39474).
+   Spread is now 4 dark (Gold Night, Midnight Blue, AI Night, Wine Purple) / 3 light. Palette
+   applied verbatim onto the contract keys: field #120A18 · panel #1C1223 · panel_hi #241830 ->
+   --hi · line #31223C -> --edge · line2 #45325A -> --gold-lo · chalk #EFE7F7 -> --ink · muted
+   #AB98C4 · accent wine #C64B80 -> --brand (CTAs, hero labels, active nav glyph + underline, tick,
+   section labels, bell badge) · accent2 purple #7E57C2 -> --accent, --label and --wayfind (dot,
+   links, wordmark gradient partner — theme_mobile.css paints the wordmark --brand -> --wayfind) ·
+   card_rail wine -> purple -> --railgrad · dark-safe P&L pair #34D399 / #FB7185 (the light pair
+   fails on #120A18; the hero word #FB7185 stays distinct from the wine accent) · field_gradient
+   -> --field-grad (the radial glow, same role Midnight Blue uses) · panel_shadow + panel_lip ->
+   --panel-shadow · accent_soft rgba(198,75,128,.12) -> --accent-soft. Dark-set roles filled with
+   dark values, never left to fall through: --texture = the dark hairline (white at .014, as
+   goldnight / dark), --sunk = the gradient's bottom stop #0B0610 (one step below the field),
+   --gold-hi = the lip's lavender #D2BEFF (derived from panel_lip rgb(210,190,255)), --brandglow =
+   the wine at .35 (the dark sets' glow strength). meta theme-color #120A18 comes from --field via
+   the resolver. CONTRAST on field / panel / hi: chalk 16.1 / 15.0 / 14.0, muted 7.41 / 6.91 /
+   6.42, wine 4.36 / 4.07 / 3.78 (as locked — a text use of the wine sits just under 4.5, stated on
+   the card, not altered), purple 3.72 / 3.47 / 3.23 (dot / links / rail, as locked), win 10.1 /
+   9.42 / 8.75, loss 7.21 / 6.73 / 6.25. No slot in the contract: dim #7A6A94, accent_soft_line
+   rgba(198,75,128,.40) (chips keep --brand as the line). */
+body[data-theme="winepurple"]{--field:#120A18;--panel:#1C1223;--hi:#241830;--edge:#31223C;
+ --ink:#EFE7F7;--muted:#AB98C4;--brand:#C64B80;--brandglow:rgba(198,75,128,.35);--accent:#7E57C2;
+ --label:#7E57C2;--win:#34D399;--loss:#FB7185;
+ --railgrad:linear-gradient(180deg,#C64B80,#7E57C2);
+ --texture:repeating-linear-gradient(115deg,rgba(255,255,255,.014) 0 2px,transparent 2px 9px);
+ --gold-lo:#45325A;--gold-hi:#D2BEFF;--sunk:#0B0610;
+ --wayfind:#7E57C2;
+ --panel-shadow:0 10px 28px rgba(0,0,0,.55), inset 0 1px 0 rgba(210,190,255,.14);
+ --field-grad:radial-gradient(120% 80% at 50% 0%, #221334 0%, #120A18 55%, #0B0610 100%);
+ --accent-soft:rgba(198,75,128,.12)}
