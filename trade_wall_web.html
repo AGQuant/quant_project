@@ -112,7 +112,11 @@
 <div class="wrap">
   <div class="hd-row">
     <h1>Wall of Trades</h1>
-    <button class="ibtn" onclick="openOther()" title="Other engines not in the 5 primary buckets">i</button>
+    <!-- cc#1733: the (i) opens the shared ScorrInfoSheet (cc#1697/cc#1708 shell) with universe /
+         entry / exit per engine from /api/tradewall/engine-rules -- every cell read from config,
+         plus the cc#1295 other-engines list as its last section. openOther() stays as the
+         fallback when the shared sheet is not on the page. -->
+    <button class="ibtn" onclick="openWallInfo()" title="Universe, entry and exit rules per engine">i</button>
   </div>
   <!-- cc#1587: subline is set by JS per mode — approved-only (default) or the engine hierarchy
        when app_config.wot_buckets_enabled is widened. The engines text lives in SUB_ENGINES. -->
@@ -186,7 +190,7 @@
    scanner — DATE columns with no time) prints its date only, never a fabricated clock time. */
 var BUCKETS = {
   FUTURES: ['V8', 'TC Scanner', 'Index Intel'],
-  EQUITY: ['QB Basket', 'Investment Scanner'],
+  EQUITY: ['QB Basket', 'Investment Scanner', 'Screeners'],   /* cc#1733: third equity source */
 };
 var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: null,
               status: 'open', instrument: 'FUTURES', bucket: 'V8',
@@ -544,6 +548,52 @@ function openOther(){
     });
 }
 function closeOther(){ document.getElementById('otherOv').classList.remove('open'); }
+
+/* cc#1733: the engine-rules (i) sheet. One table, one row per engine unit (basket / screen /
+   index), five columns; the epochs on one line at the top so a reader knows why older signals
+   are not listed; the cc#1295 other-engines list kept as the last section. Payload is served,
+   never typed here -- a cell that reads "not specified in config" is the API saying so. */
+function openWallInfo(){
+  if (!window.ScorrInfoSheet){ openOther(); return; }
+  ScorrInfoSheet.open('Wall of Trades · engine rules', '<div class="empty">Loading…</div>');
+  Promise.all([
+    fetchWithTimeout('/api/tradewall/engine-rules').then(function(r){ return r.json(); }),
+    fetchWithTimeout('/api/tradewall/other-engines').then(function(r){ return r.json(); }).catch(function(){ return {engines: []}; })
+  ]).then(function(res){
+    var d = res[0] || {}, o = res[1] || {};
+    var top = '<b>Wall epoch</b> ' + esc(d.wall_epoch || '--') + ' · <b>Equity fresh-signals epoch</b> '
+      + esc(d.equity_epoch || '--') + ' (' + esc(d.equity_epoch_source || '') + ') — QB Basket, Investment Scanner and Screeners '
+      + 'rows entered before that date are not listed; futures buckets are gated by the wall epoch only.';
+    var rows = d.engines || [];
+    var tbl = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<thead><tr>' + ['Engine','Instrument','Universe','Entry rule','Exit rule'].map(function(c){
+          return '<th style="text-align:left;padding:5px 6px;border-bottom:1px solid var(--line);white-space:nowrap">' + c + '</th>'; }).join('')
+      + '</tr></thead><tbody>'
+      + rows.map(function(r){
+          var eng = esc(r.engine) + (r.sub ? ' <span style="color:var(--mut)">· ' + esc(r.sub) + '</span>' : '');
+          return '<tr>'
+            + '<td style="padding:5px 6px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top" title="' + esc(r.source || '') + '">' + eng + '</td>'
+            + '<td style="padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top">' + esc(r.instrument || '') + '</td>'
+            + '<td style="padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top">' + esc(r.universe || '') + '</td>'
+            + '<td style="padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top">' + esc(r.entry || '') + '</td>'
+            + '<td style="padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top">' + esc(r.exit || '') + '</td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>'
+      + '<div class="isheet-hon">Source per row on hover. "' + esc(d.not_in_config_marker || 'not specified in config')
+      + '" = no machine-readable rule; the source names where the behaviour lives.</div>';
+    var others = (o.engines || []);
+    var otherHtml = others.length
+      ? others.map(function(e){ return '<div class="ov-row"><span>' + esc(e.name) + '</span><span>' + e.open + ' open · ' + e.closed + ' closed</span></div>'; }).join('')
+      : 'No other engines with a trade book right now.';
+    ScorrInfoSheet.setBody(
+      ScorrInfoSheet.section('Scope', top)
+      + ScorrInfoSheet.section('Engines on the wall (' + rows.length + ')', tbl)
+      + ScorrInfoSheet.section('Other engines not on the wall', otherHtml));
+  }).catch(function(e){
+    ScorrInfoSheet.setBody('<div class="empty">Could not load — ' + esc(e.message) + '</div>');
+  });
+}
 document.addEventListener('keydown', function(e){
   if (e.key === 'Escape') closeOther();
 });
