@@ -36,10 +36,19 @@ def _is_market_hours(now: datetime) -> bool:
     return _MKT_OPEN <= now.time() <= _MKT_CLOSE
 
 
-def _eod_fallback(cur, symbol: str):
-    """Original all-EOD raw_prices formula -- unchanged, used outside market hours."""
-    cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s
-                   ORDER BY price_date DESC LIMIT 23""", (symbol,))
+def _eod_fallback(cur, symbol: str, as_of=None):
+    """Original all-EOD raw_prices formula -- unchanged, used outside market hours.
+
+    cc#1797: `as_of` (a date) anchors the SAME formula on the closes up to and including that
+    date, so a past session's Day/Week/Month can be read through this one function instead of a
+    second return calculation elsewhere (PCR_WRITER_CONFIDENCE_READ_V1, session_log 39783). None
+    = the newest closes, exactly as before."""
+    if as_of is None:
+        cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s
+                       ORDER BY price_date DESC LIMIT 23""", (symbol,))
+    else:
+        cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND price_date <= %s
+                       ORDER BY price_date DESC LIMIT 23""", (symbol, as_of))
     nf = [float(r[0]) for r in cur.fetchall() if r[0] is not None][::-1]
     nf_day = (nf[-1] / nf[-2] - 1) * 100 if len(nf) >= 2 and nf[-2] else None
     nf_wk = (nf[-1] / nf[-6] - 1) * 100 if len(nf) >= 6 and nf[-6] else None
@@ -47,11 +56,18 @@ def _eod_fallback(cur, symbol: str):
     return nf_day, nf_wk, nf_mo, "eod"
 
 
-def live_nifty_dwm(cur, symbol: str = "NIFTY50"):
+def live_nifty_dwm(cur, symbol: str = "NIFTY50", as_of=None):
     """Returns (nf_day, nf_week, nf_month, source) as percent returns (float|None).
     source = "live_intraday" during market hours with a usable live tick, else "eod".
+
+    cc#1797: `as_of` (date, optional). A PAST date skips the live path and reads the EOD formula
+    anchored on that date's close (t vs t-1 / t-5 / t-22). Today or None behaves exactly as before,
+    so every existing caller (the Home DAY/WK chips, the Trade Check gates, the PCR composer) is
+    untouched by this parameter.
     """
     now = _ist_now()
+    if as_of is not None and as_of < now.date():
+        return _eod_fallback(cur, symbol, as_of)
     if _is_market_hours(now):
         # cc#1200: was `source='fyers_eq'`, an allow-list of ONE. The index cash legs are now
         # healed from Yahoo and written source='yahoo' (index_heal.py), and this filter could not

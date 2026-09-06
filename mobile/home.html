@@ -474,6 +474,8 @@ body[data-theme]{
 .pfrow b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;white-space:nowrap}
 .pffx{margin-top:var(--space-10);font-size:var(--type-12);line-height:1.6;color:var(--txt,#E9EEFB)}
 .pffx b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800}
+/* cc#1797: the PCR read sheet's one footer line (footer sentence + as-of), muted and small. */
+.pcrfoot{font-size:var(--type-10);color:var(--mut)}
 .v10sum i.pfib{min-width:16px;height:16px;border-radius:50%;border:var(--bw-1) solid var(--line);
   font-style:normal;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;font-size:var(--type-9);
   color:var(--txt,#E9EEFB);display:inline-flex;align-items:center;justify-content:center;
@@ -2878,7 +2880,29 @@ function oiSheetOpen(inner){
   });  return sheet;
 }
 function oiGuide(){ oiSheetOpen(oiGuideInner()); }
-/* cc#1796: pcrRead() (the cc#1576 PCR read sheet) is removed with its (i) button; oiSheetOpen() stays for the Max Pain read below. */
+/* cc#1796 removed the cc#1576 pcrRead(). cc#1797 (PCR_WRITER_CONFIDENCE_READ_V1, session_log 39783):
+   the (i) returns with a NEW read. The sheet prints ONLY what the server composer fired today —
+   pcr_mood.compose_confidence, served on /api/pcr/mood as `confidence`: the plain sentence(s) (put
+   first), or the one no-shift line, then the footer and the as-of. THE DISPLAY RULE IS A GATE: no put
+   or call OI numbers, no % change, no option prices, no strike. Nothing numeric in the payload is read
+   here except the as-of stamp, and nothing is worded or classified on the client. */
+function pcrRead(){
+  var sheet = oiSheetOpen('<div class="pfsh">Market mood \u00b7 PCR \u00b7 the read</div>'
+    + '<div class="pffx" id="pcrReadBody"><p>Loading the read\u2026</p></div>');
+  fetchWithTimeout('/api/pcr/mood?underlying=NIFTY').then(function(r){ return r.json(); }).then(function(m){
+    var body = document.getElementById('pcrReadBody');
+    if (!body || !sheet.parentNode) return;
+    var c = m && m.confidence;
+    var lines = (c && (c.sentences || []).length) ? c.sentences : ((c && c.text) ? [c.text] : []);
+    if (!lines.length){ body.innerHTML = '<p>The read is not available this tick.</p>'; return; }
+    body.innerHTML = lines.map(function(s){ return '<p>' + esc(s) + '</p>'; }).join('')
+      + '<p class="pcrfoot">' + esc(c.footer || "Describes today's mood, not a forecast.")
+      + (c.as_of ? ' \u00b7 As of ' + esc(c.as_of) : '') + '</p>';
+  }).catch(function(){
+    var body = document.getElementById('pcrReadBody');
+    if (body) body.innerHTML = '<p>The read is not available this tick.</p>';
+  });
+}
 /* cc#1575 (OI_STRUCTURE_INTERPRET_V1, 36283): the Max Pain (i) read — headline, read, evidence
    line, caveats — from the ONE composer /api/oi/structure?underlying= (the web popover reads the
    same words). Nothing is worded or classified here; the guide sits underneath. */
@@ -4681,11 +4705,13 @@ function heroCard2(d){
      with two, it just has one gap to spread instead of two; re-measured, not assumed, see this
      task's own result for the before/after deck-height numbers (unchanged, per the founder's hard
      constraint). adrBar()'s own function body is untouched, only this call site moved. */
-  /* cc#1796 (founder 06-Sep: "Remove I button from pcr card"): the cc#1576 (i) beside the date and the
-     PCR read sheet it opened are gone. The date stays; GREED/FEAR word, gauge, needle, scale labels are
-     untouched below. The Max Pain card keeps its own (i) (oiRead) — shared .oiib class, separate instance. */
+  /* cc#1796 removed the cc#1576 (i) and its read sheet. cc#1797 (PCR_WRITER_CONFIDENCE_READ_V1,
+     session_log 39783) puts the (i) BACK in the same slot beside the date, opening the new pcrRead()
+     below. GREED/FEAR word, gauge, needle, scale labels, PCR value and date are untouched. The Max Pain
+     card keeps its own (i) (oiRead) — shared .oiib class, separate instance. */
   return '<div class="c"><div class="c2body"><div class="chd"><div class="t">Market mood \u00b7 PCR</div>'
-    + '<div class="rgt">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today') + '</div></div>'
+    + '<div class="rgt" style="display:inline-flex;align-items:center;gap:8px">' + (PIV && PIV.__date ? esc(PIV.__date) : 'today')
+    + '<button type="button" class="oiib" onclick="pcrRead()" aria-label="Read this card">i</button></div></div>'
     + pcrMood(d.hero || {})
     + '</div>'
     /* cc#1182: the text link becomes the cc#1181 bevel button. Same destination, same element,
