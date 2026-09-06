@@ -851,6 +851,13 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .ipf .ippnl{margin-left:auto;flex-shrink:0;white-space:nowrap;font:600 13px var(--f-m)}
 #pane-index .ipsig{margin-top:6px;font:500 10.5px var(--f-m);color:var(--tx3)}
 #pane-index .ipsig b{color:var(--tx2);font-weight:600}
+/* cc#1756: V10 chart footer lane — .v10ln is a lane label (centred on its candle x; .x = a ×N
+   cluster), .v10ld its thin leader up to the candle. Low contrast on purpose: guides, not data,
+   and solid so they cannot be read as the dashed price lines. */
+#v10ChartBox .v10ln{position:absolute;transform:translateX(-50%);pointer-events:auto;cursor:default;font:700 9.5px var(--f-m);letter-spacing:.04em;line-height:13px;padding:0 4px;border-radius:4px;background:var(--bg);white-space:nowrap;border:1px solid transparent}
+#v10ChartBox .v10ln.x{color:var(--mut);border-color:var(--line2)}
+#v10ChartBox .v10ld{position:absolute;width:1px;background:rgba(148,166,210,.28);pointer-events:none}
+#v10ChartBox .v10ld.x{background:rgba(148,166,210,.42)}
 /* record strip */
 #pane-index .rec{display:grid;grid-template-columns:auto auto auto 1fr auto;gap:22px;align-items:center;padding:14px 18px}
 #pane-index .rec .k{font:600 9.5px var(--f-m);letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
@@ -1423,7 +1430,8 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
         <button id="v10tg-BANKNIFTY" onclick="setV10Sym('BANKNIFTY')" style="border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--mut);font-family:inherit">BANKNIFTY</button>
       </div>
       <div style="flex:1;min-width:10px"></div>
-      <div id="v10ChartLegend" style="font-size:10px;color:var(--mut)">B / S entry · FLIP B / S = same-bar exit + entry · small square = exit (green target, red stop, grey other) · ○ OPEN leg · pins on the spot bar · hover or tap a marker for the index level and option P&amp;L</div>
+      <!-- cc#1756: the legend describes what is DRAWN — markers on the plot, codes in the footer lane. -->
+      <div id="v10ChartLegend" style="font-size:10px;color:var(--mut)">on the plot: ▲ ▼ entry · ○ open leg · small square = exit (green target, red stop, grey other), pinned on the spot bar · in the footer lane, each tied to its candle by a thin vertical line: B / S entry · FLIP B / S = same-bar exit + entry · T / SL / other = exit · ×N = a cluster too dense to stagger (hover or tap it for the list) · hover or tap a candle or a lane label for the index level and option P&amp;L</div>
       <button onclick="closeV10Chart()" title="Close (Esc)" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--line2);background:var(--surface2);color:var(--mut);cursor:pointer;font-size:14px;flex:none">&#10005;</button>
     </div>
     <div id="v10ChartBox" style="flex:1;min-height:0;position:relative"></div>
@@ -6877,12 +6885,17 @@ function buildV10Markers(candles, open, closed){
       const code=e.reason==='TARGET'?'T':e.reason;
       const col=e.reason==='TARGET'?UP:(e.reason==='SL'?DN:C.mut);
       tip(e.time,(code==='T'?'Target':code==='SL'?'Stop':code)+' exit · option P&L'+(pnlTxt(e.pnl)||' n/a'));
-      return {time:e.time,position:e.long?'aboveBar':'belowBar',color:col,shape:'square',size:0.6,text:''};
+      /* cc#1756: `code` is the FOOTER-LANE label (T / SL / other keyword, muted); the plot keeps
+         the unlabelled square exactly as cc#1742 drew it. */
+      return {time:e.time,position:e.long?'aboveBar':'belowBar',color:col,shape:'square',size:0.6,text:'',code:code,lane:'exit'};
     }
     tip(e.time,(e.long?'B':'S')+' at '+num(e.level,0)+(e.kind==='open'?' · OPEN leg':''));
+    /* cc#1756 (founder 06-Sep "Dont overlap Buy Sell, better show in footer indicate by vertical
+       lines point to that candle"): NO TEXT ON THE PLOT. The arrow / ring keeps its shape, colour
+       and position; the code (B, S, B · OPEN) moves to the footer lane, tied back by a leader. */
     return {time:e.time,position:e.long?'belowBar':'aboveBar',color:e.long?UP:DN,
       shape:e.kind==='open'?'circle':(e.long?'arrowUp':'arrowDown'),
-      text:(e.long?'B':'S')+(e.kind==='open'?' · OPEN':'')};
+      text:'',code:(e.long?'B':'S')+(e.kind==='open'?' · OPEN':''),lane:'entry'};
   };
   const byBar={}; ev.forEach(e=>{ (byBar[e.time]=byBar[e.time]||[]).push(e); });
   const out=[];
@@ -6893,7 +6906,7 @@ function buildV10Markers(candles, open, closed){
       // the flip: one glyph, the entry's direction and colour; the level and the closed leg's option P&L go to the tooltip
       tip(ent.time,'FLIP '+(ent.long?'B':'S')+' at '+num(ent.level,0)+' · closed leg option P&L'+(pnlTxt(ex.pnl)||' n/a'));
       out.push({time:ent.time,position:ent.long?'belowBar':'aboveBar',color:ent.long?UP:DN,
-        shape:ent.long?'arrowUp':'arrowDown',text:'FLIP '+(ent.long?'B':'S')});
+        shape:ent.long?'arrowUp':'arrowDown',text:'',code:'FLIP '+(ent.long?'B':'S'),lane:'entry'});   // cc#1756: label in the lane, not on the plot
       rest.forEach(e=>out.push(one(e)));
     } else g.forEach(e=>out.push(one(e)));
   });
@@ -6948,11 +6961,106 @@ async function loadV10Chart(){
     });
     const series=chart.addCandlestickSeries({upColor:UP,downColor:DN,borderVisible:false,wickUpColor:UP,wickDownColor:DN});
     series.setData(candles); _v10chart=chart; _v10series=series;
+    window._v10Chart=chart;   // cc#1756: the live chart handle, readable by a render check (as _v10LastMarkers is)
     let markers=[];
     try{ markers=buildV10Markers(candles, open, closed); }
     catch(me){ console.warn('[v10chart] markers',me&&me.message); }   // a bad trade row must not cost the whole chart
     window._v10LastMarkers=markers;   // cc#1742: what is actually drawn, readable by a render check
     if(markers.length) series.setMarkers(markers);
+    /* ── cc#1756 · THE FOOTER LANE (founder 06-Sep: "Dont overlap Buy Sell, better show in footer
+       indicate by vertical lines point to that candle") ────────────────────────────────────────
+       The plot carries MARKERS ONLY (arrows, rings, squares — shape, colour, position exactly as
+       cc#1742 left them; every marker's `text` is now ''). Every event's short code (B, S, FLIP B,
+       FLIP S, B · OPEN, T, SL, other) sits in a fixed-height strip at the foot of the price pane,
+       above the time axis, at the SAME x as its candle (timeScale.timeToCoordinate), with a thin
+       low-contrast vertical leader from the label up to that candle. The candles keep clear of
+       the strip through the price scale's bottom margin, so nothing is painted under it.
+       COLLISIONS are resolved VERTICALLY ONLY (the cc#1739 rule): labels are placed left to
+       right into three sub-rows, each taking the first row whose last label ends before it
+       starts; a label no row can hold is folded into its predecessor and the pair becomes ONE
+       "×N" entry at the cluster's centre x, leader to the middle of the cluster, the members
+       listed on hover / tap. A label never slides sideways off its candle; an event is never
+       dropped — window._v10Lane reports events, entries and marker count for a render check.
+       Redrawn on pan / zoom (visible-range change) and on resize. Hover / tap on a lane label
+       shows the same cc#1742 tooltip the marker shows (level + option P&L). */
+    const byTime={}; candles.forEach(c=>{ byTime[c.time]=c; });
+    const LANE_ROW=15, LANE_ROWS=3, LANE_H=LANE_ROW*LANE_ROWS+6, LANE_GAP=4;
+    const lane=document.createElement('div'); lane.id='v10Lane';
+    lane.style.cssText='position:absolute;left:0;height:'+LANE_H+'px;z-index:4;pointer-events:none;border-top:1px solid rgba(148,166,210,.14);background:'+C.bg+';overflow:hidden';
+    const leaders=document.createElement('div'); leaders.id='v10Leaders';
+    leaders.style.cssText='position:absolute;left:0;top:0;z-index:3;pointer-events:none;overflow:hidden';
+    const probe=document.createElement('div'); probe.className='v10ln'; probe.style.cssText='position:absolute;visibility:hidden;left:0;top:0;transform:none';
+    box.appendChild(leaders); box.appendChild(lane); box.appendChild(probe);
+    probe.id='v10LaneProbe'; probe.setAttribute('aria-hidden','true');
+    const _wCache={}; const textW=t=>{ if(_wCache[t]==null){ probe.textContent=t; _wCache[t]=probe.offsetWidth||Math.round(t.length*6.2)+8; probe.textContent=''; } return _wCache[t]; };
+    const ts=chart.timeScale();
+    const laneGeom=()=>{ const tsH=ts.height(), psW=chart.priceScale('right').width(); const paneH=box.clientHeight-tsH; return {tsH,psW,paneH,laneTop:paneH-LANE_H}; };
+    const fitLane=()=>{ const g=laneGeom(); try{ series.priceScale().applyOptions({scaleMargins:{top:0.08,bottom:Math.min(0.6,(LANE_H+10)/Math.max(1,g.paneH))}}); }catch(e){} };
+    function showLaneTip(lines,x,yTop){
+      tipEl.innerHTML=lines.map(esc).join('<br>'); tipEl.style.display='block';
+      tipEl.style.left=Math.max(8,Math.min(x-tipEl.offsetWidth/2, box.clientWidth-tipEl.offsetWidth-8))+'px';
+      tipEl.style.top=Math.max(8,yTop-8-tipEl.offsetHeight)+'px';
+    }
+    function drawLane(){
+      if(!_v10chart||_v10chart!==chart) return;
+      const g=laneGeom();
+      lane.style.bottom=g.tsH+'px'; lane.style.right=g.psW+'px';
+      leaders.style.right=g.psW+'px'; leaders.style.bottom=g.tsH+'px';
+      /* the events on screen: an event outside the visible window has no x and is not on the plot either */
+      const items=[];
+      markers.forEach((m,i)=>{
+        const x=ts.timeToCoordinate(m.time); if(x==null) return;
+        const bar=byTime[m.time]||{};
+        /* the leader ends just under the candle for an above-bar marker, and just under the glyph
+           for a below-bar one, so it always points at that candle and never runs through its glyph */
+        let y=(bar.low!=null)?series.priceToCoordinate(bar.low):null;
+        if(y!=null) y+=(m.position==='belowBar'?(m.shape==='square'?14:22):2);
+        items.push({i,x:Math.round(x),y:(y==null?g.laneTop:Math.max(0,Math.min(g.laneTop,Math.round(y)))),code:m.code||'',col:m.color,time:m.time});
+      });
+      items.sort((a,b)=>a.x-b.x||a.i-b.i);
+      let groups=items.map(it=>({members:[it]}));
+      for(let guard=0;guard<600;guard++){
+        const rows=[]; for(let k=0;k<LANE_ROWS;k++) rows.push(-1e9);
+        let bad=-1;
+        for(let gi=0; gi<groups.length; gi++){
+          const G=groups[gi];
+          G.cx=Math.round(G.members.reduce((a,m)=>a+m.x,0)/G.members.length);
+          G.label=G.members.length>1?('×'+G.members.length):G.members[0].code;
+          G.w=textW(G.label); G.left=G.cx-G.w/2; G.right=G.cx+G.w/2;
+          let r=-1; for(let k=0;k<LANE_ROWS;k++){ if(G.left>=rows[k]+LANE_GAP){ r=k; break; } }
+          if(r<0){ bad=gi; break; }
+          G.row=r; rows[r]=G.right;
+        }
+        if(bad<1) break;   // every group placed (or, impossibly, the first one failed on empty rows)
+        groups[bad-1].members=groups[bad-1].members.concat(groups[bad].members); groups.splice(bad,1);   // fold into the predecessor -> ×N
+      }
+      lane.innerHTML=''; leaders.innerHTML='';
+      const report=[];
+      groups.forEach(G=>{
+        const clustered=G.members.length>1, top=G.row*LANE_ROW+3;
+        const el=document.createElement('div'); el.className='v10ln'+(clustered?' x':'');
+        el.textContent=G.label; el.style.left=G.cx+'px'; el.style.top=top+'px';
+        if(!clustered) el.style.color=G.members[0].col;
+        el.title=clustered?G.members.map(m=>m.code).join(' · '):G.label;
+        const tipLines=clustered
+          ? G.members.map(m=>m.code+' — '+((_v10Tips[m.time]||[]).join(' / ')||'no detail'))
+          : (_v10Tips[G.members[0].time]||[G.label]);
+        el.onmouseenter=el.onclick=function(ev){ if(ev&&ev.stopPropagation) ev.stopPropagation(); showLaneTip(tipLines,G.cx,g.laneTop+top); };
+        el.onmouseleave=function(){ tipEl.style.display='none'; };
+        lane.appendChild(el);
+        const mid=G.members[Math.floor((G.members.length-1)/2)];
+        const lx=clustered?G.cx:G.members[0].x, ly=clustered?mid.y:G.members[0].y;
+        const ln=document.createElement('div'); ln.className='v10ld'+(clustered?' x':'');
+        ln.style.left=lx+'px'; ln.style.top=ly+'px'; ln.style.height=Math.max(0,g.laneTop+top-ly)+'px';
+        leaders.appendChild(ln);
+        report.push({label:G.label,row:G.row,cx:G.cx,left:Math.round(G.left),right:Math.round(G.right),leaderX:lx,leaderTop:ly,
+                     members:G.members.map(m=>({code:m.code,x:m.x,y:m.y,time:m.time}))});
+      });
+      window._v10Lane={entries:report,events:items.length,markers:markers.length,laneTop:g.laneTop,laneH:LANE_H,rows:LANE_ROWS,sym:_v10sym};
+    }
+    fitLane();
+    ts.subscribeVisibleLogicalRangeChange(function(){ requestAnimationFrame(drawLane); });
+    requestAnimationFrame(function(){ drawLane(); requestAnimationFrame(drawLane); });
     /* cc#1742 scope 4 — detail on demand: the level and the option P&L that left the plot show in
        a tooltip on the bar under the crosshair (hover on desktop, tap on touch — LWC fires the
        crosshair move for both). Nothing is deleted from the data, only from the default view. */
@@ -6975,7 +7083,7 @@ async function loadV10Chart(){
       if(hit) _v10pendingScroll=hit.entry_ts;
     }
     if(_v10pendingScroll){var _sb=_v10SnapBar(candles,_v10pendingScroll);if(_sb){try{chart.timeScale().setVisibleRange({from:_sb.time-5400,to:_sb.time+5400});}catch(e){}}_v10pendingScroll=null;}
-    _v10ro=new ResizeObserver(()=>{ if(_v10chart) _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); });
+    _v10ro=new ResizeObserver(()=>{ if(_v10chart){ _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); fitLane(); requestAnimationFrame(drawLane); } });   // cc#1756: the lane follows the pane
     _v10ro.observe(box);
   }catch(e){
     if(_v10chart){try{_v10chart.remove();}catch(e2){} _v10chart=null;_v10series=null;}
