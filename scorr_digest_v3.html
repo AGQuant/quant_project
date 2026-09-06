@@ -205,7 +205,12 @@ section{margin-top:26px}
 .chip.more{color:var(--tx3);border-style:dashed}
 
 /* ── NEWS ──────────────────────────────────────── */
-.nrow{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:flex-start}
+/* cc#1748 (founder 06-Sep, light theme: "inside row colour for news and result is dark, should be
+   lighter"): the list card is --well (#EEF1F8 in light — darker than the #F5F7FB page), so every
+   row read as a grey slab. Rows now sit on --panel, the lighter step of the same surface pair
+   (#FFFFFF light / #121A33 dark — in dark that is the ordinary card surface, so nothing washes
+   out). The card keeps --well as its frame; no new hex, token contract only. */
+.nrow{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:flex-start;background:var(--panel)}
 .nrow:last-child{border-bottom:none}
 .sdot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
 .s-bull{background:var(--gr)} .s-bear{background:var(--rd)}
@@ -220,7 +225,13 @@ section{margin-top:26px}
 .rtab th{font-size:9.5px;letter-spacing:.15em;color:var(--tx3);text-transform:uppercase;
   text-align:left;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-weight:600}
 .rtab th.r{text-align:right} .rtab th.c{text-align:center}
-.rtab td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+.rtab td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top;background:var(--panel)}   /* cc#1748: rows on the lighter --panel step, same reason as .nrow */
+/* cc#1748: the Result Corner tier chips — ALL / LARGE / MID / SMALL with counts, the app's
+   raChips labels and order (scorr_digest_mobile.html), LARGE by default (founder 06-Sep). */
+.rcseg{display:inline-flex;gap:4px;margin-left:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px}
+.rcseg button{border:none;border-radius:6px;padding:4px 10px;font-family:var(--f-m);font-size:10.5px;letter-spacing:.06em;font-weight:600;cursor:pointer;background:transparent;color:var(--tx3)}
+.rcseg button.on{background:var(--cy);color:var(--bg)}
+.rcseg button .n{opacity:.7;margin-left:4px;font-weight:500}
 .rtab tr:last-child td{border-bottom:none}
 .rtab tbody tr:hover{background:rgba(34,211,238,.035)}
 .rtab td.r{text-align:right} .rtab td.c{text-align:center;white-space:nowrap}
@@ -980,6 +991,24 @@ function _sortTh(label,key,state,onclickExpr){
 }
 var RC_SORT={key:null,dir:1};
 var RC_PAGE=25, RC_SHOWN=RC_PAGE;
+/* cc#1748: tier filter — the app's RA_TIERS labels and order, LARGE by default (founder 06-Sep:
+   "All / Large / Mid / Small toggle and keep default Large ... both on mobile and web"). Filters
+   the FULL row set on the same `tier` field the TIER column prints (digest_v3._tier rank bucket —
+   no market-cap cutoff invented here). Session state only, no storage. */
+var RC_TIERS=['ALL','LARGE','MID','SMALL'];
+var RC_TIER='LARGE';
+function rcTierRows(all){ return RC_TIER==='ALL' ? all : all.filter(function(c){ return c.tier===RC_TIER; }); }
+function rcPickTier(t){
+  if(RC_TIERS.indexOf(t)<0) return;
+  RC_TIER=t; RC_SHOWN=RC_PAGE;   // a filter change resets to page 1, load-more continues under the filter
+  rcRepaint();
+}
+function rcTierChips(all){
+  return '<span class="rcseg" role="tablist" aria-label="Result Corner tier">'+RC_TIERS.map(function(t){
+    var n=(t==='ALL')?all.length:all.filter(function(c){ return c.tier===t; }).length;
+    return '<button type="button" role="tab" aria-selected="'+(t===RC_TIER)+'" class="'+(t===RC_TIER?'on':'')+'" onclick="rcPickTier(\''+t+'\')">'+t+'<span class="n">'+n+'</span></button>';
+  }).join('')+'</span>';
+}
 var RC_TIER_RANK={LARGE:0,MID:1,SMALL:2};
 var RC_DOTCLS={green:'g',amber:'a',red:'r'};
 var RC_GETTERS={
@@ -1033,14 +1062,24 @@ function secResults(s,n){
   // default order (no RC_SORT.key) is exactly the payload's own order — ex_date DESC, written
   // analysis before computed rows, symbol — which already reads "result date desc" per scope
   // item 3; a sort click overrides it via _sortByState, same mechanism the page family uses.
-  var sorted=_sortByState(all,RC_SORT,RC_GETTERS);
+  // cc#1748: the tier filter runs over the FULL set (all of s.companies, not the visible page)
+  // BEFORE the sort and the page slice, so the rows, the header stat and the chip counts always
+  // describe the same set. Default order inside a tier is the payload's own: ex_date DESC, then
+  // written analysis first (cc#1690's rule, unchanged).
+  var tiered=rcTierRows(all);
+  var sorted=_sortByState(tiered,RC_SORT,RC_GETTERS);
   var shown=sorted.slice(0,RC_SHOWN);
-  // cc#1690: total / l2_rows / latest_polished all come straight off the payload -- never
-  // recomputed client-side when the server (digest_v3._results_analysed) already carries them.
+  var untiered=all.filter(function(c){ return c.tier==null; }).length;
+  var l2n=tiered.filter(function(c){ return !!c.l2; }).length;
+  // cc#1690: latest_polished comes straight off the payload; cc#1748: the reported / detailed
+  // counts are per active tier (ALL = the payload's own total + l2_rows, so ALL matches the server).
   var st=scorrAsofStamp(s.latest_polished);
+  var stat=(RC_TIER==='ALL')
+    ? (s.total||all.length)+' reported this quarter · '+(s.l2_rows!=null?s.l2_rows:l2n)+' with detailed analysis'+(untiered?' · untiered '+untiered:'')
+    : tiered.length+' '+RC_TIER.toLowerCase()+'-cap reported this quarter · '+l2n+' with detailed analysis';
   var h='<div class="sh"><span class="snum">'+esc(n)+'</span><span class="st">Result Corner</span>'+
         (st.txt?'<span class="asof" style="margin-left:0'+(st.amber?';color:var(--am)':'')+'">as of <b>'+esc(st.txt)+'</b></span>':'')+
-        '<span class="asof">'+(s.total||all.length)+' reported this quarter · '+(s.l2_rows||0)+' with detailed analysis</span></div>';
+        '<span class="asof" id="rcStat">'+stat+'</span>'+rcTierChips(all)+'</div>';
   h += '<div class="card"><table class="rtab"><thead><tr>'+
        '<th>Company</th>'+rcTh('Result Date','DATE')+rcTh('Tier','TIER')+
        '<th class="r">Sales YoY</th>'+rcTh('PAT YoY','PAT')+'<th class="r">Margin vs LY</th>'+
@@ -1060,6 +1099,7 @@ function secResults(s,n){
            '<td class="c"><button type="button" class="rc-rbtn" onclick="rcOpenCard(\''+esc(c.symbol)+'\')">R</button></td>'+
            '</tr>';
   }).join('');
+  if(!shown.length) h += '<tr><td colspan="9" class="pend" style="background:var(--panel)">No '+(RC_TIER==='ALL'?'':RC_TIER.toLowerCase()+'-cap ')+'results on the desk this quarter.</td></tr>';   // cc#1748: an empty tier says so
   h += '</tbody></table>';
   if(sorted.length>shown.length) h += '<div style="padding:10px 16px;border-top:1px solid var(--line);background:var(--panel)">'+
        '<button type="button" class="rlink" style="background:none;border:0;cursor:pointer;font:inherit;color:var(--cy)" onclick="rcMore()">load more ↓ ('+shown.length+' of '+sorted.length+')</button></div>';
