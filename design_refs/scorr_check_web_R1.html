@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trade Check · web R1</title>
+<style>
+:root{--field:#F2F6F8;--panel:#FFFFFF;--hi:#EEF3F6;--edge:#D6E0E6;--ink:#12222B;--muted:#4A606C;--dim:#7B8B95;--accent:#0E7C8C;--win:#127A4D;--loss:#B3261E;--amber:#B26A00;--r:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--field);color:var(--ink);font:13px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+.mono{font-family:ui-monospace,Menlo,monospace}
+.wrap{max-width:1120px;margin:0 auto;padding:22px 20px 60px}
+h1{font-size:20px;font-weight:800;letter-spacing:-.01em}
+h1 i{font-style:normal;color:var(--accent)}
+.sub{font-size:11px;letter-spacing:.12em;color:var(--dim);margin-top:2px}
+.strip{display:grid;grid-template-columns:260px auto auto 1fr;gap:10px;align-items:center;margin:18px 0 8px}
+.in{height:38px;border:1px solid var(--edge);border-radius:8px;background:var(--panel);padding:0 12px;font:600 14px ui-monospace,monospace;display:flex;align-items:center;gap:8px}
+.in span{color:var(--dim);font-weight:400}
+.seg{display:inline-flex;border:1px solid var(--edge);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg b{padding:0 14px;height:36px;display:flex;align-items:center;font-size:12px;font-weight:600;color:var(--muted);border-right:1px solid var(--edge);cursor:pointer}
+.seg b:last-child{border-right:0}
+.seg b.on{background:var(--accent);color:#fff}
+.btn{height:38px;padding:0 18px;border-radius:8px;border:0;background:var(--ink);color:#fff;font-weight:700;font-size:13px;cursor:pointer}
+.btn.ghost{background:var(--panel);color:var(--ink);border:1px solid var(--edge)}
+.quick{font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.quick a{border:1px solid var(--edge);background:var(--panel);border-radius:6px;padding:3px 8px;font-family:ui-monospace,monospace;color:var(--muted);text-decoration:none}
+.grid{display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:16px}
+.hd{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.sym{font-size:22px;font-weight:800}
+.nm{font-size:12px;color:var(--muted);margin-top:2px}
+.px{text-align:right}
+.px b{font:700 20px ui-monospace,monospace}
+.px small{display:block;font-size:10.5px;color:var(--dim)}
+.eye{font-size:10px;letter-spacing:.14em;color:var(--dim);margin:16px 0 2px}
+.vrow{display:flex;justify-content:space-between;align-items:baseline}
+.vword{font-size:34px;font-weight:900;letter-spacing:-.02em;color:var(--win)}
+.vword.watch{color:var(--amber)} .vword.fail{color:var(--loss)}
+.score{font:800 30px ui-monospace,monospace}
+.score small{font-size:12px;color:var(--dim);font-weight:500;margin-left:4px}
+.meter{position:relative;height:8px;border-radius:4px;background:var(--hi);margin:12px 0 5px;overflow:visible}
+.meter i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:linear-gradient(90deg,var(--amber),var(--win))}
+.meter u{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--dim)}
+.ml{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.06em;color:var(--dim);font-family:ui-monospace,monospace}
+.tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}
+.tile{border:1px solid var(--edge);border-radius:8px;padding:9px 10px;cursor:pointer}
+.tile.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
+.tile b{display:block;font-size:10px;letter-spacing:.1em;color:var(--dim)}
+.tile .n{font:700 18px ui-monospace,monospace;margin-top:2px}
+.tile .n.w{color:var(--amber)} .tile .n.f{color:var(--loss)} .tile .n.v{color:var(--win)}
+.tile .b{font-size:10px;color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:10px;letter-spacing:.06em;padding:3px 8px;border-radius:6px;border:1px solid var(--edge);color:var(--muted);font-family:ui-monospace,monospace}
+.chip.red{border-color:var(--loss);color:var(--loss)}
+.chip.amb{border-color:var(--amber);color:var(--amber)}
+.info{margin-top:12px;font-size:11px;color:var(--dim);display:flex;gap:8px;align-items:center}
+.info i{display:inline-flex;width:18px;height:18px;border-radius:50%;border:1px solid var(--edge);align-items:center;justify-content:center;font-style:normal;font-size:11px;color:var(--muted)}
+.rh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.rh b{font-size:13px}
+.rh span{font-size:11px;color:var(--dim);font-family:ui-monospace,monospace}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10px;letter-spacing:.1em;color:var(--dim);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--edge)}
+td{padding:9px 8px;border-bottom:1px solid var(--edge);vertical-align:middle;font-size:12.5px}
+tr.r{cursor:pointer}
+tr.r:hover td{background:var(--hi)}
+tr.sel td{background:color-mix(in srgb,var(--accent) 7%,var(--panel))}
+td.id{font-family:ui-monospace,monospace;color:var(--dim);font-size:11px;width:44px}
+td.bar{width:160px}
+.bb{height:6px;border-radius:3px;background:var(--hi);overflow:hidden}
+.bb i{display:block;height:100%}
+.bb i.full{background:var(--win)} .bb i.half{background:var(--amber)} .bb i.none{background:var(--loss);width:3px !important}
+td.st{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;width:64px}
+.full{color:var(--win)} .half{color:var(--amber)} .none{color:var(--loss)}
+td.pt{font-family:ui-monospace,monospace;text-align:right;width:84px;white-space:nowrap}
+td.pt small{color:var(--dim)}
+.sheet td{padding:0;border-bottom:1px solid var(--edge)}
+.sh{padding:14px 12px 14px 52px;background:var(--hi)}
+.sh .h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.sh .h b{font-size:14px}
+.sh .h span{font:700 15px ui-monospace,monospace}
+.sh .h span small{font-weight:500;font-size:11px;color:var(--dim);margin-left:4px}
+.boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:640px}
+.bx{border:1px solid var(--edge);border-radius:8px;padding:9px 10px;background:var(--panel);opacity:.55}
+.bx b{display:block;font-size:10px;letter-spacing:.12em;color:var(--muted);margin-bottom:4px}
+.bx span{font-size:12px;color:var(--muted)}
+.bx.on{opacity:1;border-width:2px}
+.bx.on.f{border-color:var(--win);background:color-mix(in srgb,var(--win) 12%,var(--panel))} .bx.on.f b{color:var(--win)}
+.bx.on span{color:var(--ink)}
+.nums{margin-top:8px;font-size:11.5px;color:var(--muted)}
+.nums b{color:var(--ink)}
+.foot{margin-top:14px;font-size:10.5px;color:var(--dim);font-family:ui-monospace,monospace;display:flex;justify-content:space-between}
+</style></head>
+<body><div class="wrap">
+<h1>Trade <i>Check</i></h1>
+<div class="sub">V4 · DUAL-STYLE · BEST OF 4 · SCORE /100</div>
+<div class="strip">
+  <div class="in">PNB <span>Punjab National Bank</span></div>
+  <div class="seg"><b class="on">▲ LONG</b><b>▼ SHORT</b><b>◆ INVEST</b></div>
+  <button class="btn">Run check</button>
+  <div style="text-align:right"><button class="btn ghost">Future scans</button></div>
+</div>
+<div class="quick">QUICK <a>RELIANCE</a><a>INFY</a><a>HDFCBANK</a><a>TCS</a><a>ONGC</a><a>WIPRO</a><a>AXISBANK</a><a>SBIN</a></div>
+<div class="grid">
+  <div class="card">
+    <div class="hd">
+      <div><div class="sym">PNB</div><div class="nm">Punjab National Bank · PSU Banks · GVM 7.33</div></div>
+      <div class="px"><b>₹117.17</b><small>CMP · 06-Sep 20:39 · spot</small></div>
+    </div>
+    <div class="eye">BEST OF 4 · BUY-REV</div>
+    <div class="vrow"><div class="vword">Valid</div><div class="score">70.0<small>/ 100</small></div></div>
+    <div class="meter"><i style="width:70%"></i><u style="left:50%"></u><u style="left:65%"></u><u style="left:84%"></u></div>
+    <div class="ml"><span>FAIL</span><span>WATCH 50</span><span>VALID 65</span><span>STRONG 84</span></div>
+    <div class="tiles">
+      <div class="tile on"><b>BUY-REV</b><div class="n v">70.0</div><div class="b">VALID</div></div>
+      <div class="tile"><b>BUY-MOM</b><div class="n w">55.6</div><div class="b">WATCH</div></div>
+      <div class="tile"><b>SELL-REV</b><div class="n f">31.7</div><div class="b">FAIL</div></div>
+      <div class="tile"><b>SELL-MOM</b><div class="n f">18.9</div><div class="b">FAIL</div></div>
+    </div>
+    <div class="chips"><span class="chip amb">RESULT: 28 OCT</span><span class="chip">23 DAYS TO EXPIRY</span></div>
+    <div class="info"><i>i</i> Valid — 14 short of Strong. Tap for the read.</div>
+  </div>
+  <div class="card">
+    <div class="rh"><b>BUY-REV · 19 rules</b><span>heaviest first · 70.0 / 100 earned</span></div>
+    <table>
+      <thead><tr><th></th><th>RULE</th><th>CREDIT</th><th></th><th style="text-align:right">POINTS</th></tr></thead>
+      <tbody>
+        <tr class="r"><td class="id">R5</td><td>Volume (4 checks)</td><td class="bar"><div class="bb"><i class="half" style="width:47%"></i></div></td><td class="st half">7 / 15</td><td class="pt">7.0 <small>/ 15</small></td></tr>
+        <tr class="r sel"><td class="id">R11</td><td>Turn (two-day + week)</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">10.0 <small>/ 10</small></td></tr>
+        <tr class="sheet"><td colspan="5"><div class="sh">
+          <div class="h"><b>Turn</b><span>10.0<small>of 10</small></span></div>
+          <div class="boxes">
+            <div class="bx on f"><b>FULL</b><span>two-day ≥ −0.5% and week ≥ −2%</span></div>
+            <div class="bx"><b>HALF</b><span>one of the two</span></div>
+            <div class="bx"><b>NONE</b><span>otherwise</span></div>
+          </div>
+          <div class="nums">Two-day <b>+0.2%</b> · Week <b>+2.4%</b></div>
+        </div></td></tr>
+        <tr class="r"><td class="id">R10</td><td>S1 touch</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">8.0 <small>/ 8</small></td></tr>
+        <tr class="r"><td class="id">R4</td><td>Moving averages</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">7.0 <small>/ 7</small></td></tr>
+        <tr class="r"><td class="id">R7</td><td>RSI monthly</td><td class="bar"><div class="bb"><i class="half" style="width:50%"></i></div></td><td class="st half">HALF</td><td class="pt">3.5 <small>/ 7</small></td></tr>
+        <tr class="r"><td class="id">R9</td><td>5-min tape + VWAP</td><td class="bar"><div class="bb"><i class="half" style="width:50%"></i></div></td><td class="st half">HALF</td><td class="pt">3.5 <small>/ 7</small></td></tr>
+        <tr class="r"><td class="id">R26</td><td>5 DMA vs 20 DMA</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">5.0 <small>/ 5</small></td></tr>
+        <tr class="r"><td class="id">R23</td><td>GVM floor</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">5.0 <small>/ 5</small></td></tr>
+        <tr class="r"><td class="id">R1</td><td>Market mood</td><td class="bar"><div class="bb"><i class="none"></i></div></td><td class="st none">NONE</td><td class="pt">0 <small>/ 5</small></td></tr>
+        <tr class="r"><td class="id">R25</td><td>M-score trend</td><td class="bar"><div class="bb"><i class="half" style="width:50%"></i></div></td><td class="st half">HALF</td><td class="pt">2.0 <small>/ 4</small></td></tr>
+        <tr class="r"><td class="id">R18</td><td>Momentum</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">4.0 <small>/ 4</small></td></tr>
+        <tr class="r"><td class="id">R16</td><td>Fib position</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">4.0 <small>/ 4</small></td></tr>
+        <tr class="r"><td class="id">R2</td><td>Sector month</td><td class="bar"><div class="bb"><i class="none"></i></div></td><td class="st none">NONE</td><td class="pt">0 <small>/ 4</small></td></tr>
+        <tr class="r"><td class="id">R8</td><td>Month return</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">3.0 <small>/ 3</small></td></tr>
+        <tr class="r"><td class="id">R19</td><td>Rel strength 63d</td><td class="bar"><div class="bb"><i class="half" style="width:50%"></i></div></td><td class="st half">HALF</td><td class="pt">1.5 <small>/ 3</small></td></tr>
+        <tr class="r"><td class="id">R17</td><td>Valuation</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">3.0 <small>/ 3</small></td></tr>
+        <tr class="r"><td class="id">R12</td><td>Derivatives</td><td class="bar"><div class="bb"><i class="half" style="width:50%"></i></div></td><td class="st half">HALF</td><td class="pt">1.0 <small>/ 2</small></td></tr>
+        <tr class="r"><td class="id">R20</td><td>GVM trend</td><td class="bar"><div class="bb"><i class="full" style="width:100%"></i></div></td><td class="st full">FULL</td><td class="pt">2.0 <small>/ 2</small></td></tr>
+        <tr class="r"><td class="id">R3</td><td>Peers</td><td class="bar"><div class="bb"><i class="half" style="width:50%"></i></div></td><td class="st half">HALF</td><td class="pt">1.0 <small>/ 2</small></td></tr>
+      </tbody>
+    </table>
+    <div class="foot"><span>spot price, not futures · scored 06-Sep 20:39 IST</span><span>mock: rule credits illustrative</span></div>
+  </div>
+</div>
+</div></body></html>
