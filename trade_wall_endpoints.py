@@ -611,6 +611,25 @@ def _shape(r):
     }
 
 
+def _decode_map():
+    """cc#1734 scope 3: DETAIL decode sources, imported not copied. Either import failing leaves
+    that half empty, and the page then prints the raw codes — never a made-up label."""
+    out = {"exit_reasons": {}, "tags": {},
+           "sources": {"exit_reasons": "trade_alerts_endpoints._CLOSE_WORDS", "tags": "mobile_endpoints.BASKET_LABELS"},
+           "rule": "exact code -> engine word; 'CODE (suffix)' keeps the suffix; anything unmapped prints raw"}
+    try:
+        from trade_alerts_endpoints import _CLOSE_WORDS
+        out["exit_reasons"] = dict(_CLOSE_WORDS)
+    except Exception as e:
+        out["sources"]["exit_reasons_error"] = str(e)[:120]
+    try:
+        from mobile_endpoints import BASKET_LABELS
+        out["tags"] = dict(BASKET_LABELS)
+    except Exception as e:
+        out["sources"]["tags_error"] = str(e)[:120]
+    return out
+
+
 # ── cc#1736 SUPPRESS-IN-POSITION (founder 06-Sep: "if position already approved and open then no
 # new signals for that position should display in WOT") ─────────────────────────────────────────
 # approved_and_open = trade_alerts.status = 'approved' AND no trade_alert_levels.closed_at (the
@@ -735,9 +754,28 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             # subselect the wall SQL uses, so the response states the live rule rather than a claim.
             cur.execute("SELECT DISTINCT x FROM " + _QB_EXCLUDED_SQL + " AS q(x) ORDER BY 1")
             qb_excluded = [r[0] for r in cur.fetchall()]
+            # cc#1734 scope 4: the Closed book summary per instrument x engine over the WHOLE closed
+            # wall (the page loads 100 rows at a time, so a client-side sum would describe the
+            # loaded slice, not the book). Rupees are summed ONLY over rows that carry a rupee
+            # value; a percent-only row (TC Scanner, Investment Scanner, Screeners) is counted
+            # separately and NEVER converted into rupees. win/loss = the sign of whichever value
+            # the engine produced (pnl first, else pnl_pct).
+            cur.execute("SELECT instrument, engine, COUNT(*) n, "
+                        "COUNT(*) FILTER (WHERE COALESCE(pnl, pnl_pct) > 0) wins, "
+                        "COUNT(*) FILTER (WHERE COALESCE(pnl, pnl_pct) < 0) losses, "
+                        "COUNT(*) FILTER (WHERE COALESCE(pnl, pnl_pct) = 0) flat, "
+                        "COUNT(pnl) rs_rows, COALESCE(SUM(pnl), 0) rs_total, "
+                        "COUNT(*) FILTER (WHERE pnl IS NULL AND pnl_pct IS NOT NULL) pct_only, "
+                        "COUNT(*) FILTER (WHERE pnl IS NULL AND pnl_pct IS NULL) unpriced "
+                        "FROM (" + wall_sql + ") w WHERE w.status = 'closed' GROUP BY 1, 2 ORDER BY 1, 2")
+            closed_summary = [{"instrument": r["instrument"], "engine": r["engine"], "n": int(r["n"]),
+                               "wins": int(r["wins"]), "losses": int(r["losses"]), "flat": int(r["flat"]),
+                               "rs_rows": int(r["rs_rows"]), "rs_total": float(r["rs_total"] or 0),
+                               "pct_only": int(r["pct_only"]), "unpriced": int(r["unpriced"])} for r in _rows(cur)]
         else:
             approval_counts = None
             qb_excluded = None
+            closed_summary = None
 
         events = [_shape(r) for r in rows]
         # cc#1609 scope 2: STATE per engine row from trade_alerts — pending-approval | approved |
@@ -842,6 +880,13 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         # cc#1609: the approval surface — header counts + how state was joined, so no surface guesses.
         "approval_counts": approval_counts,
         "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed | suppressed-in-position (cc#1736)",
+        # cc#1734: the Closed book summary (see the SQL above) and the DECODE map the renderer
+        # applies to DETAIL — read from the engines' own words, never typed into the page:
+        # exit codes from trade_alerts_endpoints._CLOSE_WORDS (the alerts feed's own close words),
+        # basket/strategy tags from mobile_endpoints.BASKET_LABELS (the one shared slug->name map).
+        # A code absent from both prints raw on the page — that is the rule, not a gap.
+        "closed_summary": closed_summary,
+        "decode": _decode_map(),
         # cc#1736: the suppression rule, stated where the states are stated.
         "suppression_rule": "an undecided open row whose SYMBOL + SIDE matches an approved-and-open alert (trade_alerts status=approved with no trade_alert_levels.closed_at) is state suppressed-in-position: counted in approval_counts.suppressed, excluded from approval_counts.pending, served with suppressed_by; an opposite-side row on a held symbol stays pending with reversal_of set",
         "v10_display": "OPT legs only (V10_DISPLAY_OPTIONS_ONLY_V1 36703)",
