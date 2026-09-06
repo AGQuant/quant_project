@@ -239,15 +239,19 @@ body[data-theme]{
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .hchips .hc.slab:not(.ok):not(.bad):not(.vixc){ --panel:var(--accent-soft); --line:var(--brand); color:var(--brand); }
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--brand), var(--accent)); -webkit-background-clip:text; background-clip:text; color:transparent; }
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .as-hdr a.as-wm i{ color:transparent; }
-/* cc#1749 SILVER GOLD sheen — the two cc#1722 depth consumers this set opts into, tokens only:
- * cards carry --panel-shadow (brushed-metal lip + soft neutral drop) on the panel ground with the
- * silver edge; chips take the pale silver --accent-soft tint with the edge line and slate-silver
- * label text. Gold is not added to any fill; the body wash is already painted by the LIGHT-SET
- * --field-grad rule above. Pressed slabs keep their own lip, same exclusion as Midnight Blue. */
+/* cc#1749 SILVER GOLD — BRUSHED (SILVER_GOLD_BRUSHED_V1, 39481). The consumers this set opts into,
+ * tokens only: cards paint the mock's panel gradient (panel -> hi, i.e. #FFFFFF -> #F7F8FA) with the
+ * silver edge and carry --panel-shadow (the white top lip, the faint darker bottom edge, the soft
+ * drop); the index-tape chips take the same panel -> hi gradient with the edge line, ink text (the
+ * mock's .chip); the SCORR wordmark's O is gold (--brand) on ink, the mock's "ORR in gold" as far
+ * as the shared markup allows (only the O is a styled element). Gold is not added to any fill;
+ * the body wash is painted by the LIGHT-SET --field-grad rule above. Pressed slabs keep their own
+ * lip, same exclusion as Midnight Blue. */
 :root:root:not([data-theme="light"]) body[data-theme="silvergold"] .c:not(.slab),
 :root:root:not([data-theme="light"]) body[data-theme="silvergold"] .card:not(.slab),
-:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .m:not(.slab){ background:var(--panel); border-color:var(--edge); box-shadow:var(--panel-shadow); }
-:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .hchips .hc.slab:not(.ok):not(.bad):not(.vixc){ --panel:var(--accent-soft); --line:var(--edge); color:var(--label); }
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .m:not(.slab){ background:linear-gradient(180deg, var(--panel) 0%, var(--hi) 100%); border-color:var(--edge); box-shadow:var(--panel-shadow); }
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .hchips .hc.slab:not(.ok):not(.bad):not(.vixc){ background:linear-gradient(180deg, var(--gold-hi) 0%, var(--hi) 100%); --line:var(--edge); color:var(--ink); }
+:root:root:not([data-theme="light"]) body[data-theme="silvergold"] .as-hdr a.as-wm i{ color:var(--brand); }
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .bnav,
 :root:root:not([data-theme="light"]) body[data-theme="aquawhite"] .as-nav,
 :root:root:not([data-theme="light"]) body[data-theme="blush"] .bnav,
