@@ -1046,52 +1046,9 @@ function openGalaxyArticle(a){
 function hideGalaxyArticle(){ var p=document.getElementById("galaxyArticle"); if(p) p.classList.remove("on"); }
 </script>
 <script src="/nav_toggle.js" defer></script>
-<script>
-/* cc#1730: the tab strip's pin offset, read from the LIVE nav (see the .tabs CSS note).
-   One number, --scorr-nav-bottom on <html>: the lowest on-screen bottom edge among the
-   canonical #scorr-nav (pwa.js, 44px, position:sticky -- its rect follows cc#926's
-   translateY slide, so the strip rides up to 0 as the nav leaves and back to 44 as it
-   returns) and the 20px #scorr-nav-strip cc#1718 shows while the nav is hidden. Anything
-   display:none or zero-height (the max-height:0 hidden nav, the embed=1 inline hide) counts
-   as 0. Re-measured on scroll and resize (rAF, one read per frame), and for 350ms after any
-   change to the nav's class/style, the html hidden attribute, or a body child insert (the
-   strip is inserted by nav_toggle.js; the nav is rebuilt by pwa.js) so the .2s transitions
-   are tracked to their end. Counter line (#meta) is untouched: it is not sticky by design. */
-(function(){
-  var root = document.documentElement, last = null, raf = 0, until = 0;
-  function edge(el){
-    if(!el) return 0;
-    var cs = getComputedStyle(el); if(cs.display === 'none' || cs.visibility === 'hidden') return 0;
-    var r = el.getBoundingClientRect(); if(r.height <= 0) return 0;
-    return r.bottom;
-  }
-  function measure(){
-    var b = Math.max(edge(document.getElementById('scorr-nav')), edge(document.getElementById('scorr-nav-strip')));
-    return Math.max(0, Math.round(b));
-  }
-  function tick(){
-    raf = 0;
-    var b = measure();
-    if(b !== last){ last = b; root.style.setProperty('--scorr-nav-bottom', b + 'px'); }
-    if(performance.now() < until) raf = requestAnimationFrame(tick);
-  }
-  function kick(ms){ until = Math.max(until, performance.now() + (ms || 0)); if(!raf) raf = requestAnimationFrame(tick); }
-  window.addEventListener('scroll', function(){ kick(0); }, { passive:true });
-  window.addEventListener('resize', function(){ kick(0); }, { passive:true });
-  var mo = new MutationObserver(function(){ kick(350); });
-  mo.observe(root, { attributes:true, attributeFilter:['data-scorr-nav-hidden'] });
-  function watch(){
-    var nav = document.getElementById('scorr-nav'), strip = document.getElementById('scorr-nav-strip');
-    if(nav) mo.observe(nav, { attributes:true, attributeFilter:['class','style'] });
-    if(strip) mo.observe(strip, { attributes:true, attributeFilter:['class','style'] });
-    mo.observe(document.body, { childList:true });
-  }
-  watch();
-  document.addEventListener('DOMContentLoaded', function(){ watch(); kick(1200); });
-  window.addEventListener('load', function(){ watch(); kick(800); });
-  kick(1200);
-  window.__scorrNavBottom = measure;   /* read-only probe for the cc#1730 verify harness */
-})();
-</script>
+<!-- cc#1730: the strip's pin offset (--scorr-nav-bottom on <html>) is maintained by the SHARED
+     nav-offset helper in scorr_card_common.js (window.ScorrNavOffset), which this page loads at
+     the top of <head>. Written once there, per Fable 5142, so cc#1731's sticky table header on
+     /dashboard reuses the same measurement rather than a copy. See the .tabs CSS note above. -->
 </body>
 </html>

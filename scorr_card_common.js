@@ -1769,3 +1769,68 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
   }
   window.ScorrInfoSheet = { open: open, close: close, isOpen: isOpen, setBody: setBody, section: section, esc: esc };
 })();
+
+
+/* ── cc#1730: SHARED NAV-OFFSET HELPER — one measurement, every sticky element ───────────────
+   Founder 06-Sep ("when i scroll through articles this All, AI Editorial, Domestic tab should
+   stick"). A sticky element that has to sit BELOW the site nav needs the nav's live height, and
+   that height is not a constant: the canonical .scorr-cnav pwa.js builds is 44px; cc#1718 folds
+   it to a 20px Show strip when hidden (cc#311: hidden by default on a fresh tab); cc#926 slides
+   it away on scroll-down (translateY, .2s); inside an embed=1 iframe it is display:none. Every
+   hardcoded top: value went stale against one of those (cc#180's 46px was wrong on all four).
+
+   This helper measures the LIVE bottom edge of whatever nav chrome is actually on screen — the
+   lowest of #scorr-nav and #scorr-nav-strip, counting display:none / zero-height as 0 — and
+   writes it to --scorr-nav-bottom on <html>. Consumers pin with
+       position:sticky; top:var(--scorr-nav-bottom, <no-JS fallback>)
+   Consumers today: the /news category tab strip (cc#1730). Next: the Model Portfolio holdings
+   table header on /dashboard (cc#1731) — same variable, per Fable 5142, no second copy.
+
+   Re-measured with one read per frame on scroll/resize, and for 350ms after any change to the
+   nav's class/style, the html hidden attribute, or a body child insert (nav_toggle.js inserts the
+   strip; pwa.js rebuilds the nav) so the .2s transitions are tracked to their end. Loaded as a
+   BLOCKING head tag on some pages, so anything that touches <body> waits for DOMContentLoaded.
+   window.ScorrNavOffset = { measure(), kick(ms), VAR } — measure() is the read-only probe. */
+(function () {
+  if (window.ScorrNavOffset) return;
+  var VAR = '--scorr-nav-bottom';
+  var root = document.documentElement, last = null, raf = 0, until = 0;
+  function edge(el) {
+    if (!el) return 0;
+    var cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return 0;
+    var r = el.getBoundingClientRect();
+    return r.height > 0 ? r.bottom : 0;
+  }
+  function measure() {
+    var b = Math.max(edge(document.getElementById('scorr-nav')), edge(document.getElementById('scorr-nav-strip')));
+    return Math.max(0, Math.round(b));
+  }
+  function tick() {
+    raf = 0;
+    var b = measure();
+    if (b !== last) { last = b; root.style.setProperty(VAR, b + 'px'); }
+    if (performance.now() < until) raf = requestAnimationFrame(tick);
+  }
+  function kick(ms) {
+    until = Math.max(until, performance.now() + (ms || 0));
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  var mo = new MutationObserver(function () { kick(350); });
+  function watch() {
+    var nav = document.getElementById('scorr-nav'), strip = document.getElementById('scorr-nav-strip');
+    if (nav) mo.observe(nav, { attributes: true, attributeFilter: ['class', 'style'] });
+    if (strip) mo.observe(strip, { attributes: true, attributeFilter: ['class', 'style'] });
+    if (document.body) mo.observe(document.body, { childList: true });
+  }
+  mo.observe(root, { attributes: true, attributeFilter: ['data-scorr-nav-hidden'] });
+  window.addEventListener('scroll', function () { kick(0); }, { passive: true });
+  window.addEventListener('resize', function () { kick(0); }, { passive: true });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { watch(); kick(1200); });
+  } else {
+    watch(); kick(1200);
+  }
+  window.addEventListener('load', function () { watch(); kick(800); });
+  window.ScorrNavOffset = { measure: measure, kick: kick, VAR: VAR };
+})();
