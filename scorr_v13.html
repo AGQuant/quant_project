@@ -285,6 +285,7 @@ const REGISTRY=[
    ['Unpledged promoter holding','Unpledged promoter stake %','screener_raw','weekly',[]],
    ['fii_holding / dii_holding','Institutional holding %','screener_raw','weekly',[]],
    ['fii_change / dii_change','QoQ institutional stake change %','screener_raw','weekly',[]],
+   ['inst_change_pct','Total institutional QoQ change, pct points (fii_change + dii_change) · preset key, Rise = min 0.0001 · cc#1727','screener_raw','weekly',[]],
    ['No of Shareholder','Shareholder count (retail dispersion)','screener_raw','weekly',[]],
   ]},
   {label:'Screener technicals & returns',rows:[
@@ -351,6 +352,8 @@ const REGISTRY=[
   {label:'Sector aggregates',rows:[
    ['sector_week','Sector 5-day return aggregate','v8_metrics · live','5-min',['BM','SM']],
    ['sector_month','Sector 1-month return aggregate','v8_metrics','EOD',['BM']],
+   ['sector_month_return','Sector (GVM segment) 1-month return, equal-weight member avg · FULL universe preset key · cc#1727','universe_technicals','EOD 02:05',[]],
+   ['sector_year_return','Sector (GVM segment) 1-year return, equal-weight member avg · FULL universe preset key · cc#1727','universe_technicals','EOD 02:05',[]],
    ['sector_day','Sector day-change aggregate (live; EOD column dormant)','v8_qualified.metrics (live)','5-min',[]],
   ]},
   {label:'Global (overnight)',rows:[

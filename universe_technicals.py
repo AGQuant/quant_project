@@ -71,6 +71,12 @@ def ensure_schema(conn):
         # failure — year_return / dma_50 / dma_200 were already native, these two were not.
         cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS return_3y NUMERIC")
         cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS return_52w_vs_index NUMERIC")
+        # cc#1727: sector (segment) average 1m / 1y returns for the FULL universe. Until now the only
+        # sector aggregates were v8_metrics.sector_week/sector_month — futures-only (~212 names, NULL
+        # for the other ~1,600) — so the Multibagger Hunt gates SectorMonth%>0 / SectorYear%>5
+        # (session_log 5065) could not be expressed. Filled by compute_sector_returns() below.
+        cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS sector_month_return NUMERIC")
+        cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS sector_year_return NUMERIC")
     conn.commit()
 
 
@@ -147,6 +153,59 @@ def _compute_long_returns(conn, target_date: date) -> dict:
     conn.commit()
     return {"rows_touched": touched, "return_3y_filled": n3,
             "return_52w_vs_index_filled": n52, "rows_total": ntot}
+
+
+# cc#1727: sector = gvm_scores.segment (129 segments over the ~1,790-name universe, none NULL).
+SECTOR_RETURNS_SQL = """
+    WITH seg AS (
+        SELECT symbol, segment FROM gvm_scores
+        WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
+          AND segment IS NOT NULL AND segment <> ''
+    ),
+    agg AS (
+        SELECT seg.segment,
+               ROUND(AVG(u.month_return)::numeric, 2) AS m_ret,
+               ROUND(AVG(u.year_return)::numeric, 2)  AS y_ret
+        FROM universe_technicals u
+        JOIN seg ON seg.symbol = u.symbol
+        WHERE u.score_date = %(d)s
+        GROUP BY seg.segment
+    )
+    UPDATE universe_technicals u
+       SET sector_month_return = a.m_ret, sector_year_return = a.y_ret
+      FROM seg JOIN agg a ON a.segment = seg.segment
+     WHERE u.symbol = seg.symbol AND u.score_date = %(d)s
+"""
+
+
+def compute_sector_returns(conn, target_date: date) -> dict:
+    """cc#1727: fill sector_month_return + sector_year_return for every row of one score_date.
+
+    Definition (stated on the card, so the number is reproducible):
+      sector            = gvm_scores.segment at its latest score_date (the same segment the GVM
+                          engine, /screener and sector_ratings use — not a new taxonomy)
+      sector_X_return   = SIMPLE (equal-weight) average of the members' own month_return /
+                          year_return on the same score_date, NULL members skipped by AVG.
+                          Equal-weight, not mcap-weight, for two reasons: it is what the July
+                          Multibagger sheet (session_log 5065) used, and it is how the existing
+                          futures-only v8 sector_week/sector_month are defined (v8_signal_writer:
+                          EQUAL-WEIGHT average across the active futures in the theme).
+      a member's value includes itself; a 1-name segment therefore equals its own return.
+
+    One set-based statement over the day's rows, same shape as _compute_long_returns — never a
+    per-symbol query inside the main loop. Public (no underscore) because v13_presets_endpoints
+    also calls it once at app startup to fill the latest date inside the deploy->02:05 window.
+    """
+    with conn.cursor() as cur:
+        cur.execute(SECTOR_RETURNS_SQL, {"d": target_date})
+        touched = cur.rowcount
+        cur.execute("""SELECT COUNT(sector_month_return), COUNT(sector_year_return), COUNT(*),
+                              COUNT(DISTINCT sector_month_return)
+                       FROM universe_technicals WHERE score_date = %s""", (target_date,))
+        nm, ny, ntot, nseg = cur.fetchone()
+    conn.commit()
+    return {"rows_touched": touched, "sector_month_return_filled": nm,
+            "sector_year_return_filled": ny, "rows_total": ntot, "distinct_sector_values": nseg}
 
 
 def _compute_vol_ratio_21(conn, symbol: str, for_date: date):
@@ -287,6 +346,13 @@ def run_universe_technicals(conn, target_date: date = None) -> dict:
         long_ret = {"error": str(e)[:200]}
         log.warning("universe_technicals: long-return pass failed: %s", e)
 
+    # cc#1727: sector (segment) average 1m/1y returns — needs the day's month/year_return rows above.
+    try:
+        sector_ret = compute_sector_returns(conn, target_date)
+    except Exception as e:
+        sector_ret = {"error": str(e)[:200]}
+        log.warning("universe_technicals: sector-return pass failed: %s", e)
+
     runtime_secs = round(time.time() - t0, 1)
     match_pct = _overlap_match_check(conn, target_date)
     alert = (runtime_secs > RUNTIME_ALERT_SECS) or (match_pct is not None and match_pct < MATCH_PCT_ALERT)
@@ -300,6 +366,7 @@ def run_universe_technicals(conn, target_date: date = None) -> dict:
         "runtime_secs": runtime_secs,
         "overlap_match_pct": match_pct,
         "long_returns": long_ret,          # cc#828 part_2
+        "sector_returns": sector_ret,      # cc#1727
         "sample_errors": errors[:10],
     }
     with conn.cursor() as cur:
