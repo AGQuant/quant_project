@@ -597,10 +597,11 @@ body[data-theme]{
  * (2) a 1px lit rim (inset 0 1px 0) on every top edge — cards, slabs, chips, the bottom nav; (3) a
  * diagonal sheen overlay across each card (::after, pointer-events none; the Home hero deck keeps its
  * own #heroTrack ::after glitter, which outranks this by id); (4) INSET shadows in the progress bars
- * and the A/D pipe so they read as cut into the surface; (5) the wordmark and the verdict words are
- * gradient-clipped text — via -webkit-text-fill-color so the inline / state colour still drives the
- * hue (pass stays green, watch amber, fail red, mood colour unchanged) and NO text-shadow is added:
- * the hero glow stays off (cc#1775 scope 4). The four rgba literals are the set's own surface values,
+ * and the A/D pipe so they read as cut into the surface; (5) WAS gradient-clipped text on the wordmark and
+ * the verdict words — withdrawn by cc#1794 (.hero-mood) and cc#1798 (.as-wm, #ckp .c-vword): the clip's
+ * transparent fill is inherited and blanked the theme menu built inside the wordmark, and 39772 bars paint
+ * tricks on anything a person reads or operates. Text on this set is flat colour, no text-shadow (cc#1775
+ * scope 4). The four rgba literals are the set's own surface values,
  * declared once as custom properties on body (the cc#1637 / cc#1641 pattern); every rule reads a var().
  * Never on P&L numbers. */
 body[data-theme="electricviolet"]{ --ev-rim:rgba(200,180,255,.26); --ev-sink:rgba(0,0,0,.5); --ev-cut:rgba(0,0,0,.55); --ev-sheen:rgba(215,200,255,.11); }
@@ -638,11 +639,17 @@ body[data-theme="electricviolet"]{ --ev-rim:rgba(200,180,255,.26); --ev-sink:rgb
 :root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-bar i{ box-shadow:inset 0 var(--bw-1) 0 var(--ev-rim), inset 0 calc(-1 * var(--bw-1)) 0 var(--ev-sink); }
 /* (5) gradient-clipped text: wordmark (brand -> partner blue), verdict word and hero mood word (a lit tint of
  * their own state colour -> the colour), no glow */
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm{ background:linear-gradient(90deg, var(--gold-hi), var(--brand) 55%, var(--wayfind)); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; }
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm i{ color:transparent; -webkit-text-fill-color:transparent; }
+/* cc#1798 (P0, founder screenshot 06-Sep 23:39: the theme menu opened BLANK on this set). The wordmark is NOT
+ * gradient-clipped any more. scorr_appshell.js builds the theme/logout menu INSIDE a.as-wm, and
+ * -webkit-text-fill-color is inherited, so the transparent fill above reached every menu label and the
+ * caret. The wordmark is the menu handle, not pure ornament, so per HERO_NO_PAINT_TRICKS_RULE (39772) it is
+ * flat: the two ends of the old gradient as solid tokens — brand violet, the O in the partner blue. */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm{ color:var(--brand); }
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .as-hdr a.as-wm i{ color:var(--wayfind); }
 /* cc#1794 (P0, founder screenshot 06-Sep 23:14): the Home hero word is NOT gradient-clipped. On the large italic
  * 900 heading the clipped paint area collapsed and BEARISH rendered as a one-character blob. The verdict word is
  * the most important text in the app and must not depend on a paint trick: flat mood colour, permanently, no
- * text-shadow (cc#1775). Only #ckp .c-vword keeps the clip (it renders whole; checked). */
-:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-vword{ background-image:linear-gradient(180deg, color-mix(in srgb, currentColor 55%, var(--ink)) 0%, currentColor 65%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; text-shadow:none; }
+ * text-shadow (cc#1775). cc#1798: #ckp .c-vword (the Check verdict word) is flattened too — 39772 names the
+ * verdict word load-bearing, and no load-bearing text carries a paint trick on this set any more. */
+:root:root:not([data-theme="light"]) body[data-theme="electricviolet"] #ckp .c-vword{ background-image:none; -webkit-text-fill-color:currentColor; text-shadow:none; }
 :root:root:not([data-theme="light"]) body[data-theme="electricviolet"] .hero-mood{ background-image:none; -webkit-text-fill-color:currentColor; text-shadow:none; }
