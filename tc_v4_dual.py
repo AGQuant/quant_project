@@ -292,6 +292,16 @@ def _derive(d):
     # fill m_score and m180. Sign convention: NEGATIVE = momentum has decayed = good short.
     _m0, _m180v = d.get("m_score"), d.get("m180")
     d["dm180"] = (_m0 - _m180v) if (_m0 is not None and _m180v is not None) else None
+    # cc#1787 R25: ΔM over ~1 month (dM1) and ~3 months (dM3), from the m_1m / m_3m anchors both
+    # loaders fill. Derived here so the scanner and /check cannot compute them two ways.
+    d["dm1"] = (_m0 - d["m_1m"]) if (_m0 is not None and d.get("m_1m") is not None) else None
+    d["dm3"] = (_m0 - d["m_3m"]) if (_m0 is not None and d.get("m_3m") is not None) else None
+    # cc#1787 R26: 5-close vs 20-close simple averages from the daily rows already on d (raw_prices,
+    # ascending). Fewer than 20 closes -> None -> R26 scores 0 with a note.
+    d["dma5"] = (sum(closes[-5:]) / 5.0) if len(closes) >= 5 else None
+    d["dma20"] = (sum(closes[-20:]) / 20.0) if len(closes) >= 20 else None
+    d["dma5_20_gap_pct"] = ((d["dma5"] / d["dma20"] - 1.0) * 100.0
+                            if (d["dma5"] is not None and d["dma20"] not in (None, 0)) else None)
 
     # DTE to monthly expiry (G3)
     today = _ist().date()
@@ -360,6 +370,23 @@ def _dgvm180(cur, symbol):
     None if the symbol has no history that old (recent listing) -> R20 scores 0."""
     cur.execute("""SELECT gvm_score FROM gvm_history WHERE symbol=%s AND gvm_score IS NOT NULL
                    AND score_date <= CURRENT_DATE - 180 ORDER BY score_date DESC LIMIT 1""", (symbol,))
+    r = cur.fetchone()
+    return _f(r[0]) if r else None
+
+
+# cc#1787 / TC_BUY_WEIGHTS_FINAL_V1 (39713) R25: m_score ~21 sessions and ~63 sessions back. Same
+# anchor style as _m180 — the nearest gvm_history snapshot AT OR BEFORE today minus N calendar days.
+# gvm_history is a CALENDAR-daily series (29 distinct dates in the last 30 for PNB), so "21 sessions"
+# and "63 sessions" are taken as their calendar spans — 30 and 91 days (one month, one quarter) —
+# not as the 21st / 63rd most recent ROW, which on a calendar series would be three and nine weeks.
+# Judgment stated on the card with PNB's numbers both ways; one constant each to flip if Fable rules
+# for row offsets. No snapshot that old -> None -> R25 scores 0 with a note, like R18/R20.
+M_TREND_1M_DAYS, M_TREND_3M_DAYS = 30, 91
+
+
+def _m_at(cur, symbol, days):
+    cur.execute("""SELECT m_score FROM gvm_history WHERE symbol=%s AND m_score IS NOT NULL
+                   AND score_date <= CURRENT_DATE - %s ORDER BY score_date DESC LIMIT 1""", (symbol, days))
     r = cur.fetchone()
     return _f(r[0]) if r else None
 
@@ -590,6 +617,7 @@ def _load_one(cur, symbol):
     d["nifty_ret63"] = _nifty_ret63(cur)
     d["gvm180"] = _dgvm180(cur, symbol)
     d["m180"] = _m180(cur, symbol)   # cc#936: SELL R18 delta-M anchor
+    d["m_1m"], d["m_3m"] = _m_at(cur, symbol, M_TREND_1M_DAYS), _m_at(cur, symbol, M_TREND_3M_DAYS)   # cc#1787 R25
 
     d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0, "peer_count": 0})
     if d["segment"]:
@@ -1400,6 +1428,38 @@ def _rules(d, style, side):
     # "has this deteriorated over six months" twice. BUY cards keep R20 unchanged.
     if BUY:
         out.append(_R("R20", "GVM trend (Δ180d)", r20, {"dgvm180": _r(dg)}, required=r20req))
+
+        # R25 — cc#1787 / 39713 M-SCORE TREND, BUY cards only. dM1 = M now - M ~1 month ago, dM3 =
+        # M now - M ~3 months ago (anchors _m_at, deltas in _derive). BUY-MOM: dM1 > 0 AND dM3 > 0
+        # full, exactly one half, else 0. BUY-REV: dM3 >= 0 AND dM1 >= -0.5 full, one half, else 0.
+        # No anchor -> that leg fails and the note names it; both missing -> 0 with no_history.
+        dm1, dm3 = d.get("dm1"), d.get("dm3")
+        if dm1 is None and dm3 is None:
+            r25, r25req = 0.0, "no 1m/3m M history -> 0"
+            r25ev = {"m": _r(d.get("m_score")), "no_history": True}
+        else:
+            if MOM:
+                a, b = (dm1 is not None and dm1 > 0), (dm3 is not None and dm3 > 0)
+                r25req = "M rising: dM1 > 0 AND dM3 > 0 (one = 0.5)"
+            else:
+                a, b = (dm1 is not None and dm1 >= -0.5), (dm3 is not None and dm3 >= 0)
+                r25req = "M holding: dM3 >= 0 AND dM1 >= -0.5 (one = 0.5)"
+            r25 = 1.0 if (a and b) else (0.5 if (a or b) else 0.0)
+            r25ev = {"m": _r(d.get("m_score")), "m_1m": _r(d.get("m_1m")), "m_3m": _r(d.get("m_3m")),
+                     "dm1": _r(dm1), "dm3": _r(dm3)}
+        out.append(_R("R25", "M-score trend", r25, r25ev, required=r25req))
+
+        # R26 — cc#1787 / 39713 5/20 DMA, BUY cards only. 5DMA > 20DMA full; 5DMA below the 20DMA
+        # by less than 1% half; else 0. Averages of the last 5 and 20 daily closes (_derive).
+        gap = d.get("dma5_20_gap_pct")
+        if gap is None:
+            r26, r26req = 0.0, "fewer than 20 daily closes -> 0"
+            r26ev = {"dma5": _r(d.get("dma5")), "dma20": _r(d.get("dma20")), "no_history": True}
+        else:
+            r26 = 1.0 if gap > 0 else (0.5 if gap > -1.0 else 0.0)
+            r26req = "5DMA > 20DMA (below by < 1% = 0.5)"
+            r26ev = {"dma5": _r(d.get("dma5")), "dma20": _r(d.get("dma20")), "gap_pct": _r(gap)}
+        out.append(_R("R26", "5/20 DMA", r26, r26ev, required=r26req))
 
     # ── cc#767 imported LIVE-V8 basket hard gates (funded by the flow consolidation: R5+R6 merged,
     # R12+R13 merged, R14 dropped). Each is scored ONCE as its own point — never a veto (cc#677
