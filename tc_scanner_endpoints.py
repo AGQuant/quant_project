@@ -426,6 +426,20 @@ def tc_scanner_holds(date_: Optional[str] = None):
         """, (d,))
         cols = [c[0] for c in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # cc#1763 (TC_SCANNER_LOT_SIZING_V1, session_log 39570): ONE LOT per signal. The lot is
+        # futures_universe.lot_size (READ ONLY; tc_scanner_holds stores no quantity). Rupees are
+        # DISPLAY ONLY — "what one lot would have made" — never a gate, cap, ranking key or
+        # threshold, and the exit rule (check_exits: bar high/low vs the target / sl PRICE levels
+        # _target_sl derives from TARGET_PCT / SL_PCT) takes no rupee input and is untouched.
+        cur.execute("SELECT symbol, lot_size FROM futures_universe WHERE lot_size IS NOT NULL")
+        lots = {r[0]: int(r[1]) for r in cur.fetchall()}
+
+    def _rs(entry, mark, side, lot):
+        """One-lot rupees, sign-aware. None when entry, mark or lot is missing — never 0.00 off a
+        substituted price, never 1 share standing in for a lot (cc#1763 item 5)."""
+        if entry is None or mark is None or lot is None:
+            return None
+        return round((mark - entry) * lot * (1 if side == "BUY" else -1), 2)
 
     out = {"BUY": [], "SELL": []}
     for r in rows:
@@ -438,6 +452,10 @@ def tc_scanner_holds(date_: Optional[str] = None):
         pnl_pct = None
         if entry and px:
             pnl_pct = round((px - entry) / entry * 100 * (1 if side == "BUY" else -1), 2)
+        # cc#1763: the rupee mark is the exit price on a closed row, cmp_prices on an open one —
+        # and NOTHING when there is no cmp (the percent above keeps its older entry fallback).
+        mark = (float(r["exit_price"]) if (r["exit_reason"] != "OPEN" and r["exit_price"] is not None)
+                else (float(r["cmp"]) if r["cmp"] is not None else None))
         row = {
             "symbol": r["symbol"], "side": side, "score": r["score"], "evaluated": r["evaluated"],
             "entry_price": entry, "entry_ts": str(r["entry_ts"]) if r["entry_ts"] else None,
@@ -447,6 +465,7 @@ def tc_scanner_holds(date_: Optional[str] = None):
             "exit_ts": str(r["exit_ts"]) if r["exit_ts"] else None,
             "exit_reason": r["exit_reason"], "cmp": float(r["cmp"]) if r["cmp"] is not None else None,
             "pnl_pct": pnl_pct,
+            "lot_size": lots.get(r["symbol"]), "pnl_rs": _rs(entry, mark, side, lots.get(r["symbol"])),
         }
         out.setdefault(side, []).append(row)
 
@@ -457,8 +476,12 @@ def tc_scanner_holds(date_: Optional[str] = None):
         wins = [x for x in closed if str(x["exit_reason"] or "").startswith("TARGET")]
         net_pts = round(sum((x["pnl_pct"] or 0) for x in closed), 2)
         wr = round(len(wins) / len(closed) * 100, 1) if closed else None
+        # cc#1763 C5: WR / net-percent stay the statistics' basis; the rupee total rides beside
+        # them at one lot each, summed only over rows that have one.
+        rs_rows = [x for x in closed if x.get("pnl_rs") is not None]
         return {"open": len(rows_side) - len(closed), "closed": len(closed),
-                "wins": len(wins), "wr_pct": wr, "net_pts_pct": net_pts}
+                "wins": len(wins), "wr_pct": wr, "net_pts_pct": net_pts,
+                "net_rs_one_lot": round(sum(x["pnl_rs"] for x in rs_rows), 2), "rs_rows": len(rs_rows)}
 
     # cc#1599 scope 4/5: the Closed Book is keyed on the EXIT date, not the entry date. A hold
     # entered on 16-Jul and closed on 02-Sep belongs to 02-Sep's Closed Book (and to 16-Jul's
@@ -489,6 +512,7 @@ def tc_scanner_holds(date_: Optional[str] = None):
             "sl": float(r["sl"]) if r["sl"] is not None else None,
             "exit_price": px, "exit_ts": str(r["exit_ts"]) if r["exit_ts"] else None,
             "exit_reason": r["exit_reason"], "pnl_pct": pnl_pct,
+            "lot_size": lots.get(r["symbol"]), "pnl_rs": _rs(entry, px, r["side"], lots.get(r["symbol"])),   # cc#1763
         })
 
     # cc#1744 (founder 06-Sep "In TC scanner no open and closed book?"): the OPEN BOOK is NOT a
@@ -530,8 +554,25 @@ def tc_scanner_holds(date_: Optional[str] = None):
             "sl": float(r["sl"]) if r["sl"] is not None else None,
             "exit_price": None, "exit_ts": None, "exit_reason": "OPEN",
             "cmp": cmp_px, "pnl_pct": pnl_pct,
+            "lot_size": lots.get(r["symbol"]), "pnl_rs": _rs(entry, cmp_px, r["side"], lots.get(r["symbol"])),   # cc#1763
         })
     n_open_all = len(open_all.get("BUY", [])) + len(open_all.get("SELL", []))
+
+    # cc#1763 C3: the two BOOK TOTALS at one lot each, stated separately and never summed into one
+    # figure — Open Book = UNREALISED (cmp_prices), Closed Book = REALISED (exit price). Rows
+    # without a lot or a CMP are counted, not summed. The tab shows both books whole (no side
+    # filter), so these describe exactly the rows it renders.
+    def _book(rows_list, kind):
+        priced = [x for x in rows_list if x.get("pnl_rs") is not None]
+        return {"n": len(rows_list), "priced": len(priced),
+                "rows_without_lot": sum(1 for x in rows_list if x.get("lot_size") is None),
+                "rows_without_cmp": (sum(1 for x in rows_list if x.get("cmp") is None) if kind == "unrealised" else 0),
+                kind + "_rs_one_lot": round(sum(x["pnl_rs"] for x in priced), 2),
+                "basis": "%d %s position%s, one lot each (futures_universe.lot_size) — the paper book if every signal were taken; %s" % (
+                    len(rows_list), "open" if kind == "unrealised" else "closed", "" if len(rows_list) == 1 else "s",
+                    "unrealised vs cmp_prices" if kind == "unrealised" else "realised at exit price")}
+    open_all_book = _book(open_all.get("BUY", []) + open_all.get("SELL", []), "unrealised")
+    closed_by_exit_book = _book(by_exit.get("BUY", []) + by_exit.get("SELL", []), "realised")
 
     return {"date": d, "buy": out.get("BUY", []), "sell": out.get("SELL", []),
             "buy_stats": _stats(out.get("BUY", [])), "sell_stats": _stats(out.get("SELL", [])),
@@ -544,4 +585,8 @@ def tc_scanner_holds(date_: Optional[str] = None):
             "open_all_count": n_open_all,
             "open_basis": "exit_reason = 'OPEN' as of now, no date filter (cc#1744); cmp from cmp_prices or blank",
             "last_closure_date": last_closure,
+            # cc#1763: the one-lot book totals + the rule, stated where the rows are served.
+            "open_all_book": open_all_book,
+            "closed_by_exit_book": closed_by_exit_book,
+            "lot_rule": "TC_SCANNER_LOT_SIZING_V1 (session_log 39570): ONE LOT per signal, lot_size from futures_universe (read only). pnl_rs = (mark - entry) x lot_size, sign-aware; mark = exit price when closed, cmp_prices when open; None when lot or mark is missing. DISPLAY ONLY — win rate and net percent stay on pnl_pct; the engine's exits (check_exits) compare bars to target / sl price levels and read no rupee.",
             "as_of": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")}

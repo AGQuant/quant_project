@@ -269,7 +269,17 @@ function sideCls(s){ return s === 'SHORT' ? 'short' : 'long'; }
    positions, else pnl_pct (percent) for a signal-only engine like TC Scanner / Investment
    Scanner. Never both blank on a genuinely closed row with real prices; an em-dash only appears
    when the source data itself is incomplete (never fabricated). */
+/* cc#1763 rule: EQUITY rows (QB Basket, Investment Scanner, Screeners) are PERCENT ONLY in both
+   P&L columns, even where the engine served a rupee (the baskets run different capital bases —
+   Rs 5L quant, Rs 1L model portfolio — so a rupee is not comparable across the equity book). The
+   API still serves pnl; this surface does not print it for equity. */
+function isEquity(e){ return e.instrument === 'EQUITY'; }
 function pnlCell(e){
+  if (isEquity(e)){
+    if (e.pnl_pct !== null && e.pnl_pct !== undefined)
+      return '<td class="num ' + (Number(e.pnl_pct) >= 0 ? 'pos' : 'neg') + '" title="equity: percent only, on price alone (cc#1763)">' + pctFmt(e.pnl_pct) + '</td>';
+    return '<td class="num">--</td>';
+  }
   if (e.pnl !== null && e.pnl !== undefined){
     var cls = Number(e.pnl) >= 0 ? 'pos' : 'neg';
     /* cc#1762: an open row's rupee is INDICATIVE (engine entry -> CMP as of); the hover says so */
@@ -277,8 +287,21 @@ function pnlCell(e){
       ? ' title="' + esc('indicative: engine entry ' + px2(e.entry_price) + (e.entry && e.entry.when_full ? ' on ' + e.entry.when_full : '')
           + ' -> CMP' + (e.cmp != null ? ' ' + px2(e.cmp) : '') + (e.cmp_ts ? ' as of ' + e.cmp_ts + ' IST' : '') + ' x ' + (e.qty != null ? e.qty : '?')) + '"'
       : '';
+    /* cc#1763: a TC Scanner rupee is ONE LOT (qty = futures_universe.lot_size) — the percent rides
+       beside it, since lot sizes differ by symbol and percent is the only like-for-like sense */
+    if (e.pnl_basis === 'one-lot'){
+      ttl = ' title="' + esc('one lot of ' + (e.qty != null ? qty(e.qty) : '?') + ' (futures_universe.lot_size) x price move; display only, the engine exits on percent'
+        + (e.cmp != null ? ' · CMP ' + px2(e.cmp) : '') + (e.cmp_ts ? ' as of ' + e.cmp_ts + ' IST' : '')) + '"';
+      return '<td class="num ' + cls + '"' + ttl + '>' + inr(e.pnl)
+        + '<span class="tw-cmp-lbl">' + (e.pnl_pct != null ? pctFmt(e.pnl_pct) + ' · ' : '') + '1 lot</span></td>';
+    }
     return '<td class="num ' + cls + '"' + ttl + '>' + inr(e.pnl) + '</td>';
   }
+  /* cc#1763 item 5: no lot_size for the symbol -> the rupee is BLANK; the percent still prints,
+     LABELLED, so a percent never sits in the rupee column pretending to be one */
+  if (e.pnl_basis === 'no-lot' && e.pnl_pct !== null && e.pnl_pct !== undefined)
+    return '<td class="num ' + (Number(e.pnl_pct) >= 0 ? 'pos' : 'neg') + '" title="no lot size in futures_universe for ' + esc(e.symbol) + ' — rupees blank, percent on price alone">'
+      + pctFmt(e.pnl_pct) + '<span class="tw-cmp-lbl">no lot size · %</span></td>';
   /* cc#1762 item 5: a V8 row whose symbol has no CMP is BLANK — never entry price standing in
      for CMP (that renders a false 0.00), never a stale mark carried forward unsaid. */
   if (e.pnl_basis === 'no-cmp') return '<td class="num tw-nocmp" title="no CMP for ' + esc(e.symbol) + ' — both P&L cells blank"></td>';
@@ -294,7 +317,10 @@ function pnlCell(e){
    from those prices and LABELLED computed. A blank is honest; a converted number would not be. */
 function rsCell(e){
   if (e.pnl === null || e.pnl === undefined) return '<td class="num"></td>';
-  return '<td class="num ' + (Number(e.pnl) >= 0 ? 'pos' : 'neg') + '">' + inr(e.pnl) + '</td>';
+  if (isEquity(e)) return '<td class="num" title="equity: percent only (cc#1763) — see the P&L % column"></td>';
+  /* cc#1763: a TC Scanner closed row's rupee is ONE LOT (futures_universe.lot_size), said so */
+  var lot = e.qty_basis === 'one-lot' ? '<span class="tw-cmp-lbl">1 lot' + (e.qty != null ? ' of ' + qty(e.qty) : '') + '</span>' : '';
+  return '<td class="num ' + (Number(e.pnl) >= 0 ? 'pos' : 'neg') + '"' + (lot ? ' title="one lot x price move, display only"' : '') + '>' + inr(e.pnl) + lot + '</td>';
 }
 function pctCell(e){
   if (e.pnl_pct !== null && e.pnl_pct !== undefined)
@@ -343,7 +369,8 @@ function rowsHtml(list){
           ? '<td class="tw-tag">' + esc(e.exit.when_full || '--') + '</td>'
             + '<td class="num">' + px(e.exit_price) + '</td>'
             + rsCell(e) + pctCell(e)
-          : '<td class="num">' + qty(e.qty) + '</td>' + pnlCell(e) + pnlApprovedCell(e))   /* cc#1762 */
+          : '<td class="num">' + qty(e.qty) + (e.qty_basis === 'one-lot' ? '<span class="tw-cmp-lbl">1 lot</span>' : '') + '</td>'
+            + pnlCell(e) + pnlApprovedCell(e))   /* cc#1762; cc#1763 the TC lot label */
       + (STATE.status === 'closed'
           ? '<td class="tw-tag tw-detail" title="' + esc((e.result || '') + (e.note ? ' · ' + e.note : '')) + '">'
             + esc(decodeResult(e.result)) + (e.note ? (e.result ? ' · ' : '') + esc(decodeTag(e.note)) : '') + '</td>'
@@ -388,7 +415,7 @@ function pnlBasisTitle(which){
    position-sized row with a CMP). Everything else is an EMPTY cell: blank, never zero. */
 function pnlApprovedCell(e){
   var ap = e.approval;
-  if (!ap || ap.pnl_approved === null || ap.pnl_approved === undefined) return '<td class="num tw-pnl-ap"></td>';
+  if (!ap || ap.pnl_approved === null || ap.pnl_approved === undefined || isEquity(e)) return '<td class="num tw-pnl-ap"></td>';
   var cls = Number(ap.pnl_approved) >= 0 ? 'pos' : 'neg';
   return '<td class="num tw-pnl-ap ' + cls + '" title="' + esc('approved @ ' + (ap.approved_price != null ? px2(ap.approved_price) : '--')
     + (ap.approved_at ? ' on ' + twStampFull(ap.approved_at) + ' IST' : '') + ' -> CMP' + (e.cmp != null ? ' ' + px2(e.cmp) : '')
@@ -559,6 +586,7 @@ function render(){
     : '<tr><td colspan="10" class="empty">' + emptyMsg + '</td></tr>';
   document.getElementById('more').innerHTML = moreHtml();
   renderClosedSummary();
+  renderTcOpenBook(view);   /* cc#1763 */
 }
 /* cc#1734 scope 4: one compact line above the Closed table for the ACTIVE instrument + engine,
    from the SERVED closed_summary (whole closed wall, not the loaded slice). Rupees cover only
@@ -571,10 +599,34 @@ function renderClosedSummary(){
   rows.forEach(function(r){ Object.keys(a).forEach(function(k){ a[k] += Number(r[k] || 0); }); });
   el.hidden = false;
   el.innerHTML = '<b>' + a.n + '</b> closed · <b>' + a.wins + '</b> wins · <b>' + a.losses + '</b> losses' + (a.flat ? ' · ' + a.flat + ' flat' : '')
-    + ' · realised <b class="' + (a.rs_total >= 0 ? 'pos' : 'neg') + '">' + inr(a.rs_total) + '</b> over ' + a.rs_rows + ' rows with a rupee value'
-    + ' · <b>' + a.pct_only + '</b> rows percent-only (not in the rupee total)'
+    /* cc#1763: the equity book is PERCENT ONLY on this surface — no rupee total is printed for it */
+    + (STATE.instrument === 'EQUITY'
+        ? ' · percent only (equity is never shown in rupees here — different capital bases per basket)'
+        : ' · realised <b class="' + (a.rs_total >= 0 ? 'pos' : 'neg') + '">' + inr(a.rs_total) + '</b> over ' + a.rs_rows + ' rows with a rupee value'
+          + ' · <b>' + a.pct_only + '</b> rows percent-only (not in the rupee total)')
     + (a.unpriced ? ' · ' + a.unpriced + ' rows unpriced' : '')
-    + ' · ' + esc(STATE.bucket === 'ALL' ? 'all engines' : STATE.bucket) + ' · ' + esc(STATE.instrument.charAt(0) + STATE.instrument.slice(1).toLowerCase());
+    + ' · ' + esc(STATE.bucket === 'ALL' ? 'all engines' : STATE.bucket) + ' · ' + esc(STATE.instrument.charAt(0) + STATE.instrument.slice(1).toLowerCase())
+    /* cc#1763 C3: TC Scanner realised rupees are one lot per signal — the paper book if every signal were taken */
+    + (STATE.instrument === 'FUTURES' && (STATE.bucket === 'ALL' || STATE.bucket === 'TC Scanner') ? ' · TC Scanner rows at one lot each (realised, paper book if every signal were taken)' : '');
+}
+/* cc#1763 C3/C4: the TC Scanner OPEN book total, over the rows IN VIEW (so it always describes
+   the filtered set the reader is looking at), one lot each, labelled as the paper-book result if
+   every signal were taken. UNREALISED — never summed with the Closed book's realised figure. */
+function renderTcOpenBook(view){
+  var el = document.getElementById('closedSummary'); if (!el) return;
+  if (STATE.status !== 'open' || STATE.instrument !== 'FUTURES' || STATE.mode === 'approved') return;   /* renderClosedSummary already cleared it */
+  var tc = (view || []).filter(function(e){ return e.engine === 'TC Scanner'; });
+  if (!tc.length) return;
+  var tot = 0, n = 0, blank = 0;
+  tc.forEach(function(e){ if (e.pnl !== null && e.pnl !== undefined){ tot += Number(e.pnl); n++; } else blank++; });
+  el.hidden = false;
+  el.innerHTML = '<b>TC Scanner paper book</b> if every signal were taken: <b>' + tc.length + '</b> open position' + (tc.length === 1 ? '' : 's')
+    + ' in view, one lot each · unrealised <b class="' + (tot >= 0 ? 'pos' : 'neg') + '">' + inr(tot) + '</b> over ' + n + ' priced row' + (n === 1 ? '' : 's')
+    + (blank ? ' · ' + blank + ' without a CMP or lot size (not in the total)' : '')
+    + (STATE.stateFilter !== 'all' ? ' · state ' + esc(STATE.stateFilter.replace('-approval', '')) : ' · all states')
+    + (STATE.bucket === 'ALL' ? ' · Futures, all engines' : '')
+    + (PAGE.more ? ' · more rows not loaded yet' : '')
+    + (STATE.tcOpenBook && STATE.tcOpenBook.n != null ? ' · whole book: ' + STATE.tcOpenBook.n + ' open, ' + inr(STATE.tcOpenBook.unrealised_one_lot) : '');
 }
 
 function url(cursor){
@@ -651,6 +703,7 @@ function boot(keepCounts){
       STATE.cmpAsOf = d.cmp_as_of || null;            /* cc#1762: newest V8 mark, stated in the meta line */
       if (d.pnl_basis) STATE.pnlBasis = d.pnl_basis;  /* cc#1762: the two bases, in the API's words */
       if (d.v8_open_book) STATE.v8OpenBook = d.v8_open_book;
+      STATE.tcOpenBook = d.tc_open_book || null;         /* cc#1763: whole TC open book at one lot */
       if (d.approval_counts) STATE.approvalCounts = d.approval_counts;
       STATE.events = d.events || [];
       if (!keepCounts || STATE.total == null){
