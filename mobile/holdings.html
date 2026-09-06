@@ -60,6 +60,12 @@
 .pf-t{width:100%;border-collapse:collapse;font-size:var(--type-115)}
 .pf-t th{text-align:left;font-size:var(--type-9);letter-spacing:var(--track-em12);color:var(--dim);font-weight:600;padding:0 0 var(--space-7);border-bottom:var(--bw-1) solid var(--line);font-family:'IBM Plex Mono',ui-monospace,monospace}
 .pf-t th.n,.pf-t td.n{text-align:right}
+/* cc#1793: TRADE and P&L headers are sort controls (44px tap target, caret on the active one); ENTRY → EXIT is plain */
+.pf-t th .pf-sh{display:inline-flex;align-items:center;gap:var(--space-4);min-height:calc(var(--space-40) + var(--space-4));padding:0;background:transparent;border:0;color:var(--dim);font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pf-t th.n .pf-sh{justify-content:flex-end;width:100%}
+.pf-t th .pf-sh.on{color:var(--blu)}
+.pf-t th .pf-sh i{font-style:normal;font-size:var(--type-9);opacity:0;width:var(--space-8)}
+.pf-t th .pf-sh.on i{opacity:1}
 .pf-t td{padding:var(--space-9) 0;border-bottom:var(--bw-1) solid var(--line);vertical-align:top;color:var(--txt)}
 .pf-t tr:last-child td{border-bottom:0}
 .pf-tsym{font-weight:700;font-size:var(--type-12)}
@@ -114,7 +120,7 @@ function strip(sym){
   try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
   return '';
 }
-var PF = { data:null, filter:'all', showAll:false };
+var PF = { data:null, filter:'all', showAll:false, sort:{ key:'date', dir:'desc' } };   /* cc#1793: default = date, newest first (rule 6) */
 
 /* ── HERO: two windows, two bases ─────────────────────────────────────────────────────── */
 function heroHtml(d){
@@ -223,9 +229,30 @@ function closedRows(d){
   else if(f==='short') rows=rows.filter(function(r){return (r.direction||'').indexOf('S')===0;});
   return rows;
 }
+/* cc#1793: sort the FULL filtered set, then page (rule 7). date: tie-break by symbol A-Z so the order never jumps;
+   pnl: biggest win first on desc, biggest loss first on asc. */
+function sortRows(rows){
+  var k=PF.sort.key, dir=PF.sort.dir==='asc'?1:-1;
+  return rows.slice().sort(function(a,b){
+    if(k==='pnl'){ var d=(Number(a.pnl)||0)-(Number(b.pnl)||0); if(d) return d*dir; }
+    else { var da=String(a.date||''), db=String(b.date||''); if(da!==db) return (da<db?-1:1)*dir; }
+    var sa=String(a.symbol||''), sb=String(b.symbol||''); if(sa!==sb) return sa<sb?-1:1;
+    return (Number(a.id)||0)-(Number(b.id)||0);
+  });
+}
+function setSort(key){
+  if(key!=='date'&&key!=='pnl') return;
+  if(PF.sort.key===key) PF.sort.dir = (PF.sort.dir==='desc') ? 'asc' : 'desc';   /* same header again = reverse */
+  else PF.sort = { key:key, dir:'desc' };                                          /* first tap = newest / biggest win first */
+  render();
+}
+function sortHead(key,label,cls){
+  var on=PF.sort.key===key, car=on?(PF.sort.dir==='desc'?'▼':'▲'):'▼';
+  return '<th'+(cls?' class="'+cls+'"':'')+'><button type="button" class="pf-sh'+(on?' on':'')+'" data-sort="'+key+'" aria-sort="'+(on?(PF.sort.dir==='desc'?'descending':'ascending'):'none')+'">'+label+'<i>'+car+'</i></button></th>';
+}
 function closedHtml(d){
   var all=d.closed||[], s=d.stats||{};
-  var rows=closedRows(d), shown = PF.showAll ? rows : rows.slice(0,PAGE);
+  var rows=sortRows(closedRows(d)), shown = PF.showAll ? rows : rows.slice(0,PAGE);
   var fb=function(k,l){ return '<button type="button" class="pf-f'+(PF.filter===k?' on':'')+'" data-f="'+k+'">'+l+'</button>'; };
   var body=shown.map(function(r){
     var win=Number(r.pnl)>0;
@@ -237,7 +264,7 @@ function closedHtml(d){
     + '<div class="pf-card" id="pf-closed">'
     + '<div class="pf-filters">'+fb('all','All '+all.length)+fb('wins','Wins '+(s.wins==null?'':s.wins))+fb('losses','Losses '+(s.losses==null?'':s.losses))+fb('long','Long')+fb('short','Short')+'</div>'
     + (rows.length
-        ? '<table class="pf-t"><thead><tr><th>TRADE</th><th class="n">ENTRY → EXIT</th><th class="n">P&amp;L</th></tr></thead><tbody>'+body+'</tbody></table>'
+        ? '<table class="pf-t"><thead><tr>'+sortHead('date','TRADE','')+'<th class="n">ENTRY → EXIT</th>'+sortHead('pnl','P&amp;L','n')+'</tr></thead><tbody>'+body+'</tbody></table>'
         : '<div class="pf-absent">No trades match this filter.</div>')
     + (rows.length>PAGE && !PF.showAll ? '<button type="button" class="pf-more" id="pf-more">Show all '+rows.length+' closed trades</button>' : '')
     + (PF.showAll && rows.length>PAGE ? '<button type="button" class="pf-more" id="pf-less">Show first '+PAGE+'</button>' : '')
@@ -250,7 +277,8 @@ function render(){
     + '<div class="pf-asof" style="margin:var(--space-12) var(--space-14) 0">Served '+esc(d.as_of||'')+' IST &middot; closed trades from the personal journal &middot; open book from SmartGain holdings.</div>';
 }
 document.getElementById('pf-body').addEventListener('click', function(e){
-  var f=e.target.closest('[data-f]'); if(f){ PF.filter=f.getAttribute('data-f'); PF.showAll=false; render(); return; }
+  var f=e.target.closest('[data-f]'); if(f){ PF.filter=f.getAttribute('data-f'); PF.showAll=false; render(); return; }   /* filter keeps the sort (rule 5) */
+  var sh=e.target.closest('[data-sort]'); if(sh){ setSort(sh.getAttribute('data-sort')); return; }               /* sort keeps the filter */
   if(e.target.closest('#pf-more')){ PF.showAll=true; render(); return; }
   if(e.target.closest('#pf-less')){ PF.showAll=false; render(); var c=document.getElementById('pf-closed'); if(c) c.scrollIntoView({block:'start'}); }
 });
