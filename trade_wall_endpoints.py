@@ -230,25 +230,39 @@ WITH ev AS (
   -- TC SCANNER (tc_scanner_holds) — NEW, cc#1295. entry_ts/exit_ts NAIVE IST -> read raw, same
   -- doctrine as v8. side is BUY/SELL -> mapped to Long/Short. pnl_pct computed the same way
   -- tc_scanner_endpoints.py's own get_repair_sheet does: (exit-entry)/entry*100, sign flipped for
-  -- SHORT. No rupee pnl on this engine (no position sizing), pnl stays NULL.
+  -- SHORT.
+  -- cc#1763 (TC_SCANNER_LOT_SIZING_V1, session_log 39570, founder 06-Sep): ONE LOT per signal.
+  -- qty = futures_universe.lot_size (READ ONLY join on symbol; tc_scanner_holds stores no
+  -- quantity) and a CLOSED row's rupee pnl = (exit - entry) x lot_size, sign-aware — display
+  -- only, one lot, "what one lot would have made"; the engine's exits stay on percent levels
+  -- (check_exits compares bars to target / sl prices from _target_sl, no rupee input). A symbol
+  -- with no futures_universe row or a NULL lot_size keeps qty and pnl NULL -> the page prints
+  -- BLANK rupees (never 1 share, never percent standing in unlabelled). Open rows are marked
+  -- after the fetch (cmp_prices, the TC tab's own mark) in tradewall().
   UNION ALL
-  SELECT 'tc', id::text,
-         CASE WHEN exit_reason = 'OPEN' THEN 'open' ELSE 'closed' END,
-         symbol,
-         CASE WHEN UPPER(side)='BUY' THEN 'LONG' WHEN UPPER(side)='SELL' THEN 'SHORT' ELSE UPPER(side) END,
+  SELECT 'tc', h.id::text,
+         CASE WHEN h.exit_reason = 'OPEN' THEN 'open' ELSE 'closed' END,
+         h.symbol,
+         CASE WHEN UPPER(h.side)='BUY' THEN 'LONG' WHEN UPPER(h.side)='SELL' THEN 'SHORT' ELSE UPPER(h.side) END,
          'TC Scanner', 'FUTURES',
-         NULL::numeric,
-         entry_ts::timestamp, 'min', entry_price::numeric,
-         exit_ts::timestamp, 'min', exit_price::numeric,
-         NULL::numeric,
-         CASE WHEN exit_reason <> 'OPEN' AND entry_price IS NOT NULL AND entry_price <> 0
-                   AND exit_price IS NOT NULL
-              THEN ROUND(((exit_price - entry_price) / entry_price * 100
-                          * CASE WHEN UPPER(side)='BUY' THEN 1 ELSE -1 END)::numeric, 2)
+         f.lot_size::numeric,
+         h.entry_ts::timestamp, 'min', h.entry_price::numeric,
+         h.exit_ts::timestamp, 'min', h.exit_price::numeric,
+         CASE WHEN h.exit_reason <> 'OPEN' AND h.entry_price IS NOT NULL AND h.exit_price IS NOT NULL
+                   AND f.lot_size IS NOT NULL
+              THEN ROUND(((h.exit_price - h.entry_price) * f.lot_size
+                          * CASE WHEN UPPER(h.side)='BUY' THEN 1 ELSE -1 END)::numeric, 2)
          END,
-         exit_reason, style::text,
+         CASE WHEN h.exit_reason <> 'OPEN' AND h.entry_price IS NOT NULL AND h.entry_price <> 0
+                   AND h.exit_price IS NOT NULL
+              THEN ROUND(((h.exit_price - h.entry_price) / h.entry_price * 100
+                          * CASE WHEN UPPER(h.side)='BUY' THEN 1 ELSE -1 END)::numeric, 2)
+         END,
+         h.exit_reason, h.style::text,
          NULL::timestamp
-  FROM tc_scanner_holds WHERE entry_ts IS NOT NULL
+  FROM tc_scanner_holds h
+  LEFT JOIN futures_universe f ON f.symbol = h.symbol
+  WHERE h.entry_ts IS NOT NULL
 
   -- cc#1000: OPTIONS (options_trades, the stock-options engine) is EXCLUDED from the wall — never
   -- on the founder's list. Read-only exclusion; the table is untouched. The OPTIONS instrument
@@ -770,8 +784,9 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             # cc#1734 scope 4: the Closed book summary per instrument x engine over the WHOLE closed
             # wall (the page loads 100 rows at a time, so a client-side sum would describe the
             # loaded slice, not the book). Rupees are summed ONLY over rows that carry a rupee
-            # value; a percent-only row (TC Scanner, Investment Scanner, Screeners) is counted
-            # separately and NEVER converted into rupees. win/loss = the sign of whichever value
+            # value; a percent-only row (Investment Scanner, Screeners; TC Scanner too before
+            # cc#1763 gave it one-lot rupees) is counted separately and NEVER converted into
+            # rupees. win/loss = the sign of whichever value
             # the engine produced (pnl first, else pnl_pct).
             cur.execute("SELECT instrument, engine, COUNT(*) n, "
                         "COUNT(*) FILTER (WHERE COALESCE(pnl, pnl_pct) > 0) wins, "
@@ -810,12 +825,69 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         for e in events:
             e["cmp"] = e["cmp_ts"] = None
             e["pnl_basis"] = None
+            e["qty_basis"] = None
             if e["src"] != "v8open":
                 continue
+            e["qty_basis"] = "position"
             m = marks.get(e["symbol"]) or {}
             e["cmp"], e["cmp_ts"] = m.get("cmp"), m.get("cmp_ts")
             e["pnl"] = v8_book_canon.unrealised_rupees(e["entry_price"], e["cmp"], e["side"], e["qty"])
             e["pnl_basis"] = "indicative" if e["pnl"] is not None else "no-cmp"
+        # cc#1763: TC SCANNER at ONE LOT per signal (TC_SCANNER_LOT_SIZING_V1, 39570). qty arrived
+        # from the union as futures_universe.lot_size (NULL when the symbol has no lot). Closed
+        # rows already carry the one-lot rupee from the union; an OPEN row is marked HERE off
+        # cmp_prices — the SAME mark the TC tab's Open Book uses (tc_scanner_endpoints open_all)
+        # — for pnl_pct (price alone, the like-for-like column) and pnl (x lot_size, the same
+        # side-aware maths as V8 via unrealised_rupees). Rupees are DISPLAY ONLY: no gate, cap,
+        # ranking or threshold reads them, and the engine's exits stay on percent levels.
+        tc_marks = {}
+        tc_syms = sorted({e["symbol"] for e in events if e["src"] == "tc" and e["status"] == "open"})
+        if tc_syms:
+            try:
+                cur.execute("SELECT symbol, cmp, updated_at FROM cmp_prices WHERE symbol = ANY(%s)", (tc_syms,))
+                for r0 in _rows(cur):
+                    tc_marks[r0["symbol"]] = {"cmp": float(r0["cmp"]) if r0["cmp"] is not None else None,
+                                              "cmp_ts": r0["updated_at"].strftime("%Y-%m-%d %H:%M:%S") if r0["updated_at"] else None}
+            except Exception as ex:
+                log.warning("cc#1763 cmp_prices lookup failed: %s", ex)
+        for e in events:
+            if e["src"] != "tc":
+                continue
+            e["qty_basis"] = "one-lot" if e["qty"] is not None else "no-lot"
+            if e["status"] != "open":
+                e["pnl_basis"] = "one-lot" if e["pnl"] is not None else ("no-lot" if e["qty"] is None else None)
+                continue
+            m = tc_marks.get(e["symbol"]) or {}
+            e["cmp"], e["cmp_ts"] = m.get("cmp"), m.get("cmp_ts")
+            if e["cmp"] is not None and e["entry_price"]:
+                e["pnl_pct"] = round((e["cmp"] - e["entry_price"]) / e["entry_price"] * 100.0
+                                     * (-1 if e["side"] == "SHORT" else 1), 2)
+            e["pnl"] = v8_book_canon.unrealised_rupees(e["entry_price"], e["cmp"], e["side"], e["qty"])
+            e["pnl_basis"] = ("one-lot" if e["pnl"] is not None
+                              else ("no-cmp" if e["cmp"] is None else "no-lot"))
+        # cc#1763 C3: the whole TC open book at one lot each, served so the page can state the
+        # paper-book result "if every signal were taken" beside the rows it has in view.
+        tc_open_book = None
+        if st in (None, "open"):
+            try:
+                cur.execute("""SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE c.cmp IS NULL) AS no_cmp,
+                                      COUNT(*) FILTER (WHERE f.lot_size IS NULL) AS no_lot,
+                                      COALESCE(SUM((c.cmp - h.entry_price) * f.lot_size
+                                          * CASE WHEN UPPER(h.side) = 'BUY' THEN 1 ELSE -1 END), 0) AS unrealised,
+                                      MAX(c.updated_at) AS cmp_as_of
+                               FROM tc_scanner_holds h
+                               LEFT JOIN futures_universe f ON f.symbol = h.symbol
+                               LEFT JOIN cmp_prices c ON c.symbol = h.symbol
+                               WHERE h.exit_reason = 'OPEN'""")
+                r0 = _rows(cur)[0]
+                tc_open_book = {"n": int(r0["n"] or 0), "rows_without_cmp": int(r0["no_cmp"] or 0),
+                                "rows_without_lot": int(r0["no_lot"] or 0),
+                                "unrealised_one_lot": round(float(r0["unrealised"] or 0), 2),
+                                "cmp_as_of": r0["cmp_as_of"].strftime("%Y-%m-%d %H:%M:%S") if r0["cmp_as_of"] else None,
+                                "basis": "every open TC Scanner signal at ONE LOT (futures_universe.lot_size) vs cmp_prices — the paper book if every signal were taken; rows without a CMP or a lot are counted, not summed"}
+            except Exception as ex:
+                log.warning("cc#1763 tc_open_book failed: %s", ex)
+                tc_open_book = {"error": str(ex)[:160]}
         # cc#1762 V3, served live on every response: the indicative column summed over ALL open V8
         # positions (not just this page) beside the canon's own unrealised total — the two must
         # match to the paise or this surface has drifted from the app home.
@@ -892,9 +964,15 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                                  # the SAME CMP as the indicative column, same maths, same qty. Only
                                  # an approved V8 row (position-sized) gets a rupee; TC rows have no
                                  # qty (item 6) and a row with no CMP stays None (item 5).
+                                 # cc#1763: a TC Scanner open row is position-sized at ONE LOT now, so
+                                 # its approved column fills the same way (x lot_size); still None
+                                 # without a CMP or a lot.
                                  "pnl_approved": (v8_book_canon.unrealised_rupees(_apx, e.get("cmp"), e["side"], e["qty"])
-                                                  if (e["src"] == "v8open" and a["status"] == "approved") else None),
-                                 "pnl_approved_basis": "approved_price@approved_at -> cmp_as_of, x position qty"}
+                                                  if (e["src"] in ("v8open", "tc") and e["status"] == "open"
+                                                      and a["status"] == "approved") else None),
+                                 "pnl_approved_basis": ("approved_price@approved_at -> cmp, x one lot (futures_universe.lot_size)"
+                                                        if e["src"] == "tc" else
+                                                        "approved_price@approved_at -> cmp_as_of, x position qty")}
             else:
                 e["state"] = "pending-approval"
                 e["approval"] = None
@@ -961,8 +1039,10 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         "pnl_basis": {"indicative": "engine entry_price at entry.ts -> CMP as of cmp_as_of, x qty, sign-aware (v8_book_canon.unrealised_rupees, the app home V8 OPEN BOOK formula)",
                       "approved": "trade_alerts.approved_price at approved_at -> the SAME CMP, same maths, same qty; blank until approved",
                       "no_cmp": "a symbol with no CMP shows BOTH blank — entry price is never substituted",
-                      "tc_scanner": "no rupee position size; percent only (cc#1734)"},
+                      "tc_scanner": "cc#1763 TC_SCANNER_LOT_SIZING_V1: rupees at ONE LOT per signal (qty = futures_universe.lot_size), percent kept alongside on price alone; open rows marked off cmp_prices; no lot_size -> rupees blank, percent labelled; display only, the engine exits on percent levels",
+                      "equity": "QB Basket / Investment Scanner / Screeners: percent only, both columns, never rupees"},
         "v8_open_book": v8_open_book,
+        "tc_open_book": tc_open_book,
         "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed | suppressed-in-position (cc#1736)",
         # cc#1734: the Closed book summary (see the SQL above) and the DECODE map the renderer
         # applies to DETAIL — read from the engines' own words, never typed into the page:

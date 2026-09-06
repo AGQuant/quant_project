@@ -9059,6 +9059,25 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   }
   function pnlTxt(v){ return v!=null?((v>=0?'+':'')+v+'%'):'—'; }
   function cl2(v){ return v==null?'':(v>0?'pos':(v<0?'neg':'flat')); }
+  // cc#1763 (TC_SCANNER_LOT_SIZING_V1, 39570): the ONE-LOT rupee, served as pnl_rs by
+  // /api/scanners/tc/holds (lot = futures_universe.lot_size). Blank when the endpoint served
+  // none (no lot, no CMP) — never 0, never a percent dressed as rupees. Percent stays beside it.
+  function rsTxt(v){ if(v==null) return '—'; var x=Number(v); return (x<0?'−':'+')+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+  function lotTxt(r){ return r.lot_size!=null ? Number(r.lot_size).toLocaleString('en-IN') : '<span title="no lot_size in futures_universe — rupees blank">—</span>'; }
+  // the book total over the rows RENDERED (the tab shows both books whole, no side filter), one
+  // lot each: {n, priced, total, blank}. UNREALISED for the Open Book, REALISED for the Closed.
+  function bookRs(rows){
+    var t=0, n=0, blank=0;
+    rows.forEach(function(r){ if(r.pnl_rs!=null){ t+=Number(r.pnl_rs); n++; } else blank++; });
+    return {n:rows.length, priced:n, total:Math.round(t*100)/100, blank:blank};
+  }
+  function bookChip(label, rows){
+    var b=bookRs(rows);
+    if(!b.n) return '';
+    return '<span>'+label+' <b class="'+cl2(b.total)+'">'+rsTxt(b.total)+'</b></span>'
+      +'<span style="font-size:10.5px;color:var(--tx3)" title="paper book if every signal were taken: one lot per signal (futures_universe.lot_size), display only — the engine exits on percent">'
+      +b.n+(b.n===1?' position':' positions')+', one lot each'+(b.blank?' · '+b.blank+' without lot/CMP not in total':'')+'</span>';
+  }
   // the LIVE badge is a STATE, not a sticker: it renders only while NSE is open by the same
   // clock test the shell uses; off-hours the Open Book badges the payload's own date instead.
   function nseOpen(){
@@ -9084,10 +9103,12 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td>'+n2(r.sl)+'</td>'
         +'<td>'+n2(r.cmp)+'</td>'
         +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
+        +'<td>'+lotTxt(r)+'</td>'
+        +'<td class="'+cl2(r.pnl_rs)+'" title="one lot x price move, unrealised vs CMP">'+rsTxt(r.pnl_rs)+'</td>'
         +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td>'
         +'<td>'+eTime(r.entry_ts)+'</td>'
         +'<td>'+daysHeld(r.entry_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="10">'+esc(emptyMsg)+'</td></tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="12">'+esc(emptyMsg)+'</td></tr>';
     return '<section><div class="sh"><h2>Open Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC SCANNER &middot; V2 SCORE100</span>'
@@ -9095,9 +9116,10 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +(live?'<span class="badge b-live"><span class="dot"></span>LIVE</span>'
             :'<span class="badge b-eng" title="All open holds as of this time — the date control below governs the Closed Book only">as of '+esc(meta.asOf||'')+'</span>')
       +'<div class="stats"><span>Open <b>'+rows.length+'</b></span>'
-      +'<span style="font-size:10.5px;color:var(--tx3)">all open holds · not date-filtered</span></div></div>'
+      +'<span style="font-size:10.5px;color:var(--tx3)">all open holds · not date-filtered</span>'
+      +bookChip('Unrealised', rows)+'</div></div>'   /* cc#1763 C3: the open book at one lot each */
       +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
-      +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th>SL &middot; Target</th><th>Entry Time</th><th>Days Held</th></tr></thead>'
+      +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th title="futures_universe.lot_size">Lot</th><th title="one lot per signal, display only">P&amp;L &#8377; (1 lot)</th><th>SL &middot; Target</th><th>Entry Time</th><th>Days Held</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
   }
 
@@ -9113,8 +9135,9 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td>'+n2(r.exit_price)+'</td>'
         +'<td>'+reasonPill(r.exit_reason)+'</td>'
         +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
+        +'<td class="'+cl2(r.pnl_rs)+'" title="one lot ('+(r.lot_size!=null?r.lot_size:'no lot size')+') x price move, realised at exit">'+rsTxt(r.pnl_rs)+'</td>'
         +'<td>'+dShort(r.exit_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC Scanner positions on '+esc(dateStr||'this date')
+    }).join('') : '<tr class="empty-row"><td colspan="8">No closed TC Scanner positions on '+esc(dateStr||'this date')
         +(lastClosure?' &middot; last closures: '+esc(lastClosure):'')+'</td></tr>';
     return '<section><div class="sh"><h2>Closed Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
@@ -9128,9 +9151,10 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<span>Wins <b>'+stats.wins+'</b></span>'
       +'<span>WR <b>'+(stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
       +'<span>Net <b class="'+cl2(stats.net_pts_pct)+'">'
-        +(stats.closed?((stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%'):'—')+'</b></span></div></div>'
+        +(stats.closed?((stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%'):'—')+'</b></span>'
+      +bookChip('Realised', closed)+'</div></div>'   /* cc#1763 C3: the closed book at one lot each; WR/Net stay on percent (C5) */
       +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
-      +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th>Date</th></tr></thead>'
+      +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th title="one lot per signal (futures_universe.lot_size), display only">P&amp;L &#8377; (1 lot)</th><th>Date</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
   }
 
