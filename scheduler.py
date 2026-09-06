@@ -4596,14 +4596,15 @@ def _bg_ops_metrics_season_sweep():
 # state is superseded by feed_guardian's single app_config JSON state (survives app redeploy).
 
 
-_tc_scanner_running = False   # cc#464: single-flight guard for the 15-min scan+exit-check
+_tc_scanner_running = False   # cc#464: single-flight guard for the scan+exit-check tick
 
 
 def _bg_tc_scanner():
-    """cc#464: TC Scanner — 13-check binary engine (id=399/400), full futures universe, BOTH
-    sides, every 15 min during market hours (shares the qb_intraday_mark slot). Scans for new
-    qualifiers (LATCH — first per symbol/side/day, never re-evaluated) then checks every OPEN
-    hold against the current futures LTP for target/SL touch. Single-flight."""
+    """cc#464 engine slot; cc#1746 / session_log 39467 (V2): every 5 min during market hours (was
+    the 15-min qb_intraday_mark slot). run_scan scores the full futures universe on the four
+    score100 buckets and enters on the config bar (LATCH — first per symbol/side/day, and no
+    entry while that side is OPEN); check_exits then runs bracket touches on the futures bars
+    inside the 7-day life and the 7-day TIME stop. Single-flight."""
     global _tc_scanner_running
     if _tc_scanner_running:
         return
@@ -4853,11 +4854,11 @@ async def _scheduler_loop():
             _spawn(_bg_trade_alerts_check)    # cc#1504: manual trade_alerts pending->triggered price sweep
             _spawn(_bg_fut_rest_fallback)     # cc#770: REST futures fallback when native WS fut leg is dark
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
+            _spawn(_bg_tc_scanner)            # cc#464 engine; cc#1746 / 39467: every 5 min (was the m%15 slot below)
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
                 _spawn(_bg_intraday_scan)       # cc#481: 15-min BUY+SHORT scan -> intraday_watchlist (09:30-15:15 gate inside)
-                _spawn(_bg_tc_scanner)          # cc#464: TC Scanner 13-check binary engine -> tc_scanner_holds
         # cc_task #89: yahoo EOD raw_prices refresh at 15:35 IST (5 min after close) so
         # v8_engine EOD (15:45) and the evening journal review see today's official closes
         # ~5h sooner. The 01:00 IST run (below) stays as the nightly safety re-run.

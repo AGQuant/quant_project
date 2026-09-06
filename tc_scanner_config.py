@@ -32,13 +32,17 @@ router = APIRouter()
 # ── THE CONFIG. Session_log 29447 (V1) as amended by 29448 (V1.1). Nothing here is retyped anywhere
 # else in the codebase; every consumer reads this dict. ───────────────────────────────────────────
 TC_SCANNER_CONFIG = {
-    "version": "V1.1",
-    "locked_on": "23 Aug 2026",
-    "source": "session_log 29447 (config) + 29448 (observation-mode amendment)",
-    # V1.1: the rules are MARKED, not enforced. Flipping this to False is the whole of the change
-    # needed to start filtering, which is why it is a flag and not a comment.
+    "version": "V2",
+    "locked_on": "06 Sep 2026",
+    "source": "session_log 39467 TC_SCANNER_ENTRY_EXIT_V2 (entry + exit) over 29447 (gates, caps) + 29448 (observation-mode marks)",
+    # V1.1 (29448): the gates and caps are MARKED on the scanner page, not enforced there. This flag
+    # governs the DISPLAY annotations only. The BOOK (tc_scanner_endpoints.run_scan, cc#1746) enters
+    # on `score_thresholds` alone per 39467 — no gate, no cap — whatever this flag says.
     "observation_mode": True,
-    "score_thresholds": {"SELL-MOM": 80, "SELL-REV": 80, "BUY-MOM": 65, "BUY-REV": 60},
+    # cc#1746 / 39467: the ENTRY BAR per bucket, founder-stated 06-Sep-2026 ("if Buy reversal score
+    # touches 80 and buy momentum 85 then entry"; SELL mirrors BUY, amendment same day). This is
+    # the one copy: tc_scanner_endpoints reads it for entries, the scanner page for its bar marks.
+    "score_thresholds": {"SELL-MOM": 85, "SELL-REV": 80, "BUY-MOM": 85, "BUY-REV": 80},
     # Each gate carries its own label, operator and bound so the strip, the fail phrase and the
     # sheet line are all one sentence built from one row. `key` is the v8_metrics column.
     "gates": {
@@ -58,7 +62,10 @@ TC_SCANNER_CONFIG = {
         "book_total": 20,
         "fill": "rank by score100 desc, one position per symbol, no same-day re-entry",
     },
-    "exit": {"target_pct": 2, "stop_pct": -2, "time_exit": "15:20 on the 3rd session"},
+    # cc#1746 / 39467: +3% / -3% from entry, side-aware; 7 calendar days then a TIME stop at the
+    # live futures price. tc_scanner_endpoints derives TARGET_PCT / SL_PCT / HOLD_DAYS from here.
+    "exit": {"target_pct": 3, "stop_pct": -3, "hold_days": 7,
+             "time_exit": "7 calendar days from entry_ts -> closed at the live futures price, exit_reason TIME"},
     "tested_on": "one week of data (17-21 Aug 2026), longer test running",
     "caveat": ("ONE week, falling market. Three dials tuned on 5 days — a starting config, not a "
                "result. The 4-week replay confirms or kills it."),
