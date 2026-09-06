@@ -8708,6 +8708,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-wrap .pill{font:700 9px var(--f-m);letter-spacing:.08em;padding:3px 8px;border-radius:4px;border:1px solid;display:inline-block}
 .tc13-wrap .pill.target{color:var(--gr);border-color:rgba(var(--gr-rgb),.45);background:rgba(var(--gr-rgb),.12)}
 .tc13-wrap .pill.sl{color:var(--rd);border-color:rgba(var(--rd-rgb),.45);background:rgba(var(--rd-rgb),.12)}
+.tc13-wrap .pill.time{color:var(--mut);border-color:var(--line2);background:transparent}  /* cc#1746: 7-day time stop — a clock, not a verdict */
 .tc13-wrap .prox{width:96px;display:inline-block}
 .tc13-wrap .prail{position:relative;height:4px;border-radius:2px;background:linear-gradient(90deg,rgba(var(--rd-rgb),.4),var(--line2) 46%,var(--line2) 54%,rgba(var(--gr-rgb),.4))}
 .tc13-wrap .pdot{position:absolute;top:50%;width:7px;height:7px;border-radius:50%;transform:translate(-50%,-50%);background:var(--cy);box-shadow:0 0 6px var(--cy)}
@@ -8753,7 +8754,16 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   function pill(reason){
     if(reason==='TARGET')return '<span class="tc13-pill target">TARGET</span>';
     if(reason==='SL')return '<span class="tc13-pill sl">SL</span>';
+    if(reason==='TIME')return '<span class="tc13-pill time">Time stop</span>';
     return '<span class="tc13-pill open">OPEN</span>';
+  }
+  // cc#1746: exit_reason -> pill class + printed word. TIME is the 7-day time stop (session_log
+  // 39467) and prints as "Time stop", never the raw code. 'TARGET (cash-daily)' keeps its suffix.
+  function reasonPill(reason){
+    var r=String(reason||'');
+    var cls=r.indexOf('TARGET')===0?'target':r==='TIME'?'time':'sl';
+    var txt=r==='TIME'?'Time stop':r;
+    return '<span class="pill '+cls+'">'+esc(txt)+'</span>';
   }
 
   function sideBadge(side){
@@ -8825,7 +8835,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // older payload without the key says so instead of implying a healthy zero.
   function openTable(rows, meta){
     var live = nseOpen();
-    var emptyMsg = meta.hasOpenAll ? 'No open TC13 positions' : 'Open Book unavailable in this payload (no open_all key) — not a healthy zero';
+    var emptyMsg = meta.hasOpenAll ? 'No open TC Scanner positions' :'Open Book unavailable in this payload (no open_all key) — not a healthy zero';
     var body=rows.length ? rows.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
         +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
@@ -8840,7 +8850,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     }).join('') : '<tr class="empty-row"><td colspan="10">'+esc(emptyMsg)+'</td></tr>';
     return '<section><div class="sh"><h2>Open Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
-      +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
+      +'<span class="badge b-eng">TC SCANNER &middot; V2 SCORE100</span>'
       +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
       +(live?'<span class="badge b-live"><span class="dot"></span>LIVE</span>'
             :'<span class="badge b-eng" title="All open holds as of this time — the date control below governs the Closed Book only">as of '+esc(meta.asOf||'')+'</span>')
@@ -8861,14 +8871,14 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
         +'<td>'+n2(r.entry_price)+'</td>'
         +'<td>'+n2(r.exit_price)+'</td>'
-        +'<td><span class="pill '+(String(r.exit_reason||'').indexOf('TARGET')===0?'target':'sl')+'">'+esc(r.exit_reason)+'</span></td>'
+        +'<td>'+reasonPill(r.exit_reason)+'</td>'
         +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
         +'<td>'+dShort(r.exit_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC13 positions on '+esc(dateStr||'this date')
+    }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC Scanner positions on '+esc(dateStr||'this date')
         +(lastClosure?' &middot; last closures: '+esc(lastClosure):'')+'</td></tr>';
     return '<section><div class="sh"><h2>Closed Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
-      +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
+      +'<span class="badge b-eng">TC SCANNER &middot; V2 SCORE100</span>'
       +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
       +'<span class="badge b-eng">'+esc(dateStr||'')+'</span>'
       +'<div class="stats">'
@@ -8971,7 +8981,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     el.id='tc13InfoOv';
     el.className='tc13-info-ov';
     el.setAttribute('role','dialog');
-    el.setAttribute('aria-label','How the TC13 scanner works');
+    el.setAttribute('aria-label','How the TC Scanner works');
     el.innerHTML='<div class="tc13-info-box" id="tc13InfoBox">'
       +'<button class="tc13-info-close" onclick="tc13InfoClose()" aria-label="Close">&times;</button>'
       +'<div id="tc13InfoBody"></div></div>';
@@ -8984,10 +8994,12 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +(k?'<div class="tc13-info-k">'+esc(k)+'</div>':'')
       +'<div class="tc13-info-v">'+v+'</div></div>';
   }
-  function _tc13Checks(side,checks){
-    return '<div class="tc13-info-k">'+esc(side)+' — 13 checks</div>'
-      +'<div class="tc13-info-v">'+checks.map(function(c){
-        return '<div style="margin:3px 0"><b>'+esc(c.id)+'</b> '+esc(c.label)+' — '+esc(c.rule)+'</div>';
+  // cc#1746 (V2, session_log 39467): the four entry bars, read from spec.entry_rules — the engine's
+  // own thresholds, never typed here.
+  function _tc13Entries(rules){
+    return '<div class="tc13-info-k">Entry bars (score100)</div>'
+      +'<div class="tc13-info-v">'+(rules||[]).map(function(c){
+        return '<div style="margin:3px 0"><b>'+esc(c.bucket)+'</b> &ge; '+esc(c.threshold)+'</div>';
       }).join('')+'</div>';
   }
   function tc13InfoBody(spec){
@@ -9002,18 +9014,18 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     }
     var parts=[];
     parts.push(_tc13Row('The idea',
-      esc(spec.engine)+' — a binary pass/fail bucket over the full futures universe, one bucket per side.'));
+      esc(spec.engine)+' — the full futures universe scored on four buckets; a bucket enters the book when its score clears its bar.'));
     parts.push(_tc13Row('Entry',
-      'Scanned every '+spec.cadence_min+' minutes over '+esc(spec.universe)+'. '+esc(spec.qualify_rule)+'. '
-      +esc(spec.null_handling)+'. '+esc(spec.latch_rule)+'. Entry price is '+esc(spec.entry_definition)+'.'));
-    parts.push(_tc13Row('Target / SL', exLine+' '+esc(spec.target_sl_note||'')));
+      'Scored every '+spec.cadence_min+' minutes over '+esc(spec.universe)+' by '+esc(spec.scorer||'the shared scorer')+'. '
+      +esc(spec.entry_guard||'')+'. '+esc(spec.gates_and_caps||'')+'. Entry price is '+esc(spec.entry_definition)+'.'));
+    parts.push(_tc13Entries(spec.entry_rules));
+    parts.push(_tc13Row('Target / SL', exLine+' '+esc(spec.target_sl_note||'')+' '+esc(spec.bar_order||'')+'. '+esc(spec.gap_fill||'')+'.'));
+    parts.push(_tc13Row('Time stop', esc(spec.time_stop||('closed after '+spec.hold_days+' days'))+'.'));
     parts.push(_tc13Row('Exit',
       (spec.exit_basis?esc(spec.exit_basis)+'. ':'')
-      +'A row that shows TARGET or SL closed there; a row still marked OPEN has not touched either level yet.'));
+      +'A row that shows TARGET or SL closed there; Time stop closed at the '+spec.hold_days+'-day mark; a row still marked OPEN has not touched either level yet.'));
     parts.push(_tc13Row('P&L%',
       '(exit price &minus; entry price) / entry price, sign-flipped for SELL — the same figure the P&amp;L% column shows.'));
-    parts.push(_tc13Checks('BUY',spec.buy_checks||[]));
-    parts.push(_tc13Checks('SELL',spec.sell_checks||[]));
     parts.push('<div class="tc13-info-src">Research and measurement only — never a buy/sell instruction. '
       +'Facts above are read live from the engine spec, not typed here.</div>');
     return parts.join('');

@@ -623,7 +623,7 @@ _ORIGIN_TAG = "EXPERT HANDPICKED"
 _STYLE_WORDS = {"buy_momentum": "Momentum long", "sell_momentum": "Momentum short",
                 "buy_reversal": "Reversal long", "sell_reversal": "Reversal short"}
 _CLOSE_WORDS = {"TARGET": "target hit", "SL": "stop hit", "GAP_TARGET_EXIT": "gap through target",
-                "GAP_SL_EXIT": "gap through stop", "TIME": "time out", "GATE_EXIT": "setup faded",
+                "GAP_SL_EXIT": "gap through stop", "TIME": "time stop", "GATE_EXIT": "setup faded",
                 "SUITE_REBUILD": "book rebuilt", "MANUAL": "closed by hand"}
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -771,7 +771,7 @@ def _origin_tc(cur, sym, ts):
     if not r:
         return None
     is_open = (r[10] or "OPEN") == "OPEN"
-    style = "Momentum" if str(r[2] or "").upper().startswith("MOM") else "Reversal"
+    style = "Momentum" if "MOM" in str(r[2] or "").upper() else "Reversal"   # cc#1746: style is now 'BUY-MOM' etc.
     side = "long" if str(r[1] or "").upper() == "BUY" else "short"
     return {"table": "tc_scanner_holds", "id": r[0], "basket": None, "style_word": style + " " + side,
             "entry_price": _fnum(r[3]), "entry_ts": r[4], "target": _fnum(r[5]), "stop": _fnum(r[6]),

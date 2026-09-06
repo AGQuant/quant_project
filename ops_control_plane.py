@@ -118,7 +118,7 @@ SCHEDULE_SEED: List[Dict[str, Any]] = [
     ("smartgain_mtm", "market-hours", "scheduler._bg_smartgain_mtm", "smartgain mtm freshness"),
     ("qb_intraday_mark", "market-hours", "scheduler._bg_qb_intraday_mark", "qb mark freshness"),
     ("intraday_scan", "15-min 09:30-15:15", "scheduler._bg_intraday_scan", "intraday_watchlist freshness"),
-    ("tc_scanner", "15-min 09:30-15:15", "tc_scanner_endpoints", "tc_scanner_holds freshness"),
+    ("tc_scanner", "5-min market hours (cc#1746)", "tc_scanner_endpoints", "tc_scanner_holds freshness"),
     ("gate_rebalance", "weekdays 15:20", "scheduler._bg_gate_rebalance", "over-slot close ran"),
     ("yahoo_daily_sync", "weekdays 15:35", "scheduler._bg_yahoo_daily_sync", "raw_prices last trading day"),
     ("tc_scanner_eod", "weekdays ~15:35", "scheduler._bg_tc_scanner_eod", "eod sweep ran"),

@@ -1064,11 +1064,12 @@ def wall_engine_rules(cur):
             def _g(side):
                 return "; ".join(str(g.get("label")) + " " + str(g.get("op")) + " " + _fmt_num(g.get("bound")) + str(g.get("unit") or "")
                                  for g in gates.get(side, []))
-            entry = ("score >= " + ", ".join(k + " " + _fmt_num(v) for k, v in th.items())
-                     + " | BUY gates: " + (_g("BUY") or _NOT_IN_CONFIG) + " | SELL gates: " + (_g("SELL") or _NOT_IN_CONFIG)
-                     + (" | observation mode: rules are marks, not filters" if _TC.get("observation_mode") else ""))
+            # cc#1746 / 39467: the BOOK enters on the score bar alone; the gates are marks on the scanner page.
+            entry = ("book enters on score100 >= " + ", ".join(k + " " + _fmt_num(v) for k, v in th.items())
+                     + " (no gate, no cap on the book) | scanner-page marks only -- BUY gates: " + (_g("BUY") or _NOT_IN_CONFIG)
+                     + " | SELL gates: " + (_g("SELL") or _NOT_IN_CONFIG))
             ex = _TC.get("exit") or {}
-            exit_rule = ("target " + _fmt_num(ex.get("target_pct")) + " pct, stop " + _fmt_num(ex.get("stop_pct")) + " pct, time exit "
+            exit_rule = ("target " + _fmt_num(ex.get("target_pct")) + " pct, stop " + _fmt_num(ex.get("stop_pct")) + " pct, time stop "
                          + str(ex.get("time_exit"))) if ex else _NOT_IN_CONFIG
             caps = _TC.get("caps") or {}
             row("TC Scanner", _TC.get("version"), "FUTURES",
