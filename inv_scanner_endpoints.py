@@ -27,6 +27,7 @@ from fastapi.responses import HTMLResponse
 # (verified against inv_scanner_scoring.py at build time; flagged in cc_task_logs 1697 that this
 # is the one place the card's "84/65/50 appear once" verify line does not literally hold).
 from inv_scanner_rules import ENTRY_MOM, ENTRY_REV, EXIT_MOM, EXIT_REV
+from inv_scanner_rules import HARD_STOP_ABS_PCT, HARD_STOP_ALPHA_PCT, BENCHMARK_SYMBOL   # cc#1768: the hard-stop levels, surfaced (H7)
 # cc#1767: the GATES column reads the engine's OWN gate function and gate registry — never a
 # second computation of the same four numbers.
 from inv_scanner_rules import evaluate_gates, gates_passed, GATE_ORDER, GATE_LABELS, GATE_RULES, GATE_UNITS
@@ -48,19 +49,26 @@ META = {
         "thresholds": {"entry_mom": ENTRY_MOM, "entry_rev": ENTRY_REV},
     },
     "exit": {
-        "rule": "A momentum entry exits when its momentum score drops below {mom}. A reversal "
-                "entry exits when its reversal score drops below {rev}. The 5-point gap stops "
-                "churn. There is no stop-loss or target in V1 — exits are score-decay only."
-                .format(mom=EXIT_MOM, rev=EXIT_REV),
-        "thresholds": {"exit_mom": EXIT_MOM, "exit_rev": EXIT_REV},
+        # cc#1768 (INVESTMENT_SCANNER_EXIT_V2, 39581): bars 75 / 70 and the hard stop, every number
+        # read from inv_scanner_rules — the engine's own constants, never retyped here.
+        "rule": "A hard stop is checked first, regardless of score: exit when the stock is {abs:g}% "
+                "or worse from entry, or when its return since entry trails {bench} by {alpha:g}% or "
+                "more (alpha). Then score decay: a momentum entry exits when its momentum score drops "
+                "below {mom}; a reversal entry exits when its reversal score drops below {rev}. The "
+                "10-point gap between the entry bar and the exit bar stops churn. There is no target leg."
+                .format(abs=HARD_STOP_ABS_PCT, alpha=HARD_STOP_ALPHA_PCT, bench=BENCHMARK_SYMBOL,
+                        mom=EXIT_MOM, rev=EXIT_REV),
+        "thresholds": {"exit_mom": EXIT_MOM, "exit_rev": EXIT_REV,
+                       "hard_stop_abs_pct": HARD_STOP_ABS_PCT, "hard_stop_alpha_pct": HARD_STOP_ALPHA_PCT,
+                       "benchmark": BENCHMARK_SYMBOL},
     },
     "bands": {
         "rule": "STRONG BUY ≥ 84 · ACCUMULATE ≥ 65 · WATCH ≥ 50 · AVOID < 50, "
                 "on both tracks.",
         "thresholds": {"strong_buy": 84, "accumulate": 65, "watch": 50},
     },
-    "honesty": "Research only — this is a scanner, not a trade recommendation. V1 has no "
-               "stop-loss or target leg. Every number on this page is as of the run date shown, "
+    "honesty": "Research only — this is a scanner, not a trade recommendation. Exits are the "
+               "hard stop and score decay; there is no target leg. Every number on this page is as of the run date shown, "
                "not live.",
 }
 

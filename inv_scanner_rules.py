@@ -6,10 +6,22 @@ ENTRY  BUY when (mom_score > 85 OR rev_score > 80) AND ALL four price gates:
        the month is exactly what the month gate is FOR. Every gate's input, source and pass/fail
        is logged in the signal row's gates jsonb; the signal carries its qualifying track(s).
 
-EXIT   momentum-entered name: mom_score < 80 → EXIT. reversal-entered: rev_score < 75.
-       5-point hysteresis per spec; score-decay exits ONLY in V1 (no SL/target legs).
-       DUAL-track entries exit when BOTH tracks are below their thresholds — while either track
-       still clears, the name keeps a reason to be held. (Interpretation logged on the card.)
+EXIT   cc#1768 (INVESTMENT_SCANNER_EXIT_V2, session_log 39581; founder 06-Sep "Exit Scorr below 75
+       Momentum and below 70 Reversal" — supersedes the exit line of 30147 ONLY):
+       momentum-entered name: mom_score < 75 → EXIT. reversal-entered: rev_score < 70.
+       10-point hysteresis (was 5 with bars 80/75 — three of the four V1 exits, at 79.4, 79.4 and
+       74.0, were cutting names on small score dips; those closed rows stand as history with the
+       bars that fired them). DUAL-track entries exit when BOTH tracks are below their bars —
+       while either track still clears, the name keeps a reason to be held.
+       HARD STOP (AMENDMENT_06SEP_HARD_STOP), evaluated FIRST on every open position, regardless
+       of score: exit when absolute return from entry <= -10% OR alpha <= -5%, alpha = stock
+       return since entry minus NIFTY500 over the same window (raw_prices NIFTY500; base = the
+       close on or before entered_at, current = the close on the stock's own latest EOD date —
+       both legs on one as-of date, never a live stock price against a stale index). exit_reason
+       names the leg and its value ("hard stop -10.4 pct from entry" / "alpha -5.7 pct vs
+       NIFTY500"). No entry_price -> neither leg evaluable -> logged and skipped, never a pass or
+       a fail. No NIFTY500 base bar -> the absolute leg only, alpha logged as not evaluable.
+       A position breaching both the hard stop and score decay records the HARD STOP.
 
 DAY RETURN source resolution (verified on the full 196 before this file was written —
 196/196 have two closes in raw_prices, 186/196 have a live cmp_prices row):
@@ -41,7 +53,14 @@ router = APIRouter(tags=["investment_scanner"])
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 ENTRY_MOM, ENTRY_REV = 85.0, 80.0
-EXIT_MOM, EXIT_REV = 80.0, 75.0
+# cc#1768 (session_log 39581): exit bars 80/75 -> 75/70. The ONLY definition — every reason
+# string, the (i) sheet (inv_scanner_endpoints META) and the wall's engine-rules row read these.
+EXIT_MOM, EXIT_REV = 75.0, 70.0
+# cc#1768 AMENDMENT_06SEP_HARD_STOP: the two hard-stop levels and the one benchmark. Read by
+# hard_stop_check() below and surfaced wherever the exit rules are shown.
+HARD_STOP_ABS_PCT = -10.0        # exit when (close / entry_price - 1) * 100 <= this
+HARD_STOP_ALPHA_PCT = -5.0       # exit when stock return since entry - NIFTY500 return <= this
+BENCHMARK_SYMBOL = "NIFTY500"    # raw_prices symbol; never another index (H5)
 
 # cc#1767: the four price gates, NAMED ONCE. Fixed order (the page renders a capsule per gate in
 # this order, so position carries meaning), the short label each capsule prints, and the rule in
@@ -147,6 +166,71 @@ def _day_return(cur, sym):
     return None, "single_close_only"
 
 
+def hard_stop_check(cur, sym, entry_price, entered_at) -> dict:
+    """cc#1768 H1-H5: the hard-stop leg for ONE open position, pure read. Returns a dict the
+    caller can log verbatim: fired (bool), reason (the exit_reason text, None when not fired),
+    abs_pct, alpha_pct, as_of (the stock's latest EOD date — both legs are measured there),
+    stock_close, bench_base / bench_base_date / bench_now / bench_now_date, alpha_evaluable,
+    skipped (a reason string when NOTHING could be evaluated — no entry_price, no stock close)."""
+    out = {"fired": False, "reason": None, "abs_pct": None, "alpha_pct": None, "as_of": None,
+           "stock_close": None, "bench_base": None, "bench_base_date": None,
+           "bench_now": None, "bench_now_date": None, "alpha_evaluable": False, "skipped": None}
+    entry_price = _f(entry_price)
+    if not entry_price or entered_at is None:
+        out["skipped"] = "no entry_price" if not entry_price else "no entered_at"   # H5: neither leg — never a pass or a fail
+        return out
+    cur.execute("""SELECT close, price_date FROM raw_prices
+                   WHERE symbol=%s AND close IS NOT NULL ORDER BY price_date DESC LIMIT 1""", (sym,))
+    r = cur.fetchone()
+    if not r or not _f(r[0]):
+        out["skipped"] = "no EOD close for the stock"
+        return out
+    close, as_of = _f(r[0]), r[1]
+    out["stock_close"], out["as_of"] = close, str(as_of)
+    abs_pct = (close / entry_price - 1.0) * 100.0
+    out["abs_pct"] = round(abs_pct, 2)
+    # H2: base = the NIFTY500 close on or before the entry date; current = the close on or before
+    # the SAME as-of date the stock close carries. Both EOD, one as-of.
+    cur.execute("""SELECT close, price_date FROM raw_prices
+                   WHERE symbol=%s AND close IS NOT NULL AND price_date <= %s
+                   ORDER BY price_date DESC LIMIT 1""", (BENCHMARK_SYMBOL, entered_at))
+    b0 = cur.fetchone()
+    cur.execute("""SELECT close, price_date FROM raw_prices
+                   WHERE symbol=%s AND close IS NOT NULL AND price_date <= %s
+                   ORDER BY price_date DESC LIMIT 1""", (BENCHMARK_SYMBOL, as_of))
+    b1 = cur.fetchone()
+    alpha_pct = None
+    if b0 and b1 and _f(b0[0]) and _f(b1[0]):
+        out.update({"bench_base": _f(b0[0]), "bench_base_date": str(b0[1]),
+                    "bench_now": _f(b1[0]), "bench_now_date": str(b1[1])})
+        alpha_pct = abs_pct - (_f(b1[0]) / _f(b0[0]) - 1.0) * 100.0
+        out["alpha_pct"], out["alpha_evaluable"] = round(alpha_pct, 2), True
+    legs = []
+    if abs_pct <= HARD_STOP_ABS_PCT:
+        legs.append("hard stop %.1f pct from entry" % abs_pct)
+    if alpha_pct is not None and alpha_pct <= HARD_STOP_ALPHA_PCT:
+        legs.append("alpha %.1f pct vs %s" % (alpha_pct, BENCHMARK_SYMBOL))
+    if legs:
+        out["fired"], out["reason"] = True, "; ".join(legs)   # H4: the leg and its measured value, never a bare "hard stop"
+    return out
+
+
+def _close_position(cur, sym, d, reason, track, score, detail):
+    """The one exit write, shared by the hard-stop leg and the score-decay leg: exit_price via the
+    canonical resolver (cc#1297 — same source every other surface's CMP comes from), the state row
+    flipped to exited, and an EXIT signal carrying the reason + the leg's own detail."""
+    exit_r = price_resolver.resolve_price(cur, sym)
+    exit_px = _f(exit_r.get("price")) if exit_r else None
+    cur.execute("""UPDATE investment_scanner_state
+                   SET status='exited', exited_at=%s, exit_reason=%s, exit_price=%s
+                   WHERE symbol=%s""", (d, reason, exit_px, sym))
+    cur.execute("""INSERT INTO investment_scanner_signals
+                   (event, run_date, symbol, track, score, gates)
+                   VALUES ('EXIT', %s, %s, %s, %s, %s)""",
+                (d, sym, track, score, Json(dict(detail, exit_reason=reason))))
+    return exit_px
+
+
 def run(conn=None) -> dict:
     own = conn is None
     if own:
@@ -172,14 +256,42 @@ def run(conn=None) -> dict:
                            ORDER BY symbol, score_date DESC) g ON g.symbol=s.symbol
                 WHERE s.run_date=%s""", (d,))
             rows = cur.fetchall()
-            cur.execute("SELECT symbol, entry_track FROM investment_scanner_state WHERE status='open'")
-            open_pos = dict(cur.fetchall())
+            cur.execute("""SELECT symbol, entry_track, entry_price, entered_at, entry_score
+                           FROM investment_scanner_state WHERE status='open'""")
+            open_rows = cur.fetchall()
+            open_pos = {r[0]: r[1] for r in open_rows}
 
             seg_cache = {}
-            buys, exits, blocked = [], [], []
+            buys, exits, blocked, hard_stop_log = [], [], [], []
+            # ---- cc#1768 HARD STOP FIRST (H3), on EVERY open position — including one that is
+            # not in tonight's scores run, since this leg does not read a score (H1). A name that
+            # exits here is removed from open_pos so the score-decay pass below never re-judges
+            # it; a position breaching both legs therefore records the hard stop. ----
+            for sym, track, entry_price, entered_at, entry_score in open_rows:
+                hs = hard_stop_check(cur, sym, entry_price, entered_at)
+                entry_line = {"symbol": sym, "track": track, **{k: hs[k] for k in
+                              ("abs_pct", "alpha_pct", "as_of", "alpha_evaluable", "skipped")}}
+                if hs["skipped"]:
+                    log.info("inv_scanner_rules hard stop skipped for %s: %s", sym, hs["skipped"])   # H5: logged, never a pass or a fail
+                elif not hs["alpha_evaluable"]:
+                    log.info("inv_scanner_rules hard stop: alpha not evaluable for %s (no %s base bar); absolute leg only",
+                             sym, BENCHMARK_SYMBOL)
+                if hs["fired"]:
+                    exit_px = _close_position(cur, sym, d, hs["reason"], track, _f(entry_score),
+                                              {"leg": "hard_stop", "abs_pct": hs["abs_pct"], "alpha_pct": hs["alpha_pct"],
+                                               "as_of": hs["as_of"], "stock_close": hs["stock_close"],
+                                               "bench": BENCHMARK_SYMBOL, "bench_base": hs["bench_base"],
+                                               "bench_base_date": hs["bench_base_date"], "bench_now": hs["bench_now"],
+                                               "bench_now_date": hs["bench_now_date"],
+                                               "levels": {"abs_pct": HARD_STOP_ABS_PCT, "alpha_pct": HARD_STOP_ALPHA_PCT}})
+                    exits.append({"symbol": sym, "reason": hs["reason"], "leg": "hard_stop", "exit_price": exit_px})
+                    open_pos.pop(sym, None)
+                    entry_line["fired"] = True
+                hard_stop_log.append(entry_line)
             for sym, mom, rev, wk, mo, segment in rows:
                 mom, rev, wk, mo = _f(mom), _f(rev), _f(wk), _f(mo)
-                # ---- EXIT first: open names judged on tonight's scores ----
+                # ---- EXIT (score decay): open names judged on tonight's scores, bars EXIT_MOM /
+                # EXIT_REV (cc#1768: 75 / 70). The reason string prints the bar that fired. ----
                 if sym in open_pos:
                     tracks = open_pos[sym].split("+")
                     dead = []
@@ -190,21 +302,11 @@ def run(conn=None) -> dict:
                             dead.append(f"reversal {rev} < {EXIT_REV}")
                     if len(dead) == len(tracks):        # ALL entered tracks decayed
                         reason = "; ".join(dead)
-                        # cc#1297: capture exit_price via the canonical resolver — same source
-                        # every other surface's CMP comes from, never a second lookup path.
-                        exit_r = price_resolver.resolve_price(cur, sym)
-                        exit_px = _f(exit_r.get("price")) if exit_r else None
-                        cur.execute("""UPDATE investment_scanner_state
-                                       SET status='exited', exited_at=%s, exit_reason=%s, exit_price=%s
-                                       WHERE symbol=%s""", (d, reason, exit_px, sym))
-                        cur.execute("""INSERT INTO investment_scanner_signals
-                                       (event, run_date, symbol, track, score, gates)
-                                       VALUES ('EXIT', %s, %s, %s, %s, %s)""",
-                                    (d, sym, open_pos[sym],
-                                     mom if "momentum" in tracks else rev,
-                                     Json({"exit_reason": reason,
-                                           "mom_score": mom, "rev_score": rev})))
-                        exits.append({"symbol": sym, "reason": reason})
+                        _close_position(cur, sym, d, reason, open_pos[sym],
+                                        mom if "momentum" in tracks else rev,
+                                        {"leg": "score_decay", "mom_score": mom, "rev_score": rev,
+                                         "bars": {"momentum": EXIT_MOM, "reversal": EXIT_REV}})
+                        exits.append({"symbol": sym, "reason": reason, "leg": "score_decay"})
                     continue                             # an open name is never re-entered
                 # ---- ENTRY ----
                 tracks = []
@@ -246,7 +348,11 @@ def run(conn=None) -> dict:
                                     "failed_gates": failed, "gates": gates})
         conn.commit()
         out = {"status": "ok", "run_date": str(d), "buys": buys, "exits": exits,
-               "blocked": blocked[:25], "blocked_n": len(blocked)}
+               "blocked": blocked[:25], "blocked_n": len(blocked),
+               "hard_stop": hard_stop_log,   # cc#1768: every open position's two legs, fired or not, skipped when unevaluable
+               "exit_bars": {"momentum": EXIT_MOM, "reversal": EXIT_REV,
+                             "hard_stop_abs_pct": HARD_STOP_ABS_PCT, "hard_stop_alpha_pct": HARD_STOP_ALPHA_PCT,
+                             "benchmark": BENCHMARK_SYMBOL}}
         log.info(f"inv_scanner_rules: buys={len(buys)} exits={len(exits)} blocked={len(blocked)}")
         return out
     finally:
@@ -275,7 +381,7 @@ def get_signals(limit: int = 100):
 
 @router.get("/api/inv-scanner/state")
 def get_state():
-    """Open + closed scanner positions (score-decay book, V1). cc#1297: adds entry/exit price and
+    """Open + closed scanner positions (score-decay + cc#1768 hard-stop book). cc#1297: adds entry/exit price and
     P&L, all computed HERE from stored prices + a live resolve — the page computes nothing, same
     discipline as every other surface in this codebase. Long-only (V1 writes BUY only, cc#1295)."""
     with _conn() as conn, conn.cursor() as cur:
