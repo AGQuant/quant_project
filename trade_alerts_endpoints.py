@@ -422,6 +422,33 @@ async def approve_alert(req: Request):
 
 
 
+# ── cc#1760 · APPROVAL WINDOW, SERVER SIDE ─────────────────────────────────────────────────────
+# guards.approval_window is the ONE check (09:15-15:15 IST on an NSE trading day, nse_holidays
+# calendar). The wall's button reads the same dict off /api/tradewall and refreshes it from the GET
+# below every minute; the POST refuses outside the window so a disabled button is never the only
+# thing between a stale page and a write. _approval_now is a seam for tests (a fixed clock).
+def _approval_now():
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+    return _dt.now(_Z("Asia/Kolkata"))
+
+
+def _approval_gate():
+    """Raise 403 with the reason when the approval window is closed. Called BEFORE any DB work."""
+    import guards
+    w = guards.approval_window(_approval_now())
+    if not w["open"]:
+        raise HTTPException(403, "approval refused — " + w["reason"])
+    return w
+
+
+@router.get("/api/alerts/approval_window")
+def approval_window_state():
+    """The window as the server sees it right now — what the wall's button renders from."""
+    import guards
+    return guards.approval_window(_approval_now())
+
+
 @router.post("/api/alerts/approve_signal")
 async def approve_signal(req: Request):
     """cc#1524 (TRADE_CONTROL_V1, session_log 35003 lock 2) — ONE-CLICK APPROVE of an engine
@@ -450,6 +477,7 @@ async def approve_signal(req: Request):
         raise HTTPException(400, f"direction must be one of {DIRECTIONS}")
     if kind not in KINDS:
         raise HTTPException(400, f"kind must be one of {KINDS}")
+    _approval_gate()   # cc#1760: outside 09:15-15:15 IST on a trading day nothing is written — 403 with the reason
     with _conn() as conn, conn.cursor() as cur:
         _ensure_schema(conn)
         import cmp_resolver
