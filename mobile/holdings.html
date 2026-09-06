@@ -26,49 +26,50 @@
 <script src="/results_card.js"></script>
 <script src="/scorr_cockpit_card.js"></script>
 <style>
-/* cc 1779 - page-local rules (pf-*). Colours are bridge names only; no literal. */
-.pf-sect{display:flex;align-items:center;gap:10px;margin:18px 14px 8px}
-.pf-sect b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;letter-spacing:.14em;color:var(--blu)}
-.pf-sect i{flex:1;height:1px;background:var(--line)}
-.pf-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 12px}
-.pf-hero{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.pf-hero .b{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 11px}
+/* cc 1779 - page-local rules (pf-*). Colours are bridge names only; every length is a scorr_themes.css
+   scale token (--space / --type / --radius / --track / --bw) so the theme ratchet stays at zero. */
+.pf-sect{display:flex;align-items:center;gap:var(--space-10);margin:var(--space-18) var(--space-14) var(--space-8)}
+.pf-sect b{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:700;letter-spacing:var(--track-em16);color:var(--blu)}
+.pf-sect i{flex:1;height:var(--bw-1);background:var(--line)}
+.pf-card{background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:var(--radius-12);padding:var(--space-14);margin:0 var(--space-12)}
+.pf-hero{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-10)}
+.pf-hero .b{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-10) var(--space-11)}
 .pf-hero .b.wide{grid-column:1/-1}
-.pf-k{font-size:10px;letter-spacing:.1em;color:var(--dim);margin-bottom:5px;font-family:'IBM Plex Mono',ui-monospace,monospace}
-.pf-v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:21px;font-weight:700;line-height:1.1;letter-spacing:-.01em;color:var(--txt)}
-.pf-v.sm{font-size:17px}
+.pf-k{font-size:var(--type-10);letter-spacing:var(--track-em12);color:var(--dim);margin-bottom:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.pf-v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-21);font-weight:700;line-height:1.1;letter-spacing:var(--track-em3);color:var(--txt)}
+.pf-v.sm{font-size:var(--type-17)}
 .pf-v.up{color:var(--grn)} .pf-v.dn{color:var(--red)} .pf-v.na{color:var(--dim)}
-.pf-v small{color:var(--dim);font-size:13px;font-weight:600}
-.pf-asof{font-size:10.5px;color:var(--dim);margin-top:9px;line-height:1.5}
-.pf-ccap{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;gap:10px}
-.pf-ccap .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--mut)}
-.pf-ccap .r{font-size:10.5px;color:var(--dim)}
+.pf-v small{color:var(--dim);font-size:var(--type-13);font-weight:600}
+.pf-asof{font-size:var(--type-105);color:var(--dim);margin-top:var(--space-9);line-height:1.5}
+.pf-ccap{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-8);gap:var(--space-10)}
+.pf-ccap .t{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);font-weight:700;letter-spacing:var(--track-em12);color:var(--mut)}
+.pf-ccap .r{font-size:var(--type-105);color:var(--dim)}
 .pf-card svg{display:block;width:100%;height:auto;overflow:visible}
-.pf-note{margin-top:9px;padding:9px 10px;border-radius:9px;background:color-mix(in srgb,var(--blu) 12%,transparent);border:1px solid var(--line);font-size:10.5px;line-height:1.55;color:var(--mut)}
+.pf-note{margin-top:var(--space-9);padding:var(--space-9) var(--space-10);border-radius:var(--radius-9);background:color-mix(in srgb,var(--blu) 12%,transparent);border:var(--bw-1) solid var(--line);font-size:var(--type-105);line-height:1.55;color:var(--mut)}
 .pf-note b{color:var(--txt);font-weight:600}
-.pf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
-.pf-st{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 9px}
-.pf-st .pf-k{font-size:9px;margin-bottom:4px}
-.pf-st .pf-v{font-size:14px}
-.pf-absent{font-size:10.5px;color:var(--dim);font-style:italic;padding:6px 0 0}
-.pf-empty{padding:18px 14px;color:var(--dim);font-size:12.5px;line-height:1.6;text-align:center;border:1px dashed var(--line);border-radius:12px;margin:0 12px}
-.pf-empty b{display:block;color:var(--txt);font-size:13.5px;margin-bottom:4px}
-.pf-filters{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
-.pf-f{font-size:10.5px;padding:0 9px;min-height:32px;display:inline-flex;align-items:center;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--mut);cursor:pointer;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.pf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-8);margin-top:var(--space-12)}
+.pf-st{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-9);padding:var(--space-8) var(--space-9)}
+.pf-st .pf-k{font-size:var(--type-9);margin-bottom:var(--space-4)}
+.pf-st .pf-v{font-size:var(--type-14)}
+.pf-absent{font-size:var(--type-105);color:var(--dim);font-style:italic;padding:var(--space-6) 0 0}
+.pf-empty{padding:var(--space-18) var(--space-14);color:var(--dim);font-size:var(--type-125);line-height:1.6;text-align:center;border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);margin:0 var(--space-12)}
+.pf-empty b{display:block;color:var(--txt);font-size:var(--type-135);margin-bottom:var(--space-4)}
+.pf-filters{display:flex;gap:var(--space-6);margin-bottom:var(--space-10);flex-wrap:wrap}
+.pf-f{font-size:var(--type-105);padding:0 var(--space-9);min-height:calc(var(--space-28) + var(--space-4));display:inline-flex;align-items:center;border-radius:var(--radius-7);border:var(--bw-1) solid var(--line);background:var(--panel2);color:var(--mut);cursor:pointer;font-family:'IBM Plex Mono',ui-monospace,monospace}
 .pf-f.on{background:color-mix(in srgb,var(--blu) 12%,transparent);border-color:var(--blu);color:var(--blu)}
-.pf-t{width:100%;border-collapse:collapse;font-size:11.5px}
-.pf-t th{text-align:left;font-size:9px;letter-spacing:.1em;color:var(--dim);font-weight:600;padding:0 0 7px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.pf-t{width:100%;border-collapse:collapse;font-size:var(--type-115)}
+.pf-t th{text-align:left;font-size:var(--type-9);letter-spacing:var(--track-em12);color:var(--dim);font-weight:600;padding:0 0 var(--space-7);border-bottom:var(--bw-1) solid var(--line);font-family:'IBM Plex Mono',ui-monospace,monospace}
 .pf-t th.n,.pf-t td.n{text-align:right}
-.pf-t td{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:top;color:var(--txt)}
+.pf-t td{padding:var(--space-9) 0;border-bottom:var(--bw-1) solid var(--line);vertical-align:top;color:var(--txt)}
 .pf-t tr:last-child td{border-bottom:0}
-.pf-tsym{font-weight:700;font-size:12px}
-.pf-tsub{font-size:10px;color:var(--dim);margin-top:2px}
+.pf-tsym{font-weight:700;font-size:var(--type-12)}
+.pf-tsub{font-size:var(--type-10);color:var(--dim);margin-top:var(--space-2)}
 .pf-t td.n{font-family:'IBM Plex Mono',ui-monospace,monospace}
-.pf-pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:12.5px}
+.pf-pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:var(--type-125)}
 .pf-pnl.up{color:var(--grn)} .pf-pnl.dn{color:var(--red)}
-.pf-more{margin-top:10px;text-align:center;font-size:11px;color:var(--blu);border:1px solid var(--line);border-radius:9px;padding:0;min-height:44px;width:100%;background:transparent;cursor:pointer;font-family:inherit}
-.pf-open .c{margin:0 12px 9px}
-.pf-err{margin:12px}
+.pf-more{margin-top:var(--space-10);text-align:center;font-size:var(--type-11);color:var(--blu);border:var(--bw-1) solid var(--line);border-radius:var(--radius-9);padding:0;min-height:calc(var(--space-40) + var(--space-4));width:100%;background:transparent;cursor:pointer;font-family:inherit}
+.pf-open .c{margin:0 var(--space-12) var(--space-9)}
+.pf-err{margin:var(--space-12)}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -246,7 +247,7 @@ function render(){
   var d=PF.data; if(!d) return;
   document.getElementById('pf-body').innerHTML =
     heroHtml(d) + '<div class="pf-sect"><b>PERFORMANCE</b><i></i></div>' + perfHtml(d) + openHtml(d) + closedHtml(d)
-    + '<div class="pf-asof" style="margin:12px 14px 0">Served '+esc(d.as_of||'')+' IST &middot; closed trades from the personal journal &middot; open book from SmartGain holdings.</div>';
+    + '<div class="pf-asof" style="margin:var(--space-12) var(--space-14) 0">Served '+esc(d.as_of||'')+' IST &middot; closed trades from the personal journal &middot; open book from SmartGain holdings.</div>';
 }
 document.getElementById('pf-body').addEventListener('click', function(e){
   var f=e.target.closest('[data-f]'); if(f){ PF.filter=f.getAttribute('data-f'); PF.showAll=false; render(); return; }
@@ -262,7 +263,7 @@ fetchWithTimeout('/api/mobile/portfolio').then(function(r){return r.json();}).th
 }).catch(function(e){
   document.getElementById('pf-body').innerHTML =
     '<div class="pf-empty pf-err"><b>Could not load</b>'+esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
+    + '<div style="margin-top:var(--space-12)"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
   document.getElementById('sub').textContent='failed to load';
 });
 </script>
