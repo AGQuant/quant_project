@@ -963,8 +963,9 @@ def _rules(d, style, side):
     # R5 — cc#1785 / TC_VOLUME_SIMPLE_V2 (session_log 39684, supersedes cc#1784): VOLUME, FOUR
     # CHECKS, EACH PASS/FAIL, on both BUY cards. Vol R >= 1.2 (live RVOL), Vol P >= 1.0 (previous
     # session's closing RVOL), Vol D >= 1.1 (3-day delivery vs the 20 before), Vol AD >= 55 (21-day
-    # up-day volume share). credit = checks passed out of max 4, and the registry weight is 25, so
-    # the rule is worth 25 x passed/4 on the /100 scale — no half credits, no OR. A check whose
+    # up-day volume share). credit = checks passed out of max 4, and the registry weight is 15
+    # (founder correction 06-Sep ~20:10, Fable log 5329: 15, not 25), so the rule is worth
+    # 15 x passed/4 on the /100 scale — no half credits, no OR. A check whose
     # input is missing FAILS and is named in `no_data` (a symbol with no rvol_profile shows Vol R
     # as a fail with the reason, never a fabricated pass). The old R5 (vol_ratio_today +
     # vol21_up_dn, the cc#767 merge and its cc#934/cc#1172 variants) is gone from BOTH BUY cards;
@@ -988,7 +989,7 @@ def _rules(d, style, side):
         if no_data:
             val["no_data"] = no_data
         req = (f"Vol R >= {VOL_R_MIN:.1f} · Vol P >= {VOL_P_MIN:.1f} · Vol D >= {VOL_D_MIN:.1f} · "
-               f"Vol AD >= {VOL_AD_MIN:.0f}% (1 each, pass/fail; 25 pts x passed/4)")
+               f"Vol AD >= {VOL_AD_MIN:.0f}% (1 each, pass/fail; 15 pts x passed/4)")
         out.append(_R("R5", "Volume (4 checks)", float(passed), val, required=req, max_credit=4.0))
 
     # R7 — RSI. cc#513 cross-cutting fix: MOM (both sides) now reads true_weekly_rsi, not the
