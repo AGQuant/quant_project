@@ -46,7 +46,27 @@
      The 1140px cap is gone; the story list, its tabs and the masthead use the space. What stays
      narrow is the READING column: .art-body keeps its cc#195 860px measure, .art-stand its 64ch,
      and the headline gets a cap of its own below so prose is never stretched across 1900px. */
-  @media(min-width:768px){ .wrap{max-width:none;padding-left:24px;padding-right:24px} }
+  /* cc#1766 (founder 06-Sep "I want Intel also same position / alignment" as Investment Scanner):
+     the container is THE SAME ONE /inv-scanner uses — scorr_inv_scanner.html
+     .wrap{max-width:1240px;margin:0 auto;padding:16px 16px 64px}, copied value for value, not a
+     third layout. cc#1754's "viewport minus gutters" (max-width:none) is gone: the page is a
+     centred 1240px container with clear gutters, the title row, strapline and (i) at its left
+     edge, and the content inside the reference's white card. Below 768px the mobile frame is
+     unchanged (the 760px cap above). */
+  @media(min-width:768px){ .wrap{max-width:1240px;padding:16px 16px 64px} }
+  /* the reference head grammar: .h1row (h1 + (i) button) and .sub strapline — same values as
+     scorr_inv_scanner.html h1 / .sub / .h1row */
+  .h1row{display:flex;align-items:center;gap:8px}
+  .h1row h1{font-size:19px;font-weight:800;margin:4px 0 2px;font-family:var(--sans);letter-spacing:0;line-height:1.25}
+  .h1row .refresh-btn{margin-left:auto}
+  .sub{font-size:11px;color:var(--mut);letter-spacing:.14em;text-transform:uppercase;margin-bottom:14px}
+  /* the reference content card: scorr_inv_scanner.html .card{background:var(--panel);border:1px
+     solid var(--line);border-radius:12px;overflow:hidden}. overflow is CLIP here, not hidden —
+     hidden would make the card the sticky containing block and un-pin the cc#1730 tab strip;
+     clip rounds the corners the same way and creates no scroll container. */
+  .intel-card{background:var(--panel,var(--card));border:1px solid var(--line);border-radius:12px;overflow:clip;padding:0 18px 18px}
+  .intel-card .tabs{background:var(--panel,var(--card))}
+  .intel-card .meta{margin-top:14px}
 
   .masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;
     padding-bottom:18px;border-bottom:2px solid var(--txt)}
@@ -309,14 +329,19 @@
 <nav class="model-nav" id="scorr-nav"></nav>
 
 <div class="wrap">
-  <div class="masthead">
-    <div>
-      <div class="mast-title">Source AI Intelligence</div>
-      <div class="mast-sub">AI-polished market intelligence, updated daily</div>
-    </div>
+  <!-- cc#1766: the /inv-scanner head grammar — title row with the (i) button, then the strapline —
+       so the two pages line up at the container's left edge. The Refresh button keeps its job at
+       the right of the row. The (i) sheet is the shared ScorrInfoSheet (scorr_card_common.js). -->
+  <div class="h1row">
+    <h1>Source AI Intelligence</h1>
+    <button class="ibtn" onclick="openIntelInfo()" aria-label="What Source AI Intelligence is" title="What Source AI Intelligence is">i</button>
     <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">&#8635; Refresh</button>
   </div>
+  <div class="sub">AI-POLISHED MARKET INTELLIGENCE &middot; UPDATED DAILY</div>
 
+  <!-- cc#1766: counter line, category tabs, search and the article list sit inside the reference's
+       white card; the card fills the container, the reading column keeps its measure inside it. -->
+  <div class="card intel-card" id="intelCard">
   <div class="meta" id="meta">Loading&hellip;</div>
   <div class="tabs" id="tabs"></div>
 
@@ -325,6 +350,7 @@
   </div>
 
   <div id="feed"><div class="msg">Loading&hellip;</div></div>
+  </div>
 
   <div class="foot">
     Source AI &middot; polished market intelligence &middot; sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
@@ -333,6 +359,19 @@
 
 <script>
 const API = "";
+// cc#1766: the (i) sheet — the page's own facts (the strapline, the category list below, the
+// sources line in the footer), through the shared ScorrInfoSheet. Nothing typed here that the
+// page does not already say.
+function openIntelInfo(){
+  if(!window.ScorrInfoSheet){ return; }
+  var e = ScorrInfoSheet.esc;
+  var cats = (typeof CATS !== 'undefined' ? CATS : []).map(function(c){ return e(c.label); }).join(' · ');
+  ScorrInfoSheet.open('Source AI Intelligence',
+    ScorrInfoSheet.section('What it is', 'AI-polished market intelligence, updated daily. Stories are gathered, polished and filed under a category; AI Editorials are written pieces on the day\'s themes.')
+    + ScorrInfoSheet.section('Categories', cats)
+    + ScorrInfoSheet.section('Sources', 'ET · Moneycontrol · LiveMint · Reuters · Bloomberg · Google News')
+    + ScorrInfoSheet.section('Refresh', 'The counter line states the story count and the last update; Refresh pulls the latest batch.'));
+}
 const CATS = [
   { id:"all",          label:"All" },
   { id:"ai_editorial", label:"AI Editorial" },
