@@ -8792,8 +8792,15 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     return d>=1&&d<=5&&m>=555&&m<=930;
   }
 
-  function openTable(rows, dateStr){
+  // cc#1744 (founder 06-Sep "In TC scanner no open and closed book?"): the Open Book is NOT
+  // date-filtered any more. It renders the endpoint's `open_all` set (every exit_reason = OPEN
+  // hold as of now, no date predicate) whatever the date control says — the control now sits
+  // on the Closed Book, which is the only table it governs. The empty sentence "No open TC13
+  // positions" prints ONLY when the payload carries open_all and it is genuinely empty; an
+  // older payload without the key says so instead of implying a healthy zero.
+  function openTable(rows, meta){
     var live = nseOpen();
+    var emptyMsg = meta.hasOpenAll ? 'No open TC13 positions' : 'Open Book unavailable in this payload (no open_all key) — not a healthy zero';
     var body=rows.length ? rows.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
         +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
@@ -8805,22 +8812,23 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td>'
         +'<td>'+eTime(r.entry_ts)+'</td>'
         +'<td>'+daysHeld(r.entry_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="10">No open TC13 positions</td></tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="10">'+esc(emptyMsg)+'</td></tr>';
     return '<section><div class="sh"><h2>Open Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
       +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
       +(live?'<span class="badge b-live"><span class="dot"></span>LIVE</span>'
-            :'<span class="badge b-eng">'+esc(dateStr||'')+'</span>')
+            :'<span class="badge b-eng" title="All open holds as of this time — the date control below governs the Closed Book only">as of '+esc(meta.asOf||'')+'</span>')
       +'<div class="stats"><span>Open <b>'+rows.length+'</b></span>'
-      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">Date</label>'
-      +'<input type="date" id="tc13Date" value="'+esc(dateStr||'')+'"></span></div></div>'
+      +'<span style="font-size:10.5px;color:var(--tx3)">all open holds · not date-filtered</span></div></div>'
       +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
       +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th>SL &middot; Target</th><th>Entry Time</th><th>Days Held</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
   }
 
-  function closedTable(rows){
+  // cc#1744: the date control lives HERE now, labelled for the one table it governs. The empty
+  // state names the last date that had closures so a zero reads as "quiet day", not "dead engine".
+  function closedTable(rows, dateStr, lastClosure){
     var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
     var stats=closedStats(rows);
     var body=closed.length ? closed.map(function(r){
@@ -8831,12 +8839,16 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td><span class="pill '+(String(r.exit_reason||'').indexOf('TARGET')===0?'target':'sl')+'">'+esc(r.exit_reason)+'</span></td>'
         +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
         +'<td>'+dShort(r.exit_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC13 positions for this date</td></tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="7">No closed TC13 positions on '+esc(dateStr||'this date')
+        +(lastClosure?' &middot; last closures: '+esc(lastClosure):'')+'</td></tr>';
     return '<section><div class="sh"><h2>Closed Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC13 &middot; 13-CHECK</span>'
       +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
+      +'<span class="badge b-eng">'+esc(dateStr||'')+'</span>'
       +'<div class="stats">'
+      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">Closed Book date</label>'
+      +'<input type="date" id="tc13Date" value="'+esc(dateStr||'')+'" title="Governs the Closed Book only — the Open Book is never date-filtered"></span>'
       +'<span>Closed <b>'+stats.closed+'</b></span>'
       +'<span>Wins <b>'+stats.wins+'</b></span>'
       +'<span>WR <b>'+(stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
@@ -8871,7 +8883,12 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   function render(d){
     var box=document.getElementById('tc13Box'); if(!box)return;
     var allRows=(d.buy||[]).concat(d.sell||[]);
-    var openRows=allRows.filter(function(r){return r.exit_reason==='OPEN';});
+    // cc#1744: Open Book = open_all (no date predicate). The scan_date-keyed rows are only the
+    // fallback for a payload from before this card, and that case is labelled in the table.
+    var hasOpenAll = !!d.open_all;
+    var openRows = hasOpenAll ? (d.open_all.buy||[]).concat(d.open_all.sell||[])
+                              : allRows.filter(function(r){return r.exit_reason==='OPEN';});
+    openRows.sort(function(a,b){ return String(b.entry_ts||'').localeCompare(String(a.entry_ts||'')); });   // newest entry first across both sides
     _tc13OpenRows=openRows;   // cc#1685: latest render's open rows, for the info sheet's live example
     // cc#1599 scope 4/5: the Closed Book and its stat chips read the EXIT-date set the endpoint
     // now sends (closed_by_exit), so a hold entered weeks ago and closed today shows on today.
@@ -8879,8 +8896,8 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     // the entry-date rows, so nothing goes blank during a deploy.
     var closedRows=d.closed_by_exit ? (d.closed_by_exit.buy||[]).concat(d.closed_by_exit.sell||[]) : allRows;
     box.innerHTML='<div class="tc13-wrap">'
-      +openTable(openRows, d.date)
-      +closedTable(closedRows)
+      +openTable(openRows, {hasOpenAll: hasOpenAll, asOf: d.as_of || d.date})
+      +closedTable(closedRows, d.date, d.last_closure_date)
       +'</div>';
     document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
     try{ tc13MarkScroll(box); }catch(e){ console.warn('[tc13 scroll]', e && e.message); }

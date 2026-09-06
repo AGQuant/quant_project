@@ -455,9 +455,57 @@ def tc_scanner_holds(date_: Optional[str] = None):
             "exit_reason": r["exit_reason"], "pnl_pct": pnl_pct,
         })
 
+    # cc#1744 (founder 06-Sep "In TC scanner no open and closed book?"): the OPEN BOOK is NOT a
+    # per-date set. The keys above filter on scan_date (= entry day), so the Open Book read
+    # empty on every non-trading day and on any date the founder browsed to, while 19 holds
+    # sat open with real money at risk — the date control reads 06-Sep (a Sunday) and none of
+    # the open rows were ENTERED that day. An open position has no exit date and belongs to
+    # no single day: `open_all` is every exit_reason = OPEN row as of now, newest entry first,
+    # with NO date predicate. The scan_date-keyed `buy`/`sell` keys are untouched (older
+    # readers, and the Closed Book's cc#1599 exit-date keys are a separate query). CMP here is
+    # cmp_prices or NOTHING — when a symbol has no price, cmp and pnl_pct are None, never the
+    # entry price substituted to render a false 0.00 (item 4).
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT h.symbol, h.side, h.score, h.evaluated, h.entry_price, h.entry_ts,
+                   h.target, h.sl, h.scan_date, c.cmp
+            FROM tc_scanner_holds h
+            LEFT JOIN cmp_prices c ON c.symbol = h.symbol
+            WHERE h.exit_reason = 'OPEN'
+            ORDER BY h.entry_ts DESC
+        """)
+        ocols = [c[0] for c in cur.description]
+        orows = [dict(zip(ocols, r)) for r in cur.fetchall()]
+        cur.execute("SELECT MAX(exit_ts)::date FROM tc_scanner_holds WHERE exit_reason <> 'OPEN' AND exit_ts IS NOT NULL")
+        _lc = cur.fetchone()
+        last_closure = str(_lc[0]) if (_lc and _lc[0]) else None
+    open_all = {"BUY": [], "SELL": []}
+    for r in orows:
+        entry = float(r["entry_price"]) if r["entry_price"] is not None else None
+        cmp_px = float(r["cmp"]) if r["cmp"] is not None else None
+        pnl_pct = None
+        if entry and cmp_px is not None:
+            pnl_pct = round((cmp_px - entry) / entry * 100 * (1 if r["side"] == "BUY" else -1), 2)
+        open_all.setdefault(r["side"], []).append({
+            "symbol": r["symbol"], "side": r["side"], "score": r["score"], "evaluated": r["evaluated"],
+            "entry_price": entry, "entry_ts": str(r["entry_ts"]) if r["entry_ts"] else None,
+            "scan_date": str(r["scan_date"]) if r["scan_date"] else None,
+            "target": float(r["target"]) if r["target"] is not None else None,
+            "sl": float(r["sl"]) if r["sl"] is not None else None,
+            "exit_price": None, "exit_ts": None, "exit_reason": "OPEN",
+            "cmp": cmp_px, "pnl_pct": pnl_pct,
+        })
+    n_open_all = len(open_all.get("BUY", [])) + len(open_all.get("SELL", []))
+
     return {"date": d, "buy": out.get("BUY", []), "sell": out.get("SELL", []),
             "buy_stats": _stats(out.get("BUY", [])), "sell_stats": _stats(out.get("SELL", [])),
             # cc#1599: closed on this EXIT date, whatever day they were entered.
             "closed_by_exit": {"buy": by_exit.get("BUY", []), "sell": by_exit.get("SELL", [])},
             "closed_by_exit_stats": {"buy": _stats(by_exit.get("BUY", [])), "sell": _stats(by_exit.get("SELL", []))},
-            "closed_basis": "exit_ts::date = date (cc#1599); open book keyed on scan_date (entry)"}
+            "closed_basis": "exit_ts::date = date (cc#1599); open book keyed on scan_date (entry)",
+            # cc#1744: the Open Book proper — every open hold as of now, no date predicate.
+            "open_all": {"buy": open_all.get("BUY", []), "sell": open_all.get("SELL", [])},
+            "open_all_count": n_open_all,
+            "open_basis": "exit_reason = 'OPEN' as of now, no date filter (cc#1744); cmp from cmp_prices or blank",
+            "last_closure_date": last_closure,
+            "as_of": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")}
