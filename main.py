@@ -1425,7 +1425,11 @@ NAV_REGISTRY = {
     # 04-Aug. Still injected + PROTECTED above; only its discovery point moved.
     "/digest":       ("Daily Digest · V8 tab row (after V6 BT)", "v8-tab"),   # cc#846 -> cc#853
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
-    "/check":        ("Check",                "nav"),
+    # cc#1747 (founder 06-Sep): Check and Intel swap seats. Check leaves the site nav for the V8 tab
+    # row (slot 7, an iframe embed of /check?embed=1&full=1 with the cc#671 height handshake); the
+    # /check route stays live, injected + PROTECTED, for bookmarks and deep links.
+    "/check":        ("Check · V8 tab row (slot 7); page kept for the tab's iframe embed + typed URL", "v8-tab"),
+    "/dashboard#check": ("Check (V8 tab)", "tab"),   # cc#1747 rule id=2987
     "/screeners":    ("Screeners",            "nav"),   # cc#824
     "/intraday":     ("(-> /dashboard#tcscan · TC Scanner tab; page kept for the tab's iframe embed)", "typed-url"),   # cc#740
     "/dashboard#tcscan": ("TC Scanner · V8 tab — reachable via the V8 tab bar / deep link", "typed-url"),   # cc#740; cc#822 removed from nav
@@ -1437,8 +1441,10 @@ NAV_REGISTRY = {
     "/quant-basket": ("QB (curated Quant Basket)", "nav"),
     # cc#1523: Intel de-listed from the site nav — now a V8 tab-row embed pane (the cc#853 Digest
     # placement). Route unchanged, still PROTECTED + injected; /m/intel app entry untouched.
-    "/news":         ("Intel · V8 tab row (after Wall of Trades)", "v8-tab"),
-    "/dashboard#intel": ("Intel (V8 tab)", "tab"),   # cc#1523 rule id=2987
+    # cc#1747: Intel is back on the site nav (slot 3, after V8) as '/dashboard#intel' — the same V8
+    # pane (an iframe of /news?embed=1) it opened from the tab row; the Intel tab button is gone.
+    "/news":         ("Intel · site nav slot 3 via /dashboard#intel (V8 pane, iframe embed)", "v8-pane"),
+    "/dashboard#intel": ("Intel", "nav"),   # cc#1523 rule id=2987; cc#1747 promoted to the site nav
     "/dashboard#model": ("Model Portfolio (V8 tab · /quant-basket folded in)", "tab"),   # cc#1584 rule id=2987
     "/v10":          ("(-> /dashboard#index · Index Intel tab; standalone retired)", "typed-url"),   # cc#542
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)

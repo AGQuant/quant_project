@@ -2604,13 +2604,17 @@ renderChips();
 (function(){
   var p=new URLSearchParams(location.search);
   var isEmbed=(window.self!==window.top)||p.has('embed');
+  // cc#1747: the V8 tab row embeds the WHOLE page (?embed=1&full=1) — only the site nav is stripped;
+  // the page head and the symbol input stay, because that tab IS the Check surface. The Analysis
+  // modal's result-only embed (no `full`) is unchanged.
+  var full=p.has('full');
   var symq=(p.get('symbol')||'').trim().toUpperCase();
   var style=(p.get('style')||'').toLowerCase();
   if(isEmbed){
     document.body.classList.add('tc-embed');
     var mn=document.querySelector('.model-nav'); if(mn)mn.style.display='none';
-    var ph=document.querySelector('.page-head'); if(ph)ph.style.display='none';
-    var si=document.getElementById('sym'); if(si){var c=si.closest('.card'); if(c)c.style.display='none';}
+    var ph=document.querySelector('.page-head'); if(ph&&!full)ph.style.display='none';
+    var si=document.getElementById('sym'); if(si&&!full){var c=si.closest('.card'); if(c)c.style.display='none';}
     try{document.documentElement.style.background='transparent';document.body.style.background='transparent';}catch(e){}
     var W=document.querySelector('.wrap'); if(W){W.style.maxWidth='none';W.style.padding='6px 10px 10px';W.style.margin='0';}
     var postH=function(){try{var h=Math.ceil(document.documentElement.scrollHeight);window.parent.postMessage({type:'scorrTcHeight',height:h},'*');}catch(e){}};
