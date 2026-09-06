@@ -44,12 +44,25 @@ body[data-theme]{
   --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
   --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
 }
-.screen,.bnav{
+/* cc#1770 (founder 06-Sep, Market Tape dark on Silver Gold): THE OVERLAY SHEETS ARE OUTSIDE
+   .screen. #tapeov / #v10ov / #brov (.tpo), the .pfveil/.pfsheet spec sheet, and every sheet a
+   script appends to <body> (ScorrInfoSheet .isheet-ov, the symbol sheet, the bell popover, the
+   PWA More sheet, the Result Corner modal) mount AFTER .bnav as siblings of .screen — so the
+   bridge above never reached them, their var(--bg,#0A0F1E) / var(--txt,#E9EEFB) FALLBACKS
+   painted, and the sheet was dark on every theme. cc#1721 swept the page; the sheets over it
+   were never inside the selector. The rule: the bridge is declared on every overlay shell too,
+   so one switch re-skins the sheets exactly as it re-skins the page, live, while a sheet is
+   open. Extra legacy names the appended sheets read (--chalk/--mute/--card/--down/--up) are
+   bridged here as well. */
+.screen,.bnav,
+.tpo,.pfveil,.pfsheet,.isheet-ov,.symsheet,.scorr-ml-ov,.pwa-sheet-ov,.pwa-sheet,.rcard-ov,#scorr-bell-ov{
   --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
   --line:var(--t-edge); --line2:var(--t-edge);
   --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
   --grn:var(--t-win); --red:var(--t-loss);
   --blu:var(--t-accent); --cyan:var(--t-brand);
+  --chalk:var(--t-ink); --mute:var(--t-muted); --card:var(--t-panel);
+  --up:var(--t-win); --down:var(--t-loss); --veil:rgba(0,0,0,.55);
 }
 /* cc#1629: the wrapper no longer re-paints the field flat over the body. theme_mobile.css paints
    <body> in this theme's --field with the R5 grain, so the field is one continuous grained ground
@@ -300,33 +313,35 @@ body[data-theme]{
   border:var(--bw-1) solid var(--line2);border-radius:var(--radius-8);cursor:pointer}
 .rg.on{color:var(--blu,#4D7CFE);border-color:color-mix(in srgb, var(--blu) 50%, transparent);background:color-mix(in srgb, var(--blu) 12%, transparent)}
 /* cc#904 full-screen Market Tape overlay */
-.tpo{position:fixed;inset:0;z-index:60;background:var(--bg,#0A0F1E);display:none;
+.tpo{position:fixed;inset:0;z-index:60;background:var(--bg);display:none;
   flex-direction:column;overscroll-behavior:contain}
 .tpo.open{display:flex}
 .tpo-hd{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-14) var(--space-14) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
 .tpo-hd h2{font-size:var(--type-17);font-weight:800;flex:1}
-.tpo-x{min-width:44px;min-height:44px;font-size:var(--type-20);color:var(--txt,#E9EEFB);background:none;
+.tpo-x{min-width:44px;min-height:44px;font-size:var(--type-20);color:var(--txt);background:none;
   border:0;cursor:pointer;font-family:inherit}
 .tpo-bd{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 var(--space-12) var(--space-24)}
 .tpr{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-11) var(--space-2);border-bottom:var(--bw-1) solid var(--line);min-height:52px}
 .tpr .nm2{flex:1;min-width:0}
 .tpr .s1{font-size:var(--type-135);font-weight:800}
-.tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt,#E9EEFB);margin-top:var(--space-2)}
+.tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt);margin-top:var(--space-2)}
 .tpr .lv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:700;text-align:right}
 .tpr .cg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);font-weight:800;
   text-align:right;min-width:64px}
-.tpc{min-width:44px;min-height:44px;background:none;border:0;color:var(--blu,#4D7CFE);
+/* cc#1770 scope 3: the trailing chart glyph is the THEME ACCENT (--blu bridges to --t-accent):
+   gold on silvergold, raspberry-plum on blush, pulse on dark — never a fixed purple. */
+.tpc{min-width:44px;min-height:44px;background:none;border:0;color:var(--blu);
   font-size:var(--type-15);cursor:pointer;font-family:inherit}
 /* cc#939: sortable header. It reuses .tpr's flex geometry EXACTLY (same gap, same .nm2/.lv/.cg
    widths, same trailing 44px slot) so a header cell can never drift out of line with the column
    it labels. Sticky, because the founder sorts and then scrolls. Tap targets are the full cell,
    not the glyph — 44px min-height, per MOBILE_APP_FRAMEWORK_V1. */
 .tph{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-6) var(--space-2);min-height:38px;position:sticky;top:0;
-  z-index:2;background:var(--bg,#0A0F1E);border-bottom:var(--bw-1) solid var(--line)}
+  z-index:2;background:var(--bg);border-bottom:var(--bw-1) solid var(--line)}
 .tph button{background:none;border:0;padding:var(--space-8) 0;font-family:inherit;font-size:var(--type-105);
-  font-weight:800;letter-spacing:var(--track-px6);text-transform:uppercase;color:var(--txt,#E9EEFB);cursor:pointer;
+  font-weight:800;letter-spacing:var(--track-px6);text-transform:uppercase;color:var(--txt);cursor:pointer;
   display:flex;align-items:center;gap:var(--space-3);min-height:38px}
-.tph button.on{color:var(--txt,#E8EDF7)}
+.tph button.on{color:var(--txt)}
 .tph .h-nm{flex:1;min-width:0}
 .tph .h-lv{justify-content:flex-end;text-align:right}
 .tph .h-cg{justify-content:flex-end;text-align:right;min-width:64px}
@@ -337,6 +352,8 @@ body[data-theme]{
    has to survive next to 15 other rows without turning the sheet into a traffic light, and the
    coloured value + % still carry the precise reading. A row with a null change gets no tint at
    all: unknown is not flat. */
+/* cc#1770 scope 2: --grn / --red bridge to the theme's own --win / --loss pair, so the tint takes
+   the light-safe pair on silvergold / aquawhite / blush and the dark-safe pair on the dark sets. */
 .tpr.up{background:color-mix(in srgb, var(--grn) 7%, transparent)}
 .tpr.dn{background:color-mix(in srgb, var(--red) 7%, transparent)}
 /* cc#1410 · ADVANCE/DECLINE FULL-SCREEN TABLE. Own row/header classes rather than reusing
