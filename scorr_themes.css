@@ -467,3 +467,21 @@ body[data-theme="indigoash"]{--field:#141A26;--panel:#1C2331;--hi:#252D3D;--edge
  --panel-shadow:0 10px 28px rgba(0,0,0,.45);
  --field-grad:radial-gradient(120% 80% at 50% 0%, #1B2434 0%, #141A26 55%, #0E131D 100%);
  --accent-soft:rgba(140,166,219,.12)}
+
+/* ══ cc#1790 · DUSK DAY (THEME_DUSK_DAY_V1, session_log 39734; founder 06-Sep: "convert dusk violet to
+   light theme / file this with a name, dont remove dark violet for now"). The LIGHT sibling of Dusk
+   Violet: same violet, grounds inverted — the accent moves from the light violet a dark ground needs to a
+   deep violet for a light ground, the partner blue darkens the same way and lands on --wayfind. Every
+   value below is the entry's, not re-derived. All 21 contract keys declared (cc#1185). Dusk Violet is
+   untouched. Switcher 8 → 9 (39734 supersedes the 39651 count lock). Measured worst-of panel/field/hi:
+   ink 13.11 · muted 6.05 · label/accent 5.26 · win 5.42 · loss 5.38 — all AA. */
+body[data-theme="duskday"]{--field:#F4F2FA;--panel:#FFFFFF;--hi:#EBE8F6;--edge:#DBD5EC;
+ --ink:#241F38;--muted:#5B5175;--brand:#6B4FA8;--brandglow:rgba(107,79,168,.14);--accent:#6B4FA8;
+ --label:#6B4FA8;--win:#0F6B46;--loss:#B3243D;
+ --railgrad:linear-gradient(90deg,#6B4FA8,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(60,40,110,.030) 0 2px,transparent 2px 9px);
+ --gold-lo:#E3DBF5;--gold-hi:#3F2E6B;--sunk:#FBFAFE;
+ --wayfind:#4A63A8;
+ --panel-shadow:0 6px 20px rgba(60,40,110,.10);
+ --field-grad:radial-gradient(120% 80% at 50% 0%, #FAF8FE 0%, #F4F2FA 55%, #EFEBF7 100%);
+ --accent-soft:rgba(107,79,168,.10)}
