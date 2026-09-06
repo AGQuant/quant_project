@@ -164,7 +164,7 @@ var NAMES = {
   R8:'Month return', R9:'5-min tape + VWAP', R10:'Two-day turn', R11:'Location + room', R12:'Futures lean',
   R16:'Fib position (3M)', R17:'Valuation (V)', R18:'Momentum (M)', R19:'Strength vs market (63d)', R20:'GVM trend (180d)',
   R21:'50-day distance', R22:'52-week position', R23:'GVM floor', R24:'Delivery pick-up',
-  LOCK_ENTRYDAY_FALL:'Entry-day fall', LOCK_WEEK_FALLING_BAND:'Week falling, not spent', LOCK_VOLUME:'Volume backing',
+  LOCK_ENTRYDAY_FALL:'Entry-day fall', LOCK_WEEK_FALLING_BAND:'Week falling, not spent', R5V:'Volume (4 checks)',
   LOCK_MOM_2D:'Two-day slide', LOCK_ALT_IGNITION:'Steep slide (alt)', LOCK_52W_INDEX:'52-week position',
   LOCK_MA_NOT_DEEP:'Not over-stretched', LOCK_GVM:'GVM cap', LOCK_MOOD:'Market mood', LOCK_FALL_FRESHNESS:'Fall still fresh',
   LOCK_TRIO_52W:'52-week low zone', LOCK_TRIO_RSI:'Weekly RSI weak', LOCK_TRIO_MOM2D:'Two-day slide', LOCK_WEEK_FALLING:'Week falling',
@@ -241,6 +241,7 @@ var TPL = {
   LOCK_SECTOR_WEAK: function(v){ return fill(['Sector month ', pc(v.mo), '.']); }
 };
 function stateWord(st){ return st.word === 'N/A' ? 'Not applicable.' : (st.word === 'FULL' ? 'Full.' : (st.word === 'HALF' ? 'Half.' : 'None.')); }
+TPL.R5V = TPL.R5;   /* cc#1786: the SELL cards' four-check volume rule renders the same line (AD bar flipped in the engine's required text) */
 function whyLine(r, st, c){
   var line = null, f = TPL[r.rule];
   if (f){ try { line = f(r.value, c); } catch(e){ line = null; } }

@@ -18,7 +18,7 @@ THE CANON 3-TIER (R6/R7):
   Partial data never PASSes: with only one side known, clearing it earns WATCH, failing it
   FAILs; both unknown = no data (None), never fabricated.
 
-── the LEGACY formula kept for the locked 18062 tests only ──────────────────────────────────
+── the LEGACY formula (RETIRED cc#1786 — kept here as history only) ──────────────────────────────────
 FORMULA:
   Baseline     = AVG(raw_prices.volume) over the last 5 trading days (simple mean).
   T_factor     = elapsed_market_minutes / 375  (market_start=09:15 IST, full day=375min).
@@ -60,109 +60,13 @@ from datetime import datetime, time, timedelta, timezone
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-_MKT_OPEN = time(9, 15)
-_MKT_CLOSE = time(15, 30)
-_FULL_DAY_MIN = 375
-
-
-def _ist_now() -> datetime:
-    return datetime.now(IST).replace(tzinfo=None)
-
-
-def _is_market_hours(now: datetime) -> bool:
-    if now.weekday() >= 5:
-        return False
-    return _MKT_OPEN <= now.time() <= _MKT_CLOSE
-
-
-def _baseline_5d(cur, symbol: str):
-    cur.execute("""
-        SELECT AVG(volume) FROM (
-            SELECT volume FROM raw_prices
-            WHERE symbol=%s AND price_date < CURRENT_DATE AND volume IS NOT NULL
-            ORDER BY price_date DESC LIMIT 5
-        ) t
-    """, (symbol,))
-    r = cur.fetchone()
-    return float(r[0]) if r and r[0] is not None else None
-
-
-_MIN_SAMPLE_FOR_DETECTION = 3  # fewer bars than this -> not enough to trust monotonicity
-
-
-def _today_volume_rows(cur, symbol: str):
-    """Today's 5m volume bars, source IN (fyers, fyers_eq), deduped per ts bucket
-    preferring fyers_eq when both exist for the same bucket (mixed-source day)."""
-    cur.execute("""
-        SELECT ts, volume, source FROM (
-            SELECT ts, volume, source,
-                   ROW_NUMBER() OVER (PARTITION BY ts ORDER BY (source = 'fyers_eq') DESC) AS rn
-            FROM intraday_prices
-            WHERE symbol=%s AND source IN ('fyers','fyers_eq') AND timeframe='5m'
-              AND ts::date = CURRENT_DATE
-        ) t
-        WHERE rn = 1
-        ORDER BY ts ASC
-    """, (symbol,))
-    return cur.fetchall()
-
-
-def _detect_today_vol(rows):
-    """rows: [(ts, volume, source), ...] ascending by ts. Returns (today_vol, semantics)
-    where semantics is 'cumulative' or 'per_bar', or (None, None) if no usable data."""
-    vols = [(v, src) for _, v, src in rows if v is not None]
-    if not vols:
-        return None, None
-    if len(vols) < _MIN_SAMPLE_FOR_DETECTION:
-        # Too few bars (first 1-2 bars of the day) to trust a monotonicity read --
-        # default by source: fyers_eq is cumulative, plain fyers is per-bar.
-        if vols[-1][1] == 'fyers_eq':
-            return vols[-1][0], 'cumulative'
-        return sum(v for v, _ in vols), 'per_bar'
-    values = [v for v, _ in vols]
-    is_monotonic = all(values[i] <= values[i + 1] for i in range(len(values) - 1))
-    if is_monotonic:
-        return values[-1], 'cumulative'
-    return sum(values), 'per_bar'
-
-
-def volume_ratio(cur, symbol: str) -> dict:
-    """Returns dict: ratio, today_vol, expected_vol, baseline, t_factor, source, semantics.
-    ratio is None when there isn't enough data to compute one (never fabricated).
-    source = "live_intraday" | "eod" | None.
-    """
-    now = _ist_now()
-    baseline = _baseline_5d(cur, symbol)
-    out = {"ratio": None, "today_vol": None, "expected_vol": None,
-           "baseline": baseline, "t_factor": None, "source": None, "semantics": None}
-    if baseline is None or baseline <= 0:
-        return out
-
-    if _is_market_hours(now):
-        rows = _today_volume_rows(cur, symbol)
-        today_vol, semantics = _detect_today_vol(rows)
-        if today_vol is None:
-            return out
-        elapsed_min = max((now.hour * 60 + now.minute) - (9 * 60 + 15), 1)
-        t_factor = min(elapsed_min, _FULL_DAY_MIN) / _FULL_DAY_MIN
-        expected_vol = baseline * t_factor
-        ratio = (today_vol / expected_vol) if expected_vol > 0 else None
-        out.update(ratio=ratio, today_vol=today_vol, expected_vol=expected_vol,
-                    t_factor=t_factor, source="live_intraday", semantics=semantics)
-        return out
-
-    # Outside market hours (after close / before open / weekend): EOD fallback,
-    # no T-factor. Only fires if today's raw_prices row already exists.
-    cur.execute("SELECT volume FROM raw_prices WHERE symbol=%s AND price_date=CURRENT_DATE",
-                (symbol,))
-    r = cur.fetchone()
-    if not r or r[0] is None:
-        return out
-    today_vol = float(r[0])
-    ratio = today_vol / baseline
-    out.update(ratio=ratio, today_vol=today_vol, expected_vol=baseline, source="eod")
-    return out
-
+# cc#1786 (TC_VOLUME_SIMPLE_SELL_V1, 39692): the legacy T-factor volume_ratio() and the helpers
+# only it used (_baseline_5d, _today_volume_rows, _detect_today_vol, _is_market_hours, _ist_now,
+# the market-clock constants) are RETIRED. Their last readers were the locked 18062 vol tests in
+# tc_v4_dual / tc_v4_scan (LOCK_VOLUME on the SELL cards, the old R5 on the BUY cards); cc#1785 and
+# cc#1786 replaced both with the four-check R5 / R5V on the canon reads, so no caller remains
+# (grep: tc_score_replay carries its own as-of function and never called this one). Retired in
+# the same push that removed the last reader, per the card; do not reintroduce.
 
 # ── cc#1441 push 3: the canon R6/R7 read + 3-tier ────────────────────────────────────────────
 # Thresholds FOUNDER-SIGNED FINAL 30-Aug-2026 (cc_task_logs, task 1441): PASS/WATCH/FAIL lands
