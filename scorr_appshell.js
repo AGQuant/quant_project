@@ -55,8 +55,8 @@
      pwa_endpoints NAMES), literal THEME_FALLBACK only for a page whose head lost the resolver
      entirely. Glyphs match scorr_card_common.js THEME_GLYPH exactly, so the two menus never show
      two different icons for the same theme. */
-  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Midnight Blue'], ['ainight', 'AI Night'], ['aquawhite', 'Aqua White'], ['silvergold', 'Silver Gold'], ['winepurple', 'Wine Purple'], ['blush', 'Blush']];   /* cc#1750: mirrors NAMES order (Blush last); read only when the resolver is absent */
-  var THEME_GLYPH = { goldnight: '◆', dark: '◇', ainight: '✦', aquawhite: '○', blush: '❀', silvergold: '◈', winepurple: '❖' };   /* cc#1719: two new sets, same glyph in both menus */
+  var THEME_FALLBACK = [['goldnight', 'Gold Night'], ['dark', 'Midnight Blue'], ['ainight', 'AI Night'], ['duskviolet', 'Dusk Violet'], ['indigoash', 'Indigo Ash'], ['aquawhite', 'Aqua White'], ['silvergold', 'Silver Gold'], ['winepurple', 'Wine Purple'], ['blush', 'Blush']];   /* cc#1775: mirrors NAMES — the two new dark sets after AI Night, Blush still last */   /* cc#1750: mirrors NAMES order (Blush last); read only when the resolver is absent */
+  var THEME_GLYPH = { goldnight: '◆', dark: '◇', ainight: '✦', aquawhite: '○', blush: '❀', silvergold: '◈', winepurple: '❖', duskviolet: '◐', indigoash: '◑' };   /* cc#1775 */   /* cc#1719: two new sets, same glyph in both menus */
   function themeList() { var T = window.SCORR_THEME; return (T && T.list) || THEME_FALLBACK; }
   function themeOk(k) {
     var list = themeList();

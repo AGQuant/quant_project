@@ -1691,7 +1691,7 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    which letters run. cc#1178 removed the march, so the only caller left is the sweep — every
    letter, staggered. The keyframe itself has never been touched: verbatim reuse, no second
    animation, in either direction. */
-.hero-mood .mlt{display:inline-block;vertical-align:baseline;will-change:transform,text-shadow}
+.hero-mood .mlt{display:inline-block;vertical-align:baseline;will-change:transform}   /* cc#1775: the glow is gone, transform only */
 /* cc#1178 (founder ruling 21-Aug ~09:10, session_log 28179): back to the ref R3 duration of .42s.
    cc#1157 had cut it to .14s under the 20-Aug ruling, and 28179 voids that ruling by name. The
    card requires the glimpse to be byte-identical to the ref apart from its interval, and .14s is
@@ -1700,10 +1700,16 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    ruling, so the faster wave is probably what was on the phone. If that speed was wanted, this
    one number is the whole revert. */
 .hero-mood .mlt.run{animation:moodLite .42s ease-out 1 both}
+/* cc#1775 (founder 06-Sep, THEME_DUSKVIOLET_INDIGOASH_V1 39650): THE GLOW COMES OFF, app-wide. The
+   45% frame used to throw text-shadow 0 0 10px + 0 0 22px currentColor behind every letter of the
+   hero verdict word (BEARISH / BULLISH) on each sweep — halation, the single sharpest element on
+   the screen. The sweep keeps its lift and scale (delight, not information); no text-shadow at any
+   frame. This keyframe is the only hero-word glow in the tree (mobile/home.html's .hero-mood rule
+   carries none; the R5 signature treatment was withdrawn in cc#1116) and nothing else animates it. */
 @keyframes moodLite{
-  0%  {transform:translateY(0)      scale(1);    text-shadow:none}
-  45% {transform:translateY(-2px)   scale(1.06); text-shadow:0 0 10px currentColor,0 0 22px currentColor}
-  100%{transform:translateY(0)      scale(1);    text-shadow:0 0 6px var(--fade-null)}
+  0%  {transform:translateY(0)      scale(1)}
+  45% {transform:translateY(-2px)   scale(1.06)}
+  100%{transform:translateY(0)      scale(1)}
 }
 /* the sweep is delight, not information — nothing is lost by skipping it, and the letters must
    land in their final state rather than mid-animation. */
