@@ -2328,11 +2328,19 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
    Shell classes shared with the app (.pressed .slab .well-up) are used as-is. The old CHECK block
    above stays: fpc / holdings / home / positions still read its .v / .tg / .ct rules. */
 #ckp{
-  --c-field:var(--field,#0A0A0C); --c-panel:var(--panel,#17171B); --c-sunk:var(--sunk,#0C0C0F); --c-gold-lo:var(--gold-lo,#7A6320);
-  --well:#131316; --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
-  --gold:#D4AF37; --gold-d:rgba(212,175,55,.12);
-  --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45; --aqua:#35E0FF;
-  --up-d:rgba(47,212,139,.14); --down-d:rgba(255,92,108,.14); --amber-d:rgba(255,159,69,.14);
+  /* cc#1782 · TOKENS ONLY. Every colour name this block reads is now an alias of the 21-key contract
+     scorr_themes.css declares on body[data-theme] — the goldnight literals that sat here resolve to
+     the SAME values on goldnight (--hi for the old well, --ink, --muted, --edge, --brand for the
+     gold, --win/--loss) and to each set's own values elsewhere. No fallback hex: the app always
+     links scorr_themes.css. WATCH / the "amber" role rides --accent (the contract has no amber;
+     accent is the set's emphasis hue and clears AA on every set), aqua rides --brand, the three
+     14% washes are color-mix of their token. theme_mobile.css's #ckp bridge says the same for the
+     names both declare; this block no longer depends on that sheet's cascade order to be right. */
+  --c-field:var(--field); --c-panel:var(--panel); --c-sunk:var(--sunk); --c-gold-lo:var(--gold-lo);
+  --well:var(--hi); --chalk:var(--ink); --mute:var(--muted); --dim:var(--muted); --line:var(--edge);
+  --gold:var(--brand); --gold-d:color-mix(in srgb, var(--brand) 12%, transparent);
+  --up:var(--win); --down:var(--loss); --amber:var(--accent); --aqua:var(--brand);
+  --up-d:color-mix(in srgb, var(--win) 14%, transparent); --down-d:color-mix(in srgb, var(--loss) 14%, transparent); --amber-d:color-mix(in srgb, var(--accent) 14%, transparent);
   --display:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;
   --body:'Space Grotesk','Sora',system-ui,-apple-system,sans-serif;
   --mono:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;
@@ -2376,17 +2384,23 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #ckp .c-vrow{display:grid;grid-template-columns:1fr auto;gap:var(--space-12);align-items:end;margin:var(--space-14) 0 var(--space-8)}
 #ckp .c-eye{font-family:var(--mono);font-size:var(--type-10);letter-spacing:var(--track-px13);color:var(--mute)}
 #ckp .c-vword{font-family:var(--display);font-size:44px;line-height:.95;letter-spacing:-.5px;transform:skewX(-6deg);transform-origin:left center}
-#ckp .c-vword.pass{color:var(--up);text-shadow:0 0 24px rgba(47,212,139,.35)}#ckp .c-vword.watch{color:var(--amber);text-shadow:0 0 24px rgba(255,159,69,.35)}#ckp .c-vword.fail{color:var(--down);text-shadow:0 0 24px rgba(255,92,108,.35)}#ckp .c-vword.na{color:var(--dim);font-size:var(--type-30)}
+#ckp .c-vword.pass{color:var(--up);text-shadow:0 0 24px color-mix(in srgb, var(--up) 35%, transparent)}#ckp .c-vword.watch{color:var(--amber);text-shadow:0 0 24px color-mix(in srgb, var(--amber) 35%, transparent)}#ckp .c-vword.fail{color:var(--down);text-shadow:0 0 24px color-mix(in srgb, var(--down) 35%, transparent)}#ckp .c-vword.na{color:var(--dim);font-size:var(--type-30)}
 #ckp .c-vscore{text-align:right}#ckp .c-vscore .c-n{font-family:var(--mono);font-size:var(--type-34);font-weight:800;letter-spacing:var(--track-px1);line-height:1}#ckp .c-vscore .c-n small{font-size:var(--type-14);color:var(--mute);letter-spacing:0}#ckp .c-vscore .c-l{font-family:var(--mono);font-size:var(--type-10);color:var(--mute);letter-spacing:var(--track-px12)}
 #ckp .c-meter{position:relative;height:12px;background:var(--well);border:var(--bw-1) solid var(--line);margin:var(--space-6) 0 var(--space-4);clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
 #ckp .c-meter i{position:absolute;top:0;bottom:0;left:0;background:linear-gradient(90deg,var(--amber),var(--up))}
 #ckp .c-meter .c-cut{position:absolute;top:-5px;width:2px;height:22px;background:var(--chalk);opacity:.6}
 #ckp .c-mlabels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:var(--type-9);color:var(--dim);margin-top:var(--space-8)}
+/* cc#1782 · the (i) after the band meter: the plain-words read and the formula footer live behind it
+   now (founder: "make commentary in I button after valid / watch tag"), in the same .c-sheet the rule
+   rows open. 44px target (framework 15913 rule 5), a 22px ring as the visible mark. */
+#ckp .c-irow{display:flex;justify-content:flex-end;margin-top:calc(-1 * var(--space-4))}
+#ckp .c-ib{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;padding:0;cursor:pointer;color:var(--accent)}
+#ckp .c-ib i{width:22px;height:22px;border-radius:50%;border:var(--bw-1) solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-style:normal;font-weight:800;font-size:var(--type-11);line-height:1}
 #ckp .c-buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-6);margin-top:var(--space-12)}
 #ckp .c-bk{text-align:center;padding:var(--space-8) var(--space-4);background:var(--well);border:var(--bw-1) solid var(--line);border-radius:var(--radius-7);cursor:pointer}
 #ckp .c-bk-k{font-family:var(--mono);font-size:var(--type-9);letter-spacing:var(--track-px10);color:var(--mute)}#ckp .c-bk-v{font-family:var(--mono);font-size:var(--type-17);font-weight:800;margin-top:var(--space-2)}#ckp .c-bk-s{font-family:var(--mono);font-size:var(--type-9);color:var(--dim)}
 #ckp .c-bk.on{border-color:var(--gold);background:var(--gold-d)}#ckp .c-bk.on .c-bk-k{color:var(--gold)}
-#ckp .c-read{margin-top:var(--space-12);font-size:var(--type-135);line-height:1.5}#ckp .c-read b{color:var(--gold)}
+#ckp .c-read{margin-top:var(--space-12);font-size:var(--type-135);line-height:1.5}#ckp .c-read b{color:var(--accent)}   /* cc#1782: was --gold — 1.87 on a light panel; --accent is the gold on goldnight and legible on every set */
 #ckp .c-foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4) var(--space-12);margin-top:var(--space-10);font-family:var(--mono);font-size:var(--type-10);color:var(--dim)}
 #ckp .c-alerts{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-top:var(--space-10)}
 #ckp .c-tag{display:inline-block;font-family:var(--mono);font-size:var(--type-95);font-weight:800;letter-spacing:var(--track-px8);padding:var(--space-2) var(--space-6);clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);background:var(--well);color:var(--mute);border:var(--bw-1) solid var(--line)}
@@ -2461,28 +2475,28 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #ckp .c-btn{display:inline-block;margin-top:var(--space-12);padding:var(--space-9) var(--space-14);border-radius:var(--radius-9);border:var(--bw-1) solid var(--line);background:var(--well);color:var(--gold);font-family:var(--mono);font-size:var(--type-11);font-weight:700;cursor:pointer}
 /* detail sheet (R3) */
 .c-scrim{position:fixed;inset:0;background:var(--veil);z-index:9998;display:none}.c-scrim.open{display:block}
-.c-sheet{position:fixed;left:0;right:0;bottom:0;z-index:9999;max-height:88vh;overflow:auto;background:var(--panel,#17171B);color:var(--chalk,#F5F2EA);border:var(--bw-15) solid var(--line,#2A2A31);border-bottom:0;border-radius:var(--radius-18) var(--radius-18) 0 0;padding:var(--space-14) var(--space-16) max(18px,env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.7);transform:translateY(110%);transition:transform .18s ease;font-family:'Space Grotesk','Sora',system-ui,sans-serif}
+.c-sheet{position:fixed;left:0;right:0;bottom:0;z-index:9999;max-height:88vh;overflow:auto;background:var(--panel);color:var(--chalk);border:var(--bw-15) solid var(--line);border-bottom:0;border-radius:var(--radius-18) var(--radius-18) 0 0;padding:var(--space-14) var(--space-16) max(18px,env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.7);transform:translateY(110%);transition:transform .18s ease;font-family:'Space Grotesk','Sora',system-ui,sans-serif}
 .c-sheet{visibility:hidden;transition:transform .18s ease,visibility 0s linear .18s}
 .c-sheet.open{transform:none;visibility:visible;transition:transform .18s ease,visibility 0s}
 .c-sheet *{box-sizing:border-box}
-.c-sheet .c-grab{width:44px;height:4px;border-radius:var(--radius-2);background:var(--line,#2A2A31);margin:0 auto var(--space-12)}
+.c-sheet .c-grab{width:44px;height:4px;border-radius:var(--radius-2);background:var(--line);margin:0 auto var(--space-12)}
 .c-sheet .c-shd{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-10);padding-right:44px}
-.c-sheet .c-t{font-family:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;font-size:var(--type-17)}.c-sheet .c-t small{display:block;font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--mute,#8A8A93);letter-spacing:var(--track-px12);margin-top:var(--space-3)}
-.c-sheet .c-credit{text-align:right}.c-sheet .c-credit .c-n{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-26);font-weight:800;line-height:1}.c-sheet .c-credit .c-l{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mute,#8A8A93);letter-spacing:var(--track-px12)}
-.c-sheet .up{color:var(--up,#2FD48B)}.c-sheet .am{color:var(--amber,#FF9F45)}.c-sheet .dn{color:var(--down,#FF5C6C)}.c-sheet .mu{color:var(--mute,#8A8A93)}
+.c-sheet .c-t{font-family:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;font-size:var(--type-17)}.c-sheet .c-t small{display:block;font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--mute);letter-spacing:var(--track-px12);margin-top:var(--space-3)}
+.c-sheet .c-credit{text-align:right}.c-sheet .c-credit .c-n{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-26);font-weight:800;line-height:1}.c-sheet .c-credit .c-l{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--mute);letter-spacing:var(--track-px12)}
+.c-sheet .up{color:var(--up)}.c-sheet .am{color:var(--amber)}.c-sheet .dn{color:var(--down)}.c-sheet .mu{color:var(--mute)}
 .c-sheet .c-kv{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:var(--space-14) 0}
-.c-sheet .c-kv div{padding:var(--space-9) var(--space-10);background:var(--well,#131316);border-radius:var(--radius-7);box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000;min-width:0}
-.c-sheet .c-kv .c-kk{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);letter-spacing:1.3px;color:var(--mute,#8A8A93)}.c-sheet .c-kv .c-kvv{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:800;margin-top:var(--space-2);overflow-wrap:anywhere}
-.c-sheet .c-kv .c-kvv.ok{color:var(--up,#2FD48B)}.c-sheet .c-kv .c-kvv.half{color:var(--amber,#FF9F45)}.c-sheet .c-kv .c-kvv.no{color:var(--down,#FF5C6C)}
+.c-sheet .c-kv div{padding:var(--space-9) var(--space-10);background:var(--well);border-radius:var(--radius-7);box-shadow:0 1px 0 rgba(255,255,255,.07),0 -1px 0 #000;min-width:0}
+.c-sheet .c-kv .c-kk{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);letter-spacing:1.3px;color:var(--mute)}.c-sheet .c-kv .c-kvv{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:800;margin-top:var(--space-2);overflow-wrap:anywhere}
+.c-sheet .c-kv .c-kvv.ok{color:var(--up)}.c-sheet .c-kv .c-kvv.half{color:var(--amber)}.c-sheet .c-kv .c-kvv.no{color:var(--down)}
 .c-sheet .c-kv div.wide{grid-column:1/span 2}
 .c-sheet .c-ladder{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4);margin:var(--space-6) 0 var(--space-12)}
-.c-sheet .c-ladder div{text-align:center;padding:var(--space-6) var(--space-4);border:var(--bw-1) solid var(--line,#2A2A31);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim,#5E5E66)}
-.c-sheet .c-ladder div b{display:block;font-size:var(--type-11);color:var(--mute,#8A8A93)}.c-sheet .c-ladder div.on{border-color:var(--amber,#FF9F45);background:rgba(255,159,69,.14)}.c-sheet .c-ladder div.on b{color:var(--amber,#FF9F45)}
-.c-sheet .c-ladder div.on.full{border-color:var(--up,#2FD48B);background:color-mix(in srgb, var(--grn) 14%, transparent)}.c-sheet .c-ladder div.on.full b{color:var(--up,#2FD48B)}
-.c-sheet .c-ladder div.on.none{border-color:var(--down,#FF5C6C);background:color-mix(in srgb, var(--red) 14%, transparent)}.c-sheet .c-ladder div.on.none b{color:var(--down,#FF5C6C)}
-.c-sheet .c-swhy{font-size:var(--type-13);line-height:1.5}.c-sheet .c-swhy b{color:var(--gold,#D4AF37)}
-.c-sheet .c-sfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4) var(--space-10);margin-top:var(--space-12);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim,#5E5E66)}
-.c-sheet .c-x{position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:var(--bw-1) solid var(--line,#2A2A31);background:var(--well,#131316);color:var(--mute,#8A8A93);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.c-sheet .c-ladder div{text-align:center;padding:var(--space-6) var(--space-4);border:var(--bw-1) solid var(--line);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-10);color:var(--dim)}
+.c-sheet .c-ladder div b{display:block;font-size:var(--type-11);color:var(--mute)}.c-sheet .c-ladder div.on{border-color:var(--amber);background:color-mix(in srgb, var(--amber) 14%, transparent)}.c-sheet .c-ladder div.on b{color:var(--amber)}
+.c-sheet .c-ladder div.on.full{border-color:var(--up);background:color-mix(in srgb, var(--grn) 14%, transparent)}.c-sheet .c-ladder div.on.full b{color:var(--up)}
+.c-sheet .c-ladder div.on.none{border-color:var(--down);background:color-mix(in srgb, var(--red) 14%, transparent)}.c-sheet .c-ladder div.on.none b{color:var(--down)}
+.c-sheet .c-swhy{font-size:var(--type-13);line-height:1.5}.c-sheet .c-swhy b{color:var(--accent)}
+.c-sheet .c-sfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4) var(--space-10);margin-top:var(--space-12);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim)}
+.c-sheet .c-x{position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:var(--bw-1) solid var(--line);background:var(--well);color:var(--mute);display:flex;align-items:center;justify-content:center;cursor:pointer}
 
 /* ── ADV/DECL sector capsule strip (cc#1592, ADV_DECL_SECTOR_CAPS_V1 36539; ref scorr_adv_decl_sectorcaps_R1) ─
    Lives here, not in mobile/home.html's own <style> (ratcheted at 41), on the same precedent as the
