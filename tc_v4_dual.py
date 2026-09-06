@@ -538,6 +538,7 @@ def _vol_checks(d, side, style=None):
         val[key_] = _r(v)
         val["pass_" + key_[4:]] = bool(ok)
         val["pts_" + key_[4:]] = earned
+        val["max_" + key_[4:]] = float(p)      # cc#1788: the sheet's "x / y" per check, never typed on a page
         if v is None:
             no_data.append(name)
         passed += int(bool(ok))
