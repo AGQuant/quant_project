@@ -160,7 +160,7 @@ function ruleState(r){
 /* plain names per rule id — CANDIDATE list (posted for Fable review with P4; engine label is the
    fallback for any id not here, so nothing invents a rule). */
 var NAMES = {
-  R1:'Market mood', R2:'Sector month', R3:'Peers today', R4:'Moving averages', R5:'Volume backing', R7:'RSI frame',
+  R1:'Market mood', R2:'Sector month', R3:'Peers today', R4:'Moving averages', R5:'Volume (4 checks)', R7:'RSI frame',
   R8:'Month return', R9:'5-min tape + VWAP', R10:'Two-day turn', R11:'Location + room', R12:'Futures lean',
   R16:'Fib position (3M)', R17:'Valuation (V)', R18:'Momentum (M)', R19:'Strength vs market (63d)', R20:'GVM trend (180d)',
   R21:'50-day distance', R22:'52-week position', R23:'GVM floor', R24:'Delivery pick-up',
@@ -197,7 +197,11 @@ var TPL = {
   R2: function(v, c){ return (c && c.label === 'BUY-MOM') ? fill(['Sector W ', pc(v.wk), ' · M ', pc(v.mo), '.']) : fill(['Sector month ', pc(v.mo), '.']); },
   R3: function(v){ return (typeof v.dir === 'number') ? fill([tv(v.dir, 0), ' of ', tv(v.n, 0), ' peers up today, ', tv(v.strong, 0), ' strongly.']) : null; },
   R4: function(v){ return v.d50 != null ? fill(['20d ', pc(v.d20), ' · 50d ', pc(v.d50), ' · 200d ', pc(v.d200), ' vs price.']) : fill(['20d ', pc(v.d20), ' · 200d ', pc(v.d200), ' vs price.']); },
-  R5: function(v, c){ return (c && c.label === 'BUY-MOM') ? fill(['Today ', xs(v.today), ' · month ', xs(v.vol1M), '.']) : fill(['Today ', xs(v.today), ' pace · month up/down ', xs(v.vol1M), '.']); },
+  /* cc#1785: R5 is four pass/fail checks now — the line shows the four numbers and which passed.
+     A missing input prints as — with its ✗ (the engine names it in no_data). */
+  R5: function(v){ if (!v || typeof v.passed !== 'number') return null;
+    var one = function(lbl, x, ok, unit){ return lbl + ' ' + (x == null ? '—' : (unit === '%' ? tv(x, 0) + '%' : xs(x))) + (ok ? ' ✓' : ' ✗'); };
+    return one('Vol R', v.vol_r, v.pass_r) + ' · ' + one('Vol P', v.vol_p, v.pass_p) + ' · ' + one('Vol D', v.vol_d, v.pass_d) + ' · ' + one('Vol AD', v.vol_ad, v.pass_ad, '%') + ' — ' + v.passed + ' of 4.'; },
   R7: function(v){ return v.trueWk != null ? fill(['Monthly RSI ', tv(v.mRSI, 1), ' · weekly ', tv(v.trueWk, 1), '.']) : fill(['Monthly RSI ', tv(v.mRSI, 1), '.']); },
   R8: function(v){ return fill(['Month ', pc(v.mo), ', week ', pc(v.wk), '.']); },
   R9: function(v){ return fill(['VWAP ', tv(v.vwap), ' · price ', (v.rangePos == null ? null : Math.round(Number(v.rangePos) * 100) + '%'), ' of today range.']); },
