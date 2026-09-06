@@ -485,3 +485,23 @@ body[data-theme="duskday"]{--field:#F4F2FA;--panel:#FFFFFF;--hi:#EBE8F6;--edge:#
  --panel-shadow:0 6px 20px rgba(60,40,110,.10);
  --field-grad:radial-gradient(120% 80% at 50% 0%, #FAF8FE 0%, #F4F2FA 55%, #EFEBF7 100%);
  --accent-soft:rgba(107,79,168,.10)}
+
+/* ══ cc#1791 · ORANGE PEEL (THEME_ORANGE_PEEL_V1, session_log 39738; founder 06-Sep: "build a mock theme
+   for orange peel / this orange not possible? / file both orange and violet light"). A LIGHT set on a
+   warm-white field. THE TWO-ORANGE RULE: the bright orange the founder pointed at is NON-TEXT ONLY (as
+   small text it measures 2.84 and fails AA) — it lives on --wayfind, whose only readers are graphic
+   (nav underline bar, nav icon, chip border, the wordmark O, rails via --railgrad, glow via --brandglow,
+   chip wash via --accent-soft). --brand / --accent / --label carry the SAME HUE pushed darker for text
+   (4.99 worst case). All 21 contract keys declared; --field-grad is none (flat warm-white, the Blush
+   precedent). Measured worst-of panel/field/hi: ink 16.50 · muted 6.71 · accent 4.99 · win 4.79 ·
+   loss 5.01 — all AA. Every value is the entry's, not re-derived. */
+body[data-theme="orangepeel"]{--field:#FDF8F3;--panel:#FFFFFF;--hi:#F6F1EB;--edge:#E8DFD4;
+ --ink:#1A1206;--muted:#5C5348;--brand:#B54200;--brandglow:rgba(255,108,17,.30);--accent:#B54200;
+ --label:#B54200;--win:#0F7A4A;--loss:#C62828;
+ --railgrad:linear-gradient(90deg,#FF9147,#FF6C11,transparent);
+ --texture:repeating-linear-gradient(115deg,rgba(150,100,40,.026) 0 2px,transparent 2px 9px);
+ --gold-lo:#FFE0C7;--gold-hi:#5C3410;--sunk:#FFFFFF;
+ --wayfind:#FF6C11;
+ --panel-shadow:0 4px 18px rgba(120,80,40,.10);
+ --field-grad:none;
+ --accent-soft:rgba(255,108,17,.08)}
