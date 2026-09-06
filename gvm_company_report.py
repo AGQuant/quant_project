@@ -873,8 +873,24 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
 
     yr_periods = pl_labels + ["Current"]
     buckets = []
+    bucket_errors = {}   # cc#1774: {bucket title: reason} for a bucket that failed its own alignment guard
 
     def _add(title, periods, rows):
+        """cc#1774 FAULT SCOPE, decided and stated: an alignment fault (a row whose values do not
+        match the period count, or a trim that desynchronised them) is a property of ONE bucket's
+        row arithmetic — every bucket builds its rows from its own lists — so it is FATAL TO THAT
+        BUCKET ONLY: the bucket is dropped, the reason is logged at WARNING and carried in the
+        payload as ratios_v2.bucket_errors[title], and the other buckets render. A fault OUTSIDE a
+        bucket (the segment lookup, screener_raw, the annual frames, a DB error) is the section's
+        and still lands in build_financials_block's catch as ratios_v2_error. The guard itself is a
+        real raise in _add_strict below — never an assert, which python -O strips."""
+        try:
+            _add_strict(title, periods, rows)
+        except ValueError as _ve:
+            bucket_errors[title] = str(_ve)[:200]
+            log.warning("gvm_company_report ratios_v2 %s bucket for %s dropped: %s", title, sym, _ve)
+
+    def _add_strict(title, periods, rows):
         """The ONE path every bucket takes (cc#1772 routed Efficiency through it too).
         cc#1772 THE COLUMN RULE — cc#833's row doctrine lifted to the column: a column that is a
         dash across EVERY row of a bucket does not render. It is not missing data, it is a column
@@ -900,7 +916,8 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
             periods = [periods[i] for i in keep]
             rows = [dict(r, values=[r["values"][i] for i in keep]) for r in rows]
         for r in rows:
-            assert len(r["values"]) == len(periods), "ratios_v2 %s: trim desynchronised %r" % (title, r.get("label"))
+            if len(r["values"]) != len(periods):   # cc#1774: a real raise, not an assert (python -O strips asserts)
+                raise ValueError("ratios_v2 %s: trim desynchronised %r" % (title, r.get("label")))
         buckets.append({"title": title, "table": {"periods": periods, "rows": rows}})
 
     def _yr_row(label, unit, hist, current):
@@ -975,7 +992,9 @@ def build_ratios_v2(cur, symbol: str, segment: str) -> Dict[str, Any]:
         if eff_tbl["rows"]:
             _add("Efficiency", eff_tbl["periods"], eff_tbl["rows"])   # cc#1772: through the one path (no all-dash column here -> byte-identical)
 
-    return {"buckets": buckets, "bfsi": _is_bfsi(segment)}
+    return {"buckets": buckets, "bfsi": _is_bfsi(segment),
+            # cc#1774: {} on the happy path; a dropped bucket's reason otherwise. The page renders the rest.
+            "bucket_errors": bucket_errors}
 
 
 def _all_section(cur, symbol, section, ptype):
@@ -1078,16 +1097,27 @@ def build_financials_block(conn, symbol: str) -> Dict[str, Any]:
                                      "shareholding": None}
     # cc#638: RATIOS V2 buckets (variant-agnostic — screener_raw current + fundamentals annual series).
     ratios_v2 = None
+    ratios_v2_error = None
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT segment FROM gvm_scores WHERE symbol=%s ORDER BY score_date DESC LIMIT 1", (symbol,))
             seg = cur.fetchone()
             ratios_v2 = build_ratios_v2(cur, symbol, seg[0] if seg else None)
-    except Exception:
+    except Exception as _re:
+        # cc#1774: NOT SILENT (SWALLOWED_EXCEPTION_RULE, the cc#1095 P3 shape). This catch used to be
+        # bare — the cc#1772 alignment guard could fire and the only visible effect was the whole
+        # Ratios section vanishing with no log and no reason. The reason now travels WITH the
+        # payload (ratios_v2_error) and is logged; the page still renders, a diagnostic must never
+        # take the page down. Per-bucket faults never reach here any more (see _add): only a fault
+        # outside a bucket — the segment lookup, screener_raw, the annual frames — blanks the section.
         ratios_v2 = None
+        ratios_v2_error = "%s: %s" % (type(_re).__name__, str(_re)[:200])
+        log.warning("gvm_company_report ratios_v2 for %s failed: %s", symbol, ratios_v2_error)
     # backward-compat: default variant's tables at top level, + the toggle metadata + ratios_v2
     return {**base, "variants": variants, "variants_available": available, "default_variant": default,
-            "ratios_v2": ratios_v2}
+            "ratios_v2": ratios_v2,
+            # cc#1774: null when Ratios V2 built, a reason string when the SECTION could not be built.
+            "ratios_v2_error": ratios_v2_error}
 
 
 # ─── cc#541: OPERATIONAL METRICS section — per-sector KPIs (NIM/GNPA/CASA for banks,
