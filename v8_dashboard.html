@@ -6622,10 +6622,12 @@ function pcrGuide(key){
       +'<table class="tb"><thead><tr><th>SETUP</th><th>N</th><th>UP</th><th>DOWN</th><th>AVG NEXT</th><th>SCORED</th></tr></thead><tbody>'
       +keys.map(k=>row(k,obj[k])).join('')+'</tbody></table>';
   };
+  /* cc#1740: the ATM put/call numbers now LEAD the commentary (it.read_text, generated server-side
+     for the writer's seat), so the separate "ATM option price" paragraph is gone; what stays here is
+     the data-honesty line — spot, expiry, days, RV20, the fair definition and the cuts. */
   const op=it.option_price, opHtml=(op&&!op.error&&(op.ce||op.pe))
-    ? '<p><b>ATM option price.</b> '+esc((op.ce&&op.ce.line)||'')+' '+esc((op.pe&&op.pe.line)||'')+'</p>'
-      +'<p style="color:var(--tx3)">'+esc(op.header||'')+' · '+esc(op.footer||'')+' '+esc(op.cuts||'')+(op.source?' · source '+esc(op.source):'')+'</p>'
-    : '<p style="color:var(--tx3)">ATM option price: '+esc((op&&op.error)?'not available this tick':'no ATM row this tick')+'.</p>';
+    ? '<p style="color:var(--tx3)">'+esc(op.header||'')+(op.source?' · source '+esc(op.source):'')+(it.help?' · '+esc(it.help):'')+'</p>'
+    : '<p style="color:var(--tx3)">ATM option price: '+esc((op&&op.error)?'not available this tick':'no ATM row this tick')+'.'+(it.help?' '+esc(it.help):'')+'</p>';
   const win=it.evidence_window||{};
   iiSheet('<div class="iish">PCR · '+esc(key)+(m.label?' · '+esc(m.label):'')+'</div><div class="vfg">'
     +'<p><b style="color:'+tok(it.state_colour)+'">'+esc(it.headline||'')+'</b></p>'

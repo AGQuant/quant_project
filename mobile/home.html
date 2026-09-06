@@ -2829,9 +2829,12 @@ function pcrRead(){
     var it = m && m.interpret;
     if (!it || !it.headline){ body.innerHTML = '<p>The read is not available this tick.</p>'; return; }
     var op = it.option_price, opHtml = '';
+    /* cc#1740: the ATM put/call numbers lead the commentary itself (it.read_text, generated for
+       the writer's seat), so only the data-honesty line stays here: spot, expiry, RV20, fair, cuts. */
     if (op && !op.error && (op.ce || op.pe)){
-      opHtml = '<p><b>ATM option price.</b> ' + esc((op.ce && op.ce.line) || '') + ' ' + esc((op.pe && op.pe.line) || '') + '</p>'
-        + '<p style="opacity:.7">' + esc(op.header || '') + '. ' + esc(op.footer || '') + ' ' + esc(op.cuts || '') + '</p>';
+      opHtml = '<p style="opacity:.7">' + esc(op.header || '') + '.' + (it.help ? ' ' + esc(it.help) : '') + '</p>';
+    } else if (it.help){
+      opHtml = '<p style="opacity:.7">' + esc(it.help) + '</p>';
     }
     body.innerHTML = '<p><b>' + esc(it.headline) + '</b></p>'
       + '<p>' + esc(it.read_text || (it.read || []).join(' ')) + '</p>'
