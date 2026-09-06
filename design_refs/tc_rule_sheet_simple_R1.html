@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rule sheet · simple R1</title>
+<style>
+body[data-theme="goldnight"]{--field:#0A0A0C;--panel:#141418;--hi:#1C1C22;--edge:#2A2A32;--ink:#EDE7DA;--muted:#9A9285;--dim:#6E675C;--accent:#D8B25C;--win:#3DD68C;--loss:#FF6B7A;--amber:#F0B24A}
+body[data-theme="aquawhite"]{--field:#F2F6F8;--panel:#FFFFFF;--hi:#E9EFF3;--edge:#D3DEE5;--ink:#12222B;--muted:#4A606C;--dim:#6E828C;--accent:#0E7C8C;--win:#127A4D;--loss:#B3261E;--amber:#B26A00}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--field);color:var(--ink);font:14px/1.45 ui-monospace,Menlo,monospace;padding:14px 12px 40px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.top b{font:italic 800 15px system-ui,sans-serif}
+.tg{font-size:10px;letter-spacing:.06em;border:1px solid var(--edge);background:var(--hi);color:var(--muted);padding:5px 8px;border-radius:7px;cursor:pointer}
+.lbl{font-size:10px;letter-spacing:.14em;color:var(--dim);margin:18px 2px 8px}
+.sheet{background:var(--panel);border:1px solid var(--edge);border-radius:16px;padding:16px 14px 14px;position:relative;max-width:420px;margin:0 auto}
+.grab{width:44px;height:4px;border-radius:2px;background:var(--edge);margin:0 auto 14px}
+.h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}
+.h .n{font:italic 800 19px system-ui,sans-serif;letter-spacing:.01em}
+.h .s{font:700 18px ui-monospace,monospace;white-space:nowrap}
+.h .s small{font-weight:500;font-size:11px;color:var(--muted);margin-left:4px}
+.boxes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.boxes.two{grid-template-columns:repeat(2,1fr)}
+.bx{border:1px solid var(--edge);border-radius:10px;padding:10px 9px;min-height:92px;background:var(--hi);opacity:.55}
+.bx b{display:block;font-size:11px;letter-spacing:.12em;margin-bottom:6px;color:var(--muted)}
+.bx span{font-size:11.5px;line-height:1.4;color:var(--muted);font-family:system-ui,sans-serif}
+.bx.on{opacity:1;border-width:2px}
+.bx.on.full{border-color:var(--win);background:color-mix(in srgb,var(--win) 14%,var(--hi))}
+.bx.on.full b{color:var(--win)}
+.bx.on.half{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 14%,var(--hi))}
+.bx.on.half b{color:var(--amber)}
+.bx.on.none{border-color:var(--loss);background:color-mix(in srgb,var(--loss) 14%,var(--hi))}
+.bx.on.none b{color:var(--loss)}
+.bx.on span{color:var(--ink)}
+.nums{margin-top:12px;font-size:11.5px;color:var(--muted);text-align:center}
+.nums b{color:var(--ink);font-weight:600}
+.rows{margin-top:2px}
+.row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:9px 2px;border-bottom:1px solid var(--edge);font-size:12.5px}
+.row:last-child{border-bottom:0}
+.row .k{font-family:system-ui,sans-serif;color:var(--ink)}
+.row .v{color:var(--muted)}
+.row .t{font-weight:700;width:16px;text-align:center}
+.row .t.ok{color:var(--win)} .row .t.no{color:var(--loss)}
+.row .p{font-weight:700;min-width:34px;text-align:right}
+.row .p.z{color:var(--dim)}
+</style></head>
+<body data-theme="goldnight">
+<div class="top"><b>Rule sheet · simple</b>
+<span class="tg" onclick="document.body.dataset.theme=document.body.dataset.theme==='goldnight'?'aquawhite':'goldnight'">THEME</span></div>
+
+<div class="lbl">A · THREE-BOX RULE (full hit)</div>
+<div class="sheet"><div class="grab"></div>
+  <div class="h"><div class="n">Momentum</div><div class="s">4.7<small>of 4.7</small></div></div>
+  <div class="boxes">
+    <div class="bx on full"><b>FULL</b><span>stock M ≥ 6.5 and sector M ≥ 6</span></div>
+    <div class="bx"><b>HALF</b><span>one of the two</span></div>
+    <div class="bx"><b>NONE</b><span>otherwise</span></div>
+  </div>
+  <div class="nums">Stock M <b>7.8</b> · Sector M <b>6.1</b></div>
+</div>
+
+<div class="lbl">B · THREE-BOX RULE (half hit)</div>
+<div class="sheet"><div class="grab"></div>
+  <div class="h"><div class="n">RSI monthly</div><div class="s">3.5<small>of 7</small></div></div>
+  <div class="boxes">
+    <div class="bx"><b>FULL</b><span>monthly RSI 60 – 90</span></div>
+    <div class="bx on half"><b>HALF</b><span>50 – 60 or 90 – 95</span></div>
+    <div class="bx"><b>NONE</b><span>otherwise</span></div>
+  </div>
+  <div class="nums">Monthly RSI <b>54.4</b></div>
+</div>
+
+<div class="lbl">C · TWO-BOX RULE (no half tier)</div>
+<div class="sheet"><div class="grab"></div>
+  <div class="h"><div class="n">Week falling</div><div class="s">0<small>of 11.5</small></div></div>
+  <div class="boxes two">
+    <div class="bx"><b>FULL</b><span>week return ≤ −1%</span></div>
+    <div class="bx on none"><b>NONE</b><span>otherwise</span></div>
+  </div>
+  <div class="nums">Week <b>+2.4%</b></div>
+</div>
+
+<div class="lbl">D · VOLUME (four checks)</div>
+<div class="sheet"><div class="grab"></div>
+  <div class="h"><div class="n">Volume</div><div class="s">7<small>of 15</small></div></div>
+  <div class="rows">
+    <div class="row"><span class="k">Today's pace ≥ 1.2×</span><span class="v">1.04×</span><span class="t no">✗</span><span class="p z">0 / 5</span></div>
+    <div class="row"><span class="k">Yesterday ≥ 1.0×</span><span class="v">1.31×</span><span class="t ok">✓</span><span class="p">4 / 4</span></div>
+    <div class="row"><span class="k">Delivery pickup ≥ 1.1×</span><span class="v">1.22×</span><span class="t ok">✓</span><span class="p">3 / 3</span></div>
+    <div class="row"><span class="k">Accumulation ≥ 55%</span><span class="v">48%</span><span class="t no">✗</span><span class="p z">0 / 3</span></div>
+  </div>
+</div>
+</body></html>
