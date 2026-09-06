@@ -280,6 +280,47 @@ WITH ev AS (
          NULL::timestamp
   FROM investment_scanner_state WHERE entered_at IS NOT NULL
 
+  -- SCREENERS (cc#1733, founder 06-Sep "three source of equity signals. QB, Investment Scan and
+  -- Screeners") — the THIRD equity bucket. v13_screen_results is the OPEN side (a symbol still in
+  -- a screen tonight), v13_screen_exits the CLOSED side (it left), keyed on (screen_id, symbol,
+  -- first_seen). DATE columns only -> day precision, never faked up to a clock time. No qty and no
+  -- side column exist on these tables: LONG by construction, qty NULL. NO PRICES: these tables
+  -- hold no entry_price / exit_price and none is invented or joined from a close as though it
+  -- were an execution -- entry_price, exit_price and pnl stay NULL for this bucket (a pricing
+  -- convention is a separate card). note = screen_name so a row says Momentum Kings vs Hidden
+  -- Value. THIRD-PARTY SCREENS ARE EXCLUDED BY DERIVATION, NOT BY NAME: only a screen whose
+  -- v13_presets.filters is a NON-EMPTY JSON object is a computed Scorr screen; the Finz lists
+  -- carry an empty object because their membership is supplied, not screened ("third party
+  -- screener which never run on quant"). A new Scorr screen appears here automatically; a new
+  -- supplied list never does. Read-only on every v13 table -- the EOD v13 run owns them.
+  UNION ALL
+  SELECT 'screen', r.screen_id::text || ':' || r.symbol || ':' || r.first_seen::text,
+         'open',
+         r.symbol, 'LONG', 'Screeners', 'EQUITY',
+         NULL::numeric,
+         r.first_seen::timestamp, 'day', NULL::numeric,
+         NULL::timestamp, NULL::text, NULL::numeric,
+         NULL::numeric, NULL::numeric, NULL::text, r.screen_name,
+         NULL::timestamp
+  FROM v13_screen_results r
+  JOIN v13_presets p ON p.id = r.screen_id
+  WHERE r.first_seen IS NOT NULL
+    AND jsonb_typeof(p.filters) = 'object' AND p.filters <> '{}'::jsonb
+
+  UNION ALL
+  SELECT 'screen', x.screen_id::text || ':' || x.symbol || ':' || COALESCE(x.first_seen, x.exited_on)::text || ':x' || x.id::text,
+         'closed',
+         x.symbol, 'LONG', 'Screeners', 'EQUITY',
+         NULL::numeric,
+         COALESCE(x.first_seen, x.exited_on)::timestamp, 'day', NULL::numeric,
+         x.exited_on::timestamp, 'day', NULL::numeric,
+         NULL::numeric, NULL::numeric, NULL::text, COALESCE(x.screen_name, p.name),
+         NULL::timestamp
+  FROM v13_screen_exits x
+  JOIN v13_presets p ON p.id = x.screen_id
+  WHERE x.exited_on IS NOT NULL
+    AND jsonb_typeof(p.filters) = 'object' AND p.filters <> '{}'::jsonb
+
   -- MANUAL ALERT (trade_alerts) — NEW bucket, cc#1505 (MANUAL_TRADE_ALERTS_V1, 34521). Only
   -- APPROVED alerts reach the wall: pending/triggered are intent, approved is the founder's
   -- click, and the wall shows positions taken, not positions considered. approved_at is
@@ -341,6 +382,7 @@ WOT_BUCKETS = {
     "tc_scanner":         ("tc",),
     "qb_basket":          ("quant",),
     "investment_scanner": ("invscan",),
+    "screeners":          ("screen",),    # cc#1733: third equity source (Scorr screens only)
 }
 WOT_BUCKETS_KEY = "wot_buckets_enabled"
 # cc#1609 WOT_APPROVAL_SURFACE_V1 (session_log 36394 correction_02sep_1612): the wall is the
@@ -351,7 +393,8 @@ WOT_BUCKETS_KEY = "wot_buckets_enabled"
 # They were fully wired in WOT_BUCKETS since cc#1295 but absent from both this default and the
 # app_config row, so the Equity chip filtered a set that was never allowed in and every engine
 # under it read 0 — config drift from the locked spec (36394 names Equity explicitly), not a bug.
-WOT_BUCKETS_DEFAULT = ["v8", "index_intel", "tc_scanner", "qb_basket", "investment_scanner"]
+# cc#1733: screeners joins as the THIRD equity source, same wot_equity_epoch gate as the other two.
+WOT_BUCKETS_DEFAULT = ["v8", "index_intel", "tc_scanner", "qb_basket", "investment_scanner", "screeners"]
 
 # ── cc#1732 EQUITY: fresh signals only + quant-run baskets only ──────────────────────────────
 # WOT_EQUITY_EPOCH — a SECOND display epoch, applied to the qb_basket and investment_scanner
@@ -456,7 +499,7 @@ def _wall_sql(names, equity_epoch=None):
     union.
 
     cc#1732: `equity_epoch` ('YYYY-MM-DD', already validated by wot_equity_epoch()) gates the
-    qb_basket + investment_scanner branches to rows ENTERED on or after it; the QB narrowing to
+    qb_basket + investment_scanner (+ cc#1733 screeners) branches to rows ENTERED on or after it; the QB narrowing to
     quant-run baskets (_QB_NARROW_SQL, derived from app_config / quant_basket_config) is always
     composed. Both sit here, at the same composition point as WALL_EPOCH, so every consumer —
     page, chip counts, by_engine, the pending count — inherits them from one place.
@@ -469,7 +512,9 @@ def _wall_sql(names, equity_epoch=None):
     sql = (_WALL_SQL + " AND w.src IN (" + ", ".join("'" + s + "'" for s in srcs) + ")\n"
            + " AND NOT (w.src = 'v10' AND w.instrument = 'FUTURES')\n")
     if equity_epoch:
-        sql += (" AND NOT (w.src IN ('quant', 'invscan') AND w.entry_ts < '" + str(equity_epoch)[:10]
+        # cc#1733: the screeners bucket rides the same gate -- without it this bucket alone puts
+        # ~247 historical rows into the pending queue on day one.
+        sql += (" AND NOT (w.src IN ('quant', 'invscan', 'screen') AND w.entry_ts < '" + str(equity_epoch)[:10]
                 + "'::timestamp)\n")
     sql += _QB_NARROW_SQL
     return sql
@@ -779,6 +824,239 @@ def tradewall_other_engines(request: Request):
         "as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S"),
         "epoch": WALL_EPOCH,
     }
+
+
+# ── cc#1733 (i) SHEET: universe / entry / exit per engine, READ not typed ─────────────────────
+# Founder 06-Sep: "add i button for proper explanation of universe, entry and exit rules for equity
+# and futures both." The founder approves trades from this page, so a wrong rule here is worse
+# than a gap: every cell below is read from the engine's own machine-readable source, and where a
+# rule has none the cell says "not specified in config" and the `source` field says where the
+# behaviour actually lives. Nothing on this sheet is typed into HTML.
+#   QB Basket          quant_basket_config.stage1_sector / stage2_stock (the same rows the cc#1708
+#                      QB (i) sheet reads) + quant_basket_registry capital/max_stocks/rebalance_freq
+#   Screeners          v13_presets.filters rendered as readable gates, scope as the universe
+#   Investment Scanner inv_scanner_rules ENTRY_*/EXIT_* constants + the live universe table
+#   V8                 v8_signal_writer.BASKET_FILTERS (the registry /api/v8/filter_config serves)
+#   TC Scanner         tc_scanner_config.TC_SCANNER_CONFIG (the dict /api/tc-scanner/config serves)
+#   Index Intel        v10_st_ema.INDEX_CFG (per-index, founder-locked specs)
+_NOT_IN_CONFIG = "not specified in config"
+
+
+def _fmt_num(v):
+    try:
+        f = float(v)
+        return str(int(f)) if f == int(f) else ("{:g}".format(f))
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _gates_from_filters(filters):
+    """{'gvm_score': {'min': 7.5}, 'market_cap': {'max': 100000}} -> 'gvm_score >= 7.5; market_cap <= 100000'."""
+    out = []
+    for k in sorted(filters or {}):
+        v = filters[k]
+        if isinstance(v, dict):
+            parts = []
+            if v.get("min") is not None:
+                parts.append(k + " >= " + _fmt_num(v["min"]))
+            if v.get("max") is not None:
+                parts.append(k + " <= " + _fmt_num(v["max"]))
+            out.append(" and ".join(parts) if parts else k + " = " + str(v))
+        else:
+            out.append(k + " = " + _fmt_num(v))
+    return "; ".join(out) if out else _NOT_IN_CONFIG
+
+
+def _qb_gates(stage2):
+    """quant_basket_config.stage2_stock keys that are gates (…_min / …_max / …_min_exclusive) -> prose.
+    Non-gate keys (exit, spec, selection, sizing …) are reported by name+value so nothing is hidden."""
+    if not isinstance(stage2, dict):
+        return _NOT_IN_CONFIG, _NOT_IN_CONFIG
+    gates, other = [], []
+    for k in sorted(stage2):
+        v = stage2[k]
+        if k in ("exit", "spec", "amended_by"):
+            continue
+        if k.endswith("_min_exclusive"):
+            gates.append(k[:-len("_min_exclusive")] + " > " + _fmt_num(v))
+        elif k.endswith("_max_exclusive"):
+            gates.append(k[:-len("_max_exclusive")] + " < " + _fmt_num(v))
+        elif k.endswith("_min"):
+            gates.append(k[:-4] + " >= " + _fmt_num(v))
+        elif k.endswith("_max"):
+            gates.append(k[:-4] + " <= " + _fmt_num(v))
+        else:
+            other.append(k + " = " + (_fmt_num(v) if isinstance(v, (int, float)) else str(v)))
+    entry = ("; ".join(gates) if gates else _NOT_IN_CONFIG) + ((" | " + "; ".join(other)) if other else "")
+    exit_rule = stage2.get("exit") or _NOT_IN_CONFIG
+    return entry, str(exit_rule)
+
+
+def _v8_rule_text(filters):
+    parts = []
+    for f in filters:
+        lo, hi = f.get("cond_min") or "", f.get("cond_max") or ""
+        cond = (lo + " " + hi).strip() if (lo or hi) else ("(" + str(f.get("type")) + ")")
+        parts.append(str(f.get("label") or f.get("key")) + " " + cond)
+    return "; ".join(parts) if parts else _NOT_IN_CONFIG
+
+
+def wall_engine_rules(cur):
+    """The (i) sheet payload. One row per engine (per basket / screen / index where the config is
+    per-unit) for every bucket currently enabled. Each block is guarded on its own so one engine
+    whose source fails to import reports the failure in its row instead of blanking the sheet."""
+    buckets, _ = wot_buckets_enabled(cur)
+    epoch, epoch_missing = wot_equity_epoch(cur)
+    rows = []
+
+    def row(engine, sub, instrument, universe, entry, exit_rule, source):
+        rows.append({"engine": engine, "sub": sub, "instrument": instrument, "universe": universe,
+                     "entry": entry, "exit": exit_rule, "source": source})
+
+    # ── FUTURES ────────────────────────────────────────────────────────────────────────────────
+    if "v8" in buckets:
+        try:
+            cur.execute("SELECT COUNT(*) FROM futures_universe WHERE is_active")
+            n_fut = int(cur.fetchone()[0] or 0)
+            cur.execute("SELECT value FROM app_config WHERE key='v8_retired_baskets'")
+            _r = cur.fetchone()
+            retired = set()
+            try:
+                retired = {str(x).strip().lower() for x in json.loads(_r[0])} if (_r and _r[0]) else set()
+            except Exception:
+                retired = set()
+            cur.execute("SELECT DISTINCT basket FROM v8_paper_trades WHERE entry_ts >= '" + WALL_EPOCH + "'::timestamp "
+                        "UNION SELECT DISTINCT basket FROM v8_paper_positions WHERE status = 'OPEN'")
+            live_baskets = sorted({(r[0] or "") for r in cur.fetchall()} - retired - {""})
+            from v8_signal_writer import BASKET_FILTERS as _BF   # the registry /api/v8/filter_config serves
+            for b in live_baskets:
+                row("V8", b, "FUTURES",
+                    "futures_universe WHERE is_active (" + str(n_fut) + " symbols); 5-min live engine",
+                    _v8_rule_text(_BF.get(b, [])) if b in _BF else _NOT_IN_CONFIG,
+                    _NOT_IN_CONFIG + " -- v8_paper.py computes per signal: target = the signal's pivot level (R1 long / S1 short), stop = 1:1 mirror off the live entry",
+                    "v8_signal_writer.BASKET_FILTERS + futures_universe + app_config.v8_retired_baskets")
+        except Exception as e:
+            row("V8", None, "FUTURES", _NOT_IN_CONFIG, _NOT_IN_CONFIG, _NOT_IN_CONFIG, "error reading config: " + str(e)[:160])
+
+    if "tc_scanner" in buckets:
+        try:
+            from tc_scanner_config import TC_SCANNER_CONFIG as _TC
+            cur.execute("SELECT COUNT(DISTINCT symbol), COUNT(DISTINCT symbol) FILTER (WHERE symbol IN "
+                        "(SELECT symbol FROM futures_universe WHERE is_active)) FROM tc_scanner_holds")
+            _n, _nf = cur.fetchone()
+            th = _TC.get("score_thresholds") or {}
+            gates = _TC.get("gates") or {}
+            def _g(side):
+                return "; ".join(str(g.get("label")) + " " + str(g.get("op")) + " " + _fmt_num(g.get("bound")) + str(g.get("unit") or "")
+                                 for g in gates.get(side, []))
+            entry = ("score >= " + ", ".join(k + " " + _fmt_num(v) for k, v in th.items())
+                     + " | BUY gates: " + (_g("BUY") or _NOT_IN_CONFIG) + " | SELL gates: " + (_g("SELL") or _NOT_IN_CONFIG)
+                     + (" | observation mode: rules are marks, not filters" if _TC.get("observation_mode") else ""))
+            ex = _TC.get("exit") or {}
+            exit_rule = ("target " + _fmt_num(ex.get("target_pct")) + " pct, stop " + _fmt_num(ex.get("stop_pct")) + " pct, time exit "
+                         + str(ex.get("time_exit"))) if ex else _NOT_IN_CONFIG
+            caps = _TC.get("caps") or {}
+            row("TC Scanner", _TC.get("version"), "FUTURES",
+                _NOT_IN_CONFIG + " -- book so far: " + str(_n) + " symbols, " + str(_nf) + " of them in the active futures universe"
+                + ("; caps: " + str(caps.get("per_bucket_per_day")) + "/bucket/day, " + str(caps.get("book_total")) + " total" if caps else ""),
+                entry, exit_rule, "tc_scanner_config.TC_SCANNER_CONFIG (" + str(_TC.get("source")) + ") + tc_scanner_holds")
+        except Exception as e:
+            row("TC Scanner", None, "FUTURES", _NOT_IN_CONFIG, _NOT_IN_CONFIG, _NOT_IN_CONFIG, "error reading config: " + str(e)[:160])
+
+    if "index_intel" in buckets:
+        try:
+            from v10_st_ema import INDEX_CFG as _IX
+            for name in sorted(_IX):
+                c = _IX[name]
+                row("Index Intel", name, "OPTIONS (wall shows the option leg only, 36703)",
+                    name + " index, lot " + _fmt_num(c.get("lot")) + ", bars " + str(c.get("table")),
+                    "SuperTrend " + _fmt_num(c.get("st_period")) + "/" + _fmt_num(c.get("st_mult")) + " on " + str(c.get("tf_main"))
+                    + " + EMA " + _fmt_num(c.get("ema_fast")) + "/" + _fmt_num(c.get("ema_slow")) + " gate on " + str(c.get("tf_gate")),
+                    "stop " + _fmt_num(c.get("sl_pts")) + " pts / target " + _fmt_num(c.get("tgt_pts")) + " pts (close-based)",
+                    "v10_st_ema.INDEX_CFG")
+        except Exception as e:
+            row("Index Intel", None, "OPTIONS", _NOT_IN_CONFIG, _NOT_IN_CONFIG, _NOT_IN_CONFIG, "error reading config: " + str(e)[:160])
+
+    # ── EQUITY ─────────────────────────────────────────────────────────────────────────────────
+    if "qb_basket" in buckets:
+        try:
+            # the same quant-run set the wall shows: every basket with a config row that is NOT in
+            # the discretionary list (the cc#1732 derivation, reused not re-stated)
+            cur.execute("SELECT c.basket_name, c.cap_type, c.stage1_sector, c.stage2_stock, "
+                        "       r.capital, r.max_stocks, r.rebalance_freq, r.weight_band, r.next_rebalance "
+                        "FROM quant_basket_config c LEFT JOIN quant_basket_registry r ON r.basket_name = c.basket_name "
+                        "WHERE c.basket_name NOT IN " + _QB_EXCLUDED_SQL + " ORDER BY c.basket_name")
+            for bn, cap_type, s1, s2, capital, mx, freq, band, nxt in cur.fetchall():
+                if isinstance(s1, str):
+                    try: s1 = json.loads(s1)
+                    except Exception: pass
+                if isinstance(s2, str):
+                    try: s2 = json.loads(s2)
+                    except Exception: pass
+                uni = (str(cap_type) if cap_type else "") + (" | " + "; ".join(k + " = " + str(v) for k, v in sorted(s1.items())) if isinstance(s1, dict) and s1 else "")
+                entry, exit_rule = _qb_gates(s2)
+                sizing = "capital Rs " + _fmt_num(capital) + ", max " + _fmt_num(mx) + " stocks, " + str(freq or _NOT_IN_CONFIG)                          + (", band " + str(band) if band else "") + (", next " + str(nxt) if nxt else "")
+                row("QB Basket", bn, "EQUITY", (uni or _NOT_IN_CONFIG) + " | " + sizing, entry, exit_rule,
+                    "quant_basket_config.stage1_sector/stage2_stock + quant_basket_registry")
+        except Exception as e:
+            row("QB Basket", None, "EQUITY", _NOT_IN_CONFIG, _NOT_IN_CONFIG, _NOT_IN_CONFIG, "error reading config: " + str(e)[:160])
+
+    if "investment_scanner" in buckets:
+        try:
+            import inv_scanner_rules as _IR
+            cur.execute("SELECT MAX(run_date) FROM investment_scanner_universe")
+            _d = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*), string_agg(DISTINCT split_part(t, ':', 1), ', ') FROM investment_scanner_universe u, "
+                        "unnest(u.tags) t WHERE u.run_date = (SELECT MAX(run_date) FROM investment_scanner_universe)")
+            _n, _kinds = cur.fetchone()
+            cur.execute("SELECT COUNT(*) FROM investment_scanner_universe WHERE run_date = (SELECT MAX(run_date) FROM investment_scanner_universe)")
+            _nsym = int(cur.fetchone()[0] or 0)
+            cur.execute("SELECT string_agg(k, ', ') FROM (SELECT DISTINCT jsonb_object_keys(gates) k FROM investment_scanner_signals "
+                        "WHERE gates IS NOT NULL AND event = 'BUY' ORDER BY 1) g")
+            _gk = cur.fetchone()[0]
+            row("Investment Scanner", "V1", "EQUITY",
+                "investment_scanner_universe on " + str(_d) + ": " + str(_nsym) + " symbols, tag kinds " + str(_kinds),
+                "mom_score > " + _fmt_num(_IR.ENTRY_MOM) + " or rev_score > " + _fmt_num(_IR.ENTRY_REV)
+                + " | price gates logged per signal (" + str(_gk or _NOT_IN_CONFIG) + "); gate bounds " + _NOT_IN_CONFIG + " -- coded in inv_scanner_rules.run",
+                "momentum track: mom_score < " + _fmt_num(_IR.EXIT_MOM) + "; reversal track: rev_score < " + _fmt_num(_IR.EXIT_REV)
+                + "; dual-track exits only when both fail; no SL/target legs in V1",
+                "inv_scanner_rules.ENTRY_MOM/ENTRY_REV/EXIT_MOM/EXIT_REV + investment_scanner_universe + investment_scanner_signals.gates")
+        except Exception as e:
+            row("Investment Scanner", None, "EQUITY", _NOT_IN_CONFIG, _NOT_IN_CONFIG, _NOT_IN_CONFIG, "error reading config: " + str(e)[:160])
+
+    if "screeners" in buckets:
+        try:
+            cur.execute("SELECT id, name, COALESCE(scope, 'global'), filters, sort_key, sort_dir FROM v13_presets "
+                        "WHERE jsonb_typeof(filters) = 'object' AND filters <> '{}'::jsonb ORDER BY id")
+            for pid, name, scope, filters, sk, sd in cur.fetchall():
+                if isinstance(filters, str):
+                    try: filters = json.loads(filters)
+                    except Exception: filters = {}
+                row("Screeners", name, "EQUITY",
+                    "scope " + str(scope) + " (GVM-scored universe, nightly v13 run)" + (", ranked by " + str(sk) + (" desc" if (sd or 0) < 0 else " asc") if sk else ""),
+                    _gates_from_filters(filters),
+                    "leaves the screen at the nightly v13 rerun (v13_screen_exits); no separate exit threshold in config",
+                    "v13_presets(id=" + str(pid) + ").filters/scope/sort_key")
+        except Exception as e:
+            row("Screeners", None, "EQUITY", _NOT_IN_CONFIG, _NOT_IN_CONFIG, _NOT_IN_CONFIG, "error reading config: " + str(e)[:160])
+
+    return {"wall_epoch": WALL_EPOCH, "equity_epoch": epoch,
+            "equity_epoch_source": "default" if epoch_missing else "app_config",
+            "buckets_enabled": buckets, "engines": rows,
+            "not_in_config_marker": _NOT_IN_CONFIG,
+            "note": "Every cell is read from the engine's own config source named in `source`; a cell reading '"
+                    + _NOT_IN_CONFIG + "' has no machine-readable rule and the source names where the behaviour lives."}
+
+
+@router.get("/api/tradewall/engine-rules")
+@_json_safe
+def tradewall_engine_rules(request: Request):
+    """cc#1733: the (i) sheet -- universe / entry / exit rule per engine on the wall, read not typed."""
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        return wall_engine_rules(cur)
 
 
 @router.get("/m/trades", response_class=HTMLResponse)

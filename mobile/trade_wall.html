@@ -141,7 +141,7 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
    four flat groups + an Entry/Exit event toggle to STATUS (Open|Closed, default Open) ->
    INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is now one POSITION (entry+
    exit together when closed), not a flat entry/exit event — see trade_wall_endpoints.py for why. */
-var BUCKETS = { FUTURES: ['V8', 'TC Scanner', 'Index Intel'], EQUITY: ['QB Basket', 'Investment Scanner'] };
+var BUCKETS = { FUTURES: ['V8', 'TC Scanner', 'Index Intel'], EQUITY: ['QB Basket', 'Investment Scanner', 'Screeners'] };   /* cc#1733: third equity source */
 /* cc#1587 (session_log 36394): the wall now shows APPROVED TRADES ONLY. The server-side flag
    app_config.wot_buckets_enabled (default ["approved_alerts"]) decides which buckets reach the
    feed; this page reads `buckets_enabled` off the same /api/tradewall response and picks a
