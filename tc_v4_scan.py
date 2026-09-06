@@ -23,6 +23,8 @@ from fastapi import APIRouter
 
 from nifty_dwm import live_nifty_dwm
 from r6_volume import volume_ratio
+import logging as _logging
+log = _logging.getLogger("scorr.tc_v4_scan")
 from tc_v4_dual import (_f, _r, _derive, score_card, _verdict,
                         STYLES, _ist, SPEC_REF, VERSION,
                         _sector_aggs, _nifty_ret63,   # cc#586: R18/R19 sector + nifty-RS shared helpers
@@ -208,6 +210,30 @@ def _load_bulk(cur):
             D[s]["vol_ratio_today"] = volume_ratio(cur, s)["ratio"]
         except Exception:
             D[s]["vol_ratio_today"] = None
+
+    # cc#1785: the four R5 volume checks — SAME fields, SAME readers as tc_v4_dual._load_one
+    # (_vol_reads), so the scanner's R5 cannot disagree with /check. Vol D comes from ONE batch
+    # call; Vol R / Vol P / Vol AD are per-symbol reads, isolated so one bad symbol leaves its own
+    # field None and the rule names the missing check.
+    try:
+        from volume_flow_endpoints import deliv_ratio_batch
+        _dv = deliv_ratio_batch(cur, syms) or {}
+    except Exception as _e:
+        log.warning("cc#1785 deliv_ratio_batch (bulk): %s", _e)
+        _dv = {}
+    for s in syms:
+        D[s]["vol_d"] = _f(_dv.get(s))
+        try:
+            from r6_volume import r6_read
+            _rv = r6_read(cur, s) or {}
+            D[s]["vol_r"], D[s]["vol_p"] = _f(_rv.get("rvol")), _f(_rv.get("vol_p"))
+        except Exception:
+            D[s]["vol_r"], D[s]["vol_p"] = None, None
+        try:
+            from deriv_metrics import _ad_21d
+            D[s]["vol_ad"] = _f((_ad_21d(cur, s) or {}).get("up_vol_pct"))
+        except Exception:
+            D[s]["vol_ad"] = None
 
     for s in syms:
         _derive(D[s])

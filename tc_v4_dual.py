@@ -434,6 +434,36 @@ def _peer_counts(rows, self_symbol):
             "peers_dn05": dn05, "peers_dn": dn, "peer_count": n}
 
 
+def _vol_reads(cur, symbol, d):
+    """cc#1785: fill d['vol_r'], d['vol_p'], d['vol_d'], d['vol_ad'] for one symbol. Call-time
+    imports: volume_flow_endpoints and deriv_metrics are app modules that import nothing from
+    this engine, but they are not engine dependencies and must not become load-time ones."""
+    d.setdefault("vol_r", None); d.setdefault("vol_p", None)
+    d.setdefault("vol_d", None); d.setdefault("vol_ad", None)
+    try:
+        from r6_volume import r6_read
+        rv = r6_read(cur, symbol) or {}
+        d["vol_r"], d["vol_p"] = _f(rv.get("rvol")), _f(rv.get("vol_p"))
+    except Exception as e:
+        log.warning("cc#1785 r6_read %s: %s", symbol, e)
+    try:
+        from volume_flow_endpoints import deliv_ratio_batch
+        d["vol_d"] = _f((deliv_ratio_batch(cur, [symbol]) or {}).get(symbol))
+    except Exception as e:
+        log.warning("cc#1785 deliv_ratio_batch %s: %s", symbol, e)
+    try:
+        from deriv_metrics import _ad_21d
+        ad = _ad_21d(cur, symbol) or {}
+        d["vol_ad"] = _f(ad.get("up_vol_pct"))
+    except Exception as e:
+        log.warning("cc#1785 _ad_21d %s: %s", symbol, e)
+
+
+# cc#1785: the four pass/fail bars, one place. Vol AD >= 55 is Accumulation (the same 55 _ad_21d
+# labels on); cc#1786 will read the SAME fields on the SELL side with AD flipped (<= 45).
+VOL_R_MIN, VOL_P_MIN, VOL_D_MIN, VOL_AD_MIN = 1.2, 1.0, 1.1, 55.0
+
+
 def _load_one(cur, symbol):
     d = {"symbol": symbol}
 
@@ -452,6 +482,14 @@ def _load_one(cur, symbol):
     # on this scale (cc#934 / 18062). R6/R7 moved to r6_read (canon V2); ruling pending on these.
     vr = volume_ratio(cur, symbol)
     d["vol_ratio_today"] = vr["ratio"]
+    # cc#1785 / TC_VOLUME_SIMPLE_V2 (39684): the FOUR volume reads the BUY cards' R5 scores as
+    # pass/fail — Vol R (live RVOL) and Vol P (previous session's closing RVOL) from r6_read, the
+    # canon 3-tier read the V4 endpoints already use; Vol D from deliv_ratio_batch (3-day vs the
+    # 20 before, the same function the GVM VolumePanel reads); Vol AD from _ad_21d (21-session
+    # up-day volume share). Read here so the single-symbol path and tc_v4_scan._load_bulk fill
+    # the SAME four fields and scanner score == single score. Each read is isolated: a reader
+    # that fails leaves its field None (the rule then names the missing check), never a crash.
+    _vol_reads(cur, symbol, d)
 
     # cc#1173: ma9_vs_ma21 joins the select. Both locked SELL rulebooks read it — SELL-REV wants
     # abs() < 1 (an early break, not an exhausted one) and SELL-MOM wants >= -3 (an exhaustion
@@ -922,45 +960,36 @@ def _rules(d, style, side):
                       {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))},
                       required=req))
 
-    # R5 — cc#767 VOLUME CONFIRM: merges old R5 (1M up/dn ratio) + R6 (today time-adjusted) into ONE
-    # rule tested once. today >= 1.5x OR 1M >= 1.1 -> 1pt; a partial leg (today >= 1.1x OR 1M >= 0.9) ->
-    # 0.5. SELL mirror uses the down/up 1M ratio (>=1.05 full / >=0.95 partial) with the same today surge
-    # leg — a volume surge confirms conviction on either side. (Old R14 ATR ignition dropped entirely;
-    # R9 5m+VWAP already answers "is it moving now".)
-    # cc#936 / 18078: BOTH SELL CARDS now use the same two-independent-legs scheme cc#934 gave
-    # BUY-REV — the sell mirror reads the 1M DOWN/UP ratio and the bar moves to 1.1 (was 1.05 full /
-    # 0.95 partial under the OR-with-halves scheme). BUY-MOM is the last card still on the old OR.
-    vt = d.get("vol_ratio_today")
-    if (BUY and not MOM) or (not BUY):
-        # cc#934 / 18062 amendment 3: the two tests score INDEPENDENTLY — a burst today and a month
-        # of accumulation (distribution, on the sell side) are different pieces of evidence, and the
-        # old OR-with-halves let either one alone cap the rule. Both = 2, one = 1, none = 0. No half
-        # credits: the old partial thresholds (1.1x / 0.9 / 0.95) are gone on these three cards.
-        v1m = d.get("vol21_up_dn") if BUY else d.get("vol21_dn_up")
-        leg_a = (vt is not None and vt >= 1.5)
-        leg_b = (v1m is not None and v1m >= 1.1)
-        c = float(leg_a) + float(leg_b)
-        req = f"today>=1.5x pace = 1 + 1M {'up/dn' if BUY else 'dn/up'}>=1.1 = 1 (independent, max 2)"
-        out.append(_R("R5", "Volume confirm", c,
-                      {"today": _r(vt), "vol1M": _r(v1m), "leg_today": leg_a, "leg_1m": leg_b},
-                      required=req, max_credit=2.0))
-    else:
-        # cc#1172 AMENDMENT 1 (session_log 27975, founder-locked) — BUY-MOM ONLY. This `else` is
-        # reached only when (BUY and MOM), because the `if` above takes BUY-REV and both SELL cards.
-        # WAS partial at today>=1.1x. NOW today>=0.8x. Rationale from the lock: adequate volume must
-        # not ZERO a persistence trade, while genuinely thin volume still fails.
-        #
-        # WHAT I DID NOT CHANGE, deliberately. The amendment names "vol_ratio" singular at 1.5/0.8,
-        # and this rule has TWO legs — today's pace and the 1-month up/down ratio. I moved only the
-        # today-leg partial floor and left the 1M leg exactly as it was, because removing a leg the
-        # ruling never mentioned would be a bigger change than the ruling asked for. Flagged for
-        # Fable to confirm that reading.
-        v1m = d.get("vol21_up_dn")
-        full = ((vt is not None and vt >= 1.5) or (v1m is not None and v1m >= 1.1))
-        part = ((vt is not None and vt >= 0.8) or (v1m is not None and v1m >= 0.9))
-        req = "today>=1.5x OR 1M up/dn>=1.1 (partial today>=0.8x/1M>=0.9 = 0.5)"
-        c = 1.0 if full else (0.5 if part else 0.0)
-        out.append(_R("R5", "Volume confirm", c, {"today": _r(vt), "vol1M": _r(v1m)}, required=req))
+    # R5 — cc#1785 / TC_VOLUME_SIMPLE_V2 (session_log 39684, supersedes cc#1784): VOLUME, FOUR
+    # CHECKS, EACH PASS/FAIL, on both BUY cards. Vol R >= 1.2 (live RVOL), Vol P >= 1.0 (previous
+    # session's closing RVOL), Vol D >= 1.1 (3-day delivery vs the 20 before), Vol AD >= 55 (21-day
+    # up-day volume share). credit = checks passed out of max 4, and the registry weight is 25, so
+    # the rule is worth 25 x passed/4 on the /100 scale — no half credits, no OR. A check whose
+    # input is missing FAILS and is named in `no_data` (a symbol with no rvol_profile shows Vol R
+    # as a fail with the reason, never a fabricated pass). The old R5 (vol_ratio_today +
+    # vol21_up_dn, the cc#767 merge and its cc#934/cc#1172 variants) is gone from BOTH BUY cards;
+    # no BUY path reads those two fields any more. SELL never reaches this function (cc#1173: it
+    # leaves on the first line for _sell_rules), so the old `not BUY` mirror here was dead code
+    # and is not carried over — SELL's LOCK_VOLUME is untouched.
+    if BUY:
+        chk = [("vol_r", "Vol R", d.get("vol_r"), VOL_R_MIN),
+               ("vol_p", "Vol P", d.get("vol_p"), VOL_P_MIN),
+               ("vol_d", "Vol D", d.get("vol_d"), VOL_D_MIN),
+               ("vol_ad", "Vol AD", d.get("vol_ad"), VOL_AD_MIN)]
+        val, no_data, passed = {}, [], 0
+        for key, name, v, bar in chk:
+            ok = (v is not None and v >= bar)
+            val[key] = _r(v)
+            val["pass_" + key[4:]] = bool(ok)
+            if v is None:
+                no_data.append(name)
+            passed += int(ok)
+        val["passed"] = passed
+        if no_data:
+            val["no_data"] = no_data
+        req = (f"Vol R >= {VOL_R_MIN:.1f} · Vol P >= {VOL_P_MIN:.1f} · Vol D >= {VOL_D_MIN:.1f} · "
+               f"Vol AD >= {VOL_AD_MIN:.0f}% (1 each, pass/fail; 25 pts x passed/4)")
+        out.append(_R("R5", "Volume (4 checks)", float(passed), val, required=req, max_credit=4.0))
 
     # R7 — RSI. cc#513 cross-cutting fix: MOM (both sides) now reads true_weekly_rsi, not the
     # synthetic rsi_weekly (~16pt off, cc#353) -- synthetic must not appear in any rule after this.
@@ -1341,31 +1370,9 @@ def _rules(d, style, side):
         # R23 — GVM quality floor >= 7 (BuyMom V3 level, stricter than BuyRev 6.5).
         c23 = (1.0 if (gvm is not None and gvm >= 7.0) else (0.5 if (gvm is not None and 6.5 <= gvm < 7.0) else 0.0))
         out.append(_R("R23", "GVM floor", c23, {"gvm": _r(gvm)}, required="GVM >= 7.0 (6.5-7.0 = 0.5)"))
-        # R24 — DELIVERY CONFIRM (cc#935, founder-locked 18064). BUY-MOM only, 1 point. Self-relative
-        # by design: the 3-day delivery average is measured against the SYMBOL'S OWN trailing baseline,
-        # so what scores is the RISE in cash conviction, not the level (a 90%-delivery utility and a
-        # 30%-delivery high-beta name are judged on the same footing). Source: delivery_eod.
-        # BASELINE WINDOW — the spec says "own 21d avg". delivery_eod only starts 20-Jul-2026, so the
-        # deepest baseline available today is 14 sessions and NO symbol has 21. Taken literally, the
-        # rule would score 0 for every symbol on every card — a new point that can never be earned.
-        # It is therefore "the trailing UP-TO-21 sessions, minimum 10", which is exactly what Fable's
-        # 08-Aug calibration measured: on the 206-symbol active futures universe this reproduces its
-        # quoted split EXACTLY (full 10, half 35 — verified against the live table, not assumed). The
-        # window includes the 3 recent sessions (excluding them gives 25/36 and does NOT match), and it
-        # widens to a true 21 on its own as history accrues — no code change needed.
-        # Thin history / no rows -> 0 with an honest note, the same pattern as a missing V-score (R17).
-        a3, a21 = d.get("deliv_3d"), d.get("deliv_21d")
-        n3, n21 = d.get("deliv_n3") or 0, d.get("deliv_n21") or 0
-        if a3 is None or a21 is None or n3 < 3 or n21 < 10 or a21 <= 0:
-            c24 = 0.0
-            r24val = {"deliv_3d": _r(a3), "deliv_base": _r(a21), "days": n21, "no_data": True}
-            r24req = "no delivery history (needs 3 recent + 10 baseline sessions) -> 0"
-        else:
-            ratio = a3 / a21
-            c24 = 1.0 if ratio >= 1.2 else (0.5 if ratio >= 1.1 else 0.0)
-            r24val = {"deliv_3d": _r(a3), "deliv_base": _r(a21), "ratio": _r(ratio), "days": n21}
-            r24req = "3d avg deliv% >= 1.2x own baseline (1.1-1.2x = 0.5)"
-        out.append(_R("R24", "Delivery confirm", c24, r24val, required=r24req))
+        # R24 — REMOVED by cc#1785 (TC_VOLUME_SIMPLE_V2, 39684): the delivery signal now lives in
+        # R5's Vol D check on both BUY cards, so BUY-MOM no longer emits R24 and its registry row
+        # is active=false. The deliv_3d/deliv_21d loader fields stay (the detail panel reads them).
     elif BUY and (not MOM):
         # R23 — GVM quality floor >= 6.5 (BuyRev V6.1 gate).
         c23 = (1.0 if (gvm is not None and gvm >= 6.5) else (0.5 if (gvm is not None and 6.0 <= gvm < 6.5) else 0.0))
