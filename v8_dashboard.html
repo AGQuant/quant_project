@@ -805,6 +805,13 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .rail .tl .b{font:600 11px var(--f-m);color:var(--tx2);margin-top:1px}
 #pane-index .rail .tl.sup .a{color:var(--gr)} #pane-index .rail .tl.res .a{color:var(--rd)} #pane-index .rail .tl.pp .a{color:var(--cy)} #pane-index .rail .tl.mp .a{color:var(--am)}
 #pane-index .rail .tl.mp{top:-32px}
+/* cc#1739: when the MAX PAIN label and the CMP tag meet (spot near max pain), ScorrRailLabels
+   lifts MAX PAIN to a second line ABOVE the CMP line — same x, never slid sideways — and draws a
+   leader down to its tick so the anchor stays honest. The wrap grows to make room only then. */
+#pane-index .rail .tl.mp.lifted{top:-56px}
+#pane-index .rail .leader{position:absolute;top:-44px;height:38px;width:1px;background:var(--am);opacity:.65;transform:translateX(-50%);pointer-events:none}
+#pane-index .rail .leader.clamped{border-left:1px dashed var(--am);background:none;width:0}
+#pane-index .rail-wrap.has-lift{padding-top:60px}
 #pane-index .cmp{position:absolute;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;background:var(--cy);box-shadow:0 0 0 3px rgba(var(--cy-rgb),.25),0 0 16px var(--cy);animation:idxpulse 1.6s infinite;z-index:1}
 @keyframes idxpulse{0%,100%{opacity:1}50%{opacity:.45}}
 @media(prefers-reduced-motion:reduce){#pane-index .cmp,#pane-index .badge .dot{animation:none}}
@@ -8058,7 +8065,35 @@ function render(){
   mountIdxTapes();   // cc#1058
   /* cc#1522: fitSpineTags() left with the spine */
   try{ idxMarkScroll(host); }catch(e){ console.warn('[tbl scroll]', e && e.message); } // cc#1168
+  try{ fitIndexRails(host); }catch(e){ console.warn('[rail labels]', e && e.message); } // cc#1739
 }
+
+/* cc#1739 — the Index Position rails: CMP tag and MAX PAIN label are both drawn above the rail at
+   their own x, so when spot sits near max pain (BANKNIFTY 57,455 vs 57,500 on 06-Sep) the two
+   texts land on top of each other. The SHARED helper (scorr_card_common.js ScorrRailLabels, the
+   same rule cc#1726's mobile rail uses) measures the two boxes AFTER paint and, only when they
+   meet, lifts MAX PAIN to its own line above CMP — same x, never sideways — clamps it inside the
+   card at the edges and draws a leader to its true x. Re-runs on resize and when the pane becomes
+   visible (a hidden pane has no boxes to measure). Values, scale and levels are untouched. */
+function fitIndexRails(host){
+  var R = window.ScorrRailLabels; if(!R) return;
+  var root = host || document.getElementById('pane-index') || document;
+  root.querySelectorAll('.rail').forEach(function(rail){
+    var wrap = rail.parentElement;
+    var res = R.separate(rail, { fixed:'.cmptag', movable:'.tl.mp', gap:6, liftClass:'lifted', leaderClass:'leader',
+                                 clampWithin: rail.closest('.ip') || rail.closest('.card') || wrap, pad:6 });
+    if(wrap && wrap.classList.contains('rail-wrap')) wrap.classList.toggle('has-lift', !!(res && res.lifted));
+  });
+}
+(function(){
+  var t=null;
+  function later(){ clearTimeout(t); t=setTimeout(function(){ try{ fitIndexRails(); }catch(e){} }, 120); }
+  window.addEventListener('resize', later, { passive:true });
+  var p=document.getElementById('pane-index');
+  if(p && window.MutationObserver){
+    new MutationObserver(function(){ if(p.style.display!=='none') later(); }).observe(p, { attributes:true, attributeFilter:['style'] });
+  }
+})();
 
 /* cc#1168 push 3 — DEFECT D. Measure each table AFTER it is in the document and say, on the card,
    whether there is more to the right. A card that clips in silence reads as a complete table; the

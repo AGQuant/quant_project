@@ -1834,3 +1834,68 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
   window.addEventListener('load', function () { watch(); kick(800); });
   window.ScorrNavOffset = { measure: measure, kick: kick, VAR: VAR };
 })();
+
+/* ── cc#1739 · SHARED RAIL-LABEL COLLISION HELPER ─────────────────────────────────────────────
+   Two labels on a horizontal rail, each positioned at its own value's x. When their boxes meet
+   (or sit closer than `gap`), the MOVABLE one is separated VERTICALLY — never slid sideways away
+   from its value, because a label at a price it does not mark is worse than an overlap. It stays
+   anchored at its own x; the page's CSS decides where the lifted line sits (the `liftClass`). If
+   the lifted box would run past the container's edge it is clamped inside with a transform, and a
+   LEADER mark is drawn at the label's TRUE x so the anchor stays honest. Measurement only — no
+   value, scale or level is touched. Written here (not in one page) so the web Index Intel rail
+   (cc#1739) and the mobile V8 position rail (cc#1726, trkFixLabels) share one rule.
+   Usage: ScorrRailLabels.separate(railEl, {fixed:'.cmptag', movable:'.tl.mp', gap:6,
+            liftClass:'lifted', leaderClass:'leader', clampWithin: el|selector, pad:6})
+   Returns {applied, collided, lifted, shift, hidden}. Idempotent — resets its own marks first. */
+(function () {
+  function rect(el) { return el.getBoundingClientRect(); }
+  function meets(a, b, gap) {
+    return !(a.right + gap <= b.left || b.right + gap <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+  }
+  function resolve(root, sel) {
+    if (!sel) return null;
+    if (typeof sel === 'string') return root.querySelector(sel);
+    return sel;
+  }
+  function separate(rail, o) {
+    o = o || {};
+    var out = { applied: false, collided: false, lifted: false, shift: 0, hidden: false };
+    if (!rail) return out;
+    var liftClass = o.liftClass || 'lifted', leaderClass = o.leaderClass || 'leader', gap = o.gap == null ? 6 : o.gap, pad = o.pad == null ? 4 : o.pad;
+    var fixed = resolve(rail, o.fixed), mov = resolve(rail, o.movable);
+    // reset our own marks so a re-run (resize, re-render) starts clean
+    Array.prototype.forEach.call(rail.querySelectorAll('.' + leaderClass), function (l) { l.parentNode.removeChild(l); });
+    if (mov) { mov.classList.remove(liftClass); mov.style.transform = ''; }
+    if (!fixed || !mov) return out;
+    var rr = rect(rail);
+    if (!rr.width) { out.hidden = true; return out; }   // not laid out (hidden pane) — nothing to measure
+    out.applied = true;
+    if (!meets(rect(fixed), rect(mov), gap)) return out;
+    out.collided = true;
+    mov.classList.add(liftClass);
+    out.lifted = true;
+    var box = o.clampWithin ? (typeof o.clampWithin === 'string' ? rail.closest(o.clampWithin) : o.clampWithin) : rail.parentElement;
+    var cr = box ? rect(box) : null, mr = rect(mov), shift = 0;
+    if (cr) {
+      if (mr.left < cr.left + pad) shift = (cr.left + pad) - mr.left;
+      else if (mr.right > cr.right - pad) shift = (cr.right - pad) - mr.right;
+    }
+    if (shift) {
+      mov.style.transform = 'translateX(calc(-50% + ' + Math.round(shift) + 'px))';
+      out.shift = Math.round(shift);
+    }
+    // leader at the TRUE x (the label's own left, before any clamp shift)
+    var lead = document.createElement('div');
+    lead.className = leaderClass + (shift ? ' clamped' : '');
+    lead.style.left = mov.style.left || '0';
+    lead.setAttribute('aria-hidden', 'true');
+    rail.appendChild(lead);
+    return out;
+  }
+  function separateAll(root, railSel, o) {
+    var res = [];
+    Array.prototype.forEach.call((root || document).querySelectorAll(railSel), function (r) { res.push(separate(r, o)); });
+    return res;
+  }
+  window.ScorrRailLabels = { separate: separate, separateAll: separateAll, meets: meets };
+})();
