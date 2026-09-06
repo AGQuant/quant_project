@@ -24,7 +24,7 @@ from fastapi import APIRouter
 from nifty_dwm import live_nifty_dwm
 import logging as _logging
 log = _logging.getLogger("scorr.tc_v4_scan")
-from tc_v4_dual import (_f, _r, _derive, score_card, _verdict,
+from tc_v4_dual import (_f, _r, _derive, score_card, _verdict, _slot_before_0930,
                         STYLES, _ist, SPEC_REF, VERSION,
                         _sector_aggs, _nifty_ret63,   # cc#586: R18/R19 sector + nifty-RS shared helpers
                         _segment_peer_rows, _peer_counts)   # cc#717 part_3: shared R3 peer helpers (parity)
@@ -220,8 +220,9 @@ def _load_bulk(cur):
             from r6_volume import r6_read
             _rv = r6_read(cur, s) or {}
             D[s]["vol_r"], D[s]["vol_p"] = _f(_rv.get("rvol")), _f(_rv.get("vol_p"))
+            D[s]["vol_r_early"] = _slot_before_0930(_rv)   # 39713 guard input, same test as _load_one
         except Exception:
-            D[s]["vol_r"], D[s]["vol_p"] = None, None
+            D[s]["vol_r"], D[s]["vol_p"], D[s]["vol_r_early"] = None, None, False
         try:
             from deriv_metrics import _ad_21d
             D[s]["vol_ad"] = _f((_ad_21d(cur, s) or {}).get("up_vol_pct"))
