@@ -281,13 +281,13 @@ function renderTC(){
     + '<div class="c-meter"><i style="width:' + clamp(Number(score) || 0, 0, 100) + '%"></i>'
       + ['watch','valid','strong'].map(function(k){ return cuts[k] == null ? '' : '<span class="c-cut" style="left:' + clamp(Number(cuts[k]), 0, 100) + '%"></span>'; }).join('') + '</div>'
     + '<div class="c-mlabels"><span>FAIL</span><span>WATCH ' + n1(cuts.watch) + '</span><span>VALID ' + n1(cuts.valid) + '</span><span>STRONG ' + n1(cuts.strong) + '</span></div>'
+    /* cc#1782: the read and the formula footer sit behind this (i) now — see infoSheet('tc') */
+    + '<div class="c-irow"><button type="button" class="c-ib" data-info="tc" aria-label="How to read this score"><i>i</i></button></div>'
     + '<div class="c-buckets">' + tiles.map(function(t){
         var tc = t.weighted ? (bandCls(t.band) === 'pass' ? 'up' : (bandCls(t.band) === 'watch' ? 'am' : 'dn')) : 'mu';
         return '<div class="c-bk' + (t.label === c.label ? ' on' : '') + '" data-bucket="' + esc(t.label) + '" role="button"><div class="c-bk-k">' + esc(t.label) + '</div><div class="c-bk-v ' + tc + '">' + (t.score100 == null ? '—' : n1(t.score100)) + '</div><div class="c-bk-s">' + esc(t.weighted ? (t.band || '—') : 'UNWEIGHTED') + '</div></div>';
       }).join('') + '</div>'
-    + '<div class="c-read">' + readText(d, c) + '</div>'
     + alertChips(d.alerts)
-    + '<div class="c-foot"><span>score = weighted credits ÷ ' + (ws == null ? '?' : n1(ws)) + ' (registry) × 100 · full 1 · half ½</span><span>' + esc(d.price_basis || 'spot price, not futures') + '</span></div>'
     + '</section>';
   h += '<div class="c-sect">' + esc(c.label) + ' · ' + (c.n_rules || (c.rules || []).length) + ' rules <span class="c-r">heaviest first · weighted ' + n1(c.weighted_earned) + ' / ' + (ws == null ? '?' : n1(ws)) + '</span></div>';
   h += '<section class="slab" id="tc-rules"><div class="c-grp"><span>RULE · CREDIT · WEIGHT</span><span>bar = credit earned</span></div>'
@@ -506,8 +506,8 @@ function renderIC(){
         + '<div class="' + (d.band === 'WATCH' ? 'on watch' : '') + '"><b>WATCH</b>' + n1(b.watch) + '+</div>'
         + '<div class="' + (d.band === 'ACCUMULATE' ? 'on acc' : '') + '"><b>ACCUMULATE</b>' + n1(b.acc) + '+</div>'
         + '<div class="' + (d.band === 'STRONG_BUY' ? 'on strong' : '') + '"><b>STRONG BUY</b>' + n1(b.strong) + '+</div></div>' : '')
-    + '<div class="c-read">' + icRead(d) + '</div>'
-    + '<div class="c-foot"><span>' + comps.length + ' checks · weight-based · ' + (d.computable_weight == null ? '?' : num(d.computable_weight, 0)) + ' of ' + num(tot, 0) + ' computable' + (d.weighted === false ? ' · registry unread' : '') + '</span><span>scores as of ' + esc(asOf || '—') + '</span></div>'
+    /* cc#1782: the read and the footer sit behind this (i) now — see infoSheet('ic') */
+    + '<div class="c-irow"><button type="button" class="c-ib" data-info="ic" aria-label="How to read this score"><i>i</i></button></div>'
     + '</section>';
   h += '<div class="c-sect">' + comps.length + ' checks by weight <span class="c-r">earned ' + n1(d.earned_weight) + ' of ' + num(tot, 0) + '</span></div>';
   h += '<section class="slab" id="ic-rows">' + comps.map(function(c, i){
@@ -540,6 +540,7 @@ function compSheet(d, c){
     + '<div class="c-sfoot"><span>source invest_check_v2 · ' + esc(d.weight_source || 'ic_rule_weights') + '</span><span>as of ' + esc((d.as_of && d.as_of.price_date) || '—') + '</span></div>';
 }
 $('ic-main').addEventListener('click', function(e){
+  var ib = e.target.closest('[data-info]'); if (ib){ openSheet(infoSheet(ib.getAttribute('data-info'))); return; }   /* cc#1782 */
   if (e.target.closest('[data-act="ic"]')){ loadIC(); return; }
   var row = e.target.closest('[data-comp]'); if (row && S.ic.data){ var c = (S.ic.data.components || [])[Number(row.getAttribute('data-comp'))]; if (c) openSheet(compSheet(S.ic.data, c)); }
 });
@@ -565,6 +566,24 @@ function ladderText(required){
   return {full: full || '—', half: half || 'no half tier', none: 'otherwise'};
 }
 function openSheet(html){ $('c-sheet-body').innerHTML = html; $('c-sheet').classList.add('open'); $('c-scrim').classList.add('open'); $('c-sheet').scrollTop = 0; }
+/* cc#1782 · the (i) sheet: the SAME words readText()/icRead() and the SAME footer line the hero used to
+   carry inline, rendered in the rule-detail sheet instead (founder: commentary behind an (i) after the
+   band). Text unchanged, only where it renders. */
+function infoSheet(kind){
+  if (kind === 'ic'){
+    var d = S.ic.data; if (!d) return '';
+    var comps = d.components || [], tot = Number(d.total_weight) || 100, asOf = (d.as_of && d.as_of.price_date) || null;
+    return '<div class="c-shd"><div class="c-t">How to read this score<small>' + esc(d.symbol) + ' · INVEST CHECK · ' + esc(d.version || 'IC-V2') + '</small></div></div>'
+      + '<div class="c-swhy">' + icRead(d) + '</div>'
+      + '<div class="c-sfoot"><span>' + comps.length + ' checks · weight-based · ' + (d.computable_weight == null ? '?' : num(d.computable_weight, 0)) + ' of ' + num(tot, 0) + ' computable' + (d.weighted === false ? ' · registry unread' : '') + '</span><span>scores as of ' + esc(asOf || '—') + '</span></div>';
+  }
+  var t = S.tc; if (!t) return '';
+  var c = cardOf(S.bucket) || cardOf(t.best_label) || (t.cards || [])[0]; if (!c) return '';
+  var ws = c.weight_sum;
+  return '<div class="c-shd"><div class="c-t">How to read this score<small>' + esc(t.symbol) + ' · ' + esc(c.label) + ' · TC SCORE</small></div></div>'
+    + '<div class="c-swhy">' + readText(t, c) + '</div>'
+    + '<div class="c-sfoot"><span>score = weighted credits ÷ ' + (ws == null ? '?' : n1(ws)) + ' (registry) × 100 · full 1 · half ½</span><span>' + esc(t.price_basis || 'spot price, not futures') + '</span></div>';
+}
 function closeSheet(){ $('c-sheet').classList.remove('open'); $('c-scrim').classList.remove('open'); }
 function ruleSheet(c, r){
   var d = S.tc || {}, st = ruleState(r), lad = ladderText(r.required), def = DEFS[r.rule] || {};
@@ -593,6 +612,7 @@ $('c-q').addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.prev
 $('c-drop').addEventListener('click', function(e){ var r = e.target.closest('[data-pick]'); if (r) chooseSym(r.getAttribute('data-pick')); });
 document.addEventListener('click', function(e){ if (!e.target.closest('.c-search')) $('c-drop').hidden = true; });
 $('tc-main').addEventListener('click', function(e){
+  var ib = e.target.closest('[data-info]'); if (ib){ openSheet(infoSheet(ib.getAttribute('data-info'))); return; }   /* cc#1782 */
   var bk = e.target.closest('[data-bucket]'); if (bk){ S.bucket = bk.getAttribute('data-bucket'); renderTC(); return; }
   var rr = e.target.closest('[data-rule]'); if (rr && S.tc){ var c = cardOf(S.bucket) || cardOf(S.tc.best_label); var r = c && (c.rules || [])[Number(rr.getAttribute('data-rule'))]; if (r) openSheet(ruleSheet(c, r)); return; }
   var rt = e.target.closest('[data-act="tc"]'); if (rt){ loadTC(); }
