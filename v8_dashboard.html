@@ -945,6 +945,18 @@ window.addEventListener('scorr:theme', function(){
 #pane-index .iish{font:700 14px var(--f-d);color:var(--tx);margin:4px 36px 12px 0}
 #pane-index .vfg p{font:500 12px var(--f-d);color:var(--tx2);line-height:1.65;margin:0 0 10px}
 #pane-index .vfg b{color:var(--tx)}
+/* ── cc#1822 · Custom Screen Builder picker chips ──────────────────────────────────────────
+   Modelled directly on .ticks/.ticks button (same font, padding, colours) — the ONLY reason
+   this is not .ticks itself is that .ticks is a single-row pill group (overflow:hidden,
+   border-radius on the group) built for exactly 4 same-width chips in one line (VF_TICKS).
+   This card can carry 5 chips per row and 4 rows, and a phone-width pane wraps them — .ticks'
+   overflow:hidden would clip a wrapped second row, so each chip gets its OWN border-radius and
+   a bottom margin instead of sharing one clipped container. Everything else about the look is
+   identical on purpose. */
+#pane-index .csblb{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3);margin-bottom:6px}
+#pane-index .csbrow{margin-bottom:12px}
+#pane-index .csbchip{font:700 10.5px var(--f-m);padding:5px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer;margin:0 6px 6px 0;display:inline-block}
+#pane-index .csbchip.on{background:var(--blu);color:var(--bg);border-color:var(--blu)}
 /* ===== cc#543 V14 pane (namespaced) ===== */
 #pane-v14 header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 12px;border-bottom:1px solid var(--line)}
 #pane-v14 .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
@@ -8203,6 +8215,207 @@ function rFlowBasis(){
     + '</section>';
 }
 
+/* ══ cc#1822 · CUSTOM SCREEN BUILDER (CUSTOM_SCREEN_BUILDER_V1, session_log 40520) ═════════════
+   ADDITIVE ONLY — reads D.build and VF.data, the SAME payload objects OI Build Ups and Volume
+   Flow & Basis already fetch above, and never writes to them or changes anything about their own
+   cards. Placed directly below Basis Positive/Negative (rFlowBasis's own tail) per scope 3.
+
+   DISCOVERY, posted in full to cc_task_logs (task 1822) before this was built:
+   D.build (/api/v10/buildup), VF.data (/api/volume-flow) and D.qbb (/api/quality-bullish-basis)
+   are three genuinely SEPARATE backend scans — three different SQL queries across two files
+   (v10_endpoints.py, volume_flow_endpoints.py), not one combined per-symbol record. But they are
+   not equally separate:
+     - D.build already carries build_state (signal) + basis_pct + Vol R (rvol) + Vol P + Vol D +
+       CMP + DAY% + OI% TOGETHER, one row per symbol, for ~207 of 208 active futures (everything
+       with a futures_basis row today AND yesterday). Three of this card's four dimensions were
+       already one record; they were just not all exposed. basis_pct is the one field this task
+       added (v10_endpoints.py, additive — see the comment on that SELECT): futures_basis carries
+       BOTH `basis` (an absolute rupee gap) and `basis_pct` (the real percent) as separate
+       columns, and v10_buildup's own query only ever pulled the rupee one — harmless for its
+       existing use (only the SIGN of the two agree, always, since spot price is never negative)
+       but useless for the founder's percent-worded bands here.
+     - VF.data is the only source for Orderflow, and it IS genuinely narrower: /api/volume-flow
+       computes a flow ratio for every non-thin symbol internally but only ever RETURNS the
+       bullish/bearish qualifying sublists. A symbol in neither cannot be told apart from "never
+       scanned" from this page, so it is marked ABSENT here — never guessed Bullish, never
+       guessed Bearish, and its OTHER three dimensions still show normally.
+     - D.qbb was checked and is NOT read by this card: its 5-check funnel (flow + day + month +
+       sector all positive) leaves only a handful of names with a basis sign on a normal day —
+       verified live 07-Sep-2026: 3 positive, 0 negative, against D.build's basis_pct coverage of
+       ~204 of 207 that same session. Reading basis off D.qbb would make the Basis band picker
+       empty almost every day; D.build is the honest source and is what this card reads.
+
+   Columns: SYMBOL and CMP (DAY% rides the CMP cell, buTable's own convention) are always shown.
+   OI%, BASIS% and VOL R are ALSO always shown, plus VOL P / VOL D — all five ride the SAME
+   backbone record at no extra fetch, and hiding them would hide the exact evidence a founder
+   needs to see the ABSENT-vs-FAILED distinction on the card itself (a dash is a real "not
+   scored" value, never a fabricated 0 or a guess). WK% is the one column genuinely NOT in the
+   backbone (D.build has no week return at all) — it shows only when Orderflow is filtered,
+   because only then is every visible row guaranteed to be a VF member and so to actually carry
+   one. This is a deliberate, disclosed reading of session_log 40520's "show only the columns
+   relevant to what was filtered on" line — logged as a judgment call, not a silent deviation. */
+var CSB = { build: null, flow: null, basis: {}, volr: {}, sort: { key: null, dir: 1 } };
+var CSB_BASIS_BANDS = [
+  { k: 'p1',   label: '0 to 1%',    test: function (v) { return v > 0 && v <= 1; } },
+  { k: 'p1p',  label: '1%+',        test: function (v) { return v > 1; } },
+  { k: 'n1',   label: '0 to -1%',   test: function (v) { return v < 0 && v >= -1; } },
+  { k: 'n1p',  label: 'Beyond -1%', test: function (v) { return v < -1; } },
+];
+/* cc#1822 scope 5: Fable's proposal, extending the founder's own "1-1.5, 1..." — NOT LOCKED.
+   Flagged in the picker's own row label below AND in the (i) guide; founder confirms or adjusts
+   the exact breakpoints on glass. */
+var CSB_VOLR_BANDS = [
+  { k: 'lt1',   label: 'Below 1.0x', test: function (v) { return v < 1.0; } },
+  { k: 'b1015', label: '1.0-1.5x',   test: function (v) { return v >= 1.0 && v < 1.5; } },
+  { k: 'b1520', label: '1.5-2.0x',   test: function (v) { return v >= 1.5 && v < 2.0; } },
+  { k: 'gt2',   label: '2.0x+',      test: function (v) { return v >= 2.0; } },
+];
+function csbBackbone(){
+  /* the SAME de-dupe buPool() already does above — long_buildup/short_buildup overlap by
+     construction (both slices are the same ~207 rows, sorted two different ways). */
+  var bd = D.build || {}, seen = {}, out = {};
+  (bd.long_buildup || []).concat(bd.short_buildup || []).forEach(function (r) {
+    if (r && r.symbol && !seen[r.symbol]) { seen[r.symbol] = 1; out[r.symbol] = r; }
+  });
+  return out;
+}
+function csbPool(){
+  var bb = csbBackbone();
+  var vf = VF.data || {};
+  var bullRow = {}, bearRow = {};
+  (vf.bullish || []).forEach(function (r) { bullRow[r.symbol] = r; });
+  (vf.bearish || []).forEach(function (r) { bearRow[r.symbol] = r; });
+  var basisOn = Object.keys(CSB.basis).some(function (k) { return CSB.basis[k]; });
+  var volrOn = Object.keys(CSB.volr).some(function (k) { return CSB.volr[k]; });
+  var rows = [];
+  Object.keys(bb).sort().forEach(function (sym) {
+    var r = bb[sym];
+    var state = r.signal;
+    var flow = bullRow[sym] ? 'BULLISH' : (bearRow[sym] ? 'BEARISH' : null);   // null = ABSENT, never guessed
+    var basisPct = (r.basis_pct == null) ? null : Number(r.basis_pct);
+    var volR = (r.rvol == null) ? null : Number(r.rvol);
+
+    if (CSB.build && state !== CSB.build) return;
+    if (CSB.flow && flow !== CSB.flow) return;
+    if (basisOn) {
+      if (basisPct == null) return;   // ABSENT cannot satisfy a band it has no value for
+      if (!CSB_BASIS_BANDS.some(function (b) { return CSB.basis[b.k] && b.test(basisPct); })) return;
+    }
+    if (volrOn) {
+      if (volR == null) return;
+      if (!CSB_VOLR_BANDS.some(function (b) { return CSB.volr[b.k] && b.test(volR); })) return;
+    }
+    var fRow = flow === 'BULLISH' ? bullRow[sym] : (flow === 'BEARISH' ? bearRow[sym] : null);
+    rows.push({
+      symbol: sym, cmp: r.price, day_pct: r.day_1d, oi_pct: r.oi_chg_pct,
+      basis_pct: basisPct, vol_r: volR, vol_p: r.vol_p, vol_d: r.vol_d,
+      week_pct: fRow ? fRow.week_chg_pct : null,
+    });
+  });
+  return rows;
+}
+var CSB_SORT_GETTERS = {
+  SYMBOL: function (r) { return r.symbol; },
+  CMP:    function (r) { return r.day_pct; },
+  OI:     function (r) { return r.oi_pct; },
+  BASIS:  function (r) { return r.basis_pct; },
+  VOLR:   function (r) { return r.vol_r; },
+  VOLP:   function (r) { return r.vol_p; },
+  VOLD:   function (r) { return r.vol_d; },
+  WK:     function (r) { return r.week_pct; },
+};
+var CSB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, OI: -1, BASIS: -1, VOLR: -1, VOLP: -1, VOLD: -1, WK: -1 };
+function csbSort(key){
+  if (CSB.sort.key === key) CSB.sort.dir = -CSB.sort.dir;
+  else { CSB.sort.key = key; CSB.sort.dir = CSB_SORT_DEFAULT_DIR[key]; }
+  render();
+}
+function csbSetBuild(k){ CSB.build = k; render(); }
+function csbSetFlow(k){ CSB.flow = k; render(); }
+function csbToggleBasis(k){ CSB.basis[k] = !CSB.basis[k]; render(); }
+function csbToggleVolr(k){ CSB.volr[k] = !CSB.volr[k]; render(); }
+function csbChip(label, on, onclickExpr){
+  return '<button type="button" class="csbchip' + (on ? ' on' : '') + '" onclick="' + onclickExpr + '">' + esc(label) + '</button>';
+}
+function csbRow(label, chipsHtml){
+  return '<div class="csbrow"><div class="csblb">' + esc(label) + '</div>' + chipsHtml + '</div>';
+}
+function csbBuildChips(){
+  var opts = [{ k: null, label: 'Any' }].concat(BU_STATES.map(function (s) { return { k: s.k, label: s.h }; }));
+  return opts.map(function (o) {
+    return csbChip(o.label, CSB.build === o.k, "iiCsbSetBuild(" + (o.k ? "'" + o.k + "'" : 'null') + ")");
+  }).join('');
+}
+function csbFlowChips(){
+  var opts = [{ k: null, label: 'Any' }, { k: 'BULLISH', label: 'Bullish' }, { k: 'BEARISH', label: 'Bearish' }];
+  return opts.map(function (o) {
+    return csbChip(o.label, CSB.flow === o.k, "iiCsbSetFlow(" + (o.k ? "'" + o.k + "'" : 'null') + ")");
+  }).join('');
+}
+function csbBandChips(bands, state, handlerName){
+  return bands.map(function (b) {
+    return csbChip(b.label, !!state[b.k], handlerName + "('" + b.k + "')");
+  }).join('');
+}
+function csbTable(rows){
+  var showWk = !!CSB.flow;
+  var head = _sortTh('SYMBOL', 'SYMBOL', CSB.sort, "iiCsbSort('SYMBOL')")
+    + _sortTh('CMP', 'CMP', CSB.sort, "iiCsbSort('CMP')")
+    + _sortTh('OI Δ%', 'OI', CSB.sort, "iiCsbSort('OI')")
+    + _sortTh('BASIS %', 'BASIS', CSB.sort, "iiCsbSort('BASIS')")
+    + _sortTh('Vol R', 'VOLR', CSB.sort, "iiCsbSort('VOLR')")
+    + _sortTh('Vol P', 'VOLP', CSB.sort, "iiCsbSort('VOLP')")
+    + _sortTh('Vol D', 'VOLD', CSB.sort, "iiCsbSort('VOLD')")
+    + (showWk ? _sortTh('WK', 'WK', CSB.sort, "iiCsbSort('WK')") : '');
+  var body = rows.map(function (r) {
+    var d = r.day_pct;
+    var dtxt = d == null ? '' : ' <span class="cmpct ' + (d > 0 ? 'pos' : d < 0 ? 'neg' : '') + '">' + Number(d).toFixed(2) + '%</span>';
+    return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+      + '<td>' + (r.cmp != null ? String(Math.round(Number(r.cmp))) : '—') + dtxt + '</td>'
+      + buNum(r.oi_pct, 2, '%', true)
+      + buNum(r.basis_pct, 2, '%', true)
+      + (r.vol_r == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_r).toFixed(1) + '×</td>')
+      + (r.vol_p == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
+      + (r.vol_d == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>')
+      + (showWk ? vfCell(r.week_pct, 1) : '')
+      + '</tr>';
+  }).join('');
+  return '<div style="overflow-x:auto"><table class="tb"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+function csbGuide(){
+  iiSheet('<div class="iish">How to read Custom Screen Builder</div><div class="vfg">'
+    + '<p><b>The idea.</b> Pick from four filters. The table shows only stocks that match every filter you set. Leave a filter on Any, or pick no band, and it does not narrow anything.</p>'
+    + '<p><b>Buildup.</b> The same four states as the OI Build Ups cards above.</p>'
+    + '<p><b>Orderflow.</b> The same Bullish / Bearish definition as the Volume Flow cards above — 60%+ of recent volume on one side, day and week move both agreeing. A stock not on either list there will not match Bullish or Bearish here either.</p>'
+    + '<p><b>Basis band.</b> The futures price minus the spot price, as a percent of the spot price. Positive means futures cost more than the stock. 0 to 1% and 1%+ are the two positive bands; 0 to -1% and beyond -1% mirror them on the negative side.</p>'
+    + '<p><b>Volume R band.</b> Today\'s volume pace vs the normal pace at this time of day. These four breakpoints are a first guess — below 1.0x, 1.0-1.5x, 1.5-2.0x, 2.0x+ — not locked yet, and may change once seen against real data.</p>'
+    + '<p><b>A dash (—).</b> That stock has no number for that column right now. It is never a guess and never a zero standing in for missing data — and it is not the same as failing a filter.</p>'
+    + '<p><b>Honesty.</b> Every number here is read straight from the OI Build Ups and Volume Flow &amp; Basis cards above — nothing is recomputed differently for this table.</p>'
+    + '</div>');
+}
+function rCustomScreen(){
+  var bbCount = Object.keys(csbBackbone()).length;
+  var rows = _sortByState(csbPool(), CSB.sort, CSB_SORT_GETTERS);
+  var st = scorrAsofStamp(D.build && D.build.as_of);
+  /* universe read LIVE off VF.data (the same registry query volume_flow itself runs) — never a
+     hardcoded 208. Falls back to this card's own backbone count only until VF.data has loaded. */
+  var universe = (VF.data && VF.data.universe) || bbCount;
+  var badge = '<span class="badge b-static">' + rows.length + ' MATCH</span>';
+  var body = !rows.length
+    ? ('<div class="unavail">' + (D.loaded.buildup ? 'No symbol matches this combination right now. Try Any on one picker, or a wider band.' : 'Loading…') + '</div>')
+    : csbTable(rows);
+  return '<section class="iisec"><div class="sh"><span class="st">Custom Screen Builder</span>' + badge
+    + '<button type="button" class="ib" onclick="iiCsbGuide()" aria-label="How to read this card">i</button></div>'
+    + '<div class="card sc">'
+    + csbRow('Buildup', csbBuildChips())
+    + csbRow('Orderflow', csbFlowChips())
+    + csbRow('Basis band', csbBandChips(CSB_BASIS_BANDS, CSB.basis, 'iiCsbToggleBasis'))
+    + csbRow('Volume R band (first guess)', csbBandChips(CSB_VOLR_BANDS, CSB.volr, 'iiCsbToggleVolr'))
+    + body
+    + (st.txt ? '<div class="scf' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + bbCount + ' of ' + universe + ' scanned</div>' : '')
+    + '</div></section>';
+}
+
 /* inline-onclick handlers - the pane is an IIFE, so every handler the HTML strings name is
    published under an ii* name (never bare, to keep this pane's globals from colliding). */
 window.iiSheetClose = iiSheetClose;
@@ -8219,6 +8432,12 @@ window.iiBuMore = buMore;
 window.iiVfMore = vfMore;
 window.iiQbMore = qbMore;
 window.iiVfTicks = vfSetTicks;
+window.iiCsbGuide = csbGuide;
+window.iiCsbSort = csbSort;
+window.iiCsbSetBuild = csbSetBuild;
+window.iiCsbSetFlow = csbSetFlow;
+window.iiCsbToggleBasis = csbToggleBasis;
+window.iiCsbToggleVolr = csbToggleVolr;
 window.iiRecSym = recSetSym; window.iiRecMore = recMore; window.iiRecChart = iiRecChart;   /* cc#1597: the log's toggles, load more, chart glyph */
 window.iiIpChart = function(k){ openIdxChart(k); };   /* the shared chart card, index mode (cc#1059) */
 
@@ -8287,12 +8506,17 @@ function render(){
        Build Ups, Flow & Basis, [Settings, Performance], Open Positions, The Record, foot.
        cc#1741 (06-Sep-2026): Open Positions moves to sit between Flow & Basis and the Settings /
        Performance stack. Final order: TopBar, Mood, Idx/VIX, PCR/ADR, F&O ban, Index Position,
-       Max Pain, Build Ups, Flow & Basis, Open Positions, [Settings, Performance], The Record, foot. */
+       Max Pain, Build Ups, Flow & Basis, Open Positions, [Settings, Performance], The Record, foot.
+       cc#1822 (07-Sep-2026): Custom Screen Builder is a NEW section, inserted directly after Flow
+       & Basis (whose basis cards, Basis Positive/Negative, are its tail) and before Open
+       Positions, per the card's own scope 3 ("directly below Basis Positive/Negative"). Final
+       order: TopBar, Mood, Idx/VIX, PCR/ADR, F&O ban, Index Position, Max Pain, Build Ups, Flow &
+       Basis, Custom Screen Builder, Open Positions, [Settings, Performance], The Record, foot. */
     /* cc#1741 (founder 06-Sep, comment 1 of 3: "Shift Open Position box below Basis Positive above
        Entry/Exit setting"; supersedes cc#1597 on placement): Open Positions now sits AFTER Volume
        Flow & Basis (whose basis tables are its tail) and BEFORE the Settings / Performance stack.
        A move only — rOpenPos() and its data are unchanged. */
-    rIndexPos() + rMaxPainSec() + rBuildUps() + rFlowBasis() + rOpenPos() +
+    rIndexPos() + rMaxPainSec() + rBuildUps() + rFlowBasis() + rCustomScreen() + rOpenPos() +
     /* cc#1574 (founder comment 5, 02-Sep-2026): the Futures ⇄ Equity Divergence card is HIDDEN -
        rDivergence() and /api/v10/divergence stay intact, only this call and its loader are out. */
     `<div class="stack">` + rSettings() + rPerf() + `</div>` +
