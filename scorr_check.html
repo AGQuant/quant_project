@@ -69,8 +69,7 @@
     color:var(--mut);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer;
     transition:.15s;letter-spacing:.2px}
   .side-btn:hover{border-color:var(--line);background:var(--panel)}
-  .side-btn.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
-  .side-btn.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
+  .side-btn.trade.on{border-color:var(--cyan);background:var(--cyan-row);color:var(--cyan)}
   .side-btn.invest.on{border-color:var(--violet);background:var(--violet-row);color:var(--violet)}
   /* cc#300: Fibcheck relocated to GVM report (scorr_cio_dashboard.html); its CSS/UI removed here. */
 
@@ -685,8 +684,10 @@
     <div class="page-sub" id="pageSub">V4 &middot; DUAL-STYLE &middot; NATIVE $0</div>
   </div>
 
-  <!-- cc#1789 R1 rule 2: ONE control row — symbol (260px) · LONG/SHORT/INVEST segmented · Run · Future scans
-       right-aligned; the quick chips on one line under it. Same ids as before, so every handler is unchanged. -->
+  <!-- cc#1789 R1 rule 2: ONE control row — symbol (260px) · TRADE/INVEST segmented · Run · Future scans
+       right-aligned; the quick chips on one line under it. Same ids as before, so every handler is unchanged.
+       cc#1817: LONG/SHORT collapsed into one Trade button — the rule table now follows the actual best-of-4
+       style on its own; there is no side left to pre-pick here. -->
   <div class="card tcs-card">
     <div class="tcs-strip">
       <div class="sym-wrap">
@@ -695,8 +696,7 @@
         <div class="ac-drop" id="acDrop"></div>
       </div>
       <div class="side-row" id="sideRow">
-        <button class="side-btn long on"  id="btnLong"   onclick="setMode('LONG')">&#9650; LONG</button>
-        <button class="side-btn short"    id="btnShort"  onclick="setMode('SHORT')">&#9660; SHORT</button>
+        <button class="side-btn trade on" id="btnTrade"  onclick="setMode('TRADE')">&#8645; Trade</button>
         <button class="side-btn invest"   id="btnInvest" onclick="setMode('INVEST')">&#9670; INVEST</button>
       </div>
       <!-- cc#300: FIBCHECK button, entry-price input and horizon selector removed — Fibcheck now lives on the GVM report. -->
@@ -931,7 +931,7 @@
 </div>
 
 <script>
-let mode='LONG';
+let mode='TRADE';
 let gate1=null, gate2=null;
 let acSel=-1, acItems=[], acTimer=null, runTimer=null;
 const QUICK=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
@@ -950,8 +950,7 @@ function renderChips(){
 function setMode(m){
   mode=m;
   const inv=(m==='INVEST');
-  document.getElementById('btnLong').className='side-btn long'+(m==='LONG'?' on':'');
-  document.getElementById('btnShort').className='side-btn short'+(m==='SHORT'?' on':'');
+  document.getElementById('btnTrade').className='side-btn trade'+(m==='TRADE'?' on':'');
   document.getElementById('btnInvest').className='side-btn invest'+(m==='INVEST'?' on':'');
   const runBtn=document.getElementById('runBtn');
   const pageTitle=document.getElementById('pageTitle');
@@ -1498,28 +1497,30 @@ function renderV4Dual(d, uiMode){
      Row click opens the 39720 sheet INLINE under that row; another row moves it.
      Every number is a payload field: score100/score10, verdict10, bands10, weight, credit, max, cmp,
      computed_at, evidence.gvm/segment, alerts. No typed constant. /100 only — the raw pair is gone (rule 8). */
-  const side=(uiMode==='SHORT')?'SELL':'BUY';
   const cards=(d.cards||[]);
   window.__tcRules=window.__tcRules||{};
   cards.forEach(c=>{window.__tcRules[c.side+'|'+c.style]=c;});
   const _pctOf=c=>(c&&c.max)?(c.score/c.max):0;
   const winner=(d.best||[...cards].sort((a,b)=>_pctOf(b)-_pctOf(a))[0])||null;
   const keyOf=c=>c?(c.side+'|'+c.style):null;
-  /* the table opens on the best card of the side the control strip is set to (SHORT → best SELL card), so the
-     side toggle still means something; the hero stays BEST OF 4 whatever the side. Tiles switch it after that. */
-  const sideBest=[...cards].filter(c=>c.side===side).sort((a,b)=>_pctOf(b)-_pctOf(a))[0]||winner;
-  window.__tcView={d:d, uiMode:uiMode, sel:keyOf(sideBest), open:null};
+  /* cc#1817: there is no side toggle any more (LONG/SHORT collapsed into one Trade button), so the rule
+     table can only default to one thing — the actual best-of-4 winner, same card the hero already shows.
+     Tiles still switch it after that (tcrPick). Never fall back to a pre-picked BUY/SELL side again. */
+  window.__tcView={d:d, uiMode:uiMode, sel:keyOf(winner), open:null};
   const el=document.getElementById('v4Result');
   if(!winner){
     el.innerHTML='<div class="card" style="padding:16px 18px;color:var(--red)">No scorecard could be computed (missing data).</div>';
     el.classList.add('show'); return;
   }
+  // View Detailed follows the winner's own side (SELL→SHORT wording), not the removed manual toggle —
+  // renderTcDetail's internal SELL branching is unchanged, it just now gets fed the true side.
+  const winView=(winner.side==='SELL')?'SHORT':'LONG';
   el.innerHTML=
     '<div class="tcr-grid">'
     + '<div class="card tcr-hero" id="tcrHero">'+_tcrHero(d, winner, uiMode)+'</div>'
     + '<div class="card tcr-rules" id="tcrRules">'+_tcrRules()+'</div>'
     + '</div>'
-    + '<div style="margin-top:12px"><button class="v4-detail-btn" onclick="loadDetail(\''+d.symbol+'\',\''+uiMode+'\')">⊞ View Detailed — rule-by-rule evidence</button></div>'
+    + '<div style="margin-top:12px"><button class="v4-detail-btn" onclick="loadDetail(\''+d.symbol+'\',\''+winView+'\')">⊞ View Detailed — rule-by-rule evidence</button></div>'
     + '<div class="v4-detail" id="v4Detail"></div>'
     + '<div class="foot">V4 · Dual-Style · Native $0 · momentum + reversal scored side-by-side · not a V8 algo signal · ⚠ Spot price, not futures.</div>';
   el.classList.add('show');
@@ -1568,7 +1569,7 @@ function _tcrHero(d, best, uiMode){
     +'<div class="tcr-sym">'+_tcAttr(d.symbol)+(window.ScorrCardRow?ScorrCardRow(d.symbol):'')+'</div>'
     +(meta?'<div class="tcr-nm">'+meta+'</div>':'')
     +'</div><div class="tcr-px"><b>'+(d.cmp!=null?'₹'+Number(d.cmp).toFixed(2):'—')+'</b><small>CMP · '+_tcAttr(d.computed_at||'')+' · spot</small></div></div>'
-    +'<div class="tcr-eye">BEST OF 4 · '+_tcAttr(best.label)+' · '+(uiMode==='SHORT'?'▼ SHORT':'▲ LONG')+' view</div>'
+    +'<div class="tcr-eye">BEST OF 4 · '+_tcAttr(best.label)+' · '+(best.side==='SELL'?'▼ SHORT':'▲ LONG')+' view</div>'
     +'<div class="tcr-vrow"><div class="tcr-vword '+_tcrWordCls(v10)+'">'+(uncal?'Uncalibrated':_tcrWord(v10))+'</div>'
     +'<div class="tcr-score">'+(s100==null?'—':s100.toFixed(1))+'<small>/ 100</small></div></div>'
     +'<div class="tcr-meter"><i style="width:'+(s100==null?0:Math.max(0,Math.min(100,s100)))+'%"></i>'+marks+'</div>'
@@ -2635,10 +2636,10 @@ function _renderV4ScanTable(){
     +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 // tapping a scan row loads that symbol's full dual scorecard through the main surface
+// cc#1817: no side to pre-pick any more — run() always scores all 4 and the rule table follows the winner.
 function v4ScanOpen(sym, bestLabel){
   document.getElementById('sym').value=sym;
-  const short=(bestLabel||'').indexOf('SELL')===0;
-  setMode(short?'SHORT':'LONG');
+  setMode('TRADE');
   run();
 }
 
@@ -2887,10 +2888,10 @@ renderChips();
     try{new MutationObserver(function(){clearTimeout(window.__tcHT);window.__tcHT=setTimeout(postH,90);})
       .observe(document.body,{childList:true,subtree:true,attributes:true,characterData:true});}catch(e){}
   }
-  // deep-link / embed autorun — style=investment -> INVEST, anything else -> LONG trade dual.
+  // deep-link / embed autorun — style=investment -> INVEST, anything else -> Trade dual.
   if(symq){
     var go=function(){ try{
-        if(style==='investment'||style==='invest')setMode('INVEST'); else setMode('LONG');
+        if(style==='investment'||style==='invest')setMode('INVEST'); else setMode('TRADE');
         var s=document.getElementById('sym'); if(s)s.value=symq; run();
       }catch(e){} };
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go); else go();
