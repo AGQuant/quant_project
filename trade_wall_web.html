@@ -55,6 +55,15 @@
   thead th{position:sticky;top:0;background:var(--panel);text-align:left;padding:7px 10px;
            font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);
            border-bottom:1px solid var(--line);white-space:nowrap}
+  /* cc#1813: sortable header — the tap target is the inner span, min-height 44px per tonight's
+     accessibility bar, even though the label text itself is small. STATUS gets none of this. */
+  thead th.sortable{padding:0;cursor:pointer;user-select:none}
+  .th-sort{display:flex;align-items:center;gap:3px;min-height:44px;padding:0 10px}
+  .th-sort:hover{color:var(--txt)}
+  .th-sort .car{opacity:0;font-size:9px}
+  .th-sort.on{color:var(--cyan)}
+  .th-sort.on .car{opacity:1}
+  th.num .th-sort{justify-content:flex-end}
   tbody td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
   tbody tr:hover{background:var(--card2)}
   .num{text-align:right;font-variant-numeric:tabular-nums}
@@ -248,6 +257,10 @@ var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: nul
               stateFilter: 'pending-approval', approvalCounts: null,
               /* cc#1812: side filter, additive to bucket/state — default All, narrows same as those */
               side: 'ALL',
+              /* cc#1813: sortCol/sortRev — default ENTERED, not reversed = exactly today's order
+                 (no client sort applied at all in that state, see sortView()). sortRev flips the
+                 column's own first-tap direction; it does not mean literal ascending/descending. */
+              sortCol: 'ENTERED', sortRev: false,
               /* cc#1735: the Approved tab's own payload */
               approvedRows: [], approvedCount: null, approvedTabAsOf: null, approvedNote: null };
 var PAGE  = { cursor: null, more: true, busy: false };
@@ -358,13 +371,16 @@ function decodeTag(note){
   var t = (STATE.decode || {}).tags || {};
   return t[note] || String(note);
 }
-function rowsHtml(list){
+function rowsHtml(list, showDay){
   /* cc#1525/cc#1537: open rows carry a Status cell (the read-only APPROVED badge), so the row
-     width is status-dependent — the day separators must follow it or they misalign the grid. */
+     width is status-dependent — the day separators must follow it or they misalign the grid.
+     cc#1813: showDay is false whenever the active sort is anything other than Entered — a single
+     stale date header sitting over rows that actually span many real dates would be a lie on
+     screen, worse than no divider at all. */
   var cols = STATE.status === 'open' ? 10 : 10;   /* cc#1734: closed grew a second P&L column */
   var h = '', day = null;
   list.forEach(function(e){
-    if (e.day !== day){
+    if (showDay && e.day !== day){
       day = e.day;
       h += '<tr class="tw-day"><td colspan="' + cols + '">' + esc(day || 'undated') + '</td></tr>';
     }
@@ -398,22 +414,108 @@ function rowsHtml(list){
   return h;
 }
 
+/* cc#1813: sortable header cell. key=null (Status only) renders a plain, non-clickable <th> — it
+   holds the Approve/Dismiss buttons, not a data value, so no caret and no tap handler. The caret
+   marks which of the column's OWN two tap-states is active (its first-tap order, or reversed) —
+   not a universal ascending/descending indicator, since each column's first-tap meaning differs
+   (per_column_sort_meaning on the card). */
+function _th(label, key, numCls, title){
+  var titleAttr = title ? ' title="' + esc(title) + '"' : '';
+  if (!key) return '<th' + (numCls ? ' class="num"' : '') + titleAttr + '>' + label + '</th>';
+  var on = STATE.sortCol === key;
+  var car = (on && STATE.sortRev) ? '&#9652;' : '&#9662;';
+  return '<th class="sortable' + (numCls ? ' num' : '') + '"' + titleAttr + ' onclick="pickSort(\'' + key + '\')">'
+    + '<span class="th-sort' + (on ? ' on' : '') + '">' + label + '<span class="car">' + car + '</span></span></th>';
+}
 function theadHtml(){
   /* cc#1734: the Closed book carries TWO P&L columns — rupees and percent — each filled only
      with what the engine actually produced (V8/V10/QB emit rupees, TC Scanner / Investment
      Scanner / Screeners emit percent only). Never converted between them. */
   return STATE.status === 'closed'
-    ? '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
-      + '<th>Exited</th><th class="num">Exit</th><th class="num">P&amp;L Rs</th><th class="num">P&amp;L %</th><th>Detail</th></tr>'
-    : '<tr><th>Symbol</th><th>Side</th><th>Engine</th><th>Entered</th><th class="num">Entry</th>'
-      + '<th class="num">Qty</th>'
+    ? '<tr>' + _th('Symbol','SYMBOL') + _th('Side','SIDE') + _th('Engine','ENGINE')
+      + _th('Entered','ENTERED') + _th('Entry','ENTRY',true)
+      + _th('Exited','EXITED') + _th('Exit','EXIT',true)
+      + _th('P&amp;L Rs','PNL_RS',true) + _th('P&amp;L %','PNL_PCT',true) + _th('Detail','DETAIL') + '</tr>'
+    : '<tr>' + _th('Symbol','SYMBOL') + _th('Side','SIDE') + _th('Engine','ENGINE')
+      + _th('Entered','ENTERED') + _th('Entry','ENTRY',true)
+      + _th('Qty','QTY',true)
       /* cc#1762: TWO P&L columns with DIFFERENT bases, never conflated. Indicative = the engine's
          entry at entry.ts to CMP as of cmp_as_of, x qty (the app home V8 OPEN BOOK formula, served
          by the API — this page computes nothing). Approved = trade_alerts.approved_price at
          approved_at to the SAME CMP, same qty — blank until approved. No CMP = both blank. */
-      + '<th class="num" title="' + pnlBasisTitle('indicative') + '">P&amp;L (indicative)</th>'
-      + '<th class="num" title="' + pnlBasisTitle('approved') + '">P&amp;L (approved)</th>'
-      + '<th>Detail</th><th>Status</th></tr>';
+      + _th('P&amp;L (indicative)','PNL_IND',true,pnlBasisTitle('indicative'))
+      + _th('P&amp;L (approved)','PNL_APP',true,pnlBasisTitle('approved'))
+      + _th('Detail','DETAIL') + _th('Status',null) + '</tr>';
+}
+/* cc#1813: value getters, one per sortable column — each returns exactly the number/string that
+   column's cell actually displays for that row (never a re-derivation the cell itself doesn't
+   show), or null when the cell is blank. null always sorts last, whichever tap direction. */
+function _pnlIndVal(e){
+  /* P&L (indicative) mixes units by design (pnlCell): equity rows show percent, futures rows show
+     rupees, in the same column. Sorting the raw number shown is the only self-consistent read of
+     a column that already mixes units on screen — flagged, not hidden. */
+  if (isEquity(e)) return (e.pnl_pct != null) ? Number(e.pnl_pct) : null;
+  return (e.pnl != null) ? Number(e.pnl) : null;
+}
+function _pnlAppVal(e){
+  var ap = e.approval;
+  return (ap && ap.pnl_approved != null) ? Number(ap.pnl_approved) : null;
+}
+function _pnlRsVal(e){ return (e.pnl != null && !isEquity(e)) ? Number(e.pnl) : null; }
+function _pnlPctVal(e){
+  if (e.pnl_pct != null) return Number(e.pnl_pct);
+  if (e.pnl != null && e.entry_price && e.exit_price)
+    return (Number(e.exit_price) - Number(e.entry_price)) / Number(e.entry_price) * 100 * (e.side === 'SHORT' ? -1 : 1);
+  return null;
+}
+var SORT_VAL = {
+  SYMBOL:  function(e){ return e.symbol || null; },
+  SIDE:    function(e){ return e.side || null; },            /* LONG < SHORT lexically — LONG-first on first tap, CC's choice */
+  ENGINE:  function(e){ return e.engine || null; },
+  ENTERED: function(e){ return (e.entry && e.entry.ts) || null; },
+  ENTRY:   function(e){ return e.entry_price != null ? Number(e.entry_price) : null; },
+  QTY:     function(e){ return e.qty != null ? Number(e.qty) : null; },
+  PNL_IND: _pnlIndVal,
+  PNL_APP: _pnlAppVal,
+  /* DETAIL: open rows sort by the raw setup tag (SELL-MOM/SELL-REV/BUY-REV/BUY-MOM), per the card.
+     Closed rows have no setup tag any more (Detail there is the decoded exit reason) — sorted the
+     same way, alphabetically on the decoded text, by direct analogy. */
+  DETAIL:  function(e){ return STATE.status === 'closed' ? (decodeResult(e.result) || null) : (e.result || null); },
+  /* EXITED/EXIT/PNL_RS/PNL_PCT: closed-book-only columns the card's list does not name (it
+     enumerates the open header 1:1) — extended here by direct analogy to ENTERED/ENTRY/PNL_IND. */
+  EXITED:  function(e){ return (e.exit && e.exit.ts) || null; },
+  EXIT:    function(e){ return e.exit_price != null ? Number(e.exit_price) : null; },
+  PNL_RS:  _pnlRsVal,
+  PNL_PCT: _pnlPctVal
+};
+/* columns whose FIRST tap is descending (newest/biggest-win first); everything else is ascending
+   (A-Z / low-to-high) on first tap, per per_column_sort_meaning on the card */
+var SORT_DESC_FIRST = { ENTERED: 1, EXITED: 1, PNL_IND: 1, PNL_APP: 1, PNL_RS: 1, PNL_PCT: 1 };
+function pickSort(key){
+  if (STATE.sortCol === key) STATE.sortRev = !STATE.sortRev;
+  else { STATE.sortCol = key; STATE.sortRev = false; }
+  render();
+}
+/* cc#1813: sorts the FULL filtered view (whatever has been loaded so far — Load More appends and
+   re-renders, so a growing set keeps re-sorting correctly), never a display-only slice. Default
+   state (ENTERED, not reversed) returns the array untouched — exactly today's server order — so
+   default behaviour is byte-identical to before this card. */
+function sortView(view){
+  var key = STATE.sortCol;
+  if (key === 'ENTERED' && !STATE.sortRev) return view;
+  var getter = SORT_VAL[key];
+  if (!getter) return view;
+  var descFirst = !!SORT_DESC_FIRST[key];
+  return view.slice().sort(function(a, b){
+    var va = getter(a), vb = getter(b);
+    var an = (va === null || va === undefined || va === ''), bn = (vb === null || vb === undefined || vb === '');
+    if (an && bn) return 0;
+    if (an) return 1;    // nulls last, regardless of direction
+    if (bn) return -1;
+    var base = va < vb ? -1 : (va > vb ? 1 : 0);
+    if (descFirst) base = -base;
+    return STATE.sortRev ? -base : base;
+  });
 }
 function pnlBasisTitle(which){
   var b = STATE.pnlBasis || {};
@@ -596,6 +698,7 @@ function render(){
   if (STATE.side !== 'ALL'){
     view = view.filter(function(e){ return e.side === STATE.side; });
   }
+  view = sortView(view);   /* cc#1813: sort combines with every filter above, resets neither */
   var bucketTotal = STATE.bucket === 'ALL'
         ? (function(){ var t = 0; (BUCKETS[STATE.instrument] || []).forEach(function(x){ t += ((STATE.byEngine || {})[x] || {})[STATE.status] || 0; }); return t; })()
         : ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
@@ -615,7 +718,7 @@ function render(){
     emptyMsg = 'No Investment Scanner exits yet — the engine landed its first signal today and has not closed a position.';
   }
   document.getElementById('body').innerHTML = view.length
-    ? rowsHtml(view)
+    ? rowsHtml(view, STATE.sortCol === 'ENTERED')
     : '<tr><td colspan="10" class="empty">' + emptyMsg + '</td></tr>';
   document.getElementById('more').innerHTML = moreHtml();
   renderClosedSummary();
