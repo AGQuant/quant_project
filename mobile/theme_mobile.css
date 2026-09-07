@@ -594,12 +594,23 @@ body[data-theme] .as-hdr .as-pg .t{ color:var(--ink); }
  * Scoped to `body[data-theme]`, not `:root`, so it only reaches elements a page's own more
  * specific local block (e.g. mobile/v8.html's `#v8p{--well:...;--gold:...}`) does not already
  * win on -- v8.html's own internal UI (inside #v8p) is unaffected; the shared-shell bell, which
- * sits in .as-hdr OUTSIDE any such page-local scope, is what actually picks this up. */
+ * sits in .as-hdr OUTSIDE any such page-local scope, is what actually picks this up.
+ *
+ * cc#1830: --mute added to this same block. Found auditing cc#1827 -- mobile/gvm.html's spec
+ * sheets (paramSheetOpen's #g-psheet, the new pillarSheetOpen's #g-pilsheet, the ratio-filter
+ * sheet) are document.body.appendChild()'d, same as scorr_bell.js's button -- siblings of #gvp,
+ * not descendants, so they hit this exact block for --well/--line/--chalk/--gold already. They
+ * also read --mute for secondary text (a note subtitle, peer counts, chip labels), which had no
+ * bridge above #gvp,#ckp,#v8p's own ID-scoped one -- pre-existing gap in paramSheetOpen, not a
+ * cc#1827 regression, just inherited by the new sheet that copied its pattern. Same source as
+ * #ckp's own --mute:var(--muted) mapping. --up/--down deliberately left alone: this file's own
+ * --grn-d / --up-d/--down-d/--amber-d precedent already treats win/loss hue drift as tolerable. */
 body[data-theme]{
   --well: var(--panel);
   --line: var(--edge);
   --chalk: var(--ink);
   --gold: var(--brand);
+  --mute: var(--muted);
 }
 
 
