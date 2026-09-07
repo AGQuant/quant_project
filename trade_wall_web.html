@@ -170,6 +170,15 @@
       <div class="tabs" id="tabsInstrument"></div>
     </div>
   </div>
+  <!-- cc#1812 (founder direct: "Add 1 more filter after Instrument Equity Future tab Long Short"):
+       SIDE row, own row, directly below Instrument and above Engine/Status. Client-side filter over
+       the already-loaded STATE.events, same pattern as bucket/state — no second fetch, no second
+       counting mechanism. -->
+  <div class="tw-frow">
+    <div class="tw-fgrp"><span class="tw-flbl">Side</span>
+      <div class="tabs" id="tabsSide"></div>
+    </div>
+  </div>
   <div class="tw-frow">
     <div class="tw-fgrp"><span class="tw-flbl">Engine</span>
       <!-- level 3: engine bucket -->
@@ -237,6 +246,8 @@ var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: nul
               approvalWindow: null,
               /* cc#1609: engine 'ALL' = every engine of the instrument; stateFilter over open rows */
               stateFilter: 'pending-approval', approvalCounts: null,
+              /* cc#1812: side filter, additive to bucket/state — default All, narrows same as those */
+              side: 'ALL',
               /* cc#1735: the Approved tab's own payload */
               approvedRows: [], approvedCount: null, approvedTabAsOf: null, approvedNote: null };
 var PAGE  = { cursor: null, more: true, busy: false };
@@ -453,6 +464,23 @@ function stateTabsHtml(){
   }).join('');
 }
 function pickState(k){ if (k === STATE.stateFilter) return; STATE.stateFilter = k; render(); }
+/* cc#1812: All / Long / Short, counted against whatever Book/Instrument/Engine/Status already
+   narrowed to (bucket + the open-only stateFilter) — same live-recount pattern as stateTabsHtml
+   above, just one more axis. Applies to both Open and Closed (side is on every row either way,
+   unlike the approval-state row which is open-only). */
+function sideTabsHtml(){
+  var view = STATE.events.filter(function(e){ return STATE.bucket === 'ALL' || e.engine === STATE.bucket; });
+  if (STATE.status === 'open' && STATE.stateFilter !== 'all'){
+    view = view.filter(function(e){ return (e.state || 'pending-approval') === STATE.stateFilter; });
+  }
+  var n = { LONG: 0, SHORT: 0 };
+  view.forEach(function(e){ if (n[e.side] != null) n[e.side]++; });
+  return [['ALL','All',view.length],['LONG','Long',n.LONG],['SHORT','Short',n.SHORT]].map(function(p){
+    return '<button class="tab' + (p[0] === STATE.side ? ' on' : '') + '" onclick="pickSide(\'' + p[0] + '\')">'
+      + p[1] + ' <span class="n">' + p[2] + '</span></button>';
+  }).join('');
+}
+function pickSide(k){ if (k === STATE.side) return; STATE.side = k; render(); }
 /* cc#1736: the header's suppressed count toggles the reveal in place (back to Pending on a second click) */
 function toggleSuppressed(){ pickState(STATE.stateFilter === 'suppressed-in-position' ? 'pending-approval' : 'suppressed-in-position'); }
 function heldTxt(h){ return h ? (esc(h.symbol) + ' ' + esc(h.side) + ' · approved ' + esc(h.approved_at || '') + (h.approved_price != null ? ' @ ' + px2(h.approved_price) : '') + ' · ' + esc(h.engine || '') + ' · alert #' + h.id) : ''; }
@@ -537,6 +565,7 @@ function renderApproved(){
   setSubline();
   document.getElementById('tabsStatus').innerHTML = '';
   document.getElementById('tabsInstrument').innerHTML = '';
+  document.getElementById('tabsSide').innerHTML = '';
   document.getElementById('tabsBucket').innerHTML = '';
   document.getElementById('thead').innerHTML = approvedTheadHtml();
   var view = STATE.events;
@@ -555,6 +584,7 @@ function render(){
   setSubline();
   document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
   document.getElementById('tabsInstrument').innerHTML = instrumentTabsHtml();
+  document.getElementById('tabsSide').innerHTML = sideTabsHtml();
   document.getElementById('tabsBucket').innerHTML = bucketTabsHtml();
   document.getElementById('tabsState').innerHTML = stateTabsHtml();
   document.getElementById('thead').innerHTML = theadHtml();
@@ -562,6 +592,9 @@ function render(){
   var view = STATE.events.filter(function(e){ return STATE.bucket === 'ALL' || e.engine === STATE.bucket; });
   if (STATE.status === 'open' && STATE.stateFilter !== 'all'){
     view = view.filter(function(e){ return (e.state || 'pending-approval') === STATE.stateFilter; });
+  }
+  if (STATE.side !== 'ALL'){
+    view = view.filter(function(e){ return e.side === STATE.side; });
   }
   var bucketTotal = STATE.bucket === 'ALL'
         ? (function(){ var t = 0; (BUCKETS[STATE.instrument] || []).forEach(function(x){ t += ((STATE.byEngine || {})[x] || {})[STATE.status] || 0; }); return t; })()
@@ -678,7 +711,9 @@ function pickStatus(k){
    chips re-render from BUCKETS[instrument] on the refetch, so no chip from the other instrument
    survives the switch. */
 function pickInstrument(k){
-  STATE.instrument = k; STATE.bucket = 'ALL'; STATE.stateFilter = 'all';
+  /* cc#1812: reset Side to All on an Instrument click too — same cc#1761 reasoning (no stale
+     narrower-axis selection surviving a switch and landing on a dead "no positions" combo). */
+  STATE.instrument = k; STATE.bucket = 'ALL'; STATE.stateFilter = 'all'; STATE.side = 'ALL';
   STATE.events = []; PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
   boot(true);
 }
@@ -830,6 +865,7 @@ function renderApprovedTab(){
   setSubline();
   document.getElementById('tabsStatus').innerHTML = statusTabsHtml();
   document.getElementById('tabsInstrument').innerHTML = '';
+  document.getElementById('tabsSide').innerHTML = '';
   document.getElementById('tabsBucket').innerHTML = '';
   document.getElementById('tabsState').innerHTML = '';
   document.getElementById('thead').innerHTML = approvedTabTheadHtml();
