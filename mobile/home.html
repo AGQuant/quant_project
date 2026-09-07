@@ -1376,11 +1376,24 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
    needed to change for that to be true, since #heroPositionsBody only ever claimed the space
    between .chd and .c2body's own end, wherever that end currently is. */
 /* cc#1752: the body takes the card's spare height (Card 4 is levelled to the tallest sibling
-   again) and CENTRES the two index blocks as a group in it — equal space above and below — while
-   .chd stays at the top of .c2body and VIEW LOGS stays pinned to the card bottom. min-width:0 so
-   the body can never push the card wider than its siblings (a flex item's auto min-width was the
-   right-edge overflow the founder photographed). */
-#heroPositionsBody{flex:1 1 auto;min-height:0;min-width:0;display:flex;flex-direction:column;justify-content:center}
+   again) — while .chd stays at the top of .c2body and VIEW LOGS stays pinned to the card bottom.
+   min-width:0 so the body can never push the card wider than its siblings (a flex item's auto
+   min-width was the right-edge overflow the founder photographed).
+   cc#1833 (founder 07-Sep 21:26, screenshot: ~280px of dead space above NIFTY, another gap below
+   BANKNIFTY, both blocks bunched at the card's vertical middle): justify-content:center grouped
+   the two .legwrap blocks together as ONE unit and centred that unit, which is exactly the
+   bunching in the photo — the group's own combined height is small next to the card (today,
+   NIFTY renders a one-line "No open NIFTY position" while BANKNIFTY carries a full bar + labels +
+   P&L; the cc#1569 .legwrap.empty growth rule below does not fire here — renderHeroPositions()
+   never emits the empty class, only .legwrap.ixblk — so neither block flex-grows and both sit at
+   natural size). space-evenly gives three equal gaps (top edge / between the two blocks / bottom
+   edge) instead of one big gap split around a centred pair — NIFTY reads centred in the card's
+   upper half, BANKNIFTY in the lower half, matching the founder's own words ("keep in middle from
+   centre line to top and centre to bottom") in both today's asymmetric state and a symmetric
+   both-open state alike, without hardcoded margins that would break the moment NIFTY also opens a
+   position (per the card's own implementation_hint — fixed margins are the wrong tool for two
+   blocks whose heights differ this much day to day). */
+#heroPositionsBody{flex:1 1 auto;min-height:0;min-width:0;display:flex;flex-direction:column;justify-content:space-evenly}
 #heroCardPositions{min-width:0;max-width:100%;overflow:hidden}
 /* cc#1752 · WIDTH GUARDS: nothing inside may exceed the card box. The name row wraps before it
    grows; the strike chip shrinks and ellipsises before it grows; the written / grown / now row
