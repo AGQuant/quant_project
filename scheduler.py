@@ -3267,7 +3267,8 @@ def _bg_news_polish_auto():
         return _Empty(f"ran, inserted 0 of {result.get('selected', 0)} selected "
                        f"({result.get('eligible', 0)} eligible) -- {result.get('errors') or result.get('detail')}")
     log.info(f"news_polish_auto: inserted={result.get('inserted')} "
-             f"tiers={result.get('inserted_by_tier')} eligible={result.get('eligible')}")
+             f"tiers={result.get('inserted_by_tier')} id_range={result.get('inserted_id_range')} "
+             f"eligible={result.get('eligible')} suppressed_dup={result.get('suppressed_dup')}")
     return result
 
 

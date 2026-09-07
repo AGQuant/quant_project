@@ -26,9 +26,19 @@ on common words. This is a v1 heuristic; the card asks for the hit rate to be re
 week of real runs (see the ops_log rows this module writes), not for a perfect router on day one.
 
 NEVER FABRICATE: the LLM prompt is explicit that every fact in full_summary must come from the
-source row, and mentioned_symbols is capped to what the pickup-time match (or the model, told not
-to invent one) actually found — a hallucinated symbol on a story that isn't about it is a worse
+source row, and mentioned_symbols is validated post-parse against screener_raw (a model-invented
+symbol is dropped, not inserted) — a hallucinated symbol on a story that isn't about it is a worse
 failure than an empty array.
+
+CANON UPDATE (session_log 40145, NEWS_POLISH_CANON_V1, founder 07-Sep-2026 — supersedes 40138
+wherever they disagree; read via cc#1805, the perpetual standing order, AFTER this module's first
+build): two gaps closed here, not in the original build:
+  - 48h content-level dedup (session_log 1923, "same story, different URL" — url_hash cannot catch
+    it): a lightweight in-process headline-token-overlap check against the last 48h of
+    polished_news, no new extension required (pg_trgm is not installed on this DB and installing
+    one is an infra decision this card does not own).
+  - mentioned_symbols "tagged ONLY with symbols that resolve in screener_raw" (40145 quality
+    floor): validated post-parse against a screener_raw nse_code set, not just uppercased/capped.
 """
 import os
 import re
@@ -92,6 +102,53 @@ def _company_tier(pattern, term_symbol, headline, description):
     if not m:
         return None
     return term_symbol.get(m.group(1).lower())
+
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _headline_tokens(headline):
+    return {w for w in _WORD_RE.findall((headline or "").lower()) if len(w) > 2}
+
+
+def _recent_polished_token_sets(conn, hours=48):
+    """session_log 1923 (CONTENT_LEVEL_NEWS_DEDUP_V1, folded into the 40145 canon): the same
+    story can arrive as two different raw_news rows from two sources with two different
+    url_hash values, so the raw-row-level suppression/canonical_id checks don't catch it. This
+    is a lightweight in-process token-overlap check against the last N hours of already-published
+    headlines -- no new DB extension (pg_trgm isn't installed; installing one is not this card's
+    call to make)."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT COALESCE(headline_clean, summary, '') FROM polished_news
+            WHERE polished_at >= NOW() - (%s || ' hours')::interval
+        """, (hours,))
+        return [_headline_tokens(r[0]) for r in cur.fetchall() if r[0]]
+
+
+def _is_recent_duplicate(headline, recent_token_sets, threshold=0.6):
+    cand = _headline_tokens(headline)
+    if not cand:
+        return False
+    for other in recent_token_sets:
+        if not other:
+            continue
+        smaller = min(len(cand), len(other))
+        if smaller == 0:
+            continue
+        overlap = len(cand & other) / smaller
+        if overlap >= threshold:
+            return True
+    return False
+
+
+def _valid_symbol_set(conn):
+    """40145 quality floor: 'mentioned_symbols tagged ONLY with symbols that resolve in
+    screener_raw'. Built once per run, checked before insert -- a model-returned symbol that
+    isn't a real, resolvable NSE code is dropped, never inserted."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT nse_code FROM screener_raw WHERE nse_code IS NOT NULL")
+        return {r[0].strip().upper() for r in cur.fetchall() if r[0] and r[0].strip()}
 
 
 def _select_candidates(conn):
@@ -184,10 +241,13 @@ def _polish_one(client, row):
     return json.loads(txt)
 
 
-def _insert_polished(conn, row, parsed):
+def _insert_polished(conn, row, parsed, valid_symbols):
     category = CATEGORY_FOR_TIER[row["_tier"]]
-    symbols = parsed.get("mentioned_symbols") or []
-    symbols = [s.strip().upper() for s in symbols if isinstance(s, str) and s.strip()][:5]
+    raw_symbols = parsed.get("mentioned_symbols") or []
+    symbols = [s.strip().upper() for s in raw_symbols if isinstance(s, str) and s.strip()]
+    # 40145 quality floor: ONLY symbols that resolve in screener_raw. A model-returned symbol
+    # that doesn't resolve is dropped, not inserted -- never fabricate a ticker.
+    symbols = [s for s in symbols if s in valid_symbols][:5]
     with conn.cursor() as cur:
         # published_time == polished_at, POLISH_TIMESTAMP_RULE_V2 (session_log 39131)
         cur.execute("""
@@ -195,10 +255,13 @@ def _insert_polished(conn, row, parsed):
                 (raw_news_id, headline_clean, summary, category, sentiment, impact,
                  mentioned_symbols, polished_at, full_summary, source, published_time)
             VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, NOW())
+            RETURNING id
         """, (row["raw_id"], parsed.get("headline_clean") or row.get("headline"),
               parsed.get("summary"), category, parsed.get("sentiment"), parsed.get("impact"),
               symbols, parsed.get("full_summary"), row.get("source_name")))
+        new_id = cur.fetchone()[0]
     conn.commit()
+    return new_id
 
 
 def run(conn) -> dict:
@@ -208,13 +271,26 @@ def run(conn) -> dict:
     now = datetime.now(IST)
     ceiling = _weekday_ceiling(now)
     rows = _select_candidates(conn)
-    ordered = _tier_ordered(conn, rows)
+
+    # 48h content-level dedup (session_log 1923, folded into the 40145 canon): drop a candidate
+    # whose headline substantially overlaps an already-published one from the last 48h, before it
+    # ever reaches tiering/selection. Counted separately so it's visible in the report, not silent.
+    recent_sets = _recent_polished_token_sets(conn, hours=48)
+    deduped_out = 0
+    fresh_rows = []
+    for r in rows:
+        if _is_recent_duplicate(r.get("headline"), recent_sets):
+            deduped_out += 1
+        else:
+            fresh_rows.append(r)
+
+    ordered = _tier_ordered(conn, fresh_rows)
     eligible = len(ordered)
 
     # Floor rule (NEWS_POLISH_AUTOMATION_V1): <2 eligible = skip, not an error. Thin supply is
     # routine at the 06:00 slot before the morning fetch has landed much, or on a quiet news day.
     if eligible < 2:
-        return {"status": "skip_thin_supply", "eligible": eligible}
+        return {"status": "skip_thin_supply", "eligible": eligible, "suppressed_dup": deduped_out}
 
     tier_counts_eligible = {}
     for r in ordered:
@@ -236,9 +312,11 @@ def run(conn) -> dict:
 
     if client is None:
         return {"status": "empty", "eligible": eligible, "selected": len(selected),
-                "detail": init_error or "anthropic client unavailable"}
+                "suppressed_dup": deduped_out, "detail": init_error or "anthropic client unavailable"}
 
+    valid_symbols = _valid_symbol_set(conn)
     inserted = 0
+    inserted_ids = []
     tier_counts_inserted = {}
     errors = []
     for row in selected:
@@ -247,7 +325,8 @@ def run(conn) -> dict:
             if not (parsed.get("full_summary") or "").strip():
                 errors.append(f"raw_id={row['raw_id']}: model returned empty full_summary, skipped")
                 continue
-            _insert_polished(conn, row, parsed)
+            new_id = _insert_polished(conn, row, parsed, valid_symbols)
+            inserted_ids.append(new_id)
             inserted += 1
             tier_counts_inserted[row["_tier"]] = tier_counts_inserted.get(row["_tier"], 0) + 1
         except Exception as e:
@@ -262,6 +341,8 @@ def run(conn) -> dict:
         "eligible": eligible, "eligible_by_tier": tier_counts_eligible,
         "ceiling": ceiling, "selected": len(selected),
         "inserted": inserted, "inserted_by_tier": tier_counts_inserted,
+        "inserted_id_range": [min(inserted_ids), max(inserted_ids)] if inserted_ids else None,
+        "suppressed_dup": deduped_out,
         "errors": errors[:10],
     }
     try:
