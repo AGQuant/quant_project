@@ -73,7 +73,7 @@ body{ --field:#0A0A0C; }
 #v8p .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:700;padding:5px var(--space-13);border:1px solid var(--line);background:var(--well);color:var(--mute);clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer}   /* cc#1656 P2: horizontal padding one step (9->13); vertical unchanged, still inside a 44px tap target */
 #v8p .chip.ok{color:var(--up);border-color:rgba(47,212,139,.35);background:var(--up-d)}
 #v8p .chip.bad{color:var(--down);border-color:rgba(255,92,108,.35);background:var(--down-d)}
-#v8p .chip.gd{color:var(--gold);border-color:rgba(212,175,55,.4);background:var(--gold-d)}
+#v8p .chip.gd{color:var(--gold);border-color:color-mix(in srgb, var(--gold) 40%, transparent);background:var(--gold-d)}
 #v8p .tag{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:2px 6px;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
 #v8p .tag.long{background:var(--up-d);color:var(--up)} #v8p .tag.short{background:var(--down-d);color:var(--down)}
 #v8p .tag.bk{background:var(--gold-d);color:var(--gold)}
