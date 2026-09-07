@@ -595,7 +595,10 @@ async def auth_gate(request: Request, call_next):
                     b"scorr_segment_results.js",
                     # cc#1677: added WITH its script tag in v8_dashboard.html, in this same commit
                     # (cc#1060 rule) — the Model Portfolio pane's new empty-launcher + table module.
-                    b"scorr_model_portfolio.js"):
+                    b"scorr_model_portfolio.js",
+                    # cc#1831: added WITH its script tag in trade_wall_web.html, in this same commit
+                    # (cc#1060 rule) — the shared "+ New alert" manual/custom alert creation card.
+                    b"scorr_alert_create.js"):
             body = body.replace(b'src="/' + _js + b'"',
                                 b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
         # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,
