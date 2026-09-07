@@ -567,6 +567,10 @@
   .tcinfo-bx.on.half{border-color:var(--amber)} .tcinfo-bx.on.half b{color:var(--amber)}
   .tcinfo-bx.on.none{border-color:var(--red);background:var(--red-d)} .tcinfo-bx.on.none b{color:var(--red)}
   .tcinfo-nums{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11.5px;color:var(--mut);line-height:1.5}
+  /* cc#1808 TC_WEB_RULE_DEFINITION_V1 (session_log 40456): plain 2-line "what it checks / why it
+     matters" sitting between the name+points line and the FULL/HALF/NONE boxes. Web only. */
+  .tcinfo-def{font-size:12px;color:var(--mut);line-height:1.5;margin-bottom:10px}
+  .tcinfo-def div+div{margin-top:2px}
   .tcinfo-vrows{display:flex;flex-direction:column;gap:4px;margin-top:4px}
   .tcinfo-vrow{display:grid;grid-template-columns:1fr auto 18px auto;gap:8px;align-items:center;font-size:12px;padding:5px 0;border-top:1px solid var(--line)}
   .tcinfo-vrow .k{color:var(--txt)} .tcinfo-vrow .v,.tcinfo-vrow .p{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -1383,6 +1387,28 @@ const _TC_VOLROWS={
   BUY:[['vol_r',"Today's pace ≥ 1.2×",'x'],['vol_p','Yesterday ≥ 1.0×','x'],['vol_d','Delivery pickup ≥ 1.1×','x'],['vol_ad','Accumulation ≥ 55%','%']],
   SELL:[['vol_r',"Today's pace ≥ 1.2×",'x'],['vol_p','Yesterday ≥ 1.0×','x'],['vol_d','Delivery pickup ≥ 1.1×','x'],['vol_ad','Distribution ≤ 45%','%']]
 };
+// cc#1808 TC_WEB_RULE_DEFINITION_V1 (session_log 40456): rule_id -> [what it checks, why it matters],
+// rendered above the FULL/HALF/NONE box on rule-row expand. WEB ONLY (dashboard#check) -- mobile stays
+// exactly TC_RULE_SHEET_SIMPLE_V1 (39720), untouched, no lines added there. SELL-REV seeded (11 rules);
+// the remaining BUY-MOM/BUY-REV/SELL-MOM rules are a Fable follow-on once this pattern is proven here.
+// A rule id with no entry here renders exactly as before -- title/points then boxes, no fabricated text,
+// no blank gap. Keys verified against the ACTUAL registry/engine ids, not the session_log seed's
+// placeholder names -- two corrections found: LOCK_SM_WEAK -> LOCK_5M_WEAK (this file, TC_RULE_DEFS),
+// and the SELL volume rule id is R5V, confirmed live in tc_v4_dual.py:819 `_R("R5V", ...)` -- never the
+// founder screenshot's "RSV" (a display abbreviation, not the registry key) nor the shared "R5".
+const TC_WEB_RULE_LINES={
+  LOCK_MOOD:['Checks whether the overall market mood is bearish.','A short works better when the wider market is not fighting against it.'],
+  LOCK_5M_WEAK:['Checks whether the stock is down on the day itself.','A simple same-day confirmation that the setup is live right now.'],
+  LOCK_TRIO_52W:['Checks where the price sits versus its own 52-week range.','A low position confirms the stock is genuinely weak, not just having a bad week.'],
+  LOCK_TRIO_RSI:['Checks weekly RSI, a momentum reading from 0 to 100.','A weak-but-not-oversold band means the fall likely has more room before buyers step in.'],
+  LOCK_MA_SHALLOW:['Checks how far the 9-day average has pulled away from the 21-day average.','A shallow gap means the down move is still early, not already stretched out.'],
+  LOCK_TRIO_MOM2D:['Checks the price move over the last two trading days.','Confirms the weakness is showing up right now, not just in the past.'],
+  LOCK_SECTOR_WEAK:['Checks whether the stock\'s sector is falling this month too.','A weak sector removes one obvious reason the stock could bounce back quickly.'],
+  LOCK_QUALITY_FADE:['Checks the stock\'s underlying GVM quality score.','Weak fundamentals make a continued fall more believable than a strong-quality name falling temporarily.'],
+  LOCK_WEEK_FALLING:['Checks the stock\'s return over the last week.','Makes sure the down move has held for more than a single bad day.'],
+  R5V:['Checks four separate volume signals together — today\'s pace, yesterday\'s, delivery, and distribution.','Confirms real selling is behind the move, not a quiet, low-volume drift.'],
+  LOCK_FALL_FRESHNESS:['Checks how far the stock has already fallen this month.','A stock down too much is a crowded short — this favours a fall that is still fresh, not exhausted.']
+};
 /* cc#1789: the sheet body (line 1 name · points, boxes or Volume rows, line 2) is shared — the rules table renders it
    INLINE under the clicked row; tcRuleSheet keeps it as a modal for any caller that still has only the rule id. */
 function _tcSheetInner(r, side){
@@ -1410,7 +1436,11 @@ function _tcSheetInner(r, side){
     body+='<div class="tcinfo-nums">'+_tcEsc(line2)+'</div>';
   }
   const pts=_tcPtsText(r), m=pts.match(/^(\S+) of (\S+)$/);
-  return '<div class="h"><b>'+_tcEsc(name)+'</b><span>'+(m?_tcEsc(m[1])+'<small>of '+_tcEsc(m[2])+'</small>':_tcEsc(pts))+'</span></div>'+body;
+  // cc#1808: def lines sit between the title/points line and body (boxes or volume rows). No entry
+  // for this rule id -> no def block at all, not an empty slot -- see TC_WEB_RULE_LINES above.
+  const _def=TC_WEB_RULE_LINES[r.rule];
+  const defHtml=_def?'<div class="tcinfo-def"><div>'+_tcEsc(_def[0])+'</div><div>'+_tcEsc(_def[1])+'</div></div>':'';
+  return '<div class="h"><b>'+_tcEsc(name)+'</b><span>'+(m?_tcEsc(m[1])+'<small>of '+_tcEsc(m[2])+'</small>':_tcEsc(pts))+'</span></div>'+defHtml+body;
 }
 function tcRuleSheet(side, style, idx, rule){
   const c=(window.__tcRules||{})[side+'|'+style];
