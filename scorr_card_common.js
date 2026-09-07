@@ -1574,8 +1574,11 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
     rows.push({ glyph: '★', col: scol, label: slabel, note: fired.stars.note,
                 interp: _scorrMarkerLegendLine(lines, [slabel]) });
   }
-  if (fired.act) rows.push({ glyph: '⚡', col: 'inherit', label: 'Volume/OI spurt', note: fired.act.note,
-                             interp: _scorrMarkerLegendLine(lines, ['⚡', 'Volume/OI spurt']) });
+  // cc#1811: renamed from "Volume/OI spurt" -- the OI leg is retired, this is the canon Vol
+  // R/P/D/AD 2-of-4 tally now (v8_pivot_star.py evaluate_activity). fired.act.note already
+  // carries the per-check detail server-side; this row only needs the label + legend line.
+  if (fired.act) rows.push({ glyph: '⚡', col: 'inherit', label: 'Volume confirm', note: fired.act.note,
+                             interp: _scorrMarkerLegendLine(lines, ['⚡', 'Volume confirm']) });
   if (fired.dma) {
     var dcol = fired.dma.star_color === 'GREEN' ? '#0a9e63' : '#f87171';
     var dlabel = fired.dma.star_color === 'GREEN' ? 'Green square' : 'Red square';
