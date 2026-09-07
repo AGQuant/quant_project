@@ -109,6 +109,10 @@
   .tw-more{padding:16px;text-align:center;font-family:ui-monospace,monospace;font-size:11px;color:var(--mut)}
   .tw-btn{padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
           color:var(--txt);font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}
+  .tw-copyrow{display:flex;justify-content:flex-end;padding:10px 16px 0}
+  .tw-copybtn{padding:6px 14px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);
+          color:var(--mut);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+  .tw-copybtn:disabled{opacity:.5;cursor:not-allowed}
   .ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.55);z-index:9998;
       align-items:center;justify-content:center;padding:20px}
   .ov.open{display:flex}
@@ -208,6 +212,10 @@
   <div class="card">
     <div class="meta" id="meta">Loading…</div>
     <div class="tw-csum" id="closedSummary" hidden></div>   <!-- cc#1734: Closed book summary line -->
+    <!-- cc#1820: cc#1814 hid #meta (display:none, not removed) so that row is not a usable anchor
+         any more -- a new slim row directly above the table headers instead, seeded by JS every
+         render() same as the filter rows above. -->
+    <div class="tw-copyrow" id="copyRow"></div>
     <div class="scroll"><table id="tbl">
       <thead id="thead"></thead>
       <tbody id="body"></tbody>
@@ -266,6 +274,9 @@ var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: nul
                  (no client sort applied at all in that state, see sortView()). sortRev flips the
                  column's own first-tap direction; it does not mean literal ascending/descending. */
               sortCol: 'ENTERED', sortRev: false,
+              /* cc#1820: exactly the symbol list the table is CURRENTLY showing, stashed by
+                 whichever render path last ran — never re-derived, never scraped from the DOM. */
+              lastCopySyms: [],
               /* cc#1735: the Approved tab's own payload */
               approvedRows: [], approvedCount: null, approvedTabAsOf: null, approvedNote: null };
 var PAGE  = { cursor: null, more: true, busy: false };
@@ -610,6 +621,36 @@ function moreHtml(){
   return '<button class="tw-btn" onclick="loadMore()">Load more</button>';
 }
 
+/* cc#1820 (founder: "can we give table symbol copy buttons in other 2 tabs, symbol copy should
+   vary as per selection of filters"). Same spec as cc#1806 (V8 Open Positions): plain NSE symbol,
+   one per line, no prefix/suffix, a brief "Copied N symbols" confirmation. Same clipboard/fallback
+   mechanism as cc#1806's copyOpenPosSymbols too -- only the source differs (this page has no
+   SORTREG; STATE.lastCopySyms is stashed by each render path from the array it just rendered from,
+   never re-derived, never scraped off the DOM). Covers all three Book states -- render() (Open/
+   Closed, the engine hierarchy -- Book+Instrument+Engine+Status+Side+sort all already applied to
+   `view` before this runs), renderApproved() (approved-only mode) and renderApprovedTab() (the
+   Approved book tab) -- each sets STATE.lastCopySyms to exactly the array it is about to hand its
+   own rowsHtml-equivalent. */
+function copyRowHtml(){
+  const n=(STATE.lastCopySyms||[]).length;
+  return '<button id="copySymBtn" class="tw-copybtn" onclick="copyTradeSymbols(this)"'+(n?'':' disabled')+'>Copy Symbols</button>';
+}
+function copyTradeSymbols(btn){
+  const syms=STATE.lastCopySyms||[];
+  if(!syms.length||!btn) return;
+  const n=syms.length, text=syms.join('\n');
+  const confirmCopied=function(){ btn.textContent='Copied '+n+' symbol'+(n===1?'':'s'); setTimeout(function(){ btn.textContent='Copy Symbols'; },1500); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(confirmCopied).catch(function(){ _twCopyFallback(text); confirmCopied(); });
+  } else { _twCopyFallback(text); confirmCopied(); }
+}
+function _twCopyFallback(text){
+  try{
+    const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+  }catch(e){}
+}
+
 /* ══ cc#1587 approved-only mode ══ Columns per the card: symbol, direction, approved price,
    approved_at IST, origin (manual / engine name), notes. approved_at is entry.when_full — the
    union stamps an alert's entry with its approved_at (cc#1505), converted to IST in SQL. */
@@ -683,6 +724,8 @@ function renderApproved(){
     ? approvedRowsHtml(view)
     : '<tr><td colspan="6" class="empty">No approved trades yet.</td></tr>';
   document.getElementById('more').innerHTML = moreHtml();
+  STATE.lastCopySyms = view.map(function(e){ return e.symbol; }).filter(Boolean);   /* cc#1820 */
+  var copyRowEl1 = document.getElementById('copyRow'); if (copyRowEl1) copyRowEl1.innerHTML = copyRowHtml();
 }
 
 function render(){
@@ -704,6 +747,8 @@ function render(){
     view = view.filter(function(e){ return e.side === STATE.side; });
   }
   view = sortView(view);   /* cc#1813: sort combines with every filter above, resets neither */
+  STATE.lastCopySyms = view.map(function(e){ return e.symbol; }).filter(Boolean);   /* cc#1820 */
+  var copyRowEl = document.getElementById('copyRow'); if (copyRowEl) copyRowEl.innerHTML = copyRowHtml();
   var bucketTotal = STATE.bucket === 'ALL'
         ? (function(){ var t = 0; (BUCKETS[STATE.instrument] || []).forEach(function(x){ t += ((STATE.byEngine || {})[x] || {})[STATE.status] || 0; }); return t; })()
         : ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
@@ -986,6 +1031,8 @@ function renderApprovedTab(){
     ? approvedTabRowsHtml(rows)
     : '<tr><td colspan="10" class="empty">No approved positions yet. Approve a signal on the Open tab or on /alerts.</td></tr>';
   document.getElementById('more').innerHTML = '';
+  STATE.lastCopySyms = rows.map(function(e){ return e.symbol; }).filter(Boolean);   /* cc#1820 */
+  var copyRowEl2 = document.getElementById('copyRow'); if (copyRowEl2) copyRowEl2.innerHTML = copyRowHtml();
 }
 function postJson(u, body){
   return fetch(u, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
