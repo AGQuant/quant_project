@@ -237,7 +237,10 @@ function renderHero(d){
   var arc = gvm==null ? 0 : (gvm/10*CIRC);
   var vcls = /^(excellent|good)$/i.test(d.verdict||'') ? ' good' : /^weak$/i.test(d.verdict||'') ? ' weak' : '';
   var tw = trendWord(ex.trend);
-  var pill = function(k, name, v){ return '<div class="g-pl '+k+'"><div class="g-pll"><span>'+name+'</span><b>'+fx(v,1)+'</b></div><div class="g-pbar"><i style="width:'+(num(v)?Math.max(0,Math.min(100,v*10)).toFixed(0):0)+'%"></i></div></div>'; };
+  /* cc#1827: pillar pills are tappable -> pillarSheetOpen(). role="button" + one data attribute +
+     aria-label + a small "tap for X" hint mirrors the established #g-trend affordance below
+     (data-trend="1", "tap for score chart ⤢") instead of inventing a new tap style. */
+  var pill = function(k, name, v, plain){ var L = k.charAt(1).toUpperCase(); return '<div class="g-pl '+k+'" role="button" data-pillar="'+L+'" aria-label="Open '+esc(plain)+' specs"><div class="g-pll"><span>'+name+'</span><b>'+fx(v,1)+'</b></div><div class="g-pbar"><i style="width:'+(num(v)?Math.max(0,Math.min(100,v*10)).toFixed(0):0)+'%"></i></div><div class="g-pexp">tap for specs ⤢</div></div>'; };
   return '<section class="pressed" id="score" aria-label="GVM score">'+
     '<div class="g-top"><div><div class="g-sym">'+esc(d.symbol)+'</div><div class="g-nm">'+esc(d.company_name||'')+'</div><div class="g-chips">'+chips+'</div></div>'+
     '<div class="g-px"><div class="g-pv">'+inr(d.price)+'</div><div class="g-ps">'+esc(d.price_label||'CMP')+(d.price_is_live?' · live '+hhmm(STATE.fetchedAt):(d.price_date?' · '+esc(d.price_date):' · last close'))+'</div>'+
@@ -245,7 +248,7 @@ function renderHero(d){
     '<div class="g-score"><div class="g-dial"><svg viewBox="0 0 130 130" aria-hidden="true"><circle cx="65" cy="65" r="56" fill="none" stroke="var(--line)" stroke-width="12"/>'+
     (gvm==null?'':'<circle cx="65" cy="65" r="56" fill="none" stroke="var(--gold)" stroke-width="12" stroke-linecap="round" stroke-dasharray="'+arc.toFixed(1)+' '+CIRC.toFixed(1)+'"/>')+
     '</svg><div class="g-dn"><b>'+fx(gvm,1)+'</b><small>GVM / 10</small></div></div>'+
-    '<div class="g-pillars">'+pill('pg','G · GROWTH',sc.g)+pill('pv','V · VALUE',sc.v)+pill('pm','M · MOMENTUM',sc.m)+'</div></div>'+
+    '<div class="g-pillars">'+pill('pg','G · GROWTH',sc.g,'Growth')+pill('pv','V · VALUE',sc.v,'Value')+pill('pm','M · MOMENTUM',sc.m,'Momentum')+'</div></div>'+
     '<div class="g-verdict"><span class="g-w'+vcls+'">'+esc(d.verdict||'—')+'</span>'+
     (pc && num(pc.top_pct) ? '<span class="tag mu">TOP '+Math.round(pc.top_pct)+'% OF '+(num(pc.universe_total)?pc.universe_total.toLocaleString('en-IN'):'—')+'</span>' : '')+'</div>'+
     (d.punchline ? '<div class="g-punch">'+plainPunch(d.punchline)+'</div>' : '<div class="g-punch mu">No summary line for this company yet.</div>')+
@@ -492,6 +495,49 @@ function gridHtml(d){
   h += '</div>';
   return {html:h, n:n};
 }
+/* ── cc#1827 · PILLAR SHEET: tap a G/V/M hero pill -> the same specs grid the web fight card
+   shows for that pillar (scorr_gvm_fightcard.html pcard()/duelRowP -- one card per pillar, one
+   row per sub-component, coloured by beats_peer, /m/gvm2). Reuses gridRows() and gridBox()
+   VERBATIM (the Grid view's own box list and box renderer, cc#1618/cc#1663/cc#1664) so there is
+   no second definition of a spec row -- only this sheet shell is new, built on the
+   paramSheetOpen()/flagSheetOpen() pattern already on this page (scrim, rounded sheet, grab
+   handle, close X, Esc, DONE). Independent of the Rows/Grid toggle: whichever gvView a device is
+   on, the sheet always shows the full grid for the tapped pillar. Tapping a box inside the sheet
+   drills into the SAME per-parameter paramSheetOpen() the Grid view itself opens (data-gbox is
+   part of gridBox()'s own markup, reused unchanged), closing this sheet first so sheets never
+   stack. PNOTE strings are the web fight card's own pcard() header copy (scorr_gvm_fightcard.html
+   ~line 225: 'LOWER = CHEAPER' / 'PRICE IS THE PROOF' / 'RANK OF <n> PEERS'), not reworded. */
+var PNAME = {G:'Growth', V:'Value', M:'Momentum'};
+var PNOTE = {V:'LOWER = CHEAPER', M:'PRICE IS THE PROOF'};
+function pillarSheetClose(){ var w = document.getElementById('g-pilsheet'); if(w) w.remove(); }
+function pillarSheetOpen(letter){
+  var d = STATE.co; if(!d) return;
+  pillarSheetClose();
+  var group = gridRows(d).filter(function(g){ return g.pillar === letter; })[0] || {rows:[]};
+  var score = d.scores && d.scores[letter.toLowerCase()];
+  var note = letter === 'G' ? 'RANK OF '+(d.segment_total||'PEERS') : (PNOTE[letter] || '');
+  var name = PNAME[letter] || letter;
+  var boxes = group.rows.map(gridBox).join('');
+  var el = document.createElement('div'); el.id = 'g-pilsheet';
+  el.innerHTML = '<div data-pil-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80"></div>'
+    + '<div role="dialog" aria-modal="true" aria-label="'+esc(name)+' specs" style="position:fixed;left:0;right:0;bottom:0;max-height:84vh;display:flex;flex-direction:column;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0">'
+    + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 4px;flex-shrink:0"></div>'
+    + '<div style="overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px))">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div>'
+    + '<div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--gold)">'+esc(name.toUpperCase())+' · '+esc(STATE.sym||'')+'</div>'
+    + '<div style="font-family:var(--body);font-weight:800;font-size:16px;color:var(--chalk);margin-top:2px">'+fx(score,1)+' / 10 <span style="font-weight:600;font-size:11px;color:var(--mute)">· '+esc(note)+'</span></div></div>'
+    + '<button type="button" data-pil-close="1" aria-label="Close" style="background:transparent;border:1px solid var(--line);color:var(--chalk);width:32px;height:32px;border-radius:8px;font-size:16px;cursor:pointer;flex-shrink:0">×</button></div>'
+    + (boxes ? '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-7);margin-top:12px">'+boxes+'</div>'+GRID_LEGEND
+             : '<div class="g-empty" style="margin-top:12px">No '+esc(name.toLowerCase())+' checks in this report.</div>')
+    + '<div class="g-asof">'+group.rows.length+' check'+(group.rows.length===1?'':'s')+' · score as of '+esc(d.score_date||'—')+'</div>'
+    + '<button type="button" data-pil-close="1" style="width:100%;min-height:44px;margin-top:16px;border-radius:12px;border:0;background:var(--gold);color:var(--well);font-family:var(--mono);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer">DONE</button></div></div>';
+  document.body.appendChild(el);
+  el.addEventListener('click', function(e){
+    if(e.target.closest('[data-pil-close]')){ pillarSheetClose(); return; }
+    var gb = e.target.closest('[data-gbox]'); if(gb){ pillarSheetClose(); paramSheetOpen(gb.getAttribute('data-gbox')); }
+  });
+}
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') pillarSheetClose(); });
 function secGrowth(d){
   /* ref order first (8 rows), then any other G row except the holding rows (those live on Holders) */
   var ORDER = ['sales_5y','profit_5y','profit_3y','qoq_sales','qoq_profit','opm','opm_exp','roce'];
@@ -1361,6 +1407,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var g = e.target.closest('[data-go]'); if(g){ if(LP.fired && g.hasAttribute('data-recent')){ LP.fired = false; return; } go(g.getAttribute('data-go')); return; }
   var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); return; }
   var t = e.target.closest('[data-trend]'); if(t){ openScoreTrend(); return; }   /* cc#1615: the score chart, not the chart card */
+  var pl = e.target.closest('[data-pillar]'); if(pl){ pillarSheetOpen(pl.getAttribute('data-pillar')); return; }   /* cc#1827: G/V/M hero pills */
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
   var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); try{ localStorage.setItem('scorr_gvm_view', gvView); }catch(e){} refreshPillars(); syncCapVM(); return; }   /* cc#1618/cc#1664 */
