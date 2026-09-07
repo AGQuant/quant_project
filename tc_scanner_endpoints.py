@@ -9,14 +9,24 @@ cleared that Sunday (410 rows archived to tc_scanner_holds_archive_20260906).
   ENTRY  Every 5 minutes in market hours the full active futures universe is scored on
          the FOUR score100 buckets by the shared scorer (tc_v4_dual.score_card via
          tc_v4_scan._load_bulk — the same numbers the Trade Check page and the scanner
-         header show). A bucket ENTERS when its score100 >= its bar in
+         header show). A bucket is ELIGIBLE when its score100 >= its bar in
          tc_scanner_config.TC_SCANNER_CONFIG["score_thresholds"]:
              BUY-REV 80 · BUY-MOM 85 · SELL-REV 80 · SELL-MOM 85
-         No sector/RSI gate and no per-bucket cap on the book (39467 names the score bar
-         only; the 29447 gates and caps stay DISPLAY marks on the scanner page).
+         cc#1823 (P0, session_log 40526, 07-Sep-2026): the 29447 gates and caps are now
+         ENFORCED on the book, not just marked on the scanner page — observation_mode
+         governed the DISPLAY only and never gated an entry (24 unthrottled entries on
+         06-Sep). An eligible bucket also needs gate_status(...)["passed"] is True (the
+         SAME tc_scanner_config.gate_status the scanner page's annotate() already calls —
+         one definition, not a second one) before it is entry-eligible. Eligible picks
+         are then ranked by score100 desc, capped per_bucket_per_day per bucket, then
+         capped book_total across all buckets combined FOR THE DAY (cumulative across
+         every 5-min tick, not just this one) — see _score_universe/run_scan below. An
+         eligible pick cut by a cap is a near-miss: it stays visible on the scanner page
+         as would_qualify=true (annotate() runs on the full scan, independent of the
+         book) but is never written to tc_scanner_holds.
          One entry per symbol/side/day (UNIQUE latch); no entry while a position is
-         OPEN on that side. If both buckets of a side clear their bar on the same
-         tick the higher score100 is the entry. Entry price = futures CMP at the tick.
+         OPEN on that side. If both buckets of a side clear their bar (and gate) on the
+         same tick the higher score100 is the entry. Entry price = futures CMP at the tick.
   EXIT   +3% target / -3% stop from entry (SELL mirrored), checked on every fyers_fut
          5-min bar's high/low inside the 7-day life. Stop before target inside a bar.
          A bar that OPENS beyond the level fills at its open (gap fill) — the recorded
@@ -101,7 +111,7 @@ from fastapi import APIRouter
 # tc_scanner_config.TC_SCANNER_CONFIG (39467); this module derives its constants
 # from there so the scanner page, the wall's engine-rules sheet and the book can
 # never quote different figures.
-from tc_scanner_config import TC_SCANNER_CONFIG, BUCKETS, side_of
+from tc_scanner_config import TC_SCANNER_CONFIG, BUCKETS, side_of, gate_status
 
 router = APIRouter()
 IST = ZoneInfo("Asia/Kolkata")
@@ -181,12 +191,19 @@ def _score_universe():
     """Score every active futures symbol on all four buckets with the SHARED scorer — the same
     _load_bulk + score_card path tc_v4_scan.scan() runs for the scanner page, so the book and the
     page cannot disagree about a score. Returns ({symbol: {bucket: score100}}, {symbol: cmp},
-    universe_count). A bucket the registry has not weighted has score100 None and never enters."""
+    {symbol: v8-fields-for-gate_status}, universe_count). A bucket the registry has not weighted
+    has score100 None and never enters.
+
+    cc#1823: v8_by_symbol carries exactly what tc_scanner_config.gate_status() reads — sector_week/
+    sector_month/rsi_month/week_return from D[sym]['v8'] (the same block tc_v4_scan's own
+    v8_by_symbol is built from for annotate()), PLUS nifty_week merged in from D[sym]['nifty_wk']
+    (computed once per _load_bulk call, broadcast onto every symbol) for the AMENDMENT RS gate —
+    _load_bulk already computes it, so this is zero new queries."""
     from tc_v4_scan import _load_bulk
     from tc_v4_dual import score_card, STYLES
     with _conn() as conn, conn.cursor() as cur:
         D, ctx = _load_bulk(cur)
-    scores, cmps = {}, {}
+    scores, cmps, v8_by_symbol = {}, {}, {}
     for sym, d in D.items():
         if not d.get("daily") or d.get("cmp") is None:
             continue
@@ -197,7 +214,10 @@ def _score_universe():
                 c = score_card(d, st, side)
                 per[c["label"]] = c.get("score100")
         scores[sym] = per
-    return scores, cmps, int(ctx.get("count") or len(D))
+        v8 = dict(d.get("v8") or {})
+        v8["nifty_week"] = d.get("nifty_wk")
+        v8_by_symbol[sym] = v8
+    return scores, cmps, v8_by_symbol, int(ctx.get("count") or len(D))
 
 
 def pick_entries(bucket_scores, thresholds=None):
@@ -219,15 +239,46 @@ def pick_entries(bucket_scores, thresholds=None):
 
 # ── scan + record (LATCH via UNIQUE, ON CONFLICT DO NOTHING) ──────────────
 def run_scan():
-    """Full-universe scan, both sides, on the V2 entry rule (39467). Records new entries only —
-    first qualification per symbol/side/day latches, and a side that is already OPEN is skipped."""
+    """Full-universe scan, both sides, on the V2 entry rule (39467) — cc#1823 (P0, 40526) now
+    ENFORCES the 29447 gates and caps on the book instead of leaving them as display-only marks.
+
+    Stages, in order:
+      1. score_thresholds eligibility (unchanged, pick_entries) — a bucket must clear its bar.
+      2. gate_status(...)["passed"] is True (tc_scanner_config's own gate function — not a second
+         copy of the logic). Gate-failed or gate-unmeasured picks are recorded in `not_taken` and
+         never enter, but stay visible on the scanner page's own would_qualify marks (annotate()
+         runs independently, on the full scan).
+      3. Already-open-on-this-side or already-latched-today symbols are dropped BEFORE ranking —
+         a cap slot is never spent on a candidate that would no-op at the INSERT anyway.
+      4. Rank survivors within each bucket by score100 desc; keep at most the bucket's REMAINING
+         per_bucket_per_day allowance for TODAY (today's count already in tc_scanner_holds, read
+         fresh at the top of this call — the cap is cumulative across every 5-min tick, not just
+         this one).
+      5. Pool every bucket's kept picks, rank by score100 desc again, keep at most the day's
+         REMAINING book_total allowance.
+      6. INSERT the survivors. _INSERT_HOLD_SQL's own NOT EXISTS / ON CONFLICT stays as a
+         belt-and-braces guard against a race between steps 3 and 6, not the primary gate.
+    """
     now = _ist_now()
     today = now.date()
-    scores, cmps, universe = _score_universe()
+    scores, cmps, v8_by_symbol, universe = _score_universe()
+    caps = TC_SCANNER_CONFIG["caps"]
+    per_bucket_cap = int(caps["per_bucket_per_day"])
+    book_cap = int(caps["book_total"])
     buy_new = sell_new = 0
-    entries = []
+    entries, not_taken = [], []
     with _conn() as conn, conn.cursor() as cur:
         ensure_schema(cur)
+        cur.execute("SELECT symbol, side FROM tc_scanner_holds WHERE exit_reason='OPEN'")
+        open_sides = set(cur.fetchall())
+        cur.execute("SELECT symbol, side FROM tc_scanner_holds WHERE scan_date=%s", (today,))
+        latched_today = set(cur.fetchall())
+        cur.execute("SELECT style, COUNT(*) FROM tc_scanner_holds WHERE scan_date=%s GROUP BY style", (today,))
+        bucket_today = dict(cur.fetchall())
+        total_today = sum(bucket_today.values())
+
+        # stages 1-3: every gate-eligible, not-already-open/latched candidate this tick
+        candidates_by_bucket = {}
         for sym in sorted(scores):
             picks = pick_entries(scores[sym])
             if not picks:
@@ -236,18 +287,49 @@ def run_scan():
             if not px or px <= 0:
                 continue
             for side, (bucket, sc) in picks.items():
-                tgt, sl = _target_sl(px, side)
-                cur.execute(_INSERT_HOLD_SQL, (sym, side, bucket, int(round(sc)), SCORE_MAX, px,
-                                               now.replace(tzinfo=None), tgt, sl, today, sym, side))
-                if cur.rowcount:
-                    entries.append({"symbol": sym, "side": side, "bucket": bucket, "score100": sc, "entry": px})
-                    if side == "BUY":
-                        buy_new += 1
-                    else:
-                        sell_new += 1
+                if (sym, side) in open_sides or (sym, side) in latched_today:
+                    continue   # already open, or already latched today under another bucket
+                gs = gate_status(v8_by_symbol.get(sym) or {}, bucket)
+                if gs["passed"] is not True:
+                    not_taken.append({"symbol": sym, "side": side, "bucket": bucket, "score100": sc,
+                                       "reason": "gate_unmeasured" if gs["passed"] is None else "gate_failed",
+                                       "failing": gs.get("failing") or []})
+                    continue
+                candidates_by_bucket.setdefault(bucket, []).append((sc, sym, side, px))
+
+        # stage 4: per-bucket cap, remaining allowance for today
+        bucket_admitted = []
+        for bucket, lst in candidates_by_bucket.items():
+            lst.sort(key=lambda c: -c[0])
+            remaining = max(0, per_bucket_cap - bucket_today.get(bucket, 0))
+            bucket_admitted.extend((bucket,) + c for c in lst[:remaining])
+            not_taken.extend({"symbol": c[1], "side": c[2], "bucket": bucket, "score100": c[0],
+                               "reason": "per_bucket_cap"} for c in lst[remaining:])
+
+        # stage 5: book_total cap, remaining allowance for today, filling by score100 desc across buckets
+        bucket_admitted.sort(key=lambda c: -c[1])
+        remaining_book = max(0, book_cap - total_today)
+        final, cut_book = bucket_admitted[:remaining_book], bucket_admitted[remaining_book:]
+        not_taken.extend({"symbol": c[2], "side": c[3], "bucket": c[0], "score100": c[1],
+                           "reason": "book_cap"} for c in cut_book)
+
+        # stage 6: write
+        for bucket, sc, sym, side, px in final:
+            tgt, sl = _target_sl(px, side)
+            cur.execute(_INSERT_HOLD_SQL, (sym, side, bucket, int(round(sc)), SCORE_MAX, px,
+                                           now.replace(tzinfo=None), tgt, sl, today, sym, side))
+            if cur.rowcount:
+                entries.append({"symbol": sym, "side": side, "bucket": bucket, "score100": sc, "entry": px})
+                if side == "BUY":
+                    buy_new += 1
+                else:
+                    sell_new += 1
         conn.commit()
     return {"universe": universe, "scored": len(scores), "buy_new": buy_new, "sell_new": sell_new,
-            "entries": entries, "thresholds": ENTRY_THRESHOLDS, "scan_ts": now.isoformat()}
+            "entries": entries, "not_taken": not_taken, "thresholds": ENTRY_THRESHOLDS,
+            "caps": {"per_bucket_per_day": per_bucket_cap, "book_total": book_cap,
+                     "book_total_today_before": total_today},
+            "scan_ts": now.isoformat()}
 
 
 def check_exits():
