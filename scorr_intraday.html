@@ -445,7 +445,10 @@ function paintProvenance(){
     + 'no gate and no cap (session_log 39467), so an empty book beside a non-zero count here, or the reverse, is both surfaces working.';
 }
 
-const GATE_SHORT = { sector_week: 'SW', sector_month: 'SM', rsi_month: 'RSI' };
+// cc#1825: RS added (week_return_vs_sector_nifty) -- cc#1823 (this session, landed first) gave
+// gate_status() a 4th gate; without a short label here it would fall through to the "first 3
+// letters of the raw key" fallback below and render as the meaningless "WEE".
+const GATE_SHORT = { sector_week: 'SW', sector_month: 'SM', rsi_month: 'RSI', week_return_vs_sector_nifty: 'RS' };
 /* cc#1601 scope 2: Near Miss renders OPEN on every fresh load; a hand-collapse is remembered in
    memory only for this visit (the 30 s refresh re-renders the panel, so the state has to live
    outside the DOM), never in localStorage. */
@@ -464,6 +467,21 @@ function gateStrip(x){
     const sh  = GATE_SHORT[one.key] || String(one.key || '?').slice(0,3).toUpperCase();
     return '<span class="gate ' + cls + '" title="' + esc(one.text) + '">' + sh + '</span>';
   }).join('');
+}
+
+/* cc#1825 (founder: "instead of rank no relevance, show gate passed instead" -- Near Miss table).
+   Sums the SAME gate_status() gates list gateStrip() already renders badges from -- no second
+   gate-counting calculation. Denominator is g.gates.length, never a hardcoded 3: this card's own
+   text said "3 gates only" when filed, but cc#1823 (this session, landed first) added a 4th
+   (Relative Strength) -- cc#1823's own amendment named this exact case and said build /4, not /3,
+   if it lands first. Reading the length live means this never goes stale again if a 5th gate is
+   ever added. An unmeasured gate (pass === null) counts in neither the numerator nor drops the
+   denominator -- same three-state honesty gate_status() itself already guarantees. */
+function gatesPassed(x){
+  const g = x && x.gate;
+  if (!g || !g.gates || !g.gates.length) return null;
+  const n = g.gates.length, passed = g.gates.filter(function(one){ return one.pass === true; }).length;
+  return passed + '/' + n;
 }
 
 /* The reason a row is not qualified, in the order the engine applies the tests. Reported from the
@@ -537,8 +555,9 @@ function renderPanel(side){
     + '<td><span class="badge ' + (side === 'SELL' ? 'b-sell' : 'b-buy') + '">' + esc(x.best_label) + '</span></td>'
     + '<td>' + scoreCell(x) + '</td>'
     + '<td>' + gateStrip(x) + '</td>'
-    // cc#1745: rank in bucket today is the third annotation 29448 names; it now rides on every row.
-    + '<td>' + (x.rank_in_bucket != null ? '#' + x.rank_in_bucket : '—') + '</td>'
+    // cc#1825: RANK (position in an already-"strongest first"-sorted list) replaced with GATES
+    // PASSED -- the same gate_status() gates this row's Gates column already shows, summed.
+    + '<td>' + (gatesPassed(x) || '—') + '</td>'
     + '<td style="font-size:13px;color:var(--dim)">' + esc(missReason(x)) + '</td>'
     + '</tr>';
 
@@ -558,7 +577,7 @@ function renderPanel(side){
   // default (cc#1601) and remembers its own hand-collapse for the visit. The table is no longer
   // desktop-only — a phone reaches every row too, scrolling sideways inside the card like the
   // other tables at that width.
-  const nmHead = '<thead><tr><th>Symbol</th><th>Bucket</th><th>Score /100 &middot; bar</th><th>Gates</th><th>Rank</th><th>Why not</th></tr></thead>';
+  const nmHead = '<thead><tr><th>Symbol</th><th>Bucket</th><th>Score /100 &middot; bar</th><th>Gates</th><th>Gates passed</th><th>Why not</th></tr></thead>';
   const missSection = !all.length
     ? '<details class="nm" open><summary>Near miss <span class="ct">nothing scored on this side</span></summary></details>'
     : (order.map(function(b){
