@@ -21,7 +21,12 @@
   .wrap{max-width:1240px;margin:0 auto;padding:16px 16px 64px}
   h1{font-size:19px;font-weight:800;margin:4px 0 2px;display:inline-block}
   .hd-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-  .sub{font-size:12px;color:var(--mut);margin-bottom:14px;line-height:1.5}
+  /* cc#1814 (founder: "hide this comment" / "approval surface... also if req. add in i button"):
+     the two-line meta caption and the subline paragraph are hidden from the default view. The
+     computations behind them (setSubline(), the meta textContent, closedSummary/TC-book line) are
+     UNCHANGED and keep running — cc#1809-style summary work still reads real values — only the
+     visibility changes, per the card's do_not_touch. */
+  .sub{font-size:12px;color:var(--mut);margin-bottom:14px;line-height:1.5;display:none}
   .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:10px}
   .tabs::-webkit-scrollbar{display:none}
   .tab{flex:0 0 auto;padding:8px 13px;border-radius:9px;border:1px solid var(--line);
@@ -49,7 +54,7 @@
         display:inline-flex;align-items:center;justify-content:center;font-style:italic;font-family:Georgia,serif}
   .ibtn:hover{border-color:var(--blu);color:var(--blu)}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden}
-  .meta{font-size:11px;color:var(--dim);padding:12px 16px 0;line-height:1.5}
+  .meta{font-size:11px;color:var(--dim);padding:12px 16px 0;line-height:1.5;display:none}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:10px}
   table{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
   thead th{position:sticky;top:0;background:var(--panel);text-align:left;padding:7px 10px;
@@ -71,7 +76,7 @@
      numbers would shrink, so the tab fits a laptop width with no horizontal scroll. */
   .tw-detail{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   @media(max-width:1280px){ .tw-detail{max-width:150px} }
-  .tw-csum{font-size:11.5px;color:var(--mut);margin:-4px 0 8px}
+  .tw-csum{font-size:11.5px;color:var(--mut);margin:-4px 0 8px;display:none}
   .tw-csum b{color:var(--txt)}
   .sym{font-weight:800}
   .pos{color:var(--grn)} .neg{color:var(--red)}
@@ -1033,6 +1038,27 @@ function closeApproved(id){
    index), five columns; the epochs on one line at the top so a reader knows why older signals
    are not listed; the cc#1295 other-engines list kept as the last section. Payload is served,
    never typed here -- a cell that reads "not specified in config" is the API saying so. */
+/* cc#1814 AMENDMENT ("Approval surface... this comment also if req. add in i button"): the subline
+   paragraph — architecture/trust text ("this page computes nothing of its own") plus the live
+   approval-surface counts — moved here from the always-visible caption. Read straight from STATE,
+   already kept fresh by boot() on every load/refresh; no second fetch, so this can never be staler
+   than the page itself. Kept as its own section, never blended with the engine-rules content below
+   (a live "what's showing right now" note is a different thing from a static "how it's built" one,
+   even sharing one icon). */
+function _subInfoHtml(){
+  if (STATE.mode === 'approved'){
+    return '<b>Approved trades only</b>'
+      + (STATE.approvedAsOf ? ' · as of ' + esc(STATE.approvedAsOf) + ' IST' : '')
+      + '. This page computes nothing of its own — it renders <b>/api/tradewall</b>, the same endpoint the app reads.';
+  }
+  var ac = STATE.approvalCounts;
+  return (ac ? '<b>' + ac.pending + '</b> pending'
+      + (ac.suppressed ? ', ' + ac.suppressed + ' suppressed (already in position)' : '')
+      + ' · ' + ac.approved_today + ' approved today'
+      + (ac.newest_signal_ts ? ' · as of ' + esc(twStampFull(ac.newest_signal_ts)) + ' IST (newest signal)' : '')
+    : '')
+    + '. Engine signals with an Approve per row; an approval prints in Alerts. ' + SUB_ENGINES;
+}
 function openWallInfo(){
   if (!window.ScorrInfoSheet){ openOther(); return; }
   ScorrInfoSheet.open('Wall of Trades · engine rules', '<div class="empty">Loading…</div>');
@@ -1067,7 +1093,8 @@ function openWallInfo(){
       ? others.map(function(e){ return '<div class="ov-row"><span>' + esc(e.name) + '</span><span>' + e.open + ' open · ' + e.closed + ' closed</span></div>'; }).join('')
       : 'No other engines with a trade book right now.';
     ScorrInfoSheet.setBody(
-      ScorrInfoSheet.section('Scope', top)
+      ScorrInfoSheet.section('This page', _subInfoHtml())
+      + ScorrInfoSheet.section('Scope', top)
       + ScorrInfoSheet.section('Engines on the wall (' + rows.length + ')', tbl)
       + ScorrInfoSheet.section('Other engines not on the wall', otherHtml));
   }).catch(function(e){
