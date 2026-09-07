@@ -805,7 +805,9 @@ def v10_buildup(limit: int = 15):
                     -- rows it actually served (max over the l rows, below) — APP_TABLE_ASOF_
                     -- STAMP_V1's gate found this payload had no timestamp at all, which is why
                     -- the card's footer could only ever render its static fallback.
-                    SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, oi_prev, basis, ts
+                    -- cc#1822: basis_pct added alongside the existing basis (absolute rupees) —
+                    -- see the note on the final SELECT below.
+                    SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, oi_prev, basis, basis_pct, ts
                     FROM futures_basis, sess
                     WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
                     ORDER BY symbol, ts DESC
@@ -846,7 +848,17 @@ def v10_buildup(limit: int = 15):
                        -- inventoried in cc#1509's log as a separate surface, not changed here.)
                        l.oi, (l.oi - o.oi_open) AS oi_chg,
                        ROUND((l.oi - o.oi_open)::numeric / NULLIF(o.oi_open,0) * 100, 2) AS oi_chg_pct,
-                       l.basis, l.ts
+                       -- cc#1822 (CUSTOM_SCREEN_BUILDER_V1, session_log 40520): l.basis is the
+                       -- ABSOLUTE rupee futures-vs-spot gap, not a percent — confirmed by reading
+                       -- futures_basis's own columns (basis numeric, basis_pct numeric, both
+                       -- populated; e.g. BSE 07-Sep-2026 15:30 IST: futures_close 3457.3,
+                       -- spot_close 3446.2, basis 11.1, basis_pct 0.3221 = 11.1/3446.2*100). Every
+                       -- existing reader of `basis` (this endpoint's own payload key, and
+                       -- quality_bullish_basis's pos/neg split) only ever used it for its SIGN,
+                       -- which is identical either way since spot_close > 0 always — so this adds
+                       -- basis_pct as a NEW column read, changes no existing value, and nothing
+                       -- that already reads `l.basis`/`basis` is touched.
+                       l.basis, l.basis_pct, l.ts
                 FROM l JOIN pf USING(symbol) LEFT JOIN o USING(symbol)
                 WHERE pf.pc IS NOT NULL AND l.c IS NOT NULL
             """)
@@ -866,7 +878,7 @@ def v10_buildup(limit: int = 15):
         raise HTTPException(500, f"v10_buildup failed: {e}")
 
     def _row(r):
-        sym, price, day_1d, oi, oi_chg, oi_chg_pct, basis, _ts = r
+        sym, price, day_1d, oi, oi_chg, oi_chg_pct, basis, basis_pct, _ts = r
         day_1d = float(day_1d) if day_1d is not None else None
         oi_chg = int(oi_chg) if oi_chg is not None else None
         # true buildup needs price + OI; classify only when oi_chg is present
@@ -883,6 +895,7 @@ def v10_buildup(limit: int = 15):
                 "oi_chg": oi_chg,
                 "oi_chg_pct": float(oi_chg_pct) if oi_chg_pct is not None else None,   # cc#1431
                 "basis": float(basis) if basis is not None else None,
+                "basis_pct": float(basis_pct) if basis_pct is not None else None,   # cc#1822: NEW key, additive
                 "rvol": rvl.get(sym),                                # cc#1440: live RVOL
                 "vol_p": (_vp["value"] if _vp else None),            # cc#1440 (V2): yesterday's RVOL at close
                 "vol_d": dlv.get(sym),                               # cc#1454: Delivery Ratio (shared fn)
