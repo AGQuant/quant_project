@@ -2200,6 +2200,9 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #gvp .g-pl.pg .g-pbar i{background:linear-gradient(90deg,color-mix(in srgb, var(--up) 45%, var(--well)),var(--up))}
 #gvp .g-pl.pv .g-pbar i{background:linear-gradient(90deg,color-mix(in srgb, var(--amber) 45%, var(--well)),var(--amber))}
 #gvp .g-pl.pm .g-pbar i{background:linear-gradient(90deg,color-mix(in srgb, var(--aqua) 45%, var(--well)),var(--aqua))}
+/* cc#1827: pillar pills open the specs sheet -- same "tap for X" hint style as .g-trend .g-exp below */
+#gvp .g-pl{cursor:pointer}
+#gvp .g-pl .g-pexp{margin-top:var(--space-4);text-align:right;font-family:var(--mono);font-size:var(--type-10);letter-spacing:var(--track-px5);color:var(--gold)}
 #gvp .g-verdict{display:flex;align-items:center;gap:var(--space-10);margin:var(--space-6) 0 var(--space-10)}
 #gvp .g-verdict .g-w{font-family:var(--display);font-size:var(--type-22);letter-spacing:var(--track-px7);color:var(--amber);transform:skewX(-6deg)}
 #gvp .g-verdict .g-w.good{color:var(--up)} #gvp .g-verdict .g-w.weak{color:var(--down)}
