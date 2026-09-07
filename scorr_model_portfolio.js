@@ -352,17 +352,31 @@
   var HCOLS = [['symbol','Symbol','txt'],['qty','Qty','num'],['entry_price','Entry','num'],['current_price','CMP','num'],
                ['current_value','Value','num'],['pnl','P&amp;L ₹','num'],['pnl_pct','P&amp;L %','num'],['weight','Weight %','num'],['stop_loss_price','Stop','num']];
   var HSORT = { key: 'weight', dir: 1 };   // dir 1 = descending (cc#1680 convention)
-  function holdingsHtml(rows, mktVal) {
-    if (!rows || !rows.length) return '<div class="mp-msg">No open positions.</div>';
-    rows = rows.map(function (r) { var o = Object.assign({}, r);
+  // cc#1821: pulled out of holdingsHtml so the Copy Symbols button can read the SAME sorted list
+  // that function renders from, not a second, possibly-drifting re-derivation of the sort. Output
+  // of holdingsHtml is unchanged -- this is the same map+sort it always ran, just callable on its
+  // own from the click handler with the current HSORT state.
+  function sortedHoldings(rows, mktVal) {
+    var out = (rows || []).map(function (r) { var o = Object.assign({}, r);
       o.weight = (mktVal && r.current_value != null) ? (+r.current_value / mktVal * 100) : null; return o; });
     var k = HSORT.key, kind = (HCOLS.filter(function (c) { return c[0] === k; })[0] || [])[2];
-    rows.sort(function (a, b) {
+    out.sort(function (a, b) {
       var av = a[k], bv = b[k];
       if (av == null && bv == null) return 0; if (av == null) return 1; if (bv == null) return -1;
       var base = kind === 'num' ? (Number(av) - Number(bv)) : String(av).localeCompare(String(bv));
       return HSORT.dir === 1 ? -base : base;
     });
+    return out;
+  }
+  function _mpCopyFallback(text) {
+    try {
+      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    } catch (e) {}
+  }
+  function holdingsHtml(rows, mktVal) {
+    if (!rows || !rows.length) return '<div class="mp-msg">No open positions.</div>';
+    rows = sortedHoldings(rows, mktVal);
     var arrow = function (c) { return HSORT.key === c ? (HSORT.dir === 1 ? ' <span style="color:var(--blu,#4D7CFE)">▼</span>' : ' <span style="color:var(--blu,#4D7CFE)">▲</span>') : ' <span style="opacity:.25;font-size:9px">⇅</span>'; };
     var head = HCOLS.map(function (c) { return th(c[1] + arrow(c[0]), 'data-mp-sort="' + c[0] + '"' + (c[2] === 'txt' ? ' style="text-align:left"' : '')).replace('>' + esc(c[1] + arrow(c[0])) + '<', '>' + c[1] + arrow(c[0]) + '<'); }).join('');
     var body = rows.map(function (r) {
@@ -495,7 +509,12 @@
         + '<span id="mpTag" style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)">' + esc(tag) + '</span>'
         + '</div>'
         + kpiHtml(reg, d, hs1cnt, holdVal, cashInfo, pos.length)
-        + '<div class="mp-sec">Holdings · ' + pos.length + '</div><div id="mpHoldings">' + holdingsHtml(pos.slice(), mktVal) + '</div>'
+        // cc#1821: Copy Symbols on the Holdings header row, right-aligned opposite the label — the
+        // first control this row has ever had.
+        + '<div class="mp-sec" style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
+        + '<span>Holdings · ' + pos.length + '</span>'
+        + '<button type="button" class="mp-btn" id="mpCopyBtn"' + (pos.length ? '' : ' disabled') + '>Copy Symbols</button>'
+        + '</div><div id="mpHoldings">' + holdingsHtml(pos.slice(), mktVal) + '</div>'
         + '<div class="mp-tabs" id="mpTabs"><button type="button" class="mp-tab active" data-mp-tab="rebalance">Rebalance History</button><button type="button" class="mp-tab" data-mp-tab="hsl">HSL History</button></div>'
         + '<div id="mpHist">' + (rh.error ? '<div class="mp-msg">Rebalance history unavailable — ' + esc(rh.error) + '</div>' : rebalanceHtml(rh)) + '</div>';
       var ib = el.querySelector('#mpInfoBtn');
@@ -508,6 +527,22 @@
         if (HSORT.key === k) HSORT.dir = -HSORT.dir; else { HSORT.key = k; HSORT.dir = (k === 'symbol') ? -1 : 1; }
         hold.innerHTML = holdingsHtml(pos.slice(), mktVal);
       });
+      // cc#1821: same clipboard/fallback mechanism as cc#1806 (copyOpenPosSymbols in
+      // v8_dashboard.html) and cc#1820 (Wall of Trades) — plain symbol, one per line, "Copied N
+      // symbols" confirmation. Reads sortedHoldings(pos, mktVal) at CLICK time, so a sort change
+      // (the handler above) is always reflected even though pos itself is never mutated.
+      var copyBtn = el.querySelector('#mpCopyBtn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', function () {
+          var syms = sortedHoldings(pos, mktVal).map(function (r) { return r.symbol; }).filter(Boolean);
+          if (!syms.length) return;
+          var n = syms.length, text = syms.join('\n');
+          var confirmCopied = function () { copyBtn.textContent = 'Copied ' + n + ' symbol' + (n === 1 ? '' : 's'); setTimeout(function () { copyBtn.textContent = 'Copy Symbols'; }, 1500); };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(confirmCopied).catch(function () { _mpCopyFallback(text); confirmCopied(); });
+          } else { _mpCopyFallback(text); confirmCopied(); }
+        });
+      }
       el.querySelector('#mpTabs').addEventListener('click', function (e) {
         var t = e.target && e.target.closest ? e.target.closest('[data-mp-tab]') : null;
         if (!t) return;
