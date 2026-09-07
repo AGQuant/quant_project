@@ -243,8 +243,15 @@ section{margin-top:26px}
 .rtab tr:last-child td{border-bottom:none}
 .rtab tbody tr:hover{background:rgba(34,211,238,.035)}
 .rtab td.r{text-align:right} .rtab td.c{text-align:center;white-space:nowrap}
-.tk{font-family:var(--f-m);font-size:11.5px;font-weight:600;color:var(--cy);display:block;letter-spacing:.02em}
-.cn{font-size:11px;color:var(--tx3);display:block;margin-top:1px}
+/* cc#1824 (founder: "Symbol big font, full name small font", refining cc#1758's "match Verdict"
+   ruling — that card unified every OTHER column to one size via --rc-fs below; the symbol/company
+   pair is deliberately carved OUT of that uniform rule instead, into its own bigger/smaller pair,
+   per the founder's own more-pronounced-contrast ask. Values are literals reused from elsewhere on
+   this same page (this page loads no type ramp, per cc#1758's own comment) — 14px is a clean step
+   above .nh's 13.5px (this page's existing "prominent" size); 9.5px matches .rtab th's existing
+   smallest size, not a new value either. */
+.tk{font-family:var(--f-m);font-size:14px;font-weight:600;color:var(--cy);display:block;letter-spacing:.02em}
+.cn{font-size:9.5px;color:var(--tx3);display:block;margin-top:1px}
 .num{font-family:var(--f-m);font-size:11.5px;color:var(--tx2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .rtab td b{font-size:12.5px;font-weight:600;display:block;line-height:1.35}
 .sub{font-size:11px;color:var(--tx3);display:block;margin-top:3px;line-height:1.45}
@@ -273,7 +280,10 @@ section{margin-top:26px}
    and the verdict itself. Change --rc-fs and the table moves together. Declared after the
    per-class rules above so it wins on every cell. */
 .rtab{--rc-fs:11.5px}
-.rtab th,.rtab td,.rtab .tk,.rtab .cn,.rtab .num,.rtab .pill,.rtab .pend,.rtab .rc-verdict,.rtab td b{font-size:var(--rc-fs)}
+/* cc#1824: .tk/.cn dropped from this list — they now carry their own explicit sizes above (14px/
+   9.5px), not the shared --rc-fs every other cell still reads. Everything else here already
+   matches Verdict's own 11.5px (.rc-verdict, same --rc-fs) since cc#1758 — nothing else changes. */
+.rtab th,.rtab td,.rtab .num,.rtab .pill,.rtab .pend,.rtab .rc-verdict,.rtab td b{font-size:var(--rc-fs)}
 .rtdot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none}
 .rtdot.g{background:var(--gr)} .rtdot.a{background:var(--am)} .rtdot.r{background:var(--rd)}
 .rc-rbtn{font-family:var(--f-m);font-size:10px;font-weight:700;letter-spacing:.04em;
