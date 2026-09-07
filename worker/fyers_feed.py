@@ -2424,6 +2424,38 @@ def _index_one_sided_unders(minutes=15):
             pass
 
 
+def _index_option_liveness(minutes=HEARTBEAT_STALE_MINS):
+    """cc#1803 (07-Sep-2026 P0): count of INDEX_OPTION_UNDERLYINGS with ANY option_chain tick
+    (either side) in the last `minutes`, out of the full universe.
+    Companion to _index_one_sided_unders — that one catches a PARTIAL drop (one side silent per
+    underlying); this one catches a TOTAL drop (every underlying silent at once), which is the
+    07-Sep incident's actual shape: options subscribed fine at the open, then the whole leg went
+    dark for the rest of the session with nothing watching for it — eq/fut have had this exact
+    periodic per-leg check (WATCHDOG_MIN_SYMBOLS floor) since cc#489; options never did.
+
+    Same defensive contract as its sibling: own short-lived connection (cc#497), returns -1 on
+    DB error so a bad read can never be mistaken for a dead feed and trigger a false heal."""
+    hc = None
+    try:
+        cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=minutes)
+        hc = get_db()
+        with hc.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(DISTINCT underlying) FROM option_chain
+                WHERE underlying = ANY(%s) AND ts >= %s
+            """, (list(INDEX_OPTION_UNDERLYINGS.keys()), cutoff))
+            r = cur.fetchone()
+            return int(r[0]) if r and r[0] is not None else 0
+    except Exception as e:
+        log.warning(f"_index_option_liveness: {e}")
+        return -1
+    finally:
+        try:
+            if hc: hc.close()
+        except Exception:
+            pass
+
+
 # ── cold-boot CMP seed (cc#352, id166 family) ───────────────────────────────────
 CMP_BOOT_STALE_MIN = 20   # cc#352: seed cmp_prices from REST if the freshest row is older than this
 QUOTE_BATCH        = 50   # Fyers quotes API cap per request
@@ -3393,7 +3425,14 @@ def run(auth_code=None):
             in_market = is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= SESSION_END   # cc#855
             # cc#1017: the ext leg is now IN this line. The 14-Aug blindness was that it never was — so
             # 'eq 212/206, fut 208/208' read healthy while 909 extended symbols were dead off the same socket.
-            msg = f"{label}: eq {eq}/{uni_eq}, fut {fut}/{uni_fut}, ext {ext}/{uni_ext} writing bars"
+            # cc#1803: same reasoning, options leg — the 07-Sep incident's own after-connect verification
+            # would have read 'eq/fut healthy' and said nothing about options being dead. Measured only
+            # when options are supposed to be subscribed (opt_subscribed) so an off-hours reconnect, or
+            # one before the index leg has gone live yet, doesn't print a misleading 0/N.
+            opt_live = _index_option_liveness(15) if opt_subscribed else -1
+            uni_opt = len(INDEX_OPTION_UNDERLYINGS)
+            msg = f"{label}: eq {eq}/{uni_eq}, fut {fut}/{uni_fut}, ext {ext}/{uni_ext}" \
+                + (f", opt {opt_live}/{uni_opt}" if opt_subscribed else "") + " writing bars"
             # cc#759 fix2: a ticking count that EXCEEDS its universe leg is a double-subscription / counting
             # bug, NEVER health — it must ALERT and be treated as a failure (the 224/212 tell, LEARNING 2).
             if (uni_fut > 0 and fut > uni_fut) or (uni_eq > 0 and eq > uni_eq):
@@ -3421,6 +3460,15 @@ def run(auth_code=None):
                 _log_feed_incident("subscribe_verify_offhours_fail", f"OFF-HOURS 0 bars after subscribe: {msg}")
             else:
                 log.info(f"Post-{label} verification (off-hours): {msg}")
+            # ── cc#1803 OPTIONS-LEG POST-CONNECT VERIFICATION ──────────────────────────────────────
+            # Scope item 4 of the 07-Sep P0 card: "after every connect/reconnect, assert subscribed
+            # count == expected universe size per leg" — eq/fut/ext already had this (the branches
+            # above and the ext probe below); options never did. Same in_market gate as the eq/fut
+            # branches above (an off-hours reconnect naturally shows 0 — not an incident).
+            if opt_subscribed and in_market and uni_opt > 0 and opt_live >= 0 and opt_live < OPT_FRESH_MIN_FRAC * uni_opt:
+                _log_feed_incident("subscribe_verify_options_dead",
+                    f"{label}: opt {opt_live}/{uni_opt} underlyings ticking, need >={OPT_FRESH_MIN_FRAC:.0%} "
+                    f"after (re)subscribe — options leg did not come back with the rest of the feed")
             # ── cc#1017 EXTENDED-LEG TICK-RESUMPTION PROBE ─────────────────────────────────────────
             # The 14-Aug root cause: a batch re-subscribe ACK is not evidence — the extended leg never
             # resumed ticking while the legacy legs did. This is the probe: a 120s-settled read of the
@@ -4329,10 +4377,27 @@ def run(auth_code=None):
                         # keeps the startup list length, so gate on the live flag to avoid a retreat loop.
                         _ext_expected = uni_ext > 0 and ext >= 0 and _ext_win and _ext_stage_limit(conn) > 0
                         ext_ok = (not _ext_expected) or ext >= EXT_MIN_TICK_FRACTION * uni_ext
+                        # cc#1803 (07-Sep-2026 P0): the OPTIONS leg's own periodic per-leg check — its
+                        # missing counterpart to eq/fut's WATCHDOG_MIN_SYMBOLS floor and ext's ext_ok. Until
+                        # today, options had subscribe-time alerts (options_subscribe_critical, 09:30
+                        # deadline) and a PARTIAL one-sided-death healer (_index_one_sided_unders, cc#1353)
+                        # but nothing caught a TOTAL death after a clean subscribe — exactly today's shape:
+                        # options subscribed fine at the open, then wrote nothing for the rest of the
+                        # session while eq/fut/watchdog itself were each independently fine. Same "no false
+                        # action on a bad read" contract as ext_ok: a DB-error read (-1) or the leg not yet
+                        # expected (pre-subscribe / before OPT_SUB_DEADLINE / no index universe) is "not
+                        # expected" -> ok, never a false alarm.
+                        opt_live = _index_option_liveness(HEARTBEAT_STALE_MINS)
+                        uni_opt = len(INDEX_OPTION_UNDERLYINGS)
+                        _opt_expected = (opt_subscribed and opt_live >= 0 and uni_opt > 0
+                                        and now_dt.time() >= OPT_SUB_DEADLINE)
+                        opt_ok = (not _opt_expected) or opt_live >= OPT_FRESH_MIN_FRAC * uni_opt
                         log.info(f"Feed health: eq={eq}/{len(equity_fyers_syms)} "
                                  f"fut={fut}/{len(futures_fyers_syms)} ext={ext}/{uni_ext} "
+                                 f"opt={opt_live}/{uni_opt} "
                                  f"(core_floor={WATCHDOG_MIN_SYMBOLS}, ext_frac>={EXT_MIN_TICK_FRACTION}, "
-                                 f"core_ok={core_ok} ext_ok={ext_ok})")
+                                 f"opt_frac>={OPT_FRESH_MIN_FRAC}, "
+                                 f"core_ok={core_ok} ext_ok={ext_ok} opt_ok={opt_ok})")
                         # cc#1511: heartbeat BEFORE the action ladder — rung 2 os._exit(1)s, and
                         # a pass that dies acting must still have proven it ran. 'ok' means THE
                         # WATCHDOG ran and measured; what it found lives in the log line above
@@ -4343,20 +4408,35 @@ def run(auth_code=None):
                             if watchdog_rung == 0:
                                 log.error(f"FEED WATCHDOG rung 1: eq={eq} fut={fut} below floor — forcing reconnect")
                                 _force_reconnect()
-                                _log_feed_incident("feed_watchdog_reconnect", f"eq={eq} fut={fut} ext={ext}/{uni_ext}")
+                                _log_feed_incident("feed_watchdog_reconnect", f"eq={eq} fut={fut} ext={ext}/{uni_ext} opt={opt_live}/{uni_opt}")
                                 watchdog_rung = 1
                             else:
                                 log.critical(f"FEED WATCHDOG rung 2: eq={eq} fut={fut} still below floor "
                                              "after reconnect — os._exit(1) for a clean Railway restart "
                                              "(cc#501 finding_2_17jul_1550: sys.exit(1) from this housekeeping "
                                              "thread only kills the thread, leaving a zombie process)")
-                                _log_feed_incident("feed_watchdog_exit", f"eq={eq} fut={fut} ext={ext}/{uni_ext}")
+                                _log_feed_incident("feed_watchdog_exit", f"eq={eq} fut={fut} ext={ext}/{uni_ext} opt={opt_live}/{uni_opt}")
                                 os._exit(1)
                         elif not ext_ok:
                             # cc#1017: core alive, extended leg dead — rebuild (bounded) then retreat +
                             # CRITICAL via _ext_recover. Deliberately does NOT os._exit: killing the worker
                             # would drop the healthy options/futures/eq legs the founder protected.
                             _ext_recover("watchdog", eq, fut, ext, uni_ext)
+                        elif not opt_ok:
+                            # cc#1803: eq/fut/ext alive, options leg totally dead — same "don't os._exit,
+                            # just heal the one dead leg" philosophy as ext_ok above: killing the worker
+                            # would drop the healthy eq/fut legs for a problem local to one socket
+                            # subscription. Re-subscribe the full options ladder (idempotent at Fyers,
+                            # same as the one-sided healer just above) and alert loudly — this is the
+                            # exact silence today's incident sat in for hours.
+                            log.error(f"OPTIONS LEG DEAD: opt={opt_live}/{uni_opt} underlyings ticking "
+                                      f"(need >={OPT_FRESH_MIN_FRAC:.0%}) — re-subscribing full ladder "
+                                      f"({len(option_syms)} syms) (cc#1803)")
+                            _log_feed_incident("options_leg_dead_resubscribe",
+                                f"opt={opt_live}/{uni_opt} underlyings ticking, need >={OPT_FRESH_MIN_FRAC:.0%} "
+                                f"— re-subscribed {len(option_syms)} ladder symbols (cc#1803)")
+                            if option_syms:
+                                _batched_subscribe(fyers_ws, option_syms, action='sub', label='options-full-heal')
                         else:
                             watchdog_rung = 0
                             if _EXT_RECOVERY["attempts"]:
