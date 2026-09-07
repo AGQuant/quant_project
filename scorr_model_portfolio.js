@@ -410,9 +410,12 @@
       + tile('Capital', '₹' + cap.toLocaleString('en-IN'), 'Rs 5,000 slots')
       + tile('Holding Value', money2(holdVal), nHold + ' holding' + (nHold === 1 ? '' : 's') + ' at CMP')
       + tile('Cash', money2(cashInfo.cash), esc(cashInfo.sub))
-      + tile('P&amp;L', inr(d.pnl), null, cls(d.pnl))
-      + tile('Return %', pct(d.return_pct), 'on ₹' + cap.toLocaleString('en-IN'), cls(d.return_pct))
-      + tile('Alpha', d.alpha == null ? '—' : pct(d.alpha), 'vs basket benchmark', cls(d.alpha))
+      // cc#1819: P&L is live (marked at every price tick); Return %/Alpha update once a day at
+      // EOD, so the two can legitimately show different pictures on the same screen — each sub-
+      // label now says which basis it is, instead of leaving them to look like they disagree.
+      + tile('P&amp;L', inr(d.pnl), d.pnl_as_of ? ('live · ' + esc(d.pnl_as_of)) : 'live', cls(d.pnl))
+      + tile('Return %', pct(d.return_pct), 'on ₹' + cap.toLocaleString('en-IN') + ' · EOD ' + fmtDMY(d.nav_date), cls(d.return_pct))
+      + tile('Alpha', d.alpha == null ? '—' : pct(d.alpha), 'vs basket benchmark · EOD ' + fmtDMY(d.nav_date), cls(d.alpha))
       + tile('Positions', (d.positions != null ? d.positions : '—') + '/' + maxN, 'cap ' + maxN);
     if (SHOW_REVIEW_STATE) {
       h += tile('Next Review', fmtDMY(reg.next_rebalance), esc(reg.rebalance_freq || 'monthly'))
@@ -464,7 +467,14 @@
       var qb = a[1] || {}, alpha = a[2] || {};
       var d = {};
       (qb.baskets || []).forEach(function (b) { if (b.basket === MP_BASKET) d = Object.assign({}, b); });
-      (alpha.baskets || []).forEach(function (b) { if (b.basket === MP_BASKET) { d.alpha = b.alpha; d.return_pct = b.return_pct; if (d.pnl == null) d.pnl = b.pnl; if (d.positions == null) d.positions = b.positions; } });
+      (alpha.baskets || []).forEach(function (b) { if (b.basket === MP_BASKET) { d.alpha = b.alpha; d.return_pct = b.return_pct; if (d.pnl == null) d.pnl = b.pnl; if (d.positions == null) d.positions = b.positions; if (d.nav_date == null) d.nav_date = b.nav_date; } });
+      // cc#1819: P&L is live intraday marks (quant_paper_positions.updated_at, qb's own as_of_ist);
+      // Return %/Alpha are the once-daily qb_nav_daily series, appended the FOLLOWING pre-market
+      // morning for the prior close — always one EOD cycle behind P&L, and for a basket on its
+      // very first tracked day (nav_date == its own inception day) that lag reads as an exact
+      // 0.00%, not a computation error. Both numbers are correct on their own basis; the KPI
+      // sub-labels below say which basis each is, so they stop looking like a disagreement.
+      d.pnl_as_of = qb.as_of_ist || null;
       var pos = Array.isArray(a[3]) ? a[3] : [];
       // state badge = the QB card rule for a basket without HS2: names at/under HS1 −20% from entry
       var hs1cnt = (qb.positions || []).filter(function (p) { return p.basket === MP_BASKET && p.pnl_pct != null && +p.pnl_pct < -20; }).length;
