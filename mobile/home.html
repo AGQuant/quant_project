@@ -1604,6 +1604,9 @@ body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
    deliberate second focal point under the gauge rather than a stray line drifting left. */
 .pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);
   color:var(--txt,#E9EEFB);text-align:center}
+/* cc#1832: names the PCR basis (whole chain vs ATM+/-5) inline with the headline number, same
+   demoted weight as .preason's footnote role -- a qualifier, not a second focal point. */
+.pcrbasis{font-size:var(--type-11);font-weight:400;color:var(--mut)}
 /* cc#1568: one-line reason under the PCR line (CAUTIOUS cover reading / week unavailable). */
 .preason{font-size:var(--type-11);color:var(--mut);text-align:center;margin-top:var(--space-2)}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
@@ -4660,8 +4663,13 @@ function pcrMood(hero){
        (APP_TABLE_ASOF_STAMP_V1, session_log 34535) — the SAME rule every other app table stamp
        uses, not a second one hand-rolled here.
        cc#1379: this line is UNCHANGED by the gauge — still the real, unscaled PCR, never the
-       gauge's x100 display value. */
-    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + pcrAsOfSuffix(hero) + '</div>'
+       gauge's x100 display value.
+       cc#1832: hero.pcr is pcr_intraday.pcr_total (mobile_home2.py's own comment: reconciled
+       against pcr_daily, the column every other PCR surface reads) -- NOT pcr_atm5, a materially
+       different reading of the same instant (whole chain 1.28 vs ATM+/-5 1.80 on the founder's own
+       screenshot). do_not_touch forbids switching which number renders; this only names it, so a
+       reader knows which question the figure answers. */
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + ' <span class="pcrbasis">(whole chain)</span>' + pcrAsOfSuffix(hero) + '</div>'
     /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
        ("High put cover while Nifty is down 1.4% on the week"); a missing week input says so
        ("week return unavailable"). Both strings are the composer's — nothing is worded here. */
