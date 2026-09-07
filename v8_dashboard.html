@@ -3004,6 +3004,28 @@ function _masterBasketReconcile(){
 let OPENPOS_VIEW=(function(){try{var s=localStorage.getItem('v8_openpos_view');if(s)return s;}catch(e){}
   return (window.innerWidth<=767)?'ladder':'table';})();
 function setOpenPosView(v){OPENPOS_VIEW=v;try{localStorage.setItem('v8_openpos_view',v);}catch(e){}const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+// cc#1806: Copy Symbols. Reads SORTREG['openpos'] rather than closing over a render-time openRows
+// reference — sortTbl('openpos',...) registers there on EVERY render (Table, Ladder and Futures all
+// call it; see openPosTable above), so this always sees the live rows AND the live sortKey/dir,
+// however the user currently has the table sorted. The sort replicated below is the exact same two
+// lines drawTbl() uses (line ~3189) — duplicated on purpose rather than refactored into a shared
+// helper, so drawTbl's own sort behaviour stays byte-for-byte untouched (do_not_touch: table sort).
+function copyOpenPosSymbols(btn){
+  const t=SORTREG['openpos'];
+  let rows=(t&&t.rows)||[];
+  if(t&&t.sortKey){rows=[...rows].sort((a,b)=>{const av=a[t.sortKey],bv=b[t.sortKey];if(typeof av==='string'||typeof bv==='string')return t.dir*String(av??'').localeCompare(String(bv??''));return t.dir*(((av===null||av===undefined)?-1e9:+av)-((bv===null||bv===undefined)?-1e9:+bv));});}
+  const syms=rows.map(x=>x.symbol).filter(Boolean);
+  if(!syms.length||!btn)return;
+  const n=syms.length,text=syms.join('\n');
+  const confirmCopied=()=>{btn.textContent=`Copied ${n} symbol${n===1?'':'s'}`;setTimeout(()=>{btn.textContent='Copy Symbols';},1500);};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(confirmCopied).catch(()=>{_copyFallback(text);confirmCopied();});
+  }else{_copyFallback(text);confirmCopied();}
+}
+function _copyFallback(text){
+  try{const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');document.body.removeChild(ta);}catch(e){}
+}
 // cc#1009: the two sector CARD grids (All Futures = 22 Scorr themes, Nifty 50 = 12 groups) collapse
 // into ONE sortable table with a right-side [All Futures | Nifty 50] toggle. Groupings, names,
 // membership and the row-click drill-down are UNCHANGED — only the presentation. Default: All
@@ -3851,9 +3873,12 @@ function renderMaster(){
   // worse than losing the view. So Futures is Table-only, and the reason is on screen instead of
   // a control that silently disappears. The mobile card drops its bar for the same reason and
   // shows the two futures prices it does have.
+  // cc#1806: Copy Symbols button, right-aligned on the same row as the toggle (or the Futures
+  // explanatory line). Disabled on an empty book rather than copying an empty string.
+  const copySymBtn=`<button id="copySymBtn" onclick="copyOpenPosSymbols(this)"${openRows.length?'':' disabled'} style="font:inherit;font-size:12px;font-weight:600;cursor:${openRows.length?'pointer':'not-allowed'};padding:6px 14px;border-radius:8px;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);transition:.15s;opacity:${openRows.length?'1':'.5'}">Copy Symbols</button>`;
   const viewToggle=_fut
-    ? `<div style="font-size:10px;color:var(--dim);margin-bottom:10px">Table view only on Futures &mdash; the Ladder rail runs between the cash Target and SL, which this tab does not show. Switch to Equity for it.</div>`
-    : `<div style="display:flex;gap:6px;margin-bottom:10px">${vtgl('table','Table View')}${vtgl('ladder','Ladder View')}</div>`;
+    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px"><div style="font-size:10px;color:var(--dim)">Table view only on Futures &mdash; the Ladder rail runs between the cash Target and SL, which this tab does not show. Switch to Equity for it.</div>${copySymBtn}</div>`
+    : `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px"><div style="display:flex;gap:6px">${vtgl('table','Table View')}${vtgl('ladder','Ladder View')}</div>${copySymBtn}</div>`;
   const posBody=(!_fut&&OPENPOS_VIEW==='ladder')?openPosLadder:(openPosTable+openPosMobile);
     // cc#1010: marker legend is now an (i) popover in the header (was the cc#1008 always-on grey text
     // block) — rendered coloured glyphs, identical to the row glyphs, parity with the mobile pattern.
