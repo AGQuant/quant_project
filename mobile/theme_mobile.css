@@ -123,7 +123,19 @@ body[data-theme]{
   --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
   --t-sunk:var(--sunk); --t-gold-lo:var(--gold-lo); --t-gold-hi:var(--gold-hi);
 }
-.screen,.bnav{
+/* cc#1828: scorr_analysis_card.js's self-built "A" (Analysis) shell — _buildOwn() appends
+ * #scorrAnaOv straight to <body> on every /m/* page (none of them carry v8_dashboard.html's
+ * #infoModal, so _ids() always takes the self-built path, confirmed by grep) — a SIBLING of
+ * .screen/.bnav, not a descendant. This bridge never reached it: every pill/box/trajectory-grid
+ * var(--txt)/var(--surface2)/var(--panel2)/var(--line2)/var(--dim)/var(--mut) in that card fell
+ * through inheritance past body[data-theme] straight to mobile_app.css's :root literal (dark,
+ * unconditional, no [data-theme="light"] variant — same root cause cc#1064 already named for the
+ * app shell generally), so the card looked hardcoded-dark on every theme. Added to THIS family
+ * (not a new #gvp/#ckp/#v8p-style block below): the card's own token inventory (grepped) is
+ * exactly the older-family names already re-declared here — --txt/--surface2/--panel2/--line2/
+ * --dim/--mut/--panel/--line/--grn/--red/--blu — nothing from the newer --well/--chalk family.
+ */
+.screen,.bnav,#scorrAnaOv{
   --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
   --surface2:var(--t-hi);   /* cc#1778: the C·A·R·D tile fill; a :root literal in mobile_app.css until now */
   --line:var(--t-edge); --line2:var(--t-edge);
