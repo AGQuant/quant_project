@@ -1420,6 +1420,27 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:7px;font-weight:800;
   letter-spacing:.1px;white-space:nowrap;cursor:pointer}
 .pstg button.on{background:var(--gold-hi);color:#3D2E0A}
+/* cc#1802 (founder screenshot 07-Sep 08:07, captioned Aqua White: dark fill + dark text, barely
+   legible on the active MAX PAIN NIFTY/BANKNIFTY toggle). MEASURED, not assumed: --gold-hi is
+   #9FF0FF on aquawhite, #FFFFFF on both blush and silvergold — the hardcoded #3D2E0A ink above
+   reads at 10.28 / 13.18 / 13.18 contrast on those three (all comfortably past AA 4.5), so none of
+   the three named themes reproduce the described defect. What DOES reproduce it, exactly and
+   nowhere else: duskday's --gold-hi #3F2E6B (dark violet — matches "dark purple/navy" precisely,
+   which #9FF0FF/light-cyan does not) at 1.14 contrast, and orangepeel's --gold-hi #5C3410 (dark
+   brown) at 1.23 — both catastrophic, both this exact fill+ink combination, both light-set themes
+   selectable from the same switcher aquawhite is in. Fixed here rather than left unreported: the
+   #3D2E0A ink flips to var(--panel) — each theme's own contract token, not a new hex, per scope
+   item 2 — which is #FFFFFF on both, verified at 11.57 / 10.75 contrast. --gold-hi's VALUE is left
+   untouched (it has other consumers — mobile_endpoints.py, v8.html — changing the token itself
+   risks them; only this pill's text colour changes, only on the two themes that need it). Aqua
+   White / Silver Gold / Blush get no override — they were already passing, confirmed by the
+   numbers above, not left unchecked. FLAGGED for Fable/founder: this reads as the screenshot's
+   theme caption being off by one entry in the switcher (Aqua White vs Dusk Day, added the day
+   before this report) rather than the bug living where named — if a live screenshot proves Aqua
+   White itself is genuinely still broken after this push, that would mean a runtime factor this
+   static CSS trace could not see, and needs a fresh live-DOM look. */
+body[data-theme="duskday"] .pstg button.on,
+body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
 /* cc#1418 · honest feed-stopped banner. Reuses the SAME amber token the PCR pcite STALE label
    already uses (var(--amber,#FF9F45)) -- one "something is stale" colour across the app, not a
    new one for this card. */
