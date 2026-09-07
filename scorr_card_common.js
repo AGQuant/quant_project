@@ -405,12 +405,18 @@ window.scorrAsofStamp = function (asof) {
   var ist = new Date(n.getTime() + (330 + n.getTimezoneOffset()) * 60000);   // getters read IST wall-clock
   var today = ist.getFullYear() + '-' + ('0' + (ist.getMonth() + 1)).slice(-2) + '-' + ('0' + ist.getDate()).slice(-2);
   var MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  var txt = (d === today)
+  /* cc#1832: LIVE meant "same calendar date" only — a 15:25 reading still says LIVE at 21:15,
+     351 minutes after the 15:30 close, because the date component never changed. LIVE now also
+     requires the market to actually be open right now (same Mon-Fri/09:15-15:30 window `amber`
+     already uses below) — a same-day reading outside that window renders with the date+time
+     format the OLDER-date branch already had, same as any other closed-book snapshot. */
+  var dow = ist.getDay(), mins = ist.getHours() * 60 + ist.getMinutes();
+  var marketOpen = (dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930);
+  var txt = (d === today && marketOpen)
     ? 'LIVE · ' + hm
     : parseInt(d.slice(8, 10), 10) + ' ' + MON[parseInt(d.slice(5, 7), 10) - 1] + ' ' + hm;
   var amber = false;
-  var dow = ist.getDay(), mins = ist.getHours() * 60 + ist.getMinutes();
-  if (dow >= 1 && dow <= 5 && mins >= 555 && mins <= 930) {
+  if (marketOpen) {
     /* both sides interpreted in the same local frame, so the difference IS the IST wall-clock
        age — the cc#844 phantom-330-minute trap is impossible by construction here */
     var asofD = new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), +hm.slice(0, 2), +hm.slice(3, 5));
