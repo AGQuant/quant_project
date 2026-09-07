@@ -35,10 +35,14 @@ TC_SCANNER_CONFIG = {
     "version": "V2",
     "locked_on": "06 Sep 2026",
     "source": "session_log 39467 TC_SCANNER_ENTRY_EXIT_V2 (entry + exit) over 29447 (gates, caps) + 29448 (observation-mode marks)",
-    # V1.1 (29448): the gates and caps are MARKED on the scanner page, not enforced there. This flag
-    # governs the DISPLAY annotations only. The BOOK (tc_scanner_endpoints.run_scan, cc#1746) enters
-    # on `score_thresholds` alone per 39467 — no gate, no cap — whatever this flag says.
-    "observation_mode": True,
+    # cc#1823 (P0, session_log 40526): OFF from 07-Sep-2026. The book took 24 unthrottled entries
+    # on 06-Sep with this flag doing nothing to stop it — it never gated run_scan() at all (see the
+    # V1.1 comment this replaces, kept below for the history). run_scan() now requires bar_met AND
+    # gate["passed"] and respects the caps below for real. This flag now only controls the sheet's
+    # "This week" banner line and the page's own display wording.
+    # V1.1 (29448, superseded): the gates and caps were MARKED on the scanner page, not enforced —
+    # the BOOK entered on score_thresholds alone, no gate, no cap, whatever this flag said.
+    "observation_mode": False,
     # cc#1746 / 39467: the ENTRY BAR per bucket, founder-stated 06-Sep-2026 ("if Buy reversal score
     # touches 80 and buy momentum 85 then entry"; SELL mirrors BUY, amendment same day). This is
     # the one copy: tc_scanner_endpoints reads it for entries, the scanner page for its bar marks.
@@ -50,16 +54,30 @@ TC_SCANNER_CONFIG = {
             {"key": "sector_week", "label": "Sector week", "op": ">", "bound": 1, "unit": "%"},
             {"key": "sector_month", "label": "Sector month", "op": ">", "bound": 2, "unit": "%"},
             {"key": "rsi_month", "label": "Monthly RSI", "op": ">", "bound": 60, "unit": ""},
+            # cc#1823 AMENDMENT (founder: "1 more gate 5 day moving average of stock is better than
+            # its sector and nifty for buy and mirror sell" — read as the stock's WEEK return vs its
+            # sector's and vs Nifty's, since week_return/sector_week/nifty week are the fields this
+            # config already has; Fable measured 84/205 (41%) pass BUY, selective on real data).
+            # op="custom": two comparisons, not one bound -- handled in gate_status()/_rs_ok(), not _cmp.
+            {"key": "week_return_vs_sector_nifty", "label": "Relative strength (week)", "op": "custom",
+             "note": "week_return > sector_week AND week_return > nifty_week"},
         ],
         "SELL": [
             {"key": "sector_week", "label": "Sector week", "op": "<", "bound": -1, "unit": "%"},
             {"key": "sector_month", "label": "Sector month", "op": "<", "bound": -2, "unit": "%"},
             {"key": "rsi_month", "label": "Monthly RSI", "op": "<", "bound": 40, "unit": ""},
+            {"key": "week_return_vs_sector_nifty", "label": "Relative strength (week)", "op": "custom",
+             "note": "week_return < sector_week AND week_return < nifty_week"},
         ],
     },
+    # cc#1823 (P0): 20/day with zero enforcement produced 24 entries on 06-Sep. book_total=6 is
+    # FABLE'S PROPOSED DEFAULT, the midpoint of the founder's own stated 5-7/day range -- shipped
+    # now because 24-unthrottled is an active daily risk and 6 is already inside the authorized
+    # range, not a guess outside it. FOUNDER TO CONFIRM THE EXACT NUMBER (5, 6 or 7) on glass; per
+    # the card this is a one-line change here, not a rebuild, if the answer is not 6.
     "caps": {
-        "per_bucket_per_day": 5,
-        "book_total": 20,
+        "per_bucket_per_day": 2,
+        "book_total": 6,
         "fill": "rank by score100 desc, one position per symbol, no same-day re-entry",
     },
     # cc#1746 / 39467: +3% / -3% from entry, side-aware; 7 calendar days then a TIME stop at the
@@ -100,8 +118,22 @@ def _fmt_bound(bound, unit):
     return ("%+g%%" % bound) if unit == "%" else ("%g" % bound)
 
 
+def _rs_ok(v8, side):
+    """cc#1823 AMENDMENT gate: stock week_return beats BOTH its sector's week_return AND Nifty's
+    week_return (SELL mirrored — beaten by both). Three-state like every other gate: None when any
+    of the three inputs is missing, never counted as a fail. Two comparisons against one field
+    ('week_return_vs_sector_nifty') don't fit _cmp's single-bound signature, so this stays a small
+    dedicated check reporting through the same pass/fail/unmeasured convention."""
+    wr, sw, nw = v8.get("week_return"), v8.get("sector_week"), v8.get("nifty_week")
+    if wr is None or sw is None or nw is None:
+        return None, wr
+    wr, sw, nw = float(wr), float(sw), float(nw)
+    ok = (wr > sw and wr > nw) if side == "BUY" else (wr < sw and wr < nw)
+    return ok, wr
+
+
 def gate_status(v8, bucket):
-    """The three gates for this row's side, each with its value, its bound and its verdict.
+    """The gates for this row's side, each with its value, its bound and its verdict.
 
     A gate whose input is NULL is `null`, not False. The distinction matters on a surface whose
     whole purpose this week is to accumulate observations: a stock with no monthly RSI has not
@@ -113,6 +145,12 @@ def gate_status(v8, bucket):
         return {"side": None, "gates": [], "passed": None, "measured": 0, "failing": []}
     out = []
     for g in TC_SCANNER_CONFIG["gates"][side]:
+        if g.get("op") == "custom":
+            ok, val = _rs_ok((v8 or {}), side)
+            text = "%s %s, %s" % (g["label"], _fmt(val, "%"), g.get("note", ""))
+            out.append({"key": g["key"], "label": g["label"], "value": val, "op": g["op"],
+                        "bound": None, "unit": "%", "pass": ok, "text": text})
+            continue
         val = (v8 or {}).get(g["key"])
         val = float(val) if isinstance(val, (int, float)) else None
         ok = _cmp(val, g["op"], g["bound"])
@@ -190,7 +228,13 @@ def annotate(rows, v8_by_symbol):
 
 def _gate_line(side):
     gs = TC_SCANNER_CONFIG["gates"][side]
-    return " · ".join("%s %s %s" % (g["label"], g["op"], _fmt_bound(g["bound"], g["unit"])) for g in gs)
+    parts = []
+    for g in gs:
+        if g.get("op") == "custom":
+            parts.append("%s (%s)" % (g["label"], g.get("note", "")))
+        else:
+            parts.append("%s %s %s" % (g["label"], g["op"], _fmt_bound(g["bound"], g["unit"])))
+    return " · ".join(parts)
 
 
 def rules_sheet():

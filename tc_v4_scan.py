@@ -354,11 +354,14 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250, progress=None):
     results.sort(key=lambda x: x["best_score"], reverse=True)
     # ── cc#1222 TC_SCANNER_GATED_CONFIG_V1.1 — MARK, DO NOT CUT (session_log 29448) ─────────────
     # OBSERVATION MODE: every row that was scored still ships. annotate() adds the bucket bar, the
-    # three side gates, the rank inside the bucket today and a strict would_qualify flag; it cannot
+    # side gates, the rank inside the bucket today and a strict would_qualify flag; it cannot
     # remove a row because it returns marks for the list it was handed. The gates read the SAME
     # v8_metrics tick the scoring read — _load_bulk already pulled sector_week, sector_month and
     # rsi_month into d["v8"] — so the strip costs no extra query and cannot disagree with the score
-    # about which session it is describing.
+    # about which session it is describing. cc#1823: nifty_week merged in from d["nifty_wk"] (also
+    # already computed by _load_bulk, once per scan) for the AMENDMENT RS gate — the SAME merge
+    # tc_scanner_endpoints._score_universe does for the book, so the page's marks and the book's
+    # real gate can never disagree about what "measured" looks like.
     #
     # Annotated BEFORE the limit slice on purpose: rank-in-bucket and the would-qualify count are
     # statements about the whole day's scan, and ranking a truncated list would renumber the tail
@@ -366,7 +369,8 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250, progress=None):
     tc_summary = None
     try:
         from tc_scanner_config import annotate as _tc_annotate, TC_SCANNER_CONFIG
-        tc_summary = _tc_annotate(results, {s: (d.get("v8") or {}) for s, d in D.items()})
+        _v8_for_gates = {s: dict((d.get("v8") or {}), nifty_week=d.get("nifty_wk")) for s, d in D.items()}
+        tc_summary = _tc_annotate(results, _v8_for_gates)
         tc_summary["config_version"] = TC_SCANNER_CONFIG["version"]
     except Exception as e:
         # A broken annotator must not take the scan down with it — the scores are the product here
