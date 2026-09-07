@@ -3668,7 +3668,7 @@ function renderMaster(){
     + mchip('tcs','\u2605','#F5B94A','TC strong',_mkCounts.tcs,_legLine('amber','strong')||'TC strong','rgba(245,185,74,.16)')
     + mchip('s1','\u2605','#4d7cfe','S1 reversal',_mkCounts.s1,_legLine('blue')||'S1 reversal','rgba(77,124,254,.16)')
     + mchip('r1','\u2605','#f87171','R1 mirror',_mkCounts.r1,_legLine('red star')||'R1 mirror','rgba(248,113,113,.16)')
-    + mchip('act','\u26a1','var(--txt)','Vol/OI spurt',_mkCounts.act,_legLine('\u26a1','volume')||'Volume/OI spurt','rgba(77,124,254,.12)')
+    + mchip('act','\u26a1','var(--txt)','Volume confirm',_mkCounts.act,_legLine('\u26a1','volume')||'Volume confirm \u2014 2+ of 4 volume checks','rgba(77,124,254,.12)')
     + mchip('dmaUp','\u25a0','#0a9e63','5>20',_mkCounts.dmaUp,_dmaTip,'rgba(10,158,99,.16)')
     + mchip('dmaDn','\u25a0','#f87171','5<20',_mkCounts.dmaDn,_dmaTip,'rgba(248,113,113,.16)')
     + `</div>`;
@@ -4391,7 +4391,7 @@ function markerLegendPopover(){
     row('\u2605','#f5b94a','Amber star \u2014 Trade Check score above 80% and rising vs its 3-day average')+
     row('\u2605','#4d7cfe','Blue star \u2014 held reversal at S1')+
     row('\u2605','#f87171','Red star \u2014 mirror at R1')+
-    row('\u26A1','inherit','Volume/OI spurt \u2014 volume >1.5x or OI >25% d/d')+
+    row('\u26A1','inherit','Volume confirm \u2014 2+ of 4 volume checks (pace, prior day, delivery, accumulation/distribution)')+
     // cc#1682: two colours, one meaning-pair \u2014 a green square shows the glyph in its own colour;
     // the red state is stated in the text so the popover stays one row per marker family. STATE,
     // not cross: every open card carries this square every day the relationship holds (supersedes

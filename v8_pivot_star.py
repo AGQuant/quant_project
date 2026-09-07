@@ -88,21 +88,29 @@ STAB_SELL = (-2.0, 1.0)     # mirrored band, sell side
 GLYPH = {"BUY": "star", "SELL": "star"}
 
 # ── cc#933 GREEN_STAR_ACTIVITY_V1 — founder-locked in session_log 18053 ───────────────────────
-# cc#1441 push 4 (VOLUME_METRICS_CANON_V2, session_log 33843): the volume side moves off
-# v8_metrics.vol_ratio (which was a 10-DAY-average day ratio — the old "(a) 21-day average"
-# comment here was stale, verified 30-Aug) onto the canon pair. Same open-positions scope as V2.
-# Fires when ANY leg trips:
+# cc#1811 V8_MARKER_VOLUME_CANON_LINK_V1 (session_log 40489, founder 07-Sep-2026, supersedes
+# cc#1810): the ANY-leg-trips vol>X-OR-OI>Y% test below is RETIRED. It is replaced entirely by the
+# canon Vol R/P/D/AD four-check tally Trade Check already scores (tc_v4_dual.py's _vol_reads /
+# _vol_checks, cc#1785/1786) — see evaluate_activity() further down for the live implementation.
+# ONE volume definition in the codebase now, not a bespoke second one living only here. The
+# constants below are KEPT, not deleted (matching this module's own convention for a superseded
+# value — e.g. `_direction` above), because they document what the marker used to test; nothing in
+# this file reads them any more.
+#
+# THE RETIRED TEST, for history: fires when ANY leg trips:
 #   (a) RVOL  > ACTIVITY_RVOL_X  — today's slot-normalized pace (rvol_engine, profile read)
 #   (b) VOL P > ACTIVITY_VOLP_Y  — the prior session's closing RVOL (same formula, prior day)
 #   (c) |OI day-over-day| > 25%  — futures_basis, last tick of the day vs last tick of the prior
-#       session. UNTOUCHED. 25% is deliberately RARE: typical DoD is 1-5%, so this leg fires only
-#       on a true event or a rollover, and it is expected to be silent most days.
+#       session. This OI leg is what cc#1811 removes outright — not deprioritised, retired: no
+#       futures_basis read remains anywhere in evaluate_activity() after this card.
 #
 # READ 18053 CAREFULLY — two of its keys look contradictory and are not. `founder_amendment_08aug`
 # says there is NO side split; `founder_final_08aug` says BUY shows a star and SELL a circle. They
 # reconcile cleanly: the CONDITION has no side split (identical test both sides, no mirrored band),
 # while the GLYPH does. One condition, one meaning — unusual activity — drawn in the shape of the
-# side it sits on.
+# side it sits on. cc#1811 keeps this: the new 4-check tally is likewise side-aware only on the
+# Vol AD leg (Accumulation for LONG, Distribution for SHORT, exactly as Trade Check reads it), and
+# the glyph rule below is untouched.
 #
 # AND THE SIDE HERE IS THE POSITION'S OWN SIDE — the opposite of cc#932. That is deliberate, not an
 # inconsistency: a pivot marker describes how the STOCK is behaving against its own levels (so
@@ -110,14 +118,10 @@ GLYPH = {"BUY": "star", "SELL": "star"}
 # at all — volume and OI say "something is happening", not "up" or "down". So the only side it can
 # honestly take is the side you are on. DO NOT unify these two side rules later; they answer
 # different questions.
-# cc#1441: 1.5 is the like-for-like carry-over of the retired vol_ratio>1.5 bar (closing-RVOL
-# >= 1.5 selects ~15% of symbol-days, comparable selectivity — backtest + before/after fire
-# rates in the task log: open book 4->5 of 21, universe 12.71%->19.95%). Shipped values stood
-# through the 30-Aug founder sign-off round (cc_task_logs, task 1441) — FINAL with the V13/R6
-# batch; change only via a new sign-off.
-ACTIVITY_RVOL_X      = 1.5   # FINAL — 30-Aug-2026 sign-off round (cc#1441)
-ACTIVITY_VOLP_Y      = 1.5   # FINAL — 30-Aug-2026 sign-off round (cc#1441)
-ACTIVITY_OI_DOD_PCT  = 25.0  # untouched (18053)
+# RETIRED cc#1811 — kept for history only, no longer read anywhere in this file:
+ACTIVITY_RVOL_X      = 1.5   # was FINAL — 30-Aug-2026 sign-off round (cc#1441)
+ACTIVITY_VOLP_Y      = 1.5   # was FINAL — 30-Aug-2026 sign-off round (cc#1441)
+ACTIVITY_OI_DOD_PCT  = 25.0  # was untouched (18053); the OI leg itself is gone, cc#1811
 
 # cc#1024 MARKER_GLYPH_V5 (founder-locked, session_log 22296): the activity marker is a LIGHTNING
 # BOLT, U+26A1, on both sides. This retires BOTH earlier forms — the circle-for-short of 18053 and
@@ -362,6 +366,11 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
 def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
     """GREEN activity markers on the OPEN book (cc#933 / session_log 18053). PURE READ.
 
+    cc#1811 (session_log 40489, supersedes cc#1810): condition is now the canon Vol R/P/D/AD
+    four-check tally (>=2 of 4 pass), reusing tc_v4_dual.py's exact r6_read/deliv_ratio_batch/
+    _ad_21d imports and thresholds — not a second volume definition. The OI-change leg is retired
+    outright, not just deprioritised: no futures_basis read remains in this function.
+
     Kept as its own function and its own response list rather than folded into evaluate(), because
     a symbol can legitimately carry BOTH a pivot marker and an activity marker at once. Merging
     them into one keyed map would silently drop one of the two — the surfaces render them side by
@@ -382,58 +391,74 @@ def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str
             return []
         syms = [x[0] for x in pos]
 
-        # cc#1441 push 4 (canon V2): RVOL for the latest session <= d, VOL P = the session before —
-        # both through rvol_engine's one derivation. Date-aware so a replayed tick for a past date
-        # reads that date's ratios, exactly as the old score_date<=d read did.
-        from rvol_engine import day_rvol_batch
-        cur.execute("""SELECT DISTINCT ts::date AS sd FROM intraday_prices
-                       WHERE source = 'fyers_eq' AND ts::date <= %s
-                       ORDER BY sd DESC LIMIT 2""", (d,))
-        _days = [r[0] for r in cur.fetchall()]
-        rvl = day_rvol_batch(cur, syms, _days[0]) if _days else {}
-        vpl = day_rvol_batch(cur, syms, _days[1]) if len(_days) > 1 else {}
+        # cc#1811 V8_MARKER_VOLUME_CANON_LINK_V1: the SAME three functions tc_v4_dual.py's
+        # _vol_reads() calls for Trade Check's R5/R5V — r6_read (live 3-tier RVOL/VOL-P),
+        # deliv_ratio_batch (already batch-form — one call for the whole open book, not a
+        # per-symbol loop), _ad_21d (no batch form; open-book scale here is ~20-25 symbols, the
+        # same order Trade Check already loops one-at-a-time for its own single-symbol page, so a
+        # new batch wrapper is not worth adding for this size — the card's own "add one only if
+        # needed" clause). NOT a parallel calculation: these are the identical imports, called the
+        # identical way, thresholds imported from tc_v4_dual too rather than retyped here.
+        #
+        # KNOWN LIMITATION, stated rather than hidden: r6_read/deliv_ratio_batch/_ad_21d all read
+        # the LATEST live/EOD tables — none takes a historical-date parameter the way the retired
+        # day_rvol_batch(cur, syms, _days[0]) read did. `target_date` (and therefore `d`) no longer
+        # affects the volume test at all; it still scopes which OPEN positions are evaluated. In
+        # practice this function only ever runs live on the current session (the module's own
+        # "TICK SERIES — every 5 minutes" cadence), so this is not a live behaviour change — but a
+        # future replay call passing a past target_date would score that day's positions against
+        # TODAY's volume, not that day's. Flagged here rather than silently accepted.
+        from r6_volume import r6_read
+        from volume_flow_endpoints import deliv_ratio_batch
+        from deriv_metrics import _ad_21d
+        from tc_v4_dual import VOL_R_MIN, VOL_P_MIN, VOL_D_MIN, VOL_AD_MIN, VOL_AD_MAX_DIST
 
-        # OI day-over-day: LAST tick of each session, this session vs the one before it.
-        cur.execute("""
-            WITH t AS (
-                SELECT DISTINCT ON (symbol, ts::date) symbol, ts::date AS d, oi
-                FROM futures_basis
-                WHERE symbol = ANY(%s) AND ts::date <= %s
-                ORDER BY symbol, ts::date DESC, ts DESC),
-            l AS (
-                SELECT symbol, d, oi, LAG(oi) OVER (PARTITION BY symbol ORDER BY d) AS prev_oi,
-                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY d DESC) AS rn
-                FROM t)
-            SELECT symbol, CASE WHEN prev_oi > 0 THEN (oi - prev_oi) / prev_oi * 100.0 END
-            FROM l WHERE rn = 1""", (syms, d))
-        oidod = {r[0]: _f(r[1]) for r in cur.fetchall()}
+        deliv = deliv_ratio_batch(cur, syms)
+        vol_reads = {}
+        for sym in syms:
+            try:
+                rv = r6_read(cur, sym) or {}
+            except Exception as e:
+                log.warning("cc#1811 r6_read %s: %s", sym, e)
+                rv = {}
+            try:
+                ad = _ad_21d(cur, sym) or {}
+            except Exception as e:
+                log.warning("cc#1811 _ad_21d %s: %s", sym, e)
+                ad = {}
+            vol_reads[sym] = {"vol_r": _f(rv.get("rvol")), "vol_p": _f(rv.get("vol_p")),
+                               "vol_d": _f(deliv.get(sym)), "vol_ad": _f(ad.get("up_vol_pct"))}
 
     out = []
     for sym, side in pos:
-        rv, vp, od = rvl.get(sym), vpl.get(sym), oidod.get(sym)
-        rv_hit = rv is not None and rv > ACTIVITY_RVOL_X
-        vp_hit = vp is not None and vp > ACTIVITY_VOLP_Y
-        vol_hit = rv_hit or vp_hit
-        oi_hit = od is not None and abs(od) > ACTIVITY_OI_DOD_PCT
-        if not (vol_hit or oi_hit):
+        vr = vol_reads.get(sym, {})
+        r_v, p_v, d_v, ad_v = vr.get("vol_r"), vr.get("vol_p"), vr.get("vol_d"), vr.get("vol_ad")
+        r_ok = r_v is not None and r_v >= VOL_R_MIN
+        p_ok = p_v is not None and p_v >= VOL_P_MIN
+        d_ok = d_v is not None and d_v >= VOL_D_MIN
+        # side-aware exactly as tc_v4_dual._vol_checks reads it: Accumulation for LONG, Distribution
+        # for SHORT — this module's `side` is already the position's own side (v8_paper_positions.side).
+        ad_ok = ad_v is not None and ((ad_v <= VOL_AD_MAX_DIST) if side == "SELL" else (ad_v >= VOL_AD_MIN))
+        passed = int(r_ok) + int(p_ok) + int(d_ok) + int(ad_ok)
+        if passed < 2:
             continue
-        facts = []
-        if rv_hit:
-            facts.append(f"RVOL {rv:.1f}x its usual pace")
-        if vp_hit:
-            facts.append(f"prev close RVOL {vp:.1f}x")
-        if oi_hit:
-            facts.append(f"OI {od:+.0f}% day-over-day")
+        checks = [
+            {"key": "vol_r", "label": "Vol R", "value": r_v, "pass": r_ok},
+            {"key": "vol_p", "label": "Vol P", "value": p_v, "pass": p_ok},
+            {"key": "vol_d", "label": "Vol D", "value": d_v, "pass": d_ok},
+            {"key": "vol_ad", "label": "Vol AD", "value": ad_v, "pass": ad_ok},
+        ]
+        # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording. Names every
+        # passed check with its value so the tooltip answers "why" (cc#1811 step 3), not just
+        # yes/no — same transparency pattern the other markers on this board already use.
+        facts = [f"{c['label']} {c['value']:.2f}" for c in checks if c["pass"] and c["value"] is not None]
         out.append({
             "symbol": sym, "side": side,
             "star_color": "GREEN",
             "glyph": GLYPH_SIDE.get(side, "star"),
-            "rvol": round(rv, 2) if rv is not None else None,
-            "vol_p": round(vp, 2) if vp is not None else None,
-            "oi_dod_pct": round(od, 2) if od is not None else None,
-            "trigger": "VOL" if vol_hit and not oi_hit else ("OI" if oi_hit and not vol_hit else "VOL+OI"),
-            # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording.
-            "note": " · ".join(facts),
+            "checks_passed": passed,
+            "checks": checks,
+            "note": " · ".join(facts) + f" ({passed}/4 checks)",
         })
     return out
 
@@ -1235,7 +1260,7 @@ def pivot_star(star_date: Optional[str] = None):
                     "Amber star = Trade Check score above 80% and rising vs its 3-day average",
                     "Blue star = held reversal at S1",
                     "Red star = mirror at R1",
-                    "⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day",
+                    "⚡ = Volume confirm · 2+ of 4 volume checks (pace, prior day, delivery, accumulation/distribution)",
                     "Green/red square = 5DMA above/below 20DMA",
                 ],
             }
