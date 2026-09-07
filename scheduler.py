@@ -2,7 +2,7 @@
 Scheduler — Scorr background tasks (restored 18-Jun-2026).
 Deactivation: _bg_intraday_paper commented out — on-demand only via /api/intraday/tick.
 """
-import asyncio, json, logging, os, threading, time
+import asyncio, json, logging, os, re, threading, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone, time as dt_time
 from typing import Optional
@@ -197,42 +197,107 @@ class _Skip:
         return _Skip("precondition_missing", _SKIP_CONDITIONAL, detail)
 
 
+_BILLING_AUTH_RE = re.compile(
+    r"credit balance|invalid_request_error|\b401\b|\b403\b|unauthorized|authentication_error",
+    re.I)
+
+
+def _prior_job_state(fn_name):
+    """cc#1807: read scheduler_master's row for this job BEFORE record_run overwrites it below,
+    so _maybe_alert_job_failure can tell "failed again" from "failed for the first time". Bare
+    job_name (record_run's own lstrip('_') convention, scheduler_master.py:452) since that's how
+    rows are actually keyed. Best-effort -- a read failure here must never block the job."""
+    name = (fn_name or "").lstrip("_")
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT last_status, last_error FROM scheduler_master WHERE job_name=%s", (name,))
+            row = cur.fetchone()
+            return (row[0], row[1]) if row else (None, None)
+    except Exception:
+        return (None, None)
+
+
+def _maybe_alert_job_failure(fn_name, status, err, prior_status):
+    """cc#1807 P0: a job that fails into scheduler_master.last_error and sits there unread is not
+    actually monitored -- that is exactly how bg_news_polish_auto ran silently on 100% credit-
+    exhaustion failures for hours on 07-Sep before anyone noticed by hand. Two triggers, either
+    fires, both post LOUDLY to the Fable Room (cc_task_logs on cc#1199 -- the existing channel
+    cc#1805/PRODUCTION_MODE_V3 already use for run reporting, not a new one):
+      - an unambiguous billing/auth error signature -- fires on the FIRST occurrence, because this
+        class of failure does not self-heal on the next tick, so waiting for a repeat is pure delay
+      - the SAME job failing on two CONSECUTIVE runs, any reason -- catches everything else without
+        paging on one transient blip
+    Applies to every _spawn-dispatched job in this file, not just the news-polish one -- the hook
+    lives in _run_recorded, which every one of them already goes through. Throttled to one alert
+    per job per 4h so a persistent failure pages repeatedly across a day instead of once per tick."""
+    if status not in ("error", "empty"):
+        return
+    text = err or ""
+    billing_match = bool(_BILLING_AUTH_RE.search(text))
+    two_in_a_row = prior_status in ("error", "empty")
+    if not (billing_match or two_in_a_row):
+        return
+    name = (fn_name or "").lstrip("_")
+    reason = "billing/auth error signature" if billing_match else f"failed 2 runs in a row (prior status={prior_status})"
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT 1 FROM cc_task_logs WHERE task_id=1199 AND actor='scheduler'
+                           AND message LIKE %s AND ts >= NOW() - INTERVAL '4 hours' LIMIT 1""",
+                        (f"JOB ALERT: {name} %",))
+            if cur.fetchone():
+                return  # already alerted for this job within the cooldown -- don't spam every tick
+            cur.execute("""INSERT INTO cc_task_logs (task_id, actor, message)
+                           VALUES (1199, 'scheduler', %s)""",
+                        (f"JOB ALERT: {name} status={status} -- {reason}. {text[:500]}",))
+            conn.commit()
+    except Exception as e:
+        log.error(f"_maybe_alert_job_failure: could not post alert for {name}: {e}")
+
+
 def _run_recorded(fn, args):
     """cc#525 run recorder: wraps the job call so every _spawn dispatch upserts
     last_run_at/last_status/last_error/last_duration_ms into scheduler_master, with ZERO
     behavior change to fn itself (same call, same args, same return/raise). Recorder failures
-    never break the job -- scheduler_master.record_run already swallows its own exceptions."""
+    never break the job -- scheduler_master.record_run already swallows its own exceptions.
+    cc#1807: status/err classification is now computed OUTSIDE the record_run try/except (was
+    inside, both wrapped in one blanket 'except: pass') so it is reliably available afterward for
+    _maybe_alert_job_failure even if the DB write itself fails -- the classification logic and its
+    ordering (cc#1194/cc#1256 comments below) are byte-for-byte unchanged, only where it sits moved."""
     t0 = time.time()
+    prior_status, _ = _prior_job_state(fn.__name__)
     try:
         result = fn(*args)
     except Exception as e:
+        status, err = "error", str(e)
         try:
             import scheduler_master
-            scheduler_master.record_run(fn.__name__, "error", str(e), int((time.time() - t0) * 1000))
+            scheduler_master.record_run(fn.__name__, status, err, int((time.time() - t0) * 1000))
         except Exception:
             pass
+        _maybe_alert_job_failure(fn.__name__, status, err, prior_status)
         raise
+    # cc#1194: _Empty is checked FIRST and by isinstance, not by ==. An _Empty instance
+    # compared against the _SKIPPED string is False anyway, but the order is stated so a
+    # later edit cannot reintroduce the silent-ok by reordering these two branches.
+    if isinstance(result, _Empty):
+        status, err = "empty", result.detail
+    # cc#1256: _Skip is checked BEFORE the bare sentinel and by isinstance, for the same
+    # reason _Empty is — a _Skip instance compared against the _SKIPPED string is False
+    # anyway, but the order is stated so a later edit cannot drop the reason by reordering.
+    # The status stays 'skipped' either way: this card records WHY a skip happened, it never
+    # changes WHETHER one happens, and nothing downstream sees a new status value.
+    elif isinstance(result, _Skip):
+        status, err = "skipped", result.tag()
+    elif result == _SKIPPED:
+        status, err = "skipped", None
+    else:
+        status, err = "ok", None
     try:
         import scheduler_master
-        # cc#1194: _Empty is checked FIRST and by isinstance, not by ==. An _Empty instance
-        # compared against the _SKIPPED string is False anyway, but the order is stated so a
-        # later edit cannot reintroduce the silent-ok by reordering these two branches.
-        if isinstance(result, _Empty):
-            status, err = "empty", result.detail
-        # cc#1256: _Skip is checked BEFORE the bare sentinel and by isinstance, for the same
-        # reason _Empty is — a _Skip instance compared against the _SKIPPED string is False
-        # anyway, but the order is stated so a later edit cannot drop the reason by reordering.
-        # The status stays 'skipped' either way: this card records WHY a skip happened, it never
-        # changes WHETHER one happens, and nothing downstream sees a new status value.
-        elif isinstance(result, _Skip):
-            status, err = "skipped", result.tag()
-        elif result == _SKIPPED:
-            status, err = "skipped", None
-        else:
-            status, err = "ok", None
         scheduler_master.record_run(fn.__name__, status, err, int((time.time() - t0) * 1000))
     except Exception:
         pass
+    _maybe_alert_job_failure(fn.__name__, status, err, prior_status)
     return result
 
 
