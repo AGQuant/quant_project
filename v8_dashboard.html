@@ -8928,6 +8928,9 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-wrap .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:idxpdot 2s infinite}
 .tc13-wrap .stats{display:flex;gap:14px;margin-left:auto;font:500 11px var(--f-m);color:var(--tx3);flex-wrap:wrap;align-items:center}
 .tc13-wrap .stats b{color:var(--tx2);font-weight:600}
+/* cc#1809 TC_SCANNER_PL_SUMMARY_V1: LONG/SHORT tappable filter tags for the Open Book only. */
+.tc13-sidetag{font:600 10px var(--f-m);letter-spacing:.05em;padding:3px 9px;border-radius:11px;border:1px solid var(--line2);color:var(--tx3);cursor:pointer;user-select:none;transition:.15s}
+.tc13-sidetag.on{color:var(--tx);border-color:var(--cy);background:rgba(var(--cy-rgb),.10)}
 /* cc#1684: renamed from .rcard -- that class name collides with the shared Results Card modal's
    OWN unscoped .rcard{max-width:620px;width:100%} rule, injected site-wide by RESULTS_CARD_JS
    (pwa_endpoints.py, cc#573). CSS cascades per-property: since this rule never set width/max-width,
@@ -9118,6 +9121,43 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     return d>=1&&d<=5&&m>=555&&m<=930;
   }
 
+  // cc#1809 TC_SCANNER_PL_SUMMARY_V1 (session_log 40463): Open Book gets a REALISED figure
+  // (today's closed P&L) alongside the existing UNREALISED one -- two separate numbers, never
+  // blended -- plus LONG/SHORT tappable filter tags that scope both the table and the unrealised
+  // total. _tc13OpenSide/_tc13LastData/_tc13RealisedCache are module state so a tag tap can
+  // re-render from the last payload without a refetch.
+  var _tc13OpenSide='ALL';           // 'ALL' | 'BUY' | 'SELL' -- Open Book side filter only
+  var _tc13LastData=null;            // last payload render() saw
+  var _tc13RealisedCache={total:0, n:0};   // today-scoped Realised; see the render(d) guard below
+  function _tc13TodayIso(){
+    var n=new Date(), ist=new Date(n.getTime()+(n.getTimezoneOffset()*60000)+19800000);
+    return ist.getFullYear()+'-'+('0'+(ist.getMonth()+1)).slice(-2)+'-'+('0'+ist.getDate()).slice(-2);
+  }
+  // Realised is deliberately NOT read from whatever date the Closed Book control happens to be
+  // showing -- that set is exit_ts-scoped to the REQUESTED date server-side (tc_scanner_endpoints.py
+  // WHERE exit_ts::date = %s), so if the founder browses the Closed Book to a past day this must
+  // still read today, not silently follow the control. Filters on r.exit_ts itself (not just trusting
+  // the payload's own date scoping) as a second, independent check against the same drift.
+  function _tc13Realised(rows, todayIso){
+    var t=0, n=0;
+    rows.forEach(function(r){
+      if(r.exit_reason==='OPEN') return;
+      if(String(r.exit_ts||'').slice(0,10)!==todayIso) return;
+      if(r.pnl_rs!=null){ t+=Number(r.pnl_rs); n++; }
+    });
+    return {total: Math.round(t*100)/100, n: n};
+  }
+  function setTc13OpenSide(v){
+    _tc13OpenSide = (_tc13OpenSide===v) ? 'ALL' : v;   // tap the active tag again to clear back to All
+    if(_tc13LastData) render(_tc13LastData);
+  }
+  function _tc13SideTag(label, val){
+    var on=_tc13OpenSide===val;
+    return '<span class="tc13-sidetag'+(on?' on':'')+'" tabindex="0" role="button" aria-pressed="'+on+'"'
+      +' onclick="setTc13OpenSide(\''+val+'\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setTc13OpenSide(\''+val+'\');}"'
+      +'>'+label+'</span>';
+  }
+
   // cc#1744 (founder 06-Sep "In TC scanner no open and closed book?"): the Open Book is NOT
   // date-filtered any more. It renders the endpoint's `open_all` set (every exit_reason = OPEN
   // hold as of now, no date predicate) whatever the date control says — the control now sits
@@ -9126,8 +9166,13 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // older payload without the key says so instead of implying a healthy zero.
   function openTable(rows, meta){
     var live = nseOpen();
-    var emptyMsg = meta.hasOpenAll ? 'No open TC Scanner positions' :'Open Book unavailable in this payload (no open_all key) — not a healthy zero';
-    var body=rows.length ? rows.map(function(r){
+    // cc#1809: LONG/SHORT filter is Open Book only, scoped by the existing side values (BUY=Long,
+    // SELL=Short). Filters BOTH the table body and the Unrealised total together -- a filtered
+    // table next to an unfiltered total would be exactly the ambiguity this card exists to remove.
+    var fRows = _tc13OpenSide==='ALL' ? rows : rows.filter(function(r){return r.side===_tc13OpenSide;});
+    var emptyMsg = !meta.hasOpenAll ? 'Open Book unavailable in this payload (no open_all key) — not a healthy zero'
+      : (_tc13OpenSide!=='ALL' ? 'No open '+(_tc13OpenSide==='BUY'?'Long':'Short')+' TC Scanner positions' : 'No open TC Scanner positions');
+    var body=fRows.length ? fRows.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
         +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
         +'<td>'+n2(r.entry_price)+'</td>'
@@ -9147,9 +9192,13 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
       +(live?'<span class="badge b-live"><span class="dot"></span>LIVE</span>'
             :'<span class="badge b-eng" title="All open holds as of this time — the date control below governs the Closed Book only">as of '+esc(meta.asOf||'')+'</span>')
-      +'<div class="stats"><span>Open <b>'+rows.length+'</b></span>'
+      +'<div class="stats"><span>Open <b>'+fRows.length+'</b></span>'
       +'<span style="font-size:10.5px;color:var(--tx3)">all open holds · not date-filtered</span>'
-      +bookChip('Unrealised', rows)+'</div></div>'   /* cc#1763 C3: the open book at one lot each */
+      +bookChip('Unrealised', fRows)
+      +'<span>Realised <b class="'+cl2(meta.realised.total)+'">'+rsTxt(meta.realised.total)+'</b>'
+      +'<span style="font-size:10.5px;color:var(--tx3)"> ('+meta.realised.n+' closed · today)</span></span>'
+      +_tc13SideTag('Long','BUY')+_tc13SideTag('Short','SELL')
+      +'</div></div>'   /* cc#1763 C3: the open book at one lot each; cc#1809: + Realised + Long/Short */
       +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
       +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th title="futures_universe.lot_size">Lot</th><th title="one lot per signal, display only">P&amp;L &#8377; (1 lot)</th><th>SL &middot; Target</th><th>Entry Time</th><th>Days Held</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
@@ -9226,8 +9275,13 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     // The Open Book stays keyed on the entry date. Older payloads without the key fall back to
     // the entry-date rows, so nothing goes blank during a deploy.
     var closedRows=d.closed_by_exit ? (d.closed_by_exit.buy||[]).concat(d.closed_by_exit.sell||[]) : allRows;
+    // cc#1809: closedRows above is exit_ts-scoped to whatever date was requested (d.date), so it is
+    // only safe to treat as "today's Realised" when the payload actually IS today's -- otherwise
+    // keep showing the last today-scoped figure rather than a wrong-day total or a blank.
+    if(d.date===_tc13TodayIso()) _tc13RealisedCache=_tc13Realised(closedRows, d.date);
+    _tc13LastData=d;
     box.innerHTML='<div class="tc13-wrap">'
-      +openTable(openRows, {hasOpenAll: hasOpenAll, asOf: d.as_of || d.date})
+      +openTable(openRows, {hasOpenAll: hasOpenAll, asOf: d.as_of || d.date, realised: _tc13RealisedCache})
       +closedTable(closedRows, d.date, d.last_closure_date)
       +'</div>';
     document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
