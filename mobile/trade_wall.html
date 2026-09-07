@@ -49,6 +49,15 @@
 /* cc#1295: i-button (other engines not in the 5 primary buckets — QSR today). */
 .tw-ibtn{margin:0 var(--space-12) var(--space-10);padding:var(--space-8) var(--space-12);border-radius:var(--radius-9);border:var(--bw-1) solid var(--line);
   background:var(--panel);color:var(--mut);font-size:var(--type-11);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+/* cc#1831: "+ New alert" — manual/custom alert creation, moved here from the Alerts tab
+   (ALERTS_PURE_DISPLAY_V1, session_log 40507). Same .tw-ibtn box, an <a> not a <button> because
+   this is a plain deep-link to /m/alerts#new — the SAME alOpen()/#new flow mobile/alerts.html and
+   the Home "Custom Alert" tile already use (cc#1635), not a rebuilt modal on this page. display
+   is set explicitly (unlike .tw-ibtn, a native <button>) because an <a> defaults to inline, where
+   padding/margin box awkwardly around surrounding line content. */
+.tw-newalert{display:inline-block;margin:0 var(--space-12) var(--space-10);padding:var(--space-8) var(--space-12);
+  border-radius:var(--radius-9);border:var(--bw-1) solid var(--line);background:var(--panel);color:var(--mut);
+  font-size:var(--type-11);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace;text-decoration:none}
 .tw-ov{display:none;position:fixed;inset:0;background:color-mix(in srgb, var(--field) 60%, transparent);z-index:9998;
   align-items:center;justify-content:center;padding:var(--space-20)}
 .tw-ov.open{display:flex}
@@ -107,6 +116,7 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <div class="chips" id="chipsInstrument"></div>
   <div class="chips" id="chipsBucket"></div>
   <button class="tw-ibtn" onclick="openOther()" title="Other engines not in the 5 primary buckets">i &middot; other engines</button>
+  <a class="tw-newalert" href="/m/alerts#new">＋ New alert</a>
 
   <div class="body" id="body">
     <div class="loading">Loading every trade…</div>

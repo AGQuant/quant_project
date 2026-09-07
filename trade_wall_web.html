@@ -164,6 +164,13 @@
          plus the cc#1295 other-engines list as its last section. openOther() stays as the
          fallback when the shared sheet is not on the page. -->
     <button class="ibtn" onclick="openWallInfo()" title="Universe, entry and exit rules per engine">i</button>
+    <!-- cc#1831: manual/custom alert creation moved here from the Alerts page --
+         ALERTS_PURE_DISPLAY_V1 (session_log 40507). Same shared form as trade_alerts_web.html and
+         the app (window.ScorrAlertCreate, scorr_alert_create.js) -- not rebuilt. A freshly-created
+         alert starts pending; this page doesn't render the pending-alerts list itself yet
+         (that's cc#1815's job), so on success this just refreshes the wall's own approved feed --
+         nothing here claims to show the new pending row inline. -->
+    <button class="tw-btn" id="newAlertBtn" onclick="ScorrAlertCreate.open(function(){ boot(false); })">＋ New alert</button>
   </div>
   <!-- cc#1587: subline is set by JS per mode — approved-only (default) or the engine hierarchy
        when app_config.wot_buckets_enabled is widened. The engines text lives in SUB_ENGINES. -->
@@ -234,6 +241,7 @@
 </div>
 
 <script src="/scorr_card_common.js"></script>
+<script src="/scorr_alert_create.js"></script>
 <script>
 /* cc#991/cc#1295 — the WEB renderer of the Wall of Trades.
 

@@ -2524,6 +2524,10 @@ PCR_TREND_CARD_JS = _read_root_js("pcr_trend_card.js")
 # cc#1677: the V8 Dashboard's Model Portfolio pane — empty launcher + two table views, in the
 # same repo-root-file serve pattern as its neighbours above.
 SCORR_MODEL_PORTFOLIO_JS = _read_root_js("scorr_model_portfolio.js")
+# cc#1831: the shared "+ New alert" manual/custom alert creation card (window.ScorrAlertCreate),
+# lifted out of trade_alerts_web.html so trade_wall_web.html can open the SAME form rather than a
+# hand copy of it. ALERTS_PURE_DISPLAY_V1 (session_log 40507) moved creation off the Alerts page.
+SCORR_ALERT_CREATE_JS = _read_root_js("scorr_alert_create.js")
 
 
 @router.get("/index_tape_card.js")
@@ -2751,6 +2755,11 @@ def pwa_v8_ladder_v2_js():
 @router.get("/scorr_analysis_card.js")
 def pwa_scorr_analysis_card_js():
     return Response(SCORR_ANALYSIS_CARD_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_alert_create.js")
+def pwa_scorr_alert_create_js():
+    return Response(SCORR_ALERT_CREATE_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_cockpit_card.js")
