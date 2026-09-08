@@ -1468,16 +1468,67 @@ _INDEX_OPT_ROOT = {"NIFTY": "NIFTY", "NIFTY50": "NIFTY", "NIFTY 50": "NIFTY", "B
 
 def _price_rows(strikes, spot, T, rv20, px_of):
     """cc#1576: the ONE Black-Scholes fair / tag / ratio row builder, shared by the Fyers path
-    (stocks) and the option_chain path (indices) below. px_of(strike, 'CE'|'PE') -> ltp or None."""
+    (stocks) and the option_chain path (indices) below. px_of(strike, 'CE'|'PE') -> ltp or None.
+
+    cc#1847 (founder ruling 08-Sep-2026): the expensive/cheap TAG is banded to ATM +-5 strikes
+    (11 rows when the chain has that many on both sides; ATM = the strike nearest spot). Outside
+    the band every row still shows ltp/iv/fair when computable -- never a dash, never a
+    placeholder -- it simply carries no tag. INSIDE the band the tag is additionally blanked
+    (never a wrong one) by a sanity gate: the quote sits below the option's own intrinsic value,
+    or the call/put price breaks monotonic order against its nearest PRICED neighbour (a call
+    must not price above a lower strike's call; a put must not price above a higher strike's
+    put) -- this is exactly the founder screenshot's evidence (non-monotonic CE prices, deep
+    strikes with 242pct+ solved IV). A no-quote row was already untagged before this card
+    (px is None) and stays that way.
+
+    A THIRD sanity leg -- solved IV outside a plausible range -- is intentionally NOT wired here.
+    cc#1847's own gate requires that range to be proposed with query evidence and confirmed by
+    Fable before it is wired; that proposal is posted to the Fable Room (cc_task_logs, cc#1847 +
+    cc#1199) rather than picked unilaterally. It lands as a follow-on once confirmed.
+
+    This function is the ONE place both callers (the Fyers/stock path below and the option_chain/
+    index path above it) reach — banding and the sanity gate apply identically to both by
+    construction (ONE_REGISTRY_ONE_DERIVATION_V1, session_log 33549), satisfying this card's
+    step 6 port-to-index-chain without a second implementation."""
+    strikes = sorted(strikes)   # defensive: both callers already pass sorted lists
     atm = min(strikes, key=lambda s: abs(s - spot))
+    atm_idx = strikes.index(atm)
+    band = set(strikes[max(0, atm_idx - 5): atm_idx + 6])
+    px_cache = {(s, ot): px_of(s, ot) for s in strikes for ot in ("CE", "PE")}
+
+    def _mono_ok(s, ot):
+        """False if this strike's price breaks monotonic order (calls fall as strike rises, puts
+        rise as strike rises) against its nearest neighbour that actually has a quote."""
+        idx = strikes.index(s)
+        p = px_cache.get((s, ot))
+        if not p:
+            return True
+        lo = next((px_cache.get((strikes[i], ot)) for i in range(idx - 1, -1, -1)
+                   if px_cache.get((strikes[i], ot))), None)
+        hi = next((px_cache.get((strikes[i], ot)) for i in range(idx + 1, len(strikes))
+                   if px_cache.get((strikes[i], ot))), None)
+        if ot == "CE":
+            if lo is not None and p > lo:
+                return False
+            if hi is not None and p < hi:
+                return False
+        else:
+            if lo is not None and p < lo:
+                return False
+            if hi is not None and p > hi:
+                return False
+        return True
+
     rows = []
     for s in strikes:
         row = {"strike": s, "atm": (s == atm)}
         for ot, key in (("CE", "ce"), ("PE", "pe")):
-            px = px_of(s, ot)
+            px = px_cache.get((s, ot))
             iv = _bs_iv(px, spot, s, T, ot) if px else None
             fair = _bs_price(spot, s, T, rv20, ot) if rv20 else None
-            if px and fair and fair > 0:
+            intrinsic = max(spot - s, 0.0) if ot == "CE" else max(s - spot, 0.0)
+            eligible = (s in band) and px and px >= intrinsic and _mono_ok(s, ot)
+            if eligible and fair and fair > 0:
                 prem = round((px / fair - 1) * 100, 1)
                 tag = "EXPENSIVE" if prem > 25 else ("CHEAP" if prem < 0 else "REASONABLE")
                 ratio = round(px / fair, 2)
