@@ -134,8 +134,16 @@ body[data-theme]{
  * (not a new #gvp/#ckp/#v8p-style block below): the card's own token inventory (grepped) is
  * exactly the older-family names already re-declared here — --txt/--surface2/--panel2/--line2/
  * --dim/--mut/--panel/--line/--grn/--red/--blu — nothing from the newer --well/--chalk family.
+ *
+ * cc#1848: mobile/alerts.html's alOpen() (the NEW ALERT sheet) has the IDENTICAL bug for the
+ * IDENTICAL reason — document.body.appendChild(el) with id=alWrap is ANOTHER body-sibling of
+ * .screen, not a descendant, and its .al-in/.al-tg/.al-sheet/.al-lb/.al-go CSS (mobile/alerts.html)
+ * reads exactly this family — --bg/--txt/--panel/--line2/--dim, plus --blu via the shared .chip.on
+ * rule. Same fix as #scorrAnaOv: add it to this bridge rather than build a second one. No CSS
+ * value in mobile/alerts.html itself changes — the token NAMES were already right, only the scope
+ * that gives them a real per-theme value was missing.
  */
-.screen,.bnav,#scorrAnaOv{
+.screen,.bnav,#scorrAnaOv,#alWrap{
   --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
   --surface2:var(--t-hi);   /* cc#1778: the C·A·R·D tile fill; a :root literal in mobile_app.css until now */
   --line:var(--t-edge); --line2:var(--t-edge);
