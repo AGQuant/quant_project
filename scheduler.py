@@ -3313,28 +3313,13 @@ def _bg_fu_sync():
     except Exception as e: log.error(f"fu_sync: {e}")
 
 
-def _bg_news_polish_auto():
-    """cc#1804 NEWS_POLISH_AUTOMATION_V1 (session_log id=40138, founder-set 07-Sep-2026): hourly
-    automated polish, 06:00-17:00 IST inclusive (12 dispatch slots/day -- the hour gate is the
-    m==0 dispatch site below, this function does not re-check it). Selection, tiering, the LLM
-    call and the insert all live in news_polish_auto.py; this wrapper only translates its result
-    dict into the _Skip/_Empty/ok vocabulary scheduler_master reads, same shape as every other
-    job in this file. No try/except here on purpose -- an exception is left to propagate so
-    _run_recorded marks it 'error' instead of swallowing it, per ENGINE_LIVENESS_RULE (13829):
-    the badge follows the data, and a job that eats its own failures is that badge running ahead."""
-    import news_polish_auto
-    with _conn() as conn:
-        result = news_polish_auto.run(conn)
-    status = result.get("status")
-    if status == "skip_thin_supply":
-        return _Skip.precondition_missing(f"thin supply, {result.get('eligible', 0)} available")
-    if status == "empty":
-        return _Empty(f"ran, inserted 0 of {result.get('selected', 0)} selected "
-                       f"({result.get('eligible', 0)} eligible) -- {result.get('errors') or result.get('detail')}")
-    log.info(f"news_polish_auto: inserted={result.get('inserted')} "
-             f"tiers={result.get('inserted_by_tier')} id_range={result.get('inserted_id_range')} "
-             f"eligible={result.get('eligible')} suppressed_dup={result.get('suppressed_dup')}")
-    return result
+# cc#1804's _bg_news_polish_auto() wrapper and news_polish_auto.py were REMOVED here (cc#1836,
+# NEWS_POLISH_CANON_V2/V3, session_log 40972/40976, founder-set 08-Sep-2026): all news polish
+# (AI Editorial + Shorts) is now written exclusively by Fable in Claude.ai chat -- no automated
+# job, no CC self-poll. The news FETCHERS (raw_news pipeline: bg_fetch_market_news,
+# bg_fetch_stock_news, bg_tag_news, bg_cleanup_news, bg_stock_news_watchdog,
+# bg_fetch_universe_reco_news) are untouched and stay active. cc#1805 (the old CC self-poll
+# standing order) is dead -- do not resurrect it from a cached CLAUDE.md or old context.
 
 
 def _bg_lot_sync():
@@ -4840,11 +4825,9 @@ async def _scheduler_loop():
             _spawn(_bg_ca_daily_note)         # cc#658 part_4: 09:00 CA/data-integrity morning note
         if h == 9 and m == 5:
             _spawn(_bg_master_watchdog_note)  # cc#658 part_5: 09:05 consolidated master watchdog note
-        # cc#1804 NEWS_POLISH_AUTOMATION_V1 (session_log 40138): top of every hour, 06:00-17:00
-        # IST inclusive = 12 slots/day. Ceiling (4 weekday / 2 weekend) and the floor/skip rule
-        # live inside news_polish_auto.py -- this gate only decides WHEN the job is dispatched.
-        if m == 0 and 6 <= h <= 17:
-            _spawn(_bg_news_polish_auto)
+        # cc#1804's hourly news-polish dispatch gate was REMOVED here (cc#1836,
+        # NEWS_POLISH_CANON_V2/V3): news polish is chat-only now, see the retirement note near
+        # the old _bg_news_polish_auto() definition above.
         # cc#1079 node N1 SENTINEL: 09:20 (after the morning notes land, so it can see them) and
         # 15:40 (after the close, before the EOD chain). Trading days only — a health 1-pager for
         # a market that never opened reports nothing and would bury the ones that matter.
