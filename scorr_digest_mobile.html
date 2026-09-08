@@ -603,7 +603,17 @@ html,body{overflow-x:hidden;max-width:100%}
    than 50% to stay readable. Flagging for a live-screenshot confirm (CC is network-blocked from
    scorr.in) rather than assuming the literal math reads right. */
 .nwchip.sent{font-size:6px;padding:var(--space-1) var(--space-4)}
-.nwbd{font-size:var(--type-135);line-height:1.66;color:var(--news-rule)}
+/* cc#1839: was color:var(--news-rule) -- that token is a single hardcoded literal (#d9d6cc,
+   scorr_themes.css's flat top-level :root block, NOT bridged per-theme like --ink/--panel) meant
+   for a hairline rule/divider against a dark surface, never a text colour. Measured contrast
+   against --panel: 1.27-1.45:1 on all 7 light themes (goldday/aquawhite/blush/rosewall/
+   silvergold/duskday/orangepeel) -- a near-total failure, exactly the founder's "pale grey on
+   white sheet" report -- vs 10.8-13.0:1 on the 8 dark themes, which is why it went unnoticed:
+   the sheet's own inset box-shadow (line 584, tuned for a dark surface) is the same tell. Switched
+   to --chalk, the same token .nwsh/.nwsm/.nwnone already use correctly -- it is bridged on BODY
+   by scorr_appshell.css (body[data-theme]{--chalk:var(--ink)}), so it tracks the theme like the
+   headline/timestamp already do. New contrast: 11.5-18.5:1 across all 15 themes. */
+.nwbd{font-size:var(--type-135);line-height:1.66;color:var(--chalk)}
 .nwbd p{margin:0 0 var(--space-9)}
 .nwnone{font-size:var(--type-12);line-height:1.6;color:var(--chalk);font-style:italic}
 .newslist{max-height:none;overflow:visible}
