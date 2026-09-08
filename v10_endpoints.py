@@ -863,6 +863,34 @@ def v10_buildup(limit: int = 15):
                 WHERE pf.pc IS NOT NULL AND l.c IS NOT NULL
             """)
             rows = cur.fetchall()
+            # cc#1844 (LATE_FEED_START_DETECTION_V1, founder ruling 08-Sep-2026, follow-up to
+            # cc#1834): universe-wide count, independent of the `l`/`pf` filtering above, so a
+            # late-start day is detected even if it also happens to drop rows elsewhere. Same
+            # session/window logic as the `o` CTE (09:15-09:30, oi IS NOT NULL) but counted
+            # directly rather than reused from the CTE, because `o` only ever reaches the reader
+            # via the LEFT JOIN on `l` — a row-count off that join would already be filtered by
+            # pf.pc/l.c, undercounting the true universe picture this flag needs.
+            # THRESHOLD (50% of the day's total symbols), backed by the ONLY 6 days of history
+            # futures_basis actually retains (verified live, not assumed — see cc#1844 result):
+            # 09-01 and 09-07 gave 0/207 (universe-wide miss, first bar 15:30 and 10:15
+            # respectively); 09-02/03/04/08 gave the full 207/207 (first bar 09:15). The gap is
+            # 0% vs 100% with nothing observed in between, so 50% is a conservative floor with
+            # wide margin on both sides, not a number picked by feel.
+            cur.execute("""
+                WITH sess AS (
+                    SELECT MAX(ts::date) AS d FROM futures_basis
+                    WHERE ts::time BETWEEN '09:15' AND '15:30'
+                )
+                SELECT
+                    (SELECT COUNT(DISTINCT symbol) FROM futures_basis, sess WHERE ts::date=sess.d) AS total_symbols,
+                    (SELECT COUNT(DISTINCT symbol) FROM futures_basis, sess
+                       WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '09:30' AND oi IS NOT NULL) AS symbols_with_open,
+                    (SELECT MIN(ts::time) FROM futures_basis, sess WHERE ts::date=sess.d) AS first_bar_time
+            """)
+            _tot, _open, _first_bar = cur.fetchone()
+            _tot = int(_tot or 0)
+            _open = int(_open or 0)
+            opening_data_missing = _tot > 0 and _open < 0.5 * _tot
             # cc#1440: the RVOL/VOL P pair, both via rvol_engine's batch reads (one derivation).
             from rvol_engine import live_rvol_batch, closing_rvol_batch
             # cc#1454: Vol D (Delivery Ratio) via the SAME shared function Volume Flow and the
@@ -916,7 +944,13 @@ def v10_buildup(limit: int = 15):
         return {"status": "ok", "long_buildup": longs, "short_buildup": shorts,
                 "as_of": str(as_of) if as_of is not None else None,
                 "oi_feed_pending": oi_pending,
-                "note": "OI / basis feed pending — classification limited to price move" if oi_pending else None}
+                "note": "OI / basis feed pending — classification limited to price move" if oi_pending else None,
+                # cc#1844: universe-wide since-open miss (cc#1834's root cause) — Option A, no
+                # fallback calculation, the surface states the fact instead of rendering an empty
+                # list with no explanation.
+                "opening_data_missing": opening_data_missing,
+                "first_bar_time": str(_first_bar) if _first_bar is not None else None,
+                "symbols_with_open": _open}
     except Exception as e:
         _log_buildup_error(e)
         raise HTTPException(500, f"v10_buildup failed: {e}")
