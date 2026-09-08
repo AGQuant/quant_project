@@ -1550,6 +1550,29 @@ RESULTS_CARD_JS = """
     + '.rcard-ov{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:none;'   /* cc#679: unified backdrop */
     + 'align-items:center;justify-content:center;padding:16px}'
     + '.rcard-ov.on{display:flex}'
+    /* cc#1840: .rcard-ov is appended straight to <body> (see the JS below), a sibling of
+       .screen/.bnav rather than a descendant -- the SAME shape as scorr_analysis_card.js's
+       #scorrAnaOv (cc#1828) -- but it was never added to that family's theme_mobile.css bridge, so
+       --mut here was genuinely undefined and every label (.rcard-l1k, .rcard-lbl, .rcard-gvm,
+       .rcard-status.rcard-st-t, .rcard-peer-l, .rcard-pr-table th, ...) fell through to this
+       block's own var(--mut, #667085) literal fallback: 4.97:1 against this card's own
+       var(--card, #fff) background -- borderline AA, and visibly weak next to the values right
+       beside it at var(--txt, #101828) (15+:1). That matches the founder's screenshot exactly.
+       TRIED bridging --mut to var(--t-muted) (the theme_mobile.css pattern #scorrAnaOv uses) and
+       MEASURED it before shipping: it fixes light themes (6.2-10.3:1 on 6 of 7; goldday is the
+       documented cc#1185 exception at 3.68) but --card and --txt are NOT bridged for this overlay
+       either -- they only look right on a light theme by fallback-value coincidence, same root
+       cause as --mut -- so on every one of the 8 dark theme sets the card KEEPS rendering white
+       (--card unbridged) while --mut would now correctly follow that dark theme's light --muted
+       value: 2.06-3.45:1, WORSE than today on every single dark set. Reactive bridging is not the
+       right fix for a surface that is not itself theme-reactive. Fixed the FALLBACK instead, to
+       #5B6B94 -- not a new hex: it is this exact file's own pre-existing light-mode --mut value
+       (line ~1356, :root[data-theme="light"], a legacy path inactive on /m/* pages since
+       window.ScorrTheme takes over there) -- so every theme, light or dark, gets the SAME
+       5.28:1-against-white a card that stays white regardless of theme actually needs, with zero
+       risk of regressing dark. --card/--txt bridging (making the whole card theme-reactive) is a
+       separate, larger card -- out of this one's scope per do_not_touch ("not a redesign"). */
+    + '.rcard-ov{--mut:#5B6B94}'
     + '.rcard{background:var(--card,#fff);color:var(--txt,#101828);border:1px solid var(--line,rgba(148,166,210,.2));'
     + 'border-radius:16px;max-width:620px;width:100%;max-height:88vh;overflow:auto;'   /* cc#679: unified 620/88vh/16 modal footprint */
     + 'box-shadow:0 24px 64px rgba(0,0,0,.22);padding:18px}'
