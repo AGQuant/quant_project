@@ -215,6 +215,8 @@ dated recent section rather than being guessed into a topic.
 
 | id | Title |
 |---|---|
+| 40976 | NEWS_POLISH_CANON_V3 (founder 08-Sep-2026) — batch composition locked: 10 items = 1 AI Editorial + 9 Shorts. Supersedes V2 (40972) on composition only |
+| 40972 | NEWS_POLISH_CANON_V2 (founder 08-Sep-2026) — ALL news polish moves to Claude.ai chat (Fable); app-scheduler job and CC self-poll both RETIRED. Supersedes 40145, 40846, 40138 |
 | 13616 | L2_POLISH_PROTOCOL_V1 (founder-locked 02-Aug — CC-on-command, no API, no card-filing) |
 | 13456 | STOCK_VIEWS_FRAMEWORK_V2 (founder-locked 01-Aug-2026, supersedes id=10062 V1) |
 | 13354 | POLISH_RESULTS_FRAMEWORK_V1 (founder-locked 01-Aug-2026) |
@@ -908,3 +910,4 @@ someone re-adopts by accident.
 | 5650 gates | BUY_MOMENTUM V3 gate set | **23197** BUY_MOMENTUM_V5 (rule source 23186) |
 | 324 | investment_check v1.0 | **27979** INVESTMENT_CHECK_V2 — *on V2 go-live; v1 still serving* |
 | 22310 | CC_PROGRESS_REPORT_FORMAT_V1 | **27944** REPORT_FORMAT_V2 (extends, does not retire) |
+| 40145, 40846, 40138 | NEWS_POLISH_CANON_V1 / NEWS_POLISH_CC_SELFPOLL_V1 / NEWS_POLISH_AUTOMATION_V1 — automated app-job + CC self-poll execution modes | **40972** NEWS_POLISH_CANON_V2 (chat-only) + **40976** NEWS_POLISH_CANON_V3 (batch composition) |
