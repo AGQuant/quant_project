@@ -1213,7 +1213,7 @@ def alerts_ideas(limit: int = 100):
         "as_of_ist": "%02d:%02d IST" % (now_ist.hour, now_ist.minute),
         "price_basis": "LIVE" if any_live else "CLOSE",
         "counts": counts, "stats": stats,
-        "honesty": "Every idea here was handpicked and approved by hand. Prices and P&L are live since approval.",
+        "honesty": "Every idea here is picked and approved by hand. Prices and P&L are live since approval.",
         "ideas": ideas, "hidden_option_context": hidden,
         "spec_ref": "APP_ALERTS_IDEAS_V1 session_log 37072 · cc#1620",
     }
