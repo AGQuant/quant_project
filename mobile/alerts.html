@@ -205,7 +205,7 @@ function renderTop(){
     + '<div><div class="ia-k">WINNING</div><div class="ia-v ' + (s.winning ? 'up' : '') + '">' + (s.winning != null ? s.winning : '—') + '</div></div>'
     + '<div><div class="ia-k">AVG SINCE</div><div class="ia-v ' + pctCls(s.avg_since_pct) + '">' + pctS(s.avg_since_pct, 1) + '</div></div>'
     + '<div><div class="ia-k">BEST</div><div class="ia-v ' + pctCls(s.best_pct) + '">' + pctS(s.best_pct, 1) + '</div></div>'
-    + '</div><div class="ia-hon">' + esc((d && d.honesty) || 'Every idea here was handpicked and approved by hand. Prices and P&L are live since approval.') + '</div>';
+    + '</div><div class="ia-hon">' + esc((d && d.honesty) || 'Every idea here is picked and approved by hand. Prices and P&L are live since approval.') + '</div>';
   /* cc#1667: the as-of stamp moved here from the header's #ia-r line (counts stay on the filter
      chips, which already show All/Live/Waiting/Closed with their own numbers). */
   $('ia-foot').textContent = d
