@@ -814,6 +814,8 @@ from nse_fo_eod import fo_eod_router            # cc#682: NSE F&O bhavcopy -> EO
 app.include_router(fo_eod_router)
 from bhavcopy_diagnostic import router as bhavcopy_diagnostic_router   # cc#1858 step 2: read-only bhavcopy option-row measurement (production-only, no writes to fo_eod)
 app.include_router(bhavcopy_diagnostic_router)
+from option_iv_history import router as option_iv_history_router   # cc#1858 step 5/7: forward-storage + resumable backfill of option IV at ATM+-10 (no writes to fo_eod)
+app.include_router(option_iv_history_router)
 from ops_control_plane import control_plane_router   # cc#693: ops control plane (registries + job_runs spine + diagnosis)
 app.include_router(control_plane_router)
 app.include_router(performance_router)
