@@ -55,6 +55,17 @@ ONE-MONTH PROOF BEFORE THE FULL BACKFILL -- founder-mandated, structurally enfor
     already cleared (founder ruling id 5654: 8,753 rows/day measured, ~309 MB/year accepted) --
     what remains gated is the PROOF, not the size.
 
+    UPDATE 09-Sep-2026 ~05:15 IST: the August-2026 proof month completed clean (21/21 dates done,
+    183,383 rows, 217 symbols; spot-checked and posted to cc_task_logs id 1858/1199 for Fable's
+    verification). The founder then changed the sequencing for THIS production-mode window only
+    (cc_task_logs 1199, "PRODUCTION MODE RE-ARMED" post): post the proof and continue straight into
+    the remaining backfill without waiting for a reply, because the per-day resumability and
+    idempotent re-run this module already guarantees mean a defect found after the fact costs
+    nothing to correct. None of the other safeguards (vectorised solve, bulk COPY, hard abort 08:30,
+    30pct-overrun check) are relaxed by that change. Acting on it: the remaining 11 months
+    (2025-09-01 through 2026-07-31, weekdays) were seeded via seed_dates()-equivalent SQL and the
+    trigger flag set to 'pending' again -- this push's redeploy is what claims it.
+
 TRIGGER -- same pattern as fy_end_backfill.py / bhavcopy_diagnostic.py (sandbox has no HTTP path
     to prod): app_config flag 'option_iv_backfill_run' = 'pending', claimed atomically on deploy
     startup, runs in a daemon thread so the app itself starts normally. Manual re-trigger:
