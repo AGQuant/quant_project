@@ -267,6 +267,9 @@ def run_backfill() -> dict:
     started = _ist_now()
     log.info("option_iv_history backfill started")
     try:
+        with _conn() as conn, conn.cursor() as cur:   # cc#1858 fix: a cold start must not query
+            _ensure_tables(cur)                        # option_iv_backfill_status before it exists
+            conn.commit()
         while True:
             if _hard_abort_hit():
                 log.warning(f"option_iv_history HARD ABORT 08:30 IST -- stopping, {processed} dates done this run")
