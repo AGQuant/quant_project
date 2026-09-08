@@ -126,32 +126,83 @@ def compose_live(cur, pcr):
 router = APIRouter(prefix="/api/pcr", tags=["pcr"])
 
 
+# cc#1846 FOUNDER_RULING_08SEP_2026_CANON_DECIDED: "We are storing whole chain and compute live so
+# everything live nothing EOD." pcr_intraday.pcr_total's writer (compute_pcr_intraday's self-heal
+# loop) has a confirmed write-race -- it can sum a chain snapshot mid-write and commit a corrupt
+# total (root cause: cc_task_logs on cc#1846, 08-Sep NIFTY 15:30 bar, 0.5047 vs the true 1.2684).
+# pcr_daily is not itself corrupted but the founder's own evidence shows it "adds nothing" once the
+# live compute exists (identical to the live number at close). So neither table is read here any
+# more for a live/current value -- PCR is computed straight from option_chain, the same LATEST-TICK
+# SQL shape max_pain()/v10_strike_oi already use (ONE_REGISTRY_ONE_DERIVATION_V1), reusing
+# max_pain.LATEST_CHAIN_SQL's underlying/expiry resolution rather than a fourth copy of it.
+_CHAIN_TICKS_SQL = """
+    WITH exp AS (
+        SELECT MIN(expiry) AS e FROM option_chain
+        WHERE underlying = %(u)s AND expiry >= CURRENT_DATE
+    )
+    SELECT ts,
+           SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END) AS ce,
+           SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END) AS pe,
+           COUNT(DISTINCT strike) AS n
+    FROM option_chain
+    WHERE underlying = %(u)s AND expiry = (SELECT e FROM exp) AND oi IS NOT NULL
+    GROUP BY ts
+    ORDER BY ts DESC
+    LIMIT %(lim)s
+"""
+
+
+def live_pcr(cur, underlying="NIFTY", near_ts=None):
+    """(pcr, as_of_ts, strike_count) from an option_chain tick, whole chain (every strike, not a
+    window). With near_ts=None (default): the LATEST usable tick. With near_ts set: the usable
+    tick closest to that timestamp, for a "PCR as of ~N minutes ago" read (cc#1846 R1's
+    compose_read fix, the same live source as the "now" read rather than a second one).
+
+    cc#1846 R2 guard: a tick with far fewer strikes than this same underlying's recent median is a
+    partial/in-flight write -- exactly the shape that corrupted pcr_intraday -- so it is walked
+    PAST (carried forward to the next tick that passes), never served as a confident-looking wrong
+    ratio. Returns (None, None, 0) when option_chain has nothing at all for this underlying's
+    current expiry."""
+    lim = 20 if near_ts is None else 60   # near_ts can reach further back than "latest"
+    cur.execute(_CHAIN_TICKS_SQL, {"u": underlying, "lim": lim})
+    rows = cur.fetchall()
+    if not rows:
+        return None, None, 0
+    counts = sorted(int(r[3]) for r in rows)
+    median_n = counts[len(counts) // 2]
+    floor_n = max(1, median_n // 2)   # thin-snapshot guard: below half the recent median
+    usable = [(ts, ce, pe, n) for ts, ce, pe, n in rows if n >= floor_n and ce]
+    if not usable:
+        # every fetched tick is thin (e.g. the whole session just started) -- serve the newest
+        # one anyway rather than nothing, its own strike count travels with it so a caller can
+        # judge it.
+        ts, ce, pe, n = rows[0]
+        return (round(float(pe or 0) / float(ce), 4) if ce else None), ts, int(n)
+    if near_ts is None:
+        ts, ce, pe, n = usable[0]   # newest usable (rows is already ts DESC)
+    else:
+        ts, ce, pe, n = min(usable, key=lambda r: abs((r[0] - near_ts).total_seconds()))
+    return round(float(pe or 0) / float(ce), 4), ts, int(n)
+
+
 def latest_pcr(cur, underlying="NIFTY"):
-    """(pcr, basis, as_of) — the LATEST pcr_intraday bar for `underlying`, whatever its date.
+    """(pcr, basis, as_of) — the LATEST PCR reading for `underlying`, computed live from
+    option_chain (cc#1846). Never reads pcr_intraday.pcr_total or pcr_daily for this value any
+    more; pcr_daily is still the final fallback ONLY when option_chain has no chain at all for this
+    underlying's current expiry (e.g. before the feed's first snapshot of a new expiry lands).
 
-    cc#1670 (founder 04-Sep): the old query filtered `ts::date = today`, so on any tick before
-    the day's FIRST 5-min bar landed (session open, or a feed gap) this fell straight to the
-    pcr_daily EOD row and printed yesterday's number as "EOD" -- even though pcr_intraday still
-    held yesterday's perfectly good last bar. Data-honesty is "show the newest real reading with
-    its real timestamp", not "show today's reading or nothing" -- so the date filter is gone.
-
-    basis: 'LIVE' when the returned bar is stamped TODAY and it is 09:15-15:30 IST on a weekday
-           (cc#1576's session window); 'LAST' for any other real intraday bar (yesterday's close
-           tick, or a today bar read outside the session); 'DAILY' only when pcr_intraday has NO
-           rows at all for this underlying and the pcr_daily EOD table is the fallback -- as_of
-           there is the bare price_date (no fabricated time)."""
-    cur.execute("""
-        SELECT pcr_total, ts FROM pcr_intraday
-        WHERE underlying=%s AND pcr_total IS NOT NULL
-        ORDER BY ts DESC LIMIT 1
-    """, (underlying,))
-    r = cur.fetchone()
-    if r and r[0] is not None:
+    basis: 'LIVE' when the chosen tick is stamped TODAY and it is 09:15-15:30 IST on a weekday
+           (cc#1576's session window); 'LAST' for any other real chain tick (yesterday's last
+           snapshot, or a today tick read outside the session); 'DAILY' only when option_chain has
+           no usable chain at all and the pcr_daily EOD table is the fallback -- as_of there is the
+           bare price_date (no fabricated time)."""
+    pcr, ts, _n = live_pcr(cur, underlying)
+    if pcr is not None and ts is not None:
         from datetime import datetime as _dt, timedelta as _td, timezone as _tz, time as _time
         _now = _dt.now(_tz(_td(hours=5, minutes=30)))
         _open = (_now.weekday() < 5 and _time(9, 15) <= _now.time() <= _time(15, 30))
-        _is_today = r[1].date() == _now.date()
-        return _f(r[0]), ("LIVE" if (_is_today and _open) else "LAST"), r[1].strftime("%Y-%m-%d %H:%M")
+        _is_today = ts.date() == _now.date()
+        return pcr, ("LIVE" if (_is_today and _open) else "LAST"), ts.strftime("%Y-%m-%d %H:%M")
     cur.execute("""
         SELECT pcr, price_date FROM pcr_daily
         WHERE underlying=%s AND pcr IS NOT NULL
@@ -587,11 +638,11 @@ def compose_read(cur, underlying, pcr, as_of=None):
                 (underlying, as_of_date))
     r = cur.fetchone()
     pcr_prev = _f(r[0]) if r else None
-    cur.execute("""SELECT pcr_total FROM pcr_intraday WHERE underlying=%s AND pcr_total IS NOT NULL
-                   AND ts >= %s AND ts <= %s ORDER BY ts DESC LIMIT 1""",
-                (underlying, _dt.combine(today, _dt.min.time()), now.replace(tzinfo=None) - _td(minutes=60)))
-    r = cur.fetchone()
-    pcr_1h = _f(r[0]) if r else None
+    # cc#1846: pcr_1h used to read pcr_intraday.pcr_total directly -- the same corrupted-write-race
+    # column the hero used to read. live_pcr(near_ts=...) is the SAME live-from-option_chain source
+    # the "now" read already uses, just pointed ~1h back -- one derivation, not a second one.
+    _pcr_1h, _ts_1h, _ = live_pcr(cur, underlying, near_ts=now.replace(tzinfo=None) - _td(minutes=60))
+    pcr_1h = _pcr_1h if (_ts_1h is not None and _ts_1h.date() == today) else None
     nifty_day = None
     wk = None
     try:
