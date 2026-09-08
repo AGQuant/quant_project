@@ -750,7 +750,13 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             approved_as_of = _m[0].strftime("%d %b %Y %H:%M") if (_m and _m[0]) else None
             # cc#1609 scope 6: the header line — pending = open engine rows with no approve /
             # dismiss decision yet; approved today; newest signal ts. All over the WHOLE wall.
+            # cc#1843: "AND w.engine <> 'QB Basket'" added to both counts below — baskets never
+            # carry a trade_alerts match (verified live: 0 rows, ever), so before this they always
+            # inflated `pending` even though the per-row fix above (e["state"] =
+            # "not-approval-applicable") already stops them from rendering a button. Without this,
+            # the header would keep saying e.g. "78 pending" for rows nobody can act on.
             cur.execute("SELECT COUNT(*) n FROM (" + wall_sql + ") w WHERE w.status = 'open' AND w.src <> 'alert' "
+                        "AND w.engine <> 'QB Basket' "
                         "AND NOT EXISTS (SELECT 1 FROM trade_alerts a WHERE a.kind = 'entry' "
                         "AND a.source_engine = w.engine "
                         "AND a.source_ref = w.symbol || '@' || to_char(w.entry_ts, 'YYYY-MM-DD HH24:MI:SS') "
@@ -762,6 +768,7 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             # decision". THE PENDING FIGURE DROPS BY THIS NUMBER FROM THIS CARD ON — that is the
             # rule working, not data going missing; `suppressed` is served beside it.
             cur.execute("SELECT COUNT(*) n FROM (" + wall_sql + ") w WHERE w.status = 'open' AND w.src <> 'alert' "
+                        "AND w.engine <> 'QB Basket' "
                         "AND NOT EXISTS (SELECT 1 FROM trade_alerts a WHERE a.kind = 'entry' "
                         "AND a.source_engine = w.engine "
                         "AND a.source_ref = w.symbol || '@' || to_char(w.entry_ts, 'YYYY-MM-DD HH24:MI:SS') "
@@ -973,6 +980,20 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                                  "pnl_approved_basis": ("approved_price@approved_at -> cmp, x one lot (futures_universe.lot_size)"
                                                         if e["src"] == "tc" else
                                                         "approved_price@approved_at -> cmp_as_of, x position qty")}
+            elif e["engine"] == "QB Basket":
+                # cc#1843 (founder ruling 08-Sep-2026, voice, transcribed): "Wall of Trades keeps
+                # approval buttons, and those are for EQUITY and FUTURES trades only - never for
+                # baskets." Before this, a QB Basket row with no trade_alerts match (every one —
+                # verified live: 0 rows in trade_alerts have ever carried source_engine='QB
+                # Basket') fell through to the SAME "pending-approval" default as every other
+                # engine, which is what put a live APPROVE/DISMISS button on it (the render
+                # function does not special-case by engine). QB Basket rows are already-executed
+                # real positions (quant_paper_positions), not signals awaiting a founder decision
+                # — the approval concept never applied to them in the first place, so this is not
+                # "approved" (no such record exists) and not "pending" (nothing is pending a
+                # click). A dedicated state, rendered as a plain no-button badge.
+                e["state"] = "not-approval-applicable"
+                e["approval"] = None
             else:
                 e["state"] = "pending-approval"
                 e["approval"] = None
@@ -1043,7 +1064,7 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                       "equity": "QB Basket / Investment Scanner / Screeners: percent only, both columns, never rupees"},
         "v8_open_book": v8_open_book,
         "tc_open_book": tc_open_book,
-        "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed | suppressed-in-position (cc#1736)",
+        "state_join": "trade_alerts(kind=entry, source_engine=engine, source_ref=symbol@entry.ts) -> pending-approval | approved | dismissed | suppressed-in-position (cc#1736) | not-approval-applicable (cc#1843, QB Basket only — baskets are already-executed positions, never signals awaiting a founder decision, so they never enter the approve/dismiss queue)",
         # cc#1734: the Closed book summary (see the SQL above) and the DECODE map the renderer
         # applies to DETAIL — read from the engines' own words, never typed into the page:
         # exit codes from trade_alerts_endpoints._CLOSE_WORDS (the alerts feed's own close words),

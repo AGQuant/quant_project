@@ -1189,8 +1189,13 @@ function twCell(e){
   if (e.src === 'alert') return '<td></td>';   /* an approval row IS the approval record */
   var st = e.state, ap = e.approval;
   if (!st){
-    var mapHit = (TWA.approved[e.engine] || {})[twRef(e)];
-    if (mapHit){ st = 'approved'; ap = mapHit; } else st = 'pending-approval';
+    /* cc#1843: never default a QB Basket row into the actionable branch below, even in this
+       fallback (the server now always sends a real state for it, so this guard is defensive,
+       not the primary fix). */
+    if (e.engine === 'QB Basket'){ st = 'not-approval-applicable'; }
+    else {
+      var mapHit = (TWA.approved[e.engine] || {})[twRef(e)];
+      if (mapHit){ st = 'approved'; ap = mapHit; } else st = 'pending-approval'; }
   }
   if (st === 'approved'){
     return '<td><div class="twa"><span class="twa-ok">APPROVED'
@@ -1200,6 +1205,14 @@ function twCell(e){
   }
   if (st === 'dismissed'){
     return '<td><div class="twa"><span class="twa-no">DISMISSED</span></div></td>';
+  }
+  /* cc#1843 (founder ruling 08-Sep-2026): QB Basket rows never carry an approve/dismiss button —
+     they are already-executed positions, not signals awaiting a decision. Reuses .twa-no's
+     existing neutral/muted chip style (same one DISMISSED already uses) rather than adding a new
+     class — this is not a rejection, just a different visual weight from the same "no action"
+     family, and it does not claim an approval that never happened. */
+  if (st === 'not-approval-applicable'){
+    return '<td><div class="twa"><span class="twa-no">BASKET TRADE</span></div></td>';
   }
   var k = esc(e.id);
   /* cc#1736: a suppressed row keeps APPROVE / DISMISS (item 5) — the rule declutters, it does not disarm */
