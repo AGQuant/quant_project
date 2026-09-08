@@ -327,6 +327,24 @@ _MOBILE_HEAD = (
     # cc#348: DEFAULT is now LIGHT (founder 09-Jul) — no saved pick => light.
     b"<script>(function(){try{var t=localStorage.getItem('scorr_theme')||'light';"
     b"document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"
+    # cc#1842: the PWA install tags. "/" IS in _PWA_INJECT_PATHS (restored by cc#1670) so PWA_JS
+    # (pwa_endpoints.py) DOES inject a manifest link + register the service worker there — but
+    # home() 302s every phone navigation to /m/home BEFORE that body exists to inject into
+    # (main.py's home()), and /m/home is PROTECTED but deliberately NOT in _PWA_INJECT_PATHS
+    # (cc#874: /m/ pages carry their own bottom nav; injecting PWA_JS's desktop nav would double
+    # it up). So the one page a phone actually lands on never got these tags. _MOBILE_HEAD is the
+    # injection that DOES reliably reach every /m/* PROTECTED page (gated on PROTECTED membership,
+    # not _PWA_INJECT_PATHS — see the do_logout/do_pwa branch below), so the tags go here, not
+    # into _PWA_INJECT_PATHS as the card's own scope literally named (that set deliberately
+    # excludes /m/home; adding them there would not have reached it at all).
+    # start_url in the manifest stays "/" — DELIBERATELY, per cc#886's own comment inside
+    # pwa_endpoints.MANIFEST: the manifest is shared with desktop installs, and pointing
+    # start_url at /m/home would open the retail phone app on a desktop install. This redirect
+    # already does that job for every phone navigation, including from an already-installed
+    # WebAPK. Not revisited here.
+    b'<link rel="manifest" href="/static/manifest.json">'
+    b'<meta name="theme-color" content="#F4F7FE">'
+    b'<link rel="apple-touch-icon" href="/static/icon-192.png">'
     b'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
     # cc#816: BOTH of these are served with Cache-Control max-age=86400 (_CACHE_1D in
@@ -385,6 +403,16 @@ _MOBILE_HEAD = (
     # it is wired up on Home only for now (cc#1390's own scope) — see mobile/home.html's own use of
     # it for the actual check.
     + b"<script>window.__SCORR_BUILD='" + _BUILD_B + b"';</script>"
+    # cc#1842: register the service worker here too. The SW itself (pwa_endpoints.SW_JS,
+    # /service_worker.js) already exists and is valid (install/activate/fetch handlers) — it was
+    # simply never REGISTERED on any /m/* page, because navigator.serviceWorker.register(...)
+    # lives inside PWA_JS, same desktop-only injection as the manifest link above, same root
+    # cause. Chrome will not offer Install without a registered SW even with a correct manifest
+    # link present, so this is not optional alongside the tags above — deliberately minimal
+    # (register only, no update-flow reload logic; PWA_JS's cc#1246 controllerchange handling is
+    # a separate, larger piece of behaviour, not needed to make Install appear).
+    + b"<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){"
+      b"navigator.serviceWorker.register('/service_worker.js').catch(function(){});});}</script>"
 )
 
 # cc#1064: the mobile app is DARK-ONLY — mobile_endpoints' mobile_app.css defines the dark tokens
