@@ -55,7 +55,17 @@
     + '@media(max-width:560px){.qa-tcrow{flex-direction:column}}'
     + '#scorrAnaOv{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11400;align-items:center;justify-content:center}'
     + '#scorrAnaOv.open{display:flex}'
-    + '#scorrAnaOv .sa-box{background:var(--panel,#fff);border-radius:16px;max-width:620px;width:94%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.22)}'
+    /* cc#1835: base text colour, so every bare/unstyled element inside this card (e.g. qaAnalysis's
+       Segment/Sector-rating <b> values, which set no colour of their own) inherits var(--txt) —
+       the SAME token cc#1828 already bridged correctly for this shell — instead of falling through
+       to mobile_endpoints.py's global `html,body{color:var(--chalk,#E9EEFB)}` rule. --chalk is
+       only ever bridged inside #gvp/#ckp/#v8p (theme_mobile.css), never at body scope, so outside
+       those three subtrees it is undefined and that rule''s literal #E9EEFB fallback wins — a
+       near-white, dark-theme-tuned default that reads correctly on nothing built after it (this
+       card''s own explicit var(--mut)/var(--dim) usages were already fine; the regression was
+       specifically the values with NO colour declared, which is why cc#1828''s fix to the token
+       BRIDGE did not catch it — those elements never read a token here at all). */
+    + '#scorrAnaOv .sa-box{background:var(--panel,#fff);color:var(--txt,#1c2536);border-radius:16px;max-width:620px;width:94%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.22)}'
     + '#scorrAnaOv .sa-head{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px;border-bottom:1px solid var(--line,#e2e7ee);position:sticky;top:0;background:var(--panel,#fff);z-index:1;flex-wrap:wrap}'
     + '#scorrAnaOv .sa-head>div:first-child{min-width:150px;flex:1}'
     + '#scorrAnaOv #scorrAnaCard:empty{display:none}'
