@@ -107,6 +107,72 @@ def _is_future_row(row) -> bool:
     return fit in ("STF", "IDF")
 
 
+def select_atm_window(reader, d: date):
+    """cc#1858 SHARED SELECTION (ONE_REGISTRY_ONE_DERIVATION_V1): the near-month-future spot
+    proxy, each underlying's near-month OPTION expiry, and its ATM +-10 strike set (21 nearest
+    strikes by count) -- computed ONCE here and consumed by both run_diagnostic() (measurement)
+    and option_iv_history.py's forward-storage ingest, so the two paths can never define "ATM
+    window" two different ways. `reader` is the list of DictReader rows from one bhavcopy CSV.
+    Returns (spot_by_sym, opt_near_expiry, atm_strikes_by_sym, underlyings_with_options,
+    option_rows_total, strikes_by_sym) -- strikes_by_sym is the RAW (pre-ATM-limit) strike set
+    per underlying at its near-month expiry, kept for callers that report total-vs-ATM-limited
+    strike counts (run_diagnostic's per_underlying block)."""
+    fut_best = {}   # symbol -> (expiry, close)
+    for row in reader:
+        if not _is_future_row(row):
+            continue
+        sym = (row.get("TckrSymb") or "").strip().upper()
+        exp = _parse_date(row.get("XpryDt"))
+        if not sym or not exp or exp < d:
+            continue
+        cur_best = fut_best.get(sym)
+        if cur_best is None or exp < cur_best[0]:
+            fut_best[sym] = (exp, nse._f(row.get("ClsPric")))
+    spot_by_sym = {s: c for s, (e, c) in fut_best.items() if c}
+
+    opt_near_expiry = {}   # symbol -> expiry
+    option_rows_total = 0
+    underlyings_with_options = set()
+    for row in reader:
+        if not _is_option_row(row):
+            continue
+        option_rows_total += 1
+        sym = (row.get("TckrSymb") or "").strip().upper()
+        if not sym:
+            continue
+        underlyings_with_options.add(sym)
+        exp = _parse_date(row.get("XpryDt"))
+        if not exp or exp < d:
+            continue
+        cur_exp = opt_near_expiry.get(sym)
+        if cur_exp is None or exp < cur_exp:
+            opt_near_expiry[sym] = exp
+
+    strikes_by_sym = {}   # sym -> set(strike) seen at near-month expiry
+    for row in reader:
+        if not _is_option_row(row):
+            continue
+        sym = (row.get("TckrSymb") or "").strip().upper()
+        exp = _parse_date(row.get("XpryDt"))
+        if sym not in opt_near_expiry or exp != opt_near_expiry.get(sym):
+            continue
+        strike = nse._f(row.get("StrkPric"))
+        if strike is None:
+            continue
+        strikes_by_sym.setdefault(sym, set()).add(strike)
+
+    atm_strikes_by_sym = {}
+    for sym, strikes in strikes_by_sym.items():
+        spot = spot_by_sym.get(sym)
+        if spot is None:
+            continue
+        nearest = sorted(strikes, key=lambda k: abs(k - spot))[:ATM_STRIKE_COUNT]
+        atm_strikes_by_sym[sym] = set(nearest)
+
+    return (spot_by_sym, opt_near_expiry, atm_strikes_by_sym, underlyings_with_options,
+            option_rows_total, strikes_by_sym)
+
+
 def run_diagnostic(d: Optional[date] = None) -> dict:
     """Fetch ONE bhavcopy, measure per cc#1858 step 2, write ONE row to bhavcopy_diagnostic.
     Read-only against every existing table -- the only write is the new diagnostic table."""
@@ -143,64 +209,10 @@ def run_diagnostic(d: Optional[date] = None) -> dict:
         columns = list(reader[0].keys()) if reader else []
         total_rows = len(reader)
 
-        # near-month future close per underlying (spot proxy), same near-month rule as nse_fo_eod
-        fut_best = {}   # symbol -> (expiry, close)
-        for row in reader:
-            if not _is_future_row(row):
-                continue
-            sym = (row.get("TckrSymb") or "").strip().upper()
-            exp = _parse_date(row.get("XpryDt"))
-            if not sym or not exp or exp < d:
-                continue
-            cur_best = fut_best.get(sym)
-            if cur_best is None or exp < cur_best[0]:
-                fut_best[sym] = (exp, nse._f(row.get("ClsPric")))
-        spot_by_sym = {s: c for s, (e, c) in fut_best.items() if c}
-
-        # near-month expiry per underlying, from the OPTION rows themselves
-        opt_near_expiry = {}   # symbol -> expiry
-        option_rows = 0
-        underlyings_with_options = set()
-        for row in reader:
-            if not _is_option_row(row):
-                continue
-            option_rows += 1
-            sym = (row.get("TckrSymb") or "").strip().upper()
-            if not sym:
-                continue
-            underlyings_with_options.add(sym)
-            exp = _parse_date(row.get("XpryDt"))
-            if not exp or exp < d:
-                continue
-            cur_exp = opt_near_expiry.get(sym)
-            if cur_exp is None or exp < cur_exp:
-                opt_near_expiry[sym] = exp
-
+        (spot_by_sym, opt_near_expiry, atm_strikes_by_sym, underlyings_with_options,
+         option_rows, strikes_by_sym) = select_atm_window(reader, d)
         underlyings_missing_spot = sorted(underlyings_with_options - set(spot_by_sym.keys()))
-
-        # per-underlying ATM+-10 strike set (near-month only) + settlement-vs-traded-close count
         per_underlying = {}
-        strikes_by_sym = {}   # sym -> set(strike) seen at near-month expiry
-        for row in reader:
-            if not _is_option_row(row):
-                continue
-            sym = (row.get("TckrSymb") or "").strip().upper()
-            exp = _parse_date(row.get("XpryDt"))
-            if sym not in opt_near_expiry or exp != opt_near_expiry.get(sym):
-                continue
-            strike = nse._f(row.get("StrkPric"))
-            if strike is None:
-                continue
-            strikes_by_sym.setdefault(sym, set()).add(strike)
-
-        atm_strikes_by_sym = {}
-        for sym, strikes in strikes_by_sym.items():
-            spot = spot_by_sym.get(sym)
-            if spot is None:
-                continue
-            nearest = sorted(strikes, key=lambda k: abs(k - spot))[:ATM_STRIKE_COUNT]
-            atm_strikes_by_sym[sym] = set(nearest)
-
         atm10_option_rows = 0
         settlement_price_rows = 0
         traded_close_rows = 0
