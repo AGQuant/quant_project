@@ -156,13 +156,20 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
     try:
         with _conn() as conn, conn.cursor() as cur:
 
-            # ── 1. GVM trend 13d, G/V/M decomposed ────────────────────────
+            # ── 1. GVM trend 60d, G/V/M decomposed ────────────────────────
+            # cc#1841: was LIMIT 13 (13d). Founder ask: widen the inline sparkline to 60 calendar
+            # days. Not uniform across the universe -- 38 symbols have fewer than 30 days of
+            # gvm_history, minimum is 2 -- so this deliberately does NOT pad/backfill; a thin
+            # series renders as-is (reversed() below still orders whatever came back oldest-first).
+            # gvm_d13 (section 10, the ladder delta column) is UNTOUCHED by this change -- it reads
+            # its own LEAST(a.n, 13) window separately and stays a 13-day delta on purpose (Fable's
+            # explicit decision, cc#1841: repointing it here would silently change the ladder).
             try:
                 cur.execute("""
                     SELECT score_date::text, gvm_score, g_score, v_score, m_score
                     FROM gvm_history
                     WHERE symbol = %s
-                    ORDER BY score_date DESC LIMIT 13
+                    ORDER BY score_date DESC LIMIT 60
                 """, (symbol,))
                 rows = cur.fetchall()
                 extras["trend"] = [
