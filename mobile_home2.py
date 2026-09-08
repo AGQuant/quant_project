@@ -71,7 +71,9 @@ from global_heatstrip import _band as _hs_band, INVERTED as _HS_INVERTED
 # "what this page was served as" against "what the server answering THIS live, no-store call is
 # actually running" and self-heal if a layer this app does not control served a stale document.
 from pwa_endpoints import BUILD_ID
-from pcr_mood import compose_live   # cc#1568: ONE PCR mood composer (session_log 36200)
+from pcr_mood import compose_live, latest_pcr   # cc#1568/cc#1846: ONE PCR mood composer AND ONE
+# latest-PCR read -- both server-side, one source, this file no longer keeps its own copy of the
+# query (see the cc#1846 comment at the hero PCR block below).
 
 BROKERAGE_PER_TRADE = 500       # web daylog doctrine: Rs.500 per closed trade
 
@@ -909,71 +911,23 @@ def mobile_home2(request: Request):
         # cc#927: price_date comes along so card 2 can CITE the as-of beside the mood label it
         # derives. Same row, same query, one extra column — not a second fetch (18024: "same PCR
         # the hero chip reads — one derivation").
-        # cc#1140 · THE CARD WENT LIVE. Founder screenshot 09:29 with the market OPEN and the feed
-        # LIVE, while this card read PCR 0.68 · 08-19 — yesterday's close. pcr_intraday already had
-        # today's bars for both underlyings; the composer was live and only the READ was stale.
-        # STALE PATH (before): pcr_daily, ORDER BY price_date DESC LIMIT 1 — an EOD table, so
-        #   during the session it can only ever return yesterday.
-        # LIVE PATH (after): pcr_intraday.pcr_total for NIFTY, latest bar, when one exists for
-        #   TODAY. Outside market hours, or before the first bar lands, it falls back to exactly
-        #   the pcr_daily read it used before, unchanged.
-        # SAME COLUMN THE REST OF THE APP USES. pcr_total, not pcr_atm5 — this is the column
-        # cc#1121 reconciled against pcr_daily.pcr (NIFTY daily 0.678 vs intraday pcr_total 0.679,
-        # while pcr_atm5 was 0.844). Reading the other one here would put a number on this card
-        # that disagrees with the Digest chart for the same moment.
-        # NO NEW COMPOSER AND NO CLIENT MATHS: this reads the series the PCR scheduler already
-        # writes. Nothing computes a PCR here.
-        # AS-OF IS NOT OPTIONAL. pcr_as_of carries the reading's own timestamp and pcr_basis says
-        # LIVE / LAST / DAILY, so the label can never show a live-looking number without saying
-        # which bar it is. That is why they are returned together from ONE query rather than
-        # assembled by the caller — a value and its timestamp fetched separately will eventually
-        # be shown apart.
-        # cc#1670 (founder 04-Sep 09:20 IST): the OLD query gated on `ts::date = today` (both in
-        # the SQL and again in the `_i[1].date() == now.date()` check below) — so on any tick
-        # before the FIRST 5-min bar landed for the day, this fell straight to pcr_daily and
-        # printed a PAST session's number captioned "EOD", even though pcr_intraday still held a
-        # perfectly good latest bar from yesterday. The card is meant to state the DATA's own
-        # as-of, not "today or nothing" — so the date filter is gone; the query below is now just
-        # "the newest real intraday reading, whatever its date".
-        pcr_latest = pcr_date = pcr_asof = pcr_as_of = None
-        pcr_basis = "DAILY"
-        try:
-            cur.execute("""
-                SELECT pcr_total, ts FROM pcr_intraday
-                WHERE underlying='NIFTY' AND pcr_total IS NOT NULL
-                ORDER BY ts DESC LIMIT 1
-            """)
-            _i = cur.fetchone()
-            if _i and _i[0] is not None and _i[1] is not None:
-                pcr_latest = float(_i[0])
-                pcr_date = _i[1].date().isoformat()
-                pcr_asof = _i[1].strftime("%H:%M")
-                pcr_as_of = _i[1].strftime("%Y-%m-%d %H:%M")
-                # cc#1576 (Fable 4642, founder screenshot 19:34 IST "PCR 1.44 · 15:25 · LIVE" on a
-                # closed market): LIVE only while the bar is TODAY'S and the session is open.
-                # Any other real intraday bar (yesterday's close tick, or today's read outside
-                # 09:15-15:30) is LAST — a genuine reading, just not the live one. Same rule the
-                # Digest Internals pill follows (cc#1607), extended to cover the pre-open gap.
-                _in_session = bool(is_td and now.time() >= dt_time(9, 15) and now.time() <= dt_time(15, 30))
-                _is_today = _i[1].date() == now.date()
-                pcr_basis = "LIVE" if (_is_today and _in_session) else "LAST"
-        except Exception as e:
-            log.warning("cc#1140 intraday PCR unavailable, falling back to DAILY: %s", e)
-            try:
-                cur.connection.rollback()
-            except Exception:
-                pass
-        if pcr_latest is None:
-            cur.execute("""
-                SELECT pcr, price_date FROM pcr_daily
-                WHERE underlying='NIFTY' AND pcr IS NOT NULL
-                ORDER BY price_date DESC LIMIT 1
-            """)
-            _p = cur.fetchone()
-            pcr_latest = float(_p[0]) if _p and _p[0] is not None else None
-            pcr_date = _p[1].isoformat() if _p and _p[1] is not None else None
-            pcr_as_of = pcr_date   # DAILY basis: bare date only, never a fabricated time
-            pcr_basis = "DAILY"
+        #
+        # cc#1846 FOUNDER_RULING_08SEP_2026: this block used to hand-copy pcr_mood.latest_pcr()'s
+        # exact query inline (a second derivation of the same read -- the ONE_REGISTRY_ONE_
+        # DERIVATION_V1 violation this card's fix corrects). pcr_intraday.pcr_total's writer has a
+        # confirmed write-race that can commit a corrupt closing bar (cc_task_logs, cc#1846); the
+        # founder's ruling is to compute PCR LIVE from option_chain everywhere and stop reading
+        # pcr_intraday.pcr_total OR pcr_daily for a current value. latest_pcr() now does exactly
+        # that (pcr_mood.py) -- this block just calls it, so the hero can never again drift from
+        # the one canonical read, and any future fix to the derivation lands here for free.
+        pcr_latest, pcr_basis, pcr_as_of = latest_pcr(cur, "NIFTY")
+        pcr_date = pcr_asof = None
+        if pcr_as_of:
+            if pcr_basis == "DAILY":
+                pcr_date = pcr_as_of   # bare date only, never a fabricated time
+            else:
+                pcr_date = pcr_as_of[:10]
+                pcr_asof = pcr_as_of[11:]
         # STALENESS. cc#1670: this is now derived client-side from pcr_as_of via the shared
         # scorrAsofStamp() helper (APP_TABLE_ASOF_STAMP_V1, session_log 34535) rather than a
         # server-computed pcr_stale flag — one staleness rule for every app table, not a second
