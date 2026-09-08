@@ -291,7 +291,16 @@ body{background:var(--field-night);font-family:'Space Grotesk',sans-serif;color:
 /* cc#1502: symbol column reads 2 notches up the --type scale (was inheriting .butbl's
    --type-105; 105 -> 11 -> 115). Font-size ONLY — column widths and the td ellipsis rule are
    untouched, so a name that no longer fits truncates rather than moving a column. */
-.butbl td.sym{font-weight:700;font-family:'Space Grotesk',sans-serif;font-size:var(--type-115)}
+/* cc#1855: colour made EXPLICIT rather than left to inherit. .vfsheet (the expanded Volume Flow
+   sheet) is appended straight to document.body -- a sibling of .phone/.card, not a descendant --
+   and every trace of the inheritance chain from body{color:var(--chalk)} down says the card and
+   the sheet SHOULD already match (--chalk bridges unconditionally at the body level, not scoped to
+   .card), but the founder's own recording shows the sheet's symbol washed out pale blue while the
+   card's renders correctly. Could not pin the exact live mechanism from static reading alone (no
+   <a>/:visited rule anywhere, no card-only token found) -- this makes the ONE rule the card and
+   the sheet both actually use explicit and self-contained, so it can no longer depend on which DOM
+   subtree the row happens to render in, regardless of the live-only cause. */
+.butbl td.sym{font-weight:700;font-family:'Space Grotesk',sans-serif;font-size:var(--type-115);color:var(--chalk)}
 .butbl .up{color:var(--volt)} .butbl .dn{color:var(--heat)} .butbl .am{color:var(--amber)}
 /* cc#1430: Volume Flow's own sort-header state — scoped to .vfsort so the Futures Buildup .butbl
    (a plain, unsorted table sharing the same class for its column widths) is untouched. */
