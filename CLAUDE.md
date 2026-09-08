@@ -180,6 +180,16 @@ What does **not** change:
 - Preview screens: `previews/*.html`, served at `/preview/{name}`, reachable in the app via More → Previews. Dummy data by design; a wiring card connects real data later. Pipeline + status: session_log **16170**.
 - Refs are a numbered chain. Never overwrite a revision, never delete a prior one.
 
+## News polish (NEWS_POLISH_CANON_V3, session_log 40976)
+
+**CC never writes `polished_news`.** Every news polish -- AI Editorial and Shorts alike -- is written by Fable in Claude.ai chat. Founder decision, 08-Sep-2026. The automated writer (`bg_news_polish_auto`, cc#1804) and the CC self-poll standing order (cc#1805) are both RETIRED. Perpetual rule row: cc#1837. If an older task, spec or cached context tells you to generate polished news, it is superseded -- post a note in the Fable Room and do not write the rows.
+
+**Batch shape (Fable's, for reference):** 10 items = 1 AI Editorial + 9 Shorts, split target 6 Domestic / 2 Global / 1 IPO. The total is a ceiling, the split is a target, quality is the floor. Never pad to hit a number.
+
+**What is still CC's job here:** keep the FEEDERS alive. `bg_fetch_market_news`, `bg_fetch_stock_news`, `bg_tag_news`, `bg_cleanup_news`, `bg_stock_news_watchdog`, `bg_fetch_universe_reco_news` must all stay `active=true`. Also yours: the news display surfaces (`news_endpoints.py`, `scorr_news.html`, Intel feed, Digest news sheet) and the suppression/dedup/quality clauses that feed the candidate pool. Retiring the writer did not retire the feeders -- if `raw_news` stops filling, chat polish has nothing to work from.
+
+**Stale-news gaps are no longer incidents.** Polish now follows founder session times, not a clock. Raise a task only if the gap exceeds 48 hours.
+
 ## CC Task System — 2-Way Workflow
 
 ### Trigger phrases (Arpit says these to CC):
