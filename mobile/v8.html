@@ -114,10 +114,17 @@ body{ --field:#0A0A0C; }
 #v8p .dots i.on{background:var(--gold);width:16px;border-radius:var(--radius-3)}
 /* 2a · KPI wells (.well-up from the shared sheet) + filter chips */
 #v8p .kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-12);margin-bottom:10px}   /* cc#1656 P2: gap between tiles one step (8->12) */
-#v8p .kw{padding:var(--space-15) var(--space-15) var(--space-14)}   /* cc#1656 P2: padding two steps (10/10/9 -> 15/15/14) */
+#v8p .kw{padding:var(--space-15) var(--space-15) var(--space-14);min-width:0}   /* cc#1656 P2: padding two steps (10/10/9 -> 15/15/14); cc#1856 min-width:0 so a grid item can shrink below its nowrap child's content width instead of blowing out the row */
 #v8p .kw .kl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--mute)}
-#v8p .kw .kn{font-family:var(--mono);font-size:18px;font-weight:800;margin-top:2px;letter-spacing:-.3px}
-#v8p .kw .ks{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:var(--space-7)}   /* cc#1656 P2: --space-6 more below the number (1px -> 7px) */
+/* cc#1856 FABLE APPROVED (09-Sep-2026): a ratio value (52 / 44, +2.9% / -3.2%) must NEVER wrap
+   across two lines -- that reads as two separate numbers. nowrap is the safety valve; 16px (was
+   18px) buys the room so nowrap doesn't just push the tile wider than its grid column. .kn2 is a
+   second, smaller size for AVG WIN / LOSS specifically -- its dual-percentage content is wider
+   than a plain ratio, and this keeps REALISED/WIN·LOSS at the larger, more legible size rather
+   than shrinking all three tiles to fit the widest one. */
+#v8p .kw .kn{font-family:var(--mono);font-size:16px;font-weight:800;margin-top:2px;letter-spacing:-.3px;white-space:nowrap}
+#v8p .kw .kn.kn2{font-size:13px}
+#v8p .kw .ks{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:var(--space-7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* cc#1656 P2: --space-6 more below the number (1px -> 7px); cc#1856 one line, ellipsis over a second wrap */
 #v8p .filters{display:flex;gap:var(--space-10);margin:var(--space-16) 0 var(--space-18);overflow-x:auto;scrollbar-width:none}   /* cc#1656 P2: row gap one step (6->10), row-to-row two steps (8/10 -> 16/18) */
 #v8p .filters::-webkit-scrollbar{display:none}
 #v8p .filters .chip{flex:none}
@@ -1158,11 +1165,15 @@ function renderClosed(){
            + clSeg('dur', CL_DUR, [['all','ANY WINDOW'],['1w','1W'],['1m','1M']], durCounts)
            + clSeg('bsk', CL_BSK, CL_BASKETS, bskCounts);
   kpi.className = '';   /* #cl-kpi was the 3-column grid itself; it now wraps the two seg rows + the grid */
+  /* cc#1856 FABLE APPROVED (09-Sep-2026): each tile's sub carried its own copy of the SAME
+     filter/date state line (esc(win)) -- three tiles repeating one fact, plus a <br> that forced
+     two lines nobody read. Cut to one line per tile (its own stat only) and print the shared
+     filter/date state ONCE, below the whole row, instead of tripling it. */
   kpi.innerHTML = segs.replace(/class="filters"/g, 'class="filters" data-cl-seg="1"') + '<div class="kpi">'
-    + kpiWell('REALISED', inr(realised), sgn(realised), 'gross '+inrShort(gross)+' · brk '+inrShort(brk)+'<br>'+esc(win))
-    + kpiWell('WIN / LOSS', (num(wins)?wins:'—')+' / '+(num(losses)?losses:'—'), '', (num(acc) ? 'accuracy '+acc.toFixed(1)+'%' : 'no decided trade yet')+'<br>'+esc(win))
-    + kpiWell('AVG WIN / LOSS', '<span class="up">'+(num(st.avgWin) ? pct(st.avgWin, 1) : '—')+'</span><span class="mu" style="font-size:12px"> / </span><span class="dn">'+(num(st.avgLoss) ? pct(st.avgLoss, 1) : '—')+'</span>', '', 'return per decided trade<br>'+esc(win))
-    + '</div>';
+    + kpiWell('REALISED', inr(realised), sgn(realised), 'gross '+inrShort(gross)+' · brk '+inrShort(brk))
+    + kpiWell('WIN / LOSS', (num(wins)?wins:'—')+' / '+(num(losses)?losses:'—'), '', (num(acc) ? acc.toFixed(1)+'% win rate' : 'no decided trade yet'))
+    + kpiWell('AVG WIN / LOSS', '<span class="up">'+(num(st.avgWin) ? pct(st.avgWin, 1) : '—')+'</span><span class="mu" style="font-size:11px"> / </span><span class="dn">'+(num(st.avgLoss) ? pct(st.avgLoss, 1) : '—')+'</span>', 'kn2', 'per decided trade')
+    + '</div><div style="font-family:var(--mono);font-size:10px;color:var(--dim);text-align:center;margin-top:-4px">'+esc(win)+'</div>';
   if(!rows.length){
     more.innerHTML = '';
     var what = (CL_SIDE === 'all' ? '' : (CL_SIDE === 'long' ? 'long ' : 'short ')) + (CL_BSK === 'all' ? '' : clBskWord(CL_BSK) + ' ') + 'trades';
