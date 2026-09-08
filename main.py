@@ -812,6 +812,8 @@ from nse_eod_ingest import nse_eod_router       # cc#517: NSE EOD ingest suite (
 app.include_router(nse_eod_router)
 from nse_fo_eod import fo_eod_router            # cc#682: NSE F&O bhavcopy -> EOD open-interest ingest (permanent OI fallback)
 app.include_router(fo_eod_router)
+from bhavcopy_diagnostic import router as bhavcopy_diagnostic_router   # cc#1858 step 2: read-only bhavcopy option-row measurement (production-only, no writes to fo_eod)
+app.include_router(bhavcopy_diagnostic_router)
 from ops_control_plane import control_plane_router   # cc#693: ops control plane (registries + job_runs spine + diagnosis)
 app.include_router(control_plane_router)
 app.include_router(performance_router)
