@@ -1101,12 +1101,20 @@ function secHolders(d){
   var pr = shRow(sh,/^Promoter/i), fii = shRow(sh,/^FII/i), dii = shRow(sh,/^DII/i), pub = shRow(sh,/^Public/i), cnt = shRow(sh,/No\. of Shareholders|Shareholders/i);
   var pv = lastNum(pr), fv = lastNum(fii), dv = lastNum(dii), pubv = lastNum(pub), cv = lastNum(cnt);
   var inst = (num(fv)?fv:0) + (num(dv)?dv:0);
-  var prSub = (function(){ var v = lastN(pr, 12).filter(num); if(v.length < 2) return ''; var last = v[v.length-1], i = v.length-1; while(i > 0 && Math.abs(v[i-1]-last) < 0.05) i--; var since = sh.periods.slice(-v.length)[i]; return i === 0 ? 'steady all 3 years' : (Math.abs(v[0]-last) < 0.05 ? 'steady' : 'steady since '+qLabel(since)); })();
+  /* cc#1851: PROMOTERS' "steady since X" read, factored out of its old inline IIFE so PUBLIC (the
+     same shape of data -- a holding-percentage row over the last 12 quarters) can use the SAME
+     computation rather than the copy-paste bug it had before: PUBLIC's context line was calling
+     trendWords(), the Growth/Value/Momentum SCORE-TREND overlay's own summary function (built for
+     {g_score,v_score,m_score} objects) against a plain array of percentages -- every pillar lookup
+     came back undefined, so it always fell into trendWords()'s OWN "Pillar scores are not
+     available for this range" fallback, verbatim, regardless of what the Public row actually held. */
+  function holdSteadySub(row){ var v = lastN(row, 12).filter(num); if(v.length < 2) return ''; var last = v[v.length-1], i = v.length-1; while(i > 0 && Math.abs(v[i-1]-last) < 0.05) i--; var since = sh.periods.slice(-v.length)[i]; return i === 0 ? 'steady all 3 years' : (Math.abs(v[0]-last) < 0.05 ? 'steady' : 'steady since '+qLabel(since)); }
+  var prSub = holdSteadySub(pr), pubSub = holdSteadySub(pub);
   var cntSub = (function(){ var v = lastN(cnt, 13).filter(num); if(v.length < 2 || !v[0]) return ''; var chg = (v[v.length-1]-v[0])/v[0]*100; return (chg>=0?'+':'−')+Math.abs(Math.round(chg))+'% in '+Math.round((v.length-1)/4)+' years'; })();
   var tiles = '<div class="g-tiles">'+
     '<div class="g-tile well-up"><div class="g-tl">PROMOTERS</div><div class="g-tv">'+(num(pv)?pv.toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(prSub||'')+'</div></div>'+
     '<div class="g-tile well-up"><div class="g-tl">INSTITUTIONS</div><div class="g-tv '+(inst>=30?'up':'')+'">'+(num(fv)||num(dv)?inst.toFixed(1)+'%':'—')+'</div><div class="g-ts">FII '+(num(fv)?fv.toFixed(1):'—')+' · DII '+(num(dv)?dv.toFixed(1):'—')+'</div></div>'+
-    '<div class="g-tile well-up"><div class="g-tl">PUBLIC</div><div class="g-tv">'+(num(pubv)?pubv.toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(trendWords(lastN(pub,12)))+'</div></div>'+
+    '<div class="g-tile well-up"><div class="g-tl">PUBLIC</div><div class="g-tv">'+(num(pubv)?pubv.toFixed(1)+'%':'—')+'</div><div class="g-ts">'+esc(pubSub||'')+'</div></div>'+
     '<div class="g-tile well-up"><div class="g-tl">SHAREHOLDERS</div><div class="g-tv">'+(num(cv)?(cv>=1e5?(cv/1e5).toFixed(2)+'L':Math.round(cv).toLocaleString('en-IN')):'—')+'</div><div class="g-ts">'+esc(cntSub)+'</div></div>'+
   '</div>';
   var ic = bmRow(d,'inst_chg'), words = '';
