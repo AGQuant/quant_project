@@ -1580,11 +1580,25 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
     rows.push({ glyph: '★', col: scol, label: slabel, note: fired.stars.note,
                 interp: _scorrMarkerLegendLine(lines, [slabel]) });
   }
-  // cc#1811: renamed from "Volume/OI spurt" -- the OI leg is retired, this is the canon Vol
-  // R/P/D/AD 2-of-4 tally now (v8_pivot_star.py evaluate_activity). fired.act.note already
-  // carries the per-check detail server-side; this row only needs the label + legend line.
-  if (fired.act) rows.push({ glyph: '⚡', col: 'inherit', label: 'Volume confirm', note: fired.act.note,
-                             interp: _scorrMarkerLegendLine(lines, ['⚡', 'Volume confirm']) });
+  // cc#1826 (was cc#1811's collapsed single line): fired.act.checks already carries the full
+  // canon Vol R/P/D/AD 4-check tally with a pass/fail per check (v8_pivot_star.py
+  // evaluate_activity, built for this exact purpose by cc#1811 -- no new backend work needed
+  // here, only reading the array this row was throwing away). Rendered as its own vrow block
+  // below the summary row, matching cc#1788's TC_RULE_SHEET_SIMPLE_V1 Volume layout (mobile/
+  // check.html ruleSheet(), VOLROWS/.c-vrow) exactly -- same four rows, same check-name/value/
+  // tick-or-cross/points shape -- reusing that established pattern rather than inventing a new
+  // one, per the card's own instruction. Vol R here reads r6_read (r6_volume.py), which is
+  // EQUITY-sourced (fyers/fyers_eq) -- cc#1826's own step-4 text says this tooltip should read
+  // "fyers_fut, not fyers_eq" once cc#1818 confirms a live source, but that is now superseded:
+  // cc#1845's founder ruling is the opposite ("Vol R stays EQUITY-sourced by design... do not
+  // build futures volume") and cc#1818 closed as superseded by it. This row intentionally keeps
+  // reading the equity-sourced canon function, unchanged -- the correction is documented here,
+  // not silently complied with.
+  if (fired.act) {
+    rows.push({ glyph: '⚡', col: 'inherit', label: 'Volume confirm', note: fired.act.note,
+                interp: _scorrMarkerLegendLine(lines, ['⚡', 'Volume confirm']),
+                extra: (fired.act.checks && fired.act.checks.length) ? _scorrMkVolRows(fired.act.checks) : null });
+  }
   if (fired.dma) {
     var dcol = fired.dma.star_color === 'GREEN' ? '#0a9e63' : '#f87171';
     var dlabel = fired.dma.star_color === 'GREEN' ? 'Green square' : 'Red square';
@@ -1602,9 +1616,32 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
       + '<span style="font-size:12px;line-height:1.45;color:var(--txt);display:block">'
       + '<b>' + esc(r.label) + '</b> — ' + esc(r.note || '')
       + (r.interp ? '<div style="color:var(--mut);margin-top:2px">' + esc(r.interp) + '</div>' : '')
+      + (r.extra || '')
       + '</span></div>';
   }).join('');
 };
+
+// cc#1826: the 4-check Vol R/P/D/AD breakdown, mirroring cc#1788's TC_RULE_SHEET_SIMPLE_V1
+// Volume rows EXACTLY (mobile/check.html ruleSheet()'s VOLROWS + .c-vrow) -- same four labels,
+// same value formatting (x for ratios, % for AD), same tick/cross column -- reusing that
+// established pattern rather than inventing a new one. No points column here: this popover has
+// no scoring ladder to attach points to (that lives in Trade Check, not the V8 marker board), so
+// the points cell from cc#1788's layout is intentionally omitted -- name/value/pass-fail only.
+function _scorrMkVolRows(checks) {
+  var esc = function (s) { return String(s == null ? '' : s)
+    .replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var LABELS = { vol_r: "Today's pace", vol_p: "Yesterday's pace", vol_d: 'Delivery pickup', vol_ad: 'Accumulation/distribution' };
+  var PCT = { vol_ad: true };
+  var rows = checks.map(function (c) {
+    var v = c.value;
+    var val = v == null ? '—' : (PCT[c.key] ? Math.round(Number(v)) + '%' : Number(v).toFixed(2) + 'x');
+    var ok = !!c['pass'];
+    return '<div class="mk-vrow"><span class="k">' + esc(LABELS[c.key] || c.label || c.key) + '</span>'
+      + '<span class="v">' + val + '</span>'
+      + '<span class="t ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '✗') + '</span></div>';
+  }).join('');
+  return '<div class="mk-vrows">' + rows + '</div>';
+}
 
 /* ── cc#1547: MARKER DETAIL SHEET (mobile) — one shared component, reuses the .scorr-ml hook ───
    /m/v8's markerFlag() calls ScorrMarkerDetail.open() on tap. Uses the .scorr-ml/.scorr-ml-ov/
@@ -1663,6 +1700,16 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
       + '.scorr-ml-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
       + '.scorr-ml-hd b{font:800 14px Sora,sans-serif;letter-spacing:.01em;color:var(--txt,#fff)}'
       + '.scorr-ml-x{background:none;border:none;color:var(--dim,#5E6B8F);font-size:16px;cursor:pointer;min-width:32px;min-height:32px}'
+      // cc#1826: 4-check Vol R/P/D/AD rows, same grid/border shape as cc#1788's .c-vrow
+      // (mobile/check.html Trade Check Volume rule sheet) minus the points column this popover
+      // has no ladder to attach one to -- see _scorrMkVolRows() above.
+      + '.mk-vrows{margin:4px 0 0}'
+      + '.mk-vrow{display:grid;grid-template-columns:1fr auto 16px;gap:8px;align-items:center;'
+      + 'padding:5px 0;border-top:1px solid var(--line,#1E2A44);font-size:11.5px}'
+      + '.mk-vrow .k{color:var(--txt,#fff)}'
+      + '.mk-vrow .v{color:var(--mut,#5E6B8F);font-family:ui-monospace,monospace}'
+      + '.mk-vrow .t{font-weight:700;text-align:center}'
+      + '.mk-vrow .t.ok{color:#0a9e63}.mk-vrow .t.no{color:#f87171}'
     ));
     (document.head || document.documentElement).appendChild(st2);
   } catch (e) {}
