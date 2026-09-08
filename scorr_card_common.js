@@ -196,8 +196,13 @@
       + _volTile('Vol AD',adv,(ad.label||'Accumulation')+' \u00b7 up-day vol share ('+(ad.days||21)+'d)','accum','',adOvr)
       + '</div><div id="qaVolTip" style="display:none;margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px"></div>';
   }
+  /* cc#1845 FOUNDER RULING (09-Sep-2026): Vol R stays EQUITY-sourced by design. This is the ONE
+     copy of that disclosure \u2014 every surface that explains Vol R/P/D/AD appends this, verbatim,
+     rather than retyping it (ONE_REGISTRY_ONE_DERIVATION_V1, session_log 33549, applies to copy
+     as much as to numbers \u2014 cc#1845 found three independently drifted wordings of the same fact). */
+  var VOL_EQUITY_NOTE = 'Vol R, Vol P, Vol D and Vol AD are cash-market volume. They read the equity segment, not futures. For futures participation, read OI change.';
   function qaVolExplain(k){
-    var t={rvol:'Vol R = today\u2019s cumulative volume up to this 5-min slot \u00f7 the 21-session average volume by the SAME time of day. 1.0\u00d7 = normal pace; >1 = trading faster than usual. NULL until the profile has \u226510 sessions; first two slots badged EARLY.',
+    var t={rvol:'Vol R = today\u2019s cumulative volume up to this 5-min slot \u00f7 the 21-session average volume by the SAME time of day. 1.0\u00d7 = normal pace; >1 = trading faster than usual. NULL until the profile has \u226510 sessions; first two slots badged EARLY. '+VOL_EQUITY_NOTE,
            volp:'Vol P = yesterday\u2019s Vol R read at the close \u2014 the prior session\u2019s full-day volume \u00f7 the 21-session average full-day volume. One fixed number per day; same maths as Vol R, read at yesterday\u2019s close instead of live.',
            accum:'Vol AD = of the last 21 sessions\u2019 up-day + down-day volume, the share that traded on UP days \u2014 who is doing the volume, buyers or sellers. The verdict label (Accumulation / Neutral / Distribution) is the Deriv Cockpit\u2019s own, from the same shared formula.'}[k]||'';
     var el=document.getElementById('qaVolTip'); if(el){el.innerHTML=t; el.style.display='block';}
@@ -359,7 +364,7 @@
     _volCol: _volCol, _volTile: _volTile, _volTilesHtml: _volTilesHtml, qaVolExplain: qaVolExplain,
     _heatBg: _heatBg, _heatTile: _heatTile, _deltaGrade: _deltaGrade,
     _perfGrade: _perfGrade, _perfTile: _perfTile, _qaSpark: _qaSpark,
-    _MONO: _MONO
+    _MONO: _MONO, VOL_EQUITY_NOTE: VOL_EQUITY_NOTE
   };
   window.ScorrCardCommon = API;
 
@@ -376,6 +381,7 @@
   if (typeof window.SCORR_BASKET_LABELS === 'undefined') window.SCORR_BASKET_LABELS = SCORR_BASKET_LABELS;
   API.SCORR_BASKET_LABELS = SCORR_BASKET_LABELS;
   API.SCORR_BASKET_ORDER = SCORR_BASKET_ORDER;
+  if (typeof window.VOL_EQUITY_NOTE === 'undefined') window.VOL_EQUITY_NOTE = VOL_EQUITY_NOTE;
 })();
 
 /* ── cc#1510 · SHARED AS-OF STAMP (APP_TABLE_ASOF_STAMP_V1, session_log 34535) ────────────────
