@@ -4699,6 +4699,21 @@ def _bg_tc_scanner():
         _tc_scanner_running = False
 
 
+def _bg_tc_universe_tick():
+    """cc#1862 step 3 (founder-released 09-Sep-2026, id 5654): the full-universe, all-four-bucket
+    persistence bg_tc_scanner's own compute never wrote (it scores every symbol every 5 min but
+    only ACTS on entries, discarding the rest). Same 5-min market-hours beat as _bg_tc_scanner,
+    own scheduler_master row so its cost/timing shows separately (ENGINE_LIVENESS_RULE). Stops at
+    15:20 IST and purges its own 90-day rolling window on that last tick, inside tc_universe_ticks.py."""
+    try:
+        import tc_universe_ticks
+        res = tc_universe_ticks.run_tick()
+        if not res.get("ok"):
+            log.error(f"tc_universe_tick: {res}")
+    except Exception as e:
+        log.error(f"_bg_tc_universe_tick: {e}")
+
+
 _tc_scanner_eod_ran = None    # cc#1599 P5: the IST date the EOD sweep last completed (restart resets it)
 
 
@@ -4932,6 +4947,7 @@ async def _scheduler_loop():
             _spawn(_bg_fut_rest_fallback)     # cc#770: REST futures fallback when native WS fut leg is dark
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             _spawn(_bg_tc_scanner)            # cc#464 engine; cc#1746 / 39467: every 5 min (was the m%15 slot below)
+            _spawn(_bg_tc_universe_tick)      # cc#1862: full-universe all-4-bucket persistence, same beat, stops 15:20 IST
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
