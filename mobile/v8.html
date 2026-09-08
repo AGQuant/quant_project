@@ -1101,7 +1101,7 @@ function closedRow(t){
    all follow the combined cut. The four names are the founder's fixed list for this card; the
    chip counts are live from the same era-wide rows. */
 var CL_SIDE = 'all', CL_DUR = 'all', CL_BSK = 'all', CL_BRK = 500;
-var CL_BASKETS = [['all','ALL'],['buy_reversal','Buy Reversal'],['buy_momentum','Buy Momentum'],['sell_reversal','Sell Reversal'],['sell_momentum','Sell Momentum']];
+var CL_BASKETS = [['all','ANY BASKET'],['buy_reversal','Buy Reversal'],['buy_momentum','Buy Momentum'],['sell_reversal','Sell Reversal'],['sell_momentum','Sell Momentum']];
 function clBskWord(k){ var hit = ''; CL_BASKETS.forEach(function(b){ if(b[0] === k) hit = b[1]; }); return hit || String(k||'').replace(/_/g, ' '); }
 function clCut(dur){
   if(dur === 'all') return null;
@@ -1126,9 +1126,13 @@ function clStats(t){
            acc: decided ? wins.length/decided*100 : null, avgWin: mean(wins), avgLoss: mean(losses) };
 }
 function clSeg(kind, cur, opts, counts){
+  /* cc#1852 FABLE APPROVED (09-Sep-2026): the reset chip ('all') names its dimension and carries
+     NO count -- "ANY SIDE 149" would invite the exact same "three chips show 149" confusion the
+     card was about, just in new words. Specific chips (LONG, SHORT, 1W, 1M, each basket) keep
+     their own counts; only the reset option's badge is suppressed. */
   return '<div class="filters" style="margin:0 0 8px">'+opts.map(function(o){
-    var on = cur === o[0];
-    return '<span class="chip'+(on ? ' on' : '')+'" data-cl-'+kind+'="'+o[0]+'" role="button" style="'+(on ? 'color:var(--gold);border-color:var(--gold);background:var(--g-gold-d, var(--well))' : '')+'">'+o[1]+(num(counts[o[0]]) ? ' <b style="font-weight:800">'+counts[o[0]]+'</b>' : '')+'</span>';
+    var on = cur === o[0], showCount = o[0] !== 'all' && num(counts[o[0]]);
+    return '<span class="chip'+(on ? ' on' : '')+'" data-cl-'+kind+'="'+o[0]+'" role="button" style="'+(on ? 'color:var(--gold);border-color:var(--gold);background:var(--g-gold-d, var(--well))' : '')+'">'+o[1]+(showCount ? ' <b style="font-weight:800">'+counts[o[0]]+'</b>' : '')+'</span>';
   }).join('')+'</div>';
 }
 function renderClosed(){
@@ -1150,8 +1154,8 @@ function renderClosed(){
   var realised = isAll && num(bk.realised) ? bk.realised : st.net, gross = isAll && num(bk.gross) ? bk.gross : st.gross, brk = isAll && num(bk.brokerage) ? bk.brokerage : st.brokerage;
   var wins = isAll && num(bk.wins) ? bk.wins : st.wins, losses = isAll && num(bk.losses) ? bk.losses : st.losses;
   var acc = isAll && num(bk.win_rate) && num(bk.decided) && bk.decided > 0 ? bk.win_rate : st.acc;
-  var segs = clSeg('side', CL_SIDE, [['all','ALL'],['long','LONG'],['short','SHORT']], sideCounts)
-           + clSeg('dur', CL_DUR, [['all','ALL'],['1w','1W'],['1m','1M']], durCounts)
+  var segs = clSeg('side', CL_SIDE, [['all','ANY SIDE'],['long','LONG'],['short','SHORT']], sideCounts)
+           + clSeg('dur', CL_DUR, [['all','ANY WINDOW'],['1w','1W'],['1m','1M']], durCounts)
            + clSeg('bsk', CL_BSK, CL_BASKETS, bskCounts);
   kpi.className = '';   /* #cl-kpi was the 3-column grid itself; it now wraps the two seg rows + the grid */
   kpi.innerHTML = segs.replace(/class="filters"/g, 'class="filters" data-cl-seg="1"') + '<div class="kpi">'
