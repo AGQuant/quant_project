@@ -782,14 +782,26 @@ function finIdx(tbl, nFY, preferCurrent){
   var per = tbl.periods, fy = [], ttm = -1, cur = -1;
   for(var i=0;i<per.length;i++){ if(/^Mar \d{4}$/.test(per[i])) fy.push(i); else if(per[i]==='TTM' && ttm<0) ttm = i; else if(per[i]==='Current') cur = i; }
   var idx = fy.slice(-nFY);
-  if(preferCurrent && cur>=0) idx.push(cur); else if(ttm>=0) idx.push(ttm);
+  // cc#1850: ALWAYS reserve the trailing TTM/Current slot, even when the data has none (verified:
+  // ~4% of symbols carry full FY history but no TTM row at all in fundamentals_history) -- a
+  // sentinel -1 rather than silently dropping the column. finSeries() below renders it as an
+  // honest "TTM --" (finBars()'s existing null-value path already draws that), never a fabricated
+  // bar or value -- the column becomes VISIBLE, the absence stays HONEST.
+  if(preferCurrent && cur>=0) idx.push(cur); else if(ttm>=0) idx.push(ttm); else idx.push(-1);
   return idx;
 }
 function finBucket(r2, title){ if(!r2 || !r2.buckets) return null; var b = r2.buckets.filter(function(x){ return x.title === title; })[0]; return b && b.table ? b.table : null; }
 function finRow(tbl, re){ if(!tbl || !tbl.rows) return null; return tbl.rows.filter(function(r){ return re.test(String(r.label||'')); })[0] || null; }
 function finSeries(tbl, re, idx){
   var r = finRow(tbl, re); if(!r) return null;
-  return { label:r.label, unit:r.unit, vals: idx.map(function(i){ return num(r.values[i]) ? r.values[i] : null; }), labels: idx.map(function(i){ return fyLabel(tbl.periods[i]); }), ttm: idx.map(function(i){ return /TTM|Current/.test(tbl.periods[i]); }) };
+  // cc#1850: i===-1 is finIdx()'s sentinel for "TTM/Current absent from this symbol's data" --
+  // val stays null (finBars() already draws that honestly, no code change needed there), the
+  // label reads 'TTM' rather than the empty string fyLabel(undefined) would otherwise produce,
+  // and it still carries the ttm flag so it gets the same gold label colour a real TTM bar would.
+  return { label:r.label, unit:r.unit,
+    vals: idx.map(function(i){ return num(r.values[i]) ? r.values[i] : null; }),
+    labels: idx.map(function(i){ return i<0 ? 'TTM' : fyLabel(tbl.periods[i]); }),
+    ttm: idx.map(function(i){ return i<0 || /TTM|Current/.test(tbl.periods[i]); }) };
 }
 function finSum(tbl, res, idx, label){
   var parts = res.map(function(re){ return finSeries(tbl, re, idx); });
