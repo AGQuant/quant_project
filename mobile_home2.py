@@ -273,12 +273,32 @@ def mobile_trends(request: Request, kind: str = "adr", days: int = 30):
             """, (sym, sym))
             rows = _rows(cur)
         elif intraday:
+            # cc#1846/cc#1849: was pcr_intraday.pcr_total -- the corrupted-write-race column (see
+            # cc#1846's diagnosis). This chip popup is a SINGLE-SESSION chart (days==1), squarely
+            # within option_chain's retention and with no expiry-rollover to reason about (unlike
+            # the multi-day charts cc#1846 deferred), so it moves to the same live whole-chain
+            # compute pcr_mood.live_pcr() uses -- one point per tick, computed fresh, never the
+            # buggy stored total. HAVING >5 strikes is a minimal sanity floor (a healthy session
+            # carries ~40) against a near-empty in-flight write; a genuinely thin session tick
+            # simply does not plot a point rather than plotting a wrong ratio.
             cur.execute("""
-                SELECT to_char(ts, 'HH24:MI') AS d, pcr_total AS v, ts::date AS sd
-                FROM pcr_intraday
-                WHERE underlying = 'NIFTY' AND pcr_total IS NOT NULL
-                  AND ts::date = (SELECT MAX(ts)::date FROM pcr_intraday
-                                  WHERE underlying = 'NIFTY' AND pcr_total IS NOT NULL)
+                WITH exp AS (
+                    SELECT MIN(expiry) AS e FROM option_chain
+                    WHERE underlying='NIFTY' AND expiry >= CURRENT_DATE
+                ),
+                d AS (
+                    SELECT MAX(ts)::date AS sd FROM option_chain
+                    WHERE underlying='NIFTY' AND expiry=(SELECT e FROM exp) AND oi IS NOT NULL
+                )
+                SELECT to_char(ts, 'HH24:MI') AS d,
+                       (SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::float
+                        / NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END), 0)) AS v,
+                       ts::date AS sd
+                FROM option_chain
+                WHERE underlying='NIFTY' AND expiry=(SELECT e FROM exp) AND oi IS NOT NULL
+                  AND ts::date = (SELECT sd FROM d)
+                GROUP BY ts
+                HAVING COUNT(DISTINCT strike) > 5
                 ORDER BY ts ASC
             """)
             rows = _rows(cur)
