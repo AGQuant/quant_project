@@ -1463,6 +1463,11 @@ body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
 .posalert-t{flex:1 1 auto;font-size:var(--type-12);line-height:1.4;color:var(--amber,#FF9F45)}
 .posalert-x{flex:0 0 auto;background:none;border:0;color:var(--amber,#FF9F45);font-size:var(--type-12);
   min-width:24px;min-height:24px;cursor:pointer}
+/* cc#1844: #buildupBanner sits OUTSIDE .body (see the HTML comment at its container), so it does
+   not inherit .body's own 12px horizontal padding (mobile_endpoints.MOBILE_CSS) -- matched here
+   directly rather than adding padding to .screen itself, which every OTHER child already
+   assumes is absent. Empty when nothing is showing, so :empty collapses it to zero height. */
+#buildupBanner:not(:empty){padding:11px 12px 0}
 .legwrap{margin-top:var(--space-12)}
 .leghd{display:flex;justify-content:space-between;align-items:center}
 .leghd .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
@@ -1675,6 +1680,13 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
      CSS-disabled, cc#1644-era) so nothing functional is lost by removing it along with the row. -->
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Home</span></div><div class="as-slot"><span data-scorr-bell></span></div></div>
 <div class="screen">
+  <!-- cc#1844: OUTSIDE #body deliberately, same reasoning as the V10 modal/Market Tape/Breadth
+       overlays this file's own renderHome() comment already documents -- a full re-render swaps
+       #body.innerHTML every 5-min poll tick, and a banner living inside that swap would either
+       fight a real dismiss (it reappears every tick, ignoring the tap) or, if the dismiss removed
+       it from the DOM tree entirely, would need re-adding logic duplicated at every render call
+       site. A stable sibling node, painted by its own function, is simpler than either. -->
+  <div id="buildupBanner"></div>
   <div class="body" id="body"><div class="loading">Loading your dashboard…</div></div>
 </div>
 
@@ -5472,6 +5484,49 @@ function renderHome(d, pv){
    page with an error over one dropped request. The next tick simply tries again.
    NO refresh spinner (scope 6, CC's call): the session clock, feed rail and every figure
    repaint in place — that movement IS the acknowledgement, kept quiet per the card. */
+/* cc#1844 (LATE_FEED_START_DETECTION_V1, founder ruling 08-Sep-2026, follow-up to cc#1834):
+   dismissible banner reading /api/v10/buildup's opening_data_missing flag -- the SAME flag the
+   F&O Radar buildup card reads (scorr_v10_signal.html buCard()), one source of truth, computed
+   once server-side and never recomputed here. limit=1 keeps the payload small; the flag fields
+   are computed before the sort/slice in v10_endpoints.v10_buildup, so the limit does not affect
+   them.
+   DAY-SCOPED DISMISS, deliberately NOT cc#1418's pattern (posFeedAlertHtml, which just vanishes
+   from a re-render and reappears on the next poll if still live) -- the founder asked for THIS
+   one to survive the whole day: localStorage keyed by the phone's own local date (a dismiss-key
+   convenience, not a market-open/live-vs-stale decision, so cc#984's "never the phone clock"
+   rule does not apply here), checked fresh at every paint rather than expired by a timer. */
+var BUILDUP_FLAG = null;
+function buildupDismissKey(){
+  var d = new Date();
+  return 'scorr_buildup_banner_dismissed_' + d.getFullYear() + '-'
+       + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function buildupBannerDismiss(){
+  try { localStorage.setItem(buildupDismissKey(), '1'); } catch (e) {}
+  var el = document.getElementById('buildupBanner');
+  if (el) el.innerHTML = '';
+}
+function paintBuildupBanner(){
+  var el = document.getElementById('buildupBanner');
+  if (!el) return;
+  if (!BUILDUP_FLAG || !BUILDUP_FLAG.opening_data_missing){ el.innerHTML = ''; return; }
+  var dismissed = false;
+  try { dismissed = !!localStorage.getItem(buildupDismissKey()); } catch (e) {}
+  if (dismissed){ el.innerHTML = ''; return; }
+  var ft = BUILDUP_FLAG.first_bar_time ? BUILDUP_FLAG.first_bar_time.slice(0, 5) + ' IST' : 'a later time';
+  el.innerHTML = '<div class="posalert" id="buildupBannerInner">'
+    + '<span class="posalert-t">The futures feed started late today (' + esc(ft)
+    + '), so Buildup data is unavailable.</span>'
+    + '<button type="button" class="posalert-x" onclick="buildupBannerDismiss()" aria-label="Dismiss">&#10005;</button>'
+    + '</div>';
+}
+function loadBuildupBanner(){
+  return fetchWithTimeout('/api/v10/buildup?limit=1')
+    .then(function(r){ return r.json(); })
+    .then(function(d){ BUILDUP_FLAG = d; paintBuildupBanner(); })
+    .catch(function(){ /* a failed fetch must not blank a banner that was correctly showing */ });
+}
+
 var HOME_POLL = { h: null, inflight: false, ms: 5 * 60 * 1000, marketOpen: false, lastFetch: 0 };
 var HOME_SESS_LINE = '';   /* cc#1634: "Market open · HH:MM IST · feed live" for hero card 1's as-of line */
 function homeRefresh(){
@@ -5480,6 +5535,7 @@ function homeRefresh(){
   if (document.visibilityState === 'hidden') return;  /* belt to the braces — the timer is
                                                          already cleared on hide */
   HOME_POLL.inflight = true;
+  loadBuildupBanner();   /* cc#1844: rides alongside, same reasoning as pivots below — never gates the main render */
   fetchWithTimeout('/api/mobile/home2')
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -5513,7 +5569,9 @@ document.addEventListener('visibilitychange', function(){
 });
 
 /* pivots ride alongside the main call — the deck renders either way, and a pivot failure costs
-   the bar, never the card (Promise.all would have let it take the whole screen down). */
+   the bar, never the card (Promise.all would have let it take the whole screen down). cc#1844's
+   buildup-banner fetch rides alongside the same way, for the same reason. */
+loadBuildupBanner();
 Promise.all([
   fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }),
   fetchWithTimeout('/api/paper/pivots?symbol=NIFTY50,BANKNIFTY')

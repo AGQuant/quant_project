@@ -1179,7 +1179,17 @@ function buCard(st){
   var pool = buPool(st.k), rows = _sortByState(pool.slice(0, 5), BU_SORT[st.k], BU_SORT_GETTERS),
       bd = D.build || {};
   var body;
-  if (bd.oi_feed_pending){
+  if (bd.opening_data_missing){
+    /* cc#1844 (follow-up to cc#1834): the futures feed's FIRST bar of the session landed too
+       late for the since-open OI baseline (cc#1509) to have anything to measure from — a
+       universe-wide miss, not a per-symbol gap. Option A, founder-ruled: state the fact, name
+       the time, never fall back to a different calculation. Checked BEFORE oi_feed_pending —
+       this is the more specific, more useful message when both would otherwise be true. */
+    body = '<div class="unavail">Opening data is missing for today — the futures feed started at '
+         + esc(bd.first_bar_time ? bd.first_bar_time.slice(0, 5) + ' IST' : 'a later time')
+         + ', after the market opened. Buildup needs the session\'s first bar to measure '
+         + 'open-interest change from, so it has nothing to show right now.</div>';
+  } else if (bd.oi_feed_pending){
     /* the 6055 rule, literally: with OI pending there IS no buildup state, so nothing is classified
        and the card says why instead of showing a price-only list under a buildup badge. */
     body = '<div class="unavail">OI feed pending — buildup state needs open interest, and it is not '
