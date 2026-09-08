@@ -344,8 +344,12 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
             "impact": (a["impact"] or "").upper() or None,
             "symbols": a["mentioned_symbols"] or [],
             "source": a["source_name"],
-            "when": a["display_time"].strftime("%H:%M") if a["display_time"] else None,
-            "when_full": a["display_time"].strftime("%d-%b %H:%M IST") if a["display_time"] else None,
+            # cc#1860: display_time is a timestamptz, returned by the DB session in UTC -- strftime()
+            # straight off it printed the raw UTC clock (a card polished at 20:17 IST/14:47 UTC read
+            # "14:47", and when_full compounded it by labelling that UTC value " IST"). .astimezone(_IST)
+            # first, reusing this file's own canonical IST tzinfo (line 69) rather than a new one.
+            "when": a["display_time"].astimezone(_IST).strftime("%H:%M") if a["display_time"] else None,
+            "when_full": a["display_time"].astimezone(_IST).strftime("%d-%b %H:%M IST") if a["display_time"] else None,
         }
 
     editorials = [shape(a) for a in arts if (a["category"] or "") == "AI Editorial"]
