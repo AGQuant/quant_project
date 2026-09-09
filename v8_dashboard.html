@@ -3079,7 +3079,10 @@ function holdDays(ts){if(!ts)return"--";const ed=String(ts).slice(0,10);const t=
 // so two independent amber sources were rendering back-to-back on the same row. One flag, one amber
 // source now. See cc#1556's own completion notes for the repo-wide grep on the now-orphaned endpoint.
 function posTags(x){
-  const nw=(Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
+  // cc#1879: the NEW chip is redundant on a basket tab (same fact as ENTRY TIME + DAYS, rendered a
+  // third time) and is removed there \u2014 x._basketTab is set by v8NormRow only for surface==='basket'.
+  // Master (Open Positions) is untouched: it never sets _basketTab, so `nw` renders exactly as before.
+  const nw=(!x._basketTab&&Number(x.days)===1)?'<span title="Entered this session" style="display:inline-block;font:800 8.5px/1 Sora,sans-serif;letter-spacing:.05em;color:var(--grn,#0a9e63);background:var(--grn-d,rgba(10,158,99,.14));border:1px solid var(--grn,#0a9e63);border-radius:4px;padding:2px 4px;margin-left:4px;vertical-align:middle">NEW</span>':'';
   // cc#1008: markers on the OPEN book, same maps + endpoint the basket panels and /m/v8 use \u2014 the
   // founder's locked stars were rendering in the funnel panels but never on the open-position
   // rows. Inline (not async) so they paint with the row; loadPivotStars() repaints the master
@@ -3130,7 +3133,11 @@ const SIG_REASON_TEXT={
   pending:'Engine evaluation not recorded yet for this signal. The reason appears once the ledger has it.'
 };
 function statusBadge(status,reason){
-  if(status==='OPEN')return`<span class="badge b-open">&#9679; OPEN</span>`;
+  // cc#1879: OPEN chip removed — both call sites (basket desktop row, bkMobile card) are basket-tab
+  // only; every row in an OPEN book carried this identical chip with zero variance, and the tab's
+  // own legend/section header already states "OPEN · Position live" once. SIGNAL is unchanged —
+  // that badge still carries real per-row information (the gating reason).
+  if(status==='OPEN')return'';
   const k=String(reason||'').toLowerCase();
   const tip=SIG_REASON_TEXT[k]?` title="${SIG_REASON_TEXT[k].replace(/"/g,'&quot;')}"`:'';
   const rt=reason?`<span class="sig-reason"${tip}>&middot;${String(reason).toUpperCase()}</span>`:'';
@@ -4045,7 +4052,12 @@ const V8_COLS=[
   // referenced the key breaks; no view lists it.
   ["status","Status",     x=>`<td>${x._statusHtml||''}</td>`],
   ["side","Side",         x=>`<td><span class="badge ${String(x.side||'').toUpperCase()==='SHORT'?'b-short':'b-long'}">${x.side||'--'}</span></td>`],
-  ["entry_ts","Entry Time",x=>`<td style="color:var(--mut);${V8_COL_MONO};font-size:11px">${_cD(x.entry_ts,fmtTs)}</td>`],
+  // cc#1879: same-day (IST) entry is bold instead of carrying a separate NEW chip. x.days is
+  // holdDays(entry_ts||signal_ts) everywhere it's set (see v8NormRow/openpos normaliser) — an
+  // IST-safe, entry-derived value already, so this reuses it rather than adding a parallel notion
+  // of "today" (no client new Date() here, no UTC-midnight edge case). Basket-tab rows only,
+  // per x._basketTab (see posTags for the same ring-fence) — master's Entry Time is unchanged.
+  ["entry_ts","Entry Time",x=>`<td style="color:var(--mut);${V8_COL_MONO};font-size:11px${(x._basketTab&&Number(x.days)===1)?';font-weight:800':''}">${_cD(x.entry_ts,fmtTs)}</td>`],
   ["days","Days",         x=>`<td style="text-align:center">${_cD(x.days,v=>v)}</td>`],
   // cc#1542: the position's CURRENT Trade Check score off v8_tc_score_ticks (5-min series,
   // cc#1540/1541), via /api/v8/tc_score_latest. Centered like Days (its neighbour). Neutral
@@ -4132,6 +4144,10 @@ function v8NormRow(x,ctx){
   // The status badge is a basket concept; a master row is always OPEN, so 22301 lets it stay
   // implicit — the cell renders empty rather than repeating "OPEN" on every row.
   x._statusHtml=(ctx.surface==='basket')?(statusBadge(st,x.signal_reason)+_banChip(x)):'';
+  // cc#1879: NEW/OPEN row chips are a basket-tab-only concept (founder: "New Open capsule not
+  // req... keep table clean"). Master (Open Positions) keeps posTags' NEW badge exactly as before —
+  // this flag is the ring-fence, same whitelist pattern as _showPill/_statusHtml above.
+  x._basketTab=(ctx.surface==='basket');
   x._qa=`openQuickActions(event,'${x.symbol}','${x.side||''}',${isOpen?(Number(x.qty)||0):0},${isOpen&&x.entry_price!=null?Number(x.entry_price):'null'},${x.cmp!=null?Number(x.cmp):'null'})`;
   // Stock metrics: the basket feed carries its own; the paper book carries none, so master fills
   // them from metricsAll and prints -- for what even that lacks (pivots, which live per basket).
