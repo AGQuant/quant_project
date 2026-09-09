@@ -4979,7 +4979,14 @@ async def _scheduler_loop():
         # cc#728: HOURLY open-position TC-star batch on the :30 mark, 09:30-15:30 IST (trading days).
         # Predictable star cadence (7 marks/day) replacing cc#720's per-render 15-min cache.
         if now.weekday() < 5 and _is_trading_day(today) and m == 30 and 9 <= h <= 15:
-            _spawn(_bg_tc_position_stars)
+            # cc#1862 (09-Sep-2026, founder ruling id 5654): bg_tc_position_stars (v1, the old
+            # tier1+tier2 tc_v4_endpoints.trade_check_v4 scorer, table tc_position_stars) is
+            # SUPERSEDED by _v2 below -- confirmed orphaned in the UI (its serving endpoint
+            # GET /api/trade-check/position-stars is not rendered anywhere, removed cc#1556) and
+            # scoring on a rule set that predates the 06-07 Sep V2 canon. Dispatch unmounted AND
+            # the registry row set active=false (belt and braces, same pattern as cc#1442 QSR) --
+            # code + table preserved intact, nothing deleted.
+            # _spawn(_bg_tc_position_stars)
             _spawn(_bg_tc_position_stars_v2)   # cc#1172 push 7: four-bucket star, same mark, own table
         # cc#748: TC outcome sim — hourly STRONG-entry tracker on the session's entry marks (09:30-15:30
         # today, sourced from nse_session so it follows the 03-Aug NSE change). Trading-day gate + all
@@ -5024,7 +5031,15 @@ async def _scheduler_loop():
         #     _spawn(_bg_qsr_scan)
         if h == 16 and m == 0:
             _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
-            _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
+            # cc#1862 (09-Sep-2026, founder ruling id 5654): bg_tc_screener_precompute (the OLD
+            # /21-rule scorer, table tc_screener_cache) is SUPERSEDED by bg_tc_screener_v2 below
+            # (V2 canon, 06-07 Sep rule set, table tc_screener_v2) -- the two were run five minutes
+            # apart for a diff period per cc#1172 push 4's own comment; that diff period is over,
+            # v2 is confirmed canon (cc_task_logs on cc#1862). Dispatch unmounted AND the registry
+            # row set active=false (belt and braces, same pattern as cc#1442 QSR) -- code + table
+            # preserved intact (tc_screener_cache history kept until the founder rules on it, per
+            # this card's own instruction), nothing deleted.
+            # _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
             # cc#1172 push 4: the FOUR-BUCKET screener, five minutes behind the old one so both
             # write the same evening and can be diffed. Registry-gated inside.
             _spawn(_bg_stock_news_watchdog)      # cc#245: stock-news staleness/all-blocked alert
