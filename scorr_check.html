@@ -1542,6 +1542,10 @@ function _tcrScore100(c){
 }
 function _tcrWord(v){ return v==='STRONG'?'Strong':v==='VALID'?'Valid':v==='WATCH'?'Watch':v==='REJECT'?'Fail':(v||'—'); }
 function _tcrWordCls(v){ return v==='STRONG'?'':v==='VALID'?'valid':v==='WATCH'?'watch':v==='REJECT'?'fail':'uncal'; }
+/* cc#1909: computed_at is now the LAST INTRADAY TICK time (tc_universe_ticks), never render time.
+   null means no tick exists for today (e.g. before the 09:15 first tick) — say so plainly rather
+   than printing a blank "scored " label, and never substitute the clock. */
+function _tcrScoredLabel(computedAt){ return computedAt ? computedAt : 'no tick yet today'; }
 function _tcrHero(d, best, uiMode){
   const ev=d.evidence||{};
   const s100=_tcrScore100(best), uncal=(best.score10!=null&&best.score10_weighted===false);
@@ -1568,7 +1572,7 @@ function _tcrHero(d, best, uiMode){
   return '<div class="tcr-hd"><div>'
     +'<div class="tcr-sym">'+_tcAttr(d.symbol)+(window.ScorrCardRow?ScorrCardRow(d.symbol):'')+'</div>'
     +(meta?'<div class="tcr-nm">'+meta+'</div>':'')
-    +'</div><div class="tcr-px"><b>'+(d.cmp!=null?'₹'+Number(d.cmp).toFixed(2):'—')+'</b><small>CMP · '+_tcAttr(d.computed_at||'')+' · spot</small></div></div>'
+    +'</div><div class="tcr-px"><b>'+(d.cmp!=null?'₹'+Number(d.cmp).toFixed(2):'—')+'</b><small>CMP · '+_tcAttr(_tcrScoredLabel(d.computed_at))+' · spot</small></div></div>'
     +'<div class="tcr-eye">BEST OF 4 · '+_tcAttr(best.label)+' · '+(best.side==='SELL'?'▼ SHORT':'▲ LONG')+' view</div>'
     +'<div class="tcr-vrow"><div class="tcr-vword '+_tcrWordCls(v10)+'">'+(uncal?'Uncalibrated':_tcrWord(v10))+'</div>'
     +'<div class="tcr-score">'+(s100==null?'—':s100.toFixed(1))+'<small>/ 100</small></div></div>'
@@ -1607,7 +1611,7 @@ function _tcrRules(){
   }).join('');
   return '<div class="tcr-rh"><b>'+_tcAttr(c.label)+' · '+rules.length+' rules</b><span>heaviest first · '+_tcPtsFmt(earned)+' / '+_tcPtsFmt(avail)+' earned</span></div>'
     +'<table class="tcr-t"><thead><tr><th></th><th>RULE</th><th class="bar">CREDIT</th><th></th><th style="text-align:right">POINTS</th></tr></thead><tbody>'+rows+'</tbody></table>'
-    +'<div class="tcr-foot"><span>spot price, not futures · scored '+_tcAttr(v.d.computed_at||'')+'</span><span>'+(c.score10!=null&&c.score10_weighted===false?'uncalibrated bucket — no live weights':'registry weights · '+_tcAttr(v.d.version||'V4'))+'</span></div>';
+    +'<div class="tcr-foot"><span>spot price, not futures · scored '+_tcAttr(_tcrScoredLabel(v.d.computed_at))+'</span><span>'+(c.score10!=null&&c.score10_weighted===false?'uncalibrated bucket — no live weights':'registry weights · '+_tcAttr(v.d.version||'V4'))+'</span></div>';
 }
 function tcrToggle(i){
   const v=window.__tcView; if(!v) return;
@@ -1640,7 +1644,7 @@ function tcrRead(){
   document.getElementById('tcInfoBox').innerHTML=
     '<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
     +'<div class="tcinfo-h">'+_tcAttr(d.symbol)+' · the read</div>'
-    +'<div class="tcinfo-sub">'+_tcAttr(best.label||'')+' · scored '+_tcAttr(d.computed_at||'')+'</div>'
+    +'<div class="tcinfo-sub">'+_tcAttr(best.label||'')+' · scored '+_tcAttr(_tcrScoredLabel(d.computed_at))+'</div>'
     +lines.map(l=>'<div class="tcinfo-v" style="margin-bottom:8px">'+_tcAttr(l)+'</div>').join('');
   document.getElementById('tcInfoOv').classList.add('open');
 }

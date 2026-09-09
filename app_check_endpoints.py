@@ -134,6 +134,9 @@ def app_check_tc(request: Request, symbol: str = ""):
             "score100": _f(c.get("score100")), "score10": _f(c.get("score10")),
             "weighted": bool(c.get("score10_weighted")),
             "band": _band_word(c.get("verdict10")),
+            # cc#1909: True when tc_universe_ticks has no tick for this bucket TODAY — score100/
+            # score10/band are None together in that case, never a stale or live-recomputed value.
+            "no_score_today": bool(c.get("no_score_today")),
             "raw_score": _f(c.get("score")), "raw_max": _f(c.get("max")),
             "weight_sum": sums.get(label),
             "weighted_earned": round(earned, 2),
@@ -145,6 +148,7 @@ def app_check_tc(request: Request, symbol: str = ""):
         "symbol": sym, "company": meta["company"], "segment": meta["segment"], "gvm": meta["gvm"],
         "cmp": _f(r.get("cmp")), "cmp_line": cmp_line,
         "computed_at": r.get("computed_at"),
+        "no_score_today": bool(r.get("no_score_today")),   # cc#1909
         "best_label": best.get("label"),
         "best_score100": _f(best.get("score100")),
         "best_band": _band_word(best.get("verdict10")),

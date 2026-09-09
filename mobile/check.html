@@ -81,6 +81,9 @@ function hhmm(ts){ /* "2026-09-02 16:41:12 IST" or "2026-09-02 15:30:00" -> "02-
   if (!ts) return null; var m = String(ts).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); if (!m) return String(ts);
   var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return m[3] + '-' + MON[Number(m[2]) - 1] + ' ' + m[4] + ':' + m[5]; }
+/* cc#1909: computed_at is now the LAST INTRADAY TICK time (tc_universe_ticks), never render time.
+   null means no tick exists yet today — say so plainly, never blank. */
+function scoredLabel(ts){ var h = hhmm(ts); return h ? (h + ' IST') : 'no tick yet today'; }
 function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
 function apiGet(url){
   return fetchWithTimeout(url).then(function(r){ return r.json(); }).then(function(d){
@@ -280,7 +283,7 @@ function renderTC(){
   if (!c){ $('tc-main').innerHTML = emptyBox('No cards scored', 'The engine returned no bucket for ' + S.sym + '.', 'tc'); return; }
   var cuts = d.cuts || {}, ws = c.weight_sum;
   var score = c.score100, cls = c.weighted ? bandCls(c.band) : 'na';
-  var cmpTs = hhmm((d.cmp_line && d.cmp_line.ts) || d.computed_at);
+  var cmpTs = (d.cmp_line && d.cmp_line.ts) ? hhmm(d.cmp_line.ts) : scoredLabel(d.computed_at);
   var tiles = (d.cards || []).slice().sort(function(a, b){ return (Number(b.score100) || 0) - (Number(a.score100) || 0); });
   var h = '<section class="pressed c-hero">'
     + '<div class="c-hd"><div><div class="c-sym">' + esc(d.symbol) + '</div><div class="c-nm">' + esc(d.company || '') + (d.segment ? ' · ' + esc(d.segment) : '') + (d.gvm != null ? ' · GVM ' + num(d.gvm, 2) : '') + '</div></div>'
@@ -306,9 +309,9 @@ function renderTC(){
           + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div><div class="c-why">' + whyLine(r, st, c) + '</div></div>';
       }).join('') + '</section>';
   if (c.unmapped_rules && c.unmapped_rules.length) h += '<div class="c-note">Rules with no registry row (scored at weight 1): ' + esc(c.unmapped_rules.join(', ')) + '.</div>';
-  h += '<div class="c-cover">Personal trade context · not a V8 signal · scored ' + esc(hhmm(d.computed_at) || '—') + ' IST</div>';
+  h += '<div class="c-cover">Personal trade context · not a V8 signal · scored ' + esc(scoredLabel(d.computed_at)) + '</div>';
   $('tc-main').innerHTML = h;
-  $('c-live').textContent = 'Scored ' + (hhmm(d.computed_at) || '') + ' IST';
+  $('c-live').textContent = 'Scored ' + scoredLabel(d.computed_at);
 }
 function renderTCLanding(){
   $('tc-main').innerHTML = '<div class="slab c-empty"><b>Search a stock to check</b>All four buckets are scored — BUY-MOM, BUY-REV, SELL-MOM, SELL-REV — and the best one leads.</div>';
