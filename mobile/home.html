@@ -1259,6 +1259,26 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 .deriv-row .dr-grid .val{color:var(--txt);margin-top:var(--space-2)}
 .deriv-row .dr-foot{display:flex;justify-content:space-between;margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line2);font-size:var(--type-9);color:var(--dim)}
 .deriv-row .dr-foot .stale{color:var(--amber,#F5B94A)}
+/* cc#1888 P4 (APP_GRID_FRAMEWORK_V1): the new DASHBOARD section — four entries in a row-list,
+   same tokens/idiom the .deriv-card/.approved-slider header (eyebrow+rule) and .tool grid tile
+   (panel/border/radius, icon span with the brand glow) already use on this page, scoped under its
+   own class per this file's own convention (each card family gets its own .hdr/.eyebrow/.rule
+   rather than a shared global one — see .approved-slider / .deriv-card above). A row layout, not
+   the 3-col icon grid, because two of the four entries (My Watchlist / My Trades Shortlist) need
+   room for an honest one-line empty-state caption (item 7) that an icon-only tile has no space for. */
+.dash-section{margin:var(--space-14) 0}
+.dash-section .hdr{display:flex;align-items:center;gap:var(--space-10);margin-bottom:var(--space-6)}
+.dash-section .eyebrow{font-size:var(--type-11);font-weight:700;letter-spacing:var(--track-px16);color:var(--txt);text-transform:uppercase}
+.dash-section .rule{flex:1;height:1px;background:var(--line2)}
+.dash-row{display:flex;align-items:center;gap:12px;background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:12px;padding:var(--space-12) var(--space-14);margin-bottom:var(--space-8);text-decoration:none;color:inherit}
+.dash-row:last-child{margin-bottom:0}
+.dash-row .di{font-size:var(--type-19);flex:none;text-shadow:0 0 10px var(--brandglow)}
+.dash-row .dt{flex:1;min-width:0}
+.dash-row .dl{font-size:var(--type-13);font-weight:700;color:var(--txt)}
+.dash-row .ds{font-size:var(--type-11);color:var(--dim);margin-top:2px}
+.dash-row.empty{cursor:default}
+.dash-row.empty .di{opacity:.5;text-shadow:none}
+.dash-row.empty .dl{color:var(--mut)}
 /* the per-strike sheet — same overlay/scrim shape the rest of this app's bottom sheets use */
 .deriv-sheet-ov{position:fixed;inset:0;z-index:9200;background:rgba(4,8,18,.62);display:none;align-items:flex-end}
 .deriv-sheet-ov.open{display:flex}
@@ -1858,6 +1878,37 @@ var HIDDEN_GRID_TILES = ['/m/digest', '/m/v10', '/dashboard#index', '/v9', '/int
 function gtile(href, glyph, label){
   if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
   return '<a class="tool slab dense" href="' + href + '"><span>' + glyph + '</span>' + esc(label) + '</a>';
+}
+
+/* cc#1888 P4-P7 (APP_GRID_FRAMEWORK_V1): the new DASHBOARD section. My Portfolio and My Alerts
+   REUSE existing real surfaces (P5/P6 — checked first, per the card, rather than building new):
+   My Portfolio -> /m/holdings, the cc#1779 MY PORTFOLIO full page (design ref
+   scorr_mobile_myportfolio_R1); My Alerts -> /m/alerts, the same page + endpoint the Alerts grid
+   tile already opens. My Watchlist and My Trades Shortlist have NO backing store anywhere in the
+   codebase — grepped every .py file for "watchlist"/"shortlist": every hit is an unrelated engine
+   concept (intraday_watchlist/v14_watchlist are scanner candidate logs the engines write,
+   stock_views_shortlist is a research-views funnel), none is a user-personal saved list. Per item
+   7, these ship as HONEST EMPTY STATES this sprint — visible (never hidden because empty), no
+   href (there is genuinely nowhere to send a tap), a plain one-line caption instead of a fake
+   number or an invented table. Item 8's report (what a real Watchlist/Shortlist would need) is in
+   the task result, not code. */
+function dashRow(href, glyph, label, sub){
+  var empty = !href;
+  var tag = empty ? 'div' : 'a';
+  return '<' + tag + ' class="dash-row' + (empty ? ' empty' : '') + '"' + (empty ? '' : ' href="' + href + '"') + '>'
+    + '<span class="di">' + glyph + '</span>'
+    + '<span class="dt"><span class="dl">' + esc(label) + '</span>'
+    + (sub ? '<span class="ds">' + esc(sub) + '</span>' : '') + '</span>'
+    + '</' + tag + '>';
+}
+function dashSectionHtml(){
+  return '<div class="dash-section">'
+    + '<div class="hdr"><span class="eyebrow">DASHBOARD</span><div class="rule"></div></div>'
+    + dashRow('/m/holdings', '◈', 'My Portfolio', 'Holdings, allocation, unrealised P&L')
+    + dashRow(null, '☆', 'My Watchlist', 'Nothing saved yet')
+    + dashRow(null, '☰', 'My Trades Shortlist', 'Nothing saved yet')
+    + dashRow('/m/alerts', '◬', 'My Alerts', 'Price triggers you set')
+    + '</div>';
 }
 
 function esc(s){ return String(s == null ? '' : s)
@@ -5682,6 +5733,7 @@ function renderHome(d, pv){
     // cc#991 appended Wall of Trades as tile 15; cc#1526 moved it to tile 1 (top of this list).
     ;
   document.getElementById('body').appendChild(tools);
+  document.getElementById('body').insertAdjacentHTML('beforeend', dashSectionHtml());   // cc#1888 P4
 
   renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone
 
