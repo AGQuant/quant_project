@@ -1473,11 +1473,16 @@ NAV_REGISTRY = {
     # the registry saying which bar an entry actually appears on, so the registry cannot claim a
     # desktop destination that the desktop never renders.
     "/m/intel":      ("Intel (mobile)",       "grid-tile"),   # cc#1638: out of the nav, Home grid tile next to Custom Alert
-    "/m/myportfolio": ("My Portfolio (mobile, Dashboard section)", "grid-tile"),   # cc#1895
-    "/m/myalerts":    ("My Alerts (mobile, Dashboard section)",    "grid-tile"),   # cc#1896
-    "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "grid-tile"),   # cc#1897
-    "/m/screeners":  ("Screeners (mobile)",     "grid-tile"),   # cc#1899: Home grid entry point, same tier as /m/intel
-    "/m/sector":     ("Sector Intel (mobile)",  "grid-tile"),   # cc#1900: Home grid entry point, same tier as /m/intel
+    # cc#1907 (Fable ruling 5876): all five below were mis-tiered "grid-tile" (Home-grid-only) at
+    # build time on the wrong premise that no /m/* route belongs in pwa_endpoints.py's NAV array —
+    # Fable grepped that file and found twelve already there. Now carrying the NAV array's 'm'
+    # flag too (mobile More sheet), so the tier is corrected to "nav-mobile" to match reality —
+    # the registry says which bar an entry appears on, and it now actually appears on this one.
+    "/m/myportfolio": ("My Portfolio (mobile, Dashboard section)", "nav-mobile"),   # cc#1895, tier fixed cc#1907
+    "/m/myalerts":    ("My Alerts (mobile, Dashboard section)",    "nav-mobile"),   # cc#1896, tier fixed cc#1907
+    "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "nav-mobile"),   # cc#1897, tier fixed cc#1907
+    "/m/screeners":  ("Screeners (mobile)",     "nav-mobile"),   # cc#1899, tier fixed cc#1907
+    "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),

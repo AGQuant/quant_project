@@ -439,7 +439,20 @@ PWA_JS = """
     // cc#1535: Wall of Trades takes the freed PRIMARY slot, labelled WoT on the bar (shortLabel
     // strips the suffix). Same \\u2637\\ufe0e glyph as the grid tile it vacated.
     ['/m/trades', '\\u2637\\ufe0e', 'WoT (mobile)', 'm'],
-    ['/m/results', '\\u25f7', 'Results (mobile)', 'm']
+    ['/m/results', '\\u25f7', 'Results (mobile)', 'm'],
+    // cc#1907 (Fable ruling 5876 on cc#1199, 09-Sep): cc#1898 wrongly reported that NO /m/*
+    // route participates in this array and justified the three Dashboard pages' absence on that
+    // basis — Fable grepped this file directly and found TWELVE /m/ entries already here. These
+    // five close that gap: the three Home Dashboard section pages (cc#1895/1896/1897) plus the
+    // two Home grid section pages from the same shipping window (cc#1899/1900) that carried the
+    // identical wrong assumption. /m/results (cc#1901's route, above) already had its entry —
+    // verified, not re-added. Glyphs match each page's own Home-grid tile exactly (home.html
+    // dashRow()/gtile() calls), not invented here.
+    ['/m/myportfolio', '\\u25c8', 'My Portfolio (mobile)', 'm'],
+    ['/m/myalerts', '\\u25ec', 'My Alerts (mobile)', 'm'],
+    ['/m/mywatchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
+    ['/m/screeners', '\\u2637', 'Screeners (mobile)', 'm'],
+    ['/m/sector', '\\u2b21', 'Sector Intel (mobile)', 'm']
     // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).
   ];
