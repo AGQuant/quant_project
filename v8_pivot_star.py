@@ -1231,6 +1231,40 @@ def pivot_star(star_date: Optional[str] = None):
             except Exception as e:
                 log.warning("cc#1540 tc_strong log-read failed: %s", e)
                 tcs = []
+            # cc#1880: GREEN TRIANGLE channel-rejection markers — the fifth list, LOG read like the
+            # other four (cc#1008 DISPLAY_PARITY: never a live re-eval). Written by
+            # v8_channel_5m.evaluate_triangle_markers(), same v8_pivot_star_log table, direction
+            # values CHAN_SELL/CHAN_BUY (cannot collide with BUY/SELL/ACTIVITY/DMA_*/TC_STRONG
+            # under the table's own UNIQUE(symbol,star_date,direction)). COLUMN REUSE, stated at
+            # the write site: level_value=pct move from touch to latest close, pp=touch bar's own
+            # close, cmp_at_star=latest close, day_1d=n_bars, touched_dates=the touch bar's date.
+            chan = []
+            try:
+                with conn.cursor() as ccur:
+                    ccur.execute("""
+                        SELECT symbol, direction, level_value, pp, cmp_at_star, day_1d, touched_dates
+                        FROM v8_pivot_star_log
+                        WHERE star_date=%s AND direction IN ('CHAN_SELL','CHAN_BUY')
+                        ORDER BY symbol""", (d,))
+                    for sym, dirn, pct, touch_close, latest_close, nbars, tdates in ccur.fetchall():
+                        pctf, touchf, latf = _f(pct), _f(touch_close), _f(latest_close)
+                        tdate = tdates[0] if tdates else None
+                        rel_up = "below" if dirn == "CHAN_SELL" else "above"
+                        chan.append({
+                            "symbol": sym, "direction": dirn, "star_color": "GREEN",
+                            "glyph": "triangle",
+                            "pct_move": pctf, "touch_close": touchf, "latest_close": latf,
+                            "n_bars": int(nbars) if nbars is not None else None,
+                            "touch_date": str(tdate) if tdate else None,
+                            # FACTS ONLY, same wall as every other marker note.
+                            "note": (f"touched the {'upper' if dirn=='CHAN_SELL' else 'lower'} band "
+                                     f"on {tdate.strftime('%d-%b')}, now {abs(pctf):.1f}% {rel_up} "
+                                     f"that bar's close" if pctf is not None and tdate
+                                     else f"channel band rejection ({'sell' if dirn=='CHAN_SELL' else 'buy'} side)"),
+                        })
+            except Exception as e:
+                log.warning("cc#1880 channel_5m log-read failed: %s", e)
+                chan = []
             return {
                 # cc#1032: the RESOLVED date, so every surface is honest about which session it is
                 # showing, plus an explicit flag rather than making a reader compare dates.
@@ -1242,6 +1276,7 @@ def pivot_star(star_date: Optional[str] = None):
                 "dma_state": dma, "dma_state_count": len(dma),
                 "dma_cross": dma, "dma_cross_count": len(dma),
                 "tc_strong": tcs, "tc_strong_count": len(tcs),
+                "channel_reject": chan, "channel_reject_count": len(chan),
                 "scope": EVAL_SCOPE,
                 "rule": ("PIVOT_STAR_V2 (session_log 18052) with MARKER_GLYPH_V3 glyphs "
                          "(session_log 21764), evaluated on the OPEN paper book. "
@@ -1275,6 +1310,8 @@ def pivot_star(star_date: Optional[str] = None):
                     "Red star = mirror at R1",
                     "⚡ = Volume confirm · 2+ of 4 volume checks (pace, prior day, delivery, accumulation/distribution)",
                     "Green/red square = 5DMA above/below 20DMA",
+                    "Green triangle = touched the 5-min channel band (last 3 trading days) and "
+                    "reversed 1%+ off that touch",
                 ],
             }
     except Exception as e:

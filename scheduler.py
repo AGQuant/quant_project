@@ -862,6 +862,19 @@ def _bg_pivot_star():
         raise RuntimeError(f"pivot_star run_tick failed: {res.get('error')}")
 
 
+def _bg_channel_5m():
+    """cc#1880: the 5-min channel + GREEN TRIANGLE marker. OWN scheduler_master row (not folded
+    into _bg_pivot_star) so its cost/timing shows separately — same ENGINE_LIVENESS_RULE reasoning
+    _bg_tc_score_tick/_bg_guardian_tick/_bg_v10_tick already apply on this identical cash-continuous
+    5-min beat. Same LOUD-FAILURE convention as _bg_pivot_star above: a non-ok result is re-raised
+    so a component that cannot do its job alarms rather than idling behind a green status."""
+    import v8_channel_5m
+    res = v8_channel_5m.run_tick()
+    log.info(f"channel_5m: {res}")
+    if isinstance(res, dict) and not res.get("ok"):
+        raise RuntimeError(f"channel_5m run_tick failed: {res.get('error')}")
+
+
 def _bg_signal_writer():
     global _signal_writer_started_at, _signal_writer_token
     global _signal_writer_fail_streak, _last_signal_writer_ok
@@ -4923,6 +4936,12 @@ async def _scheduler_loop():
         # only v8_pivot_star_log and can never create a qualification or a paper entry.
         if _is_cash_continuous(now) and _is_trading_day(now.date()) and m % 5 == 0:
             _spawn(_bg_pivot_star)
+            # cc#1880: the channel + GREEN TRIANGLE marker rides the SAME cash-continuous 5-min
+            # beat as the pivot star (card scope item 4: "computes on the same cadence... rather
+            # than becoming a second, differently-timed star engine"), as its own spawned job for
+            # scheduler_master observability — the same split _bg_tc_score_tick/_bg_guardian_tick/
+            # _bg_v10_tick already use on this identical tick.
+            _spawn(_bg_channel_5m)
             # cc#1540 (amended cadence, log 4292): TC score ticks ride the same 5-min
             # market-hours beat but as their OWN job, so the heavy compute_trade_check sweep
             # is timed separately in scheduler_master and can be silenced independently.

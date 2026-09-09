@@ -1360,7 +1360,8 @@ window.scorrAsofStamp = function (asof) {
     'Amber star = Trade Check STRONG. VALID shows no marker.',
     'Blue star = held reversal at S1',
     'Red star = mirror at R1',
-    '⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day'
+    '⚡ = Volume/OI spurt · volume >1.5x or OI >25% day-over-day',
+    'Green triangle = touched the 5-min channel band and reversed 1%+'
   ];
   function esc(t){ return String(t == null ? '' : t)
     .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -1526,20 +1527,31 @@ window.ScorrMarkerFlagFilter = function (fired, posSide) {
   fired = fired || {};
   var side = String(posSide || '').toUpperCase() === 'SHORT' ? 'SHORT' : 'LONG';   // COALESCE(side,'LONG')
   var starWant = (side === 'LONG') ? 'BUY' : 'SELL';
+  // cc#1880: GREEN TRIANGLE is side-filtered the same way stars is — CHAN_BUY only agrees with a
+  // LONG row, CHAN_SELL only with a SHORT row (v8_channel_5m.py's own basket/side pairing, card
+  // items 2-3: SELL fires on a SELL-basket row, BUY on a BUY-basket row).
+  var chanWant = (side === 'LONG') ? 'CHAN_BUY' : 'CHAN_SELL';
   return {
     stars: (fired.stars && fired.stars.direction === starWant) ? fired.stars : null,
     dma: fired.dma || null,
     act: fired.act || null,
-    tcs: fired.tcs || null
+    tcs: fired.tcs || null,
+    chan: (fired.chan && fired.chan.direction === chanWant) ? fired.chan : null
   };
 };
 window.ScorrMarkerFlagColor = function (fired) {
-  // fired = {stars, act, dma, tcs} — expected to already be filtered through
+  // fired = {stars, act, dma, tcs, chan} — expected to already be filtered through
   // window.ScorrMarkerFlagFilter (cc#1558) against the position's own side before reaching here, so
   // fired.stars and fired.dma, if both present, can never disagree in direction — no tie-break
   // needed. Returns null (render nothing) when none fired; otherwise the flag's colour.
-  if (!fired || !(fired.stars || fired.act || fired.dma || fired.tcs)) return null;
+  if (!fired || !(fired.stars || fired.act || fired.dma || fired.tcs || fired.chan)) return null;
   if (fired.tcs) return '#F5B94A';   // amber — highest priority, "something notable", unchanged
+  // cc#1880 DEFAULT (no founder priority ruling on the card — stated here per house doctrine):
+  // GREEN TRIANGLE sits right below amber. It is a rarer, higher-conviction rejection-at-band
+  // event than the blue/red pivot star's general reversal-at-level cue, and the founder's own
+  // ask named it "green flag" — a genuine green the flag did not have before this card (the old
+  // dma GREEN state maps to blue below, not a true green). Revisit if the founder rules otherwise.
+  if (fired.chan) return '#0a9e63';   // true green — GREEN TRIANGLE, cc#1880
   if (fired.stars) return fired.stars.star_color === 'BLUE' ? '#4d7cfe' : '#f87171';
   if (fired.dma) return fired.dma.star_color === 'GREEN' ? '#4d7cfe' : '#f87171';
   // Neither a pivot star nor a dma-cross fired (activity/bolt fired alone) — activity has no
@@ -1613,6 +1625,10 @@ window.ScorrMarkerFlagDetailHtml = function (fired, tc, legendLines) {
   }
   if (fired.tcs) rows.push({ glyph: '★', col: '#F5B94A', label: 'Amber star', note: fired.tcs.note,
                              interp: _scorrMarkerLegendLine(lines, ['Amber star']) });
+  // cc#1880: GREEN TRIANGLE — always true green, both sides (unlike stars/dma there is no
+  // mirrored colour; the rule itself is the mirror, side to side).
+  if (fired.chan) rows.push({ glyph: '▲', col: '#0a9e63', label: 'Green triangle', note: fired.chan.note,
+                              interp: _scorrMarkerLegendLine(lines, ['Green triangle']) });
 
   if (!rows.length) return '<div style="font-size:12px;color:var(--mut)">No marker fired for this row today.</div>';
 
