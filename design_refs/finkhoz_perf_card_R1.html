@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<!-- FINKHOZ PERFORMANCE CARD TEMPLATE R1 (09-Sep-2026)
+     1080x1350 social creative. WeasyPrint renders it: HTML('file.html').write_pdf('out.pdf')
+     NOT wkhtmltopdf - its old WebKit scales the page by ~0.74 and drops flexbox.
+     Layout is ABSOLUTE POSITIONING ONLY, no flexbox. Positioned ancestor is .card, NOT .inner,
+     so right:0 lands on the card edge - use right:64px to sit inside the margin.
+     Page height is fixed; if content grows, raise @page size or it silently spills to page 2.
+     DO NOT add "Noto Color Emoji" to the body font stack - it captures digit glyphs and
+     destroys every number. Scope it to .emoji only.
+     SWAP PER USE: .hook, .sub2, .kicker, the three .win rows, .grid squares, .leg rows,
+     .ctaT and .fine. Grid square count and legend counts MUST agree - verify before shipping.
+     Brand mark is inline SVG on viewBox 0 0 62 68 (see assets/brand/, cc#1876). -->
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FINKHOZ performance card - template R1</title>
+<style>
+  @page { size: 1080px 1350px; margin: 0; }
+  html,body{margin:0;padding:0;background:#0d0605;}
+  body{width:1080px;color:#fff;font-family:"DejaVu Sans",Helvetica,Arial,sans-serif;}
+  .card{position:relative;width:1080px;height:1350px;background:#0d0605;overflow:hidden;}
+  .topline{position:absolute;left:0;right:0;top:0;height:5px;background:#ff5a3c;}
+  .wash{position:absolute;left:0;right:0;top:5px;height:296px;background:#1e0d0a;}
+
+  .mark{position:absolute;left:64px;top:48px;width:46px;}
+  .mark svg{display:block;}
+  .wm{position:absolute;left:120px;top:50px;font-size:26px;font-weight:bold;color:#ff5a3c;letter-spacing:1.5px;}
+  .wmS{position:absolute;left:121px;top:80px;font-size:11px;letter-spacing:4px;color:#9b8f8c;}
+  .reg{position:absolute;right:64px;top:52px;text-align:right;font-size:12px;color:#6a5e5b;line-height:22px;}
+
+  .hook{position:absolute;left:64px;top:150px;width:820px;font-size:58px;font-weight:bold;line-height:64px;letter-spacing:-1.8px;}
+  .emoji{font-family:"Noto Color Emoji";font-size:46px;}
+  .sub2{position:absolute;left:64px;top:296px;width:800px;font-size:28px;font-weight:bold;letter-spacing:-.6px;line-height:36px;}
+  .kicker{position:absolute;left:64px;top:348px;width:760px;font-size:18px;color:#9b8f8c;line-height:28px;}
+
+  /* winner rows */
+  .win{position:absolute;left:64px;right:64px;height:112px;}
+  .wn{position:absolute;left:0;top:22px;font-size:38px;font-weight:bold;letter-spacing:-.5px;}
+  .wm2{position:absolute;left:0;top:70px;font-size:15px;color:#6a5e5b;}
+  .wp{position:absolute;right:0;top:16px;font-size:60px;font-weight:bold;color:#22d07a;letter-spacing:-2px;}
+  .wl{position:absolute;left:0;right:0;bottom:0;height:1px;background:#2a1c1a;}
+
+  .rule{position:absolute;left:64px;right:64px;height:1px;background:#2a1c1a;}
+
+  .gTitle{position:absolute;left:64px;top:872px;font-size:23px;font-weight:bold;}
+  .gSub{position:absolute;left:64px;top:906px;width:480px;font-size:14px;color:#6a5e5b;line-height:21px;}
+
+  .grid{position:absolute;left:64px;top:962px;width:520px;font-size:0;}
+  .sq{display:inline-block;width:110px;height:46px;margin:0 11px 10px 0;}
+  .sq.e{margin-right:0;}
+  .g1{background:#22d07a;} .g2{background:#17a35e;} .fl{background:#4a3f3a;} .rd{background:#f04a3c;}
+
+  .leg{position:absolute;left:620px;top:958px;width:396px;}
+  .lrow{position:relative;height:56px;}
+  .ldot{position:absolute;left:0;top:5px;width:20px;height:20px;}
+  .lt{position:absolute;left:36px;top:2px;font-size:17px;font-weight:bold;}
+  .ls{position:absolute;left:36px;top:25px;font-size:12.5px;color:#6a5e5b;}
+  .lc{position:absolute;right:0;top:0;font-size:26px;font-weight:bold;}
+  .cU{color:#22d07a;} .cF{color:#a89a92;} .cD{color:#f04a3c;}
+
+  .ctaT{position:absolute;left:64px;top:1198px;font-size:21px;font-weight:bold;}
+  .ctaS{position:absolute;left:64px;top:1228px;font-size:14px;color:#6a5e5b;}
+  .fine{position:absolute;left:64px;right:64px;top:1262px;font-size:10px;color:#5c5150;line-height:15px;}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="topline"></div><div class="wash"></div>
+
+  <div class="mark"><svg viewBox="0 0 62 68" width="46" height="50" xmlns="http://www.w3.org/2000/svg"><polygon fill="#ffffff" points="9.6,5.6 55.6,5.6 49.4,19.0 3.4,19.0"/><polygon fill="#ffffff" points="5.6,25.6 43.6,25.6 36.7,39.7 23.3,40.4 29.8,52.6 20.6,62.6 2.6,31.6"/></svg></div>
+  <div class="wm">FINKHOZ</div>
+  <div class="wmS">ROBOADVISORY</div>
+  <div class="reg">SEBI RA INH000022297<br>WEALTH COMPOUNDER</div>
+
+  <div class="hook">Inside FINZ<br>Wealth Compounder <span class="emoji">🏆</span></div>
+  <div class="sub2">Three that ran while the market slipped.</div>
+  <div class="kicker">Wealth Compounder book, opened 03 Feb 2026. Positions added since. All three still held.</div>
+
+  <div class="win" style="top:452px">
+    <div class="wn">SAILIFE</div><div class="wm2">entered 25 Mar 2026 &middot; 168 days &middot; 997.04 &rarr; 1,679.80</div>
+    <div class="wp">+68.5%</div><div class="wl"></div>
+  </div>
+  <div class="win" style="top:564px">
+    <div class="wn">RRKABEL</div><div class="wm2">entered 10 Feb 2026 &middot; 211 days &middot; 1,452.01 &rarr; 2,433.70</div>
+    <div class="wp">+67.6%</div><div class="wl"></div>
+  </div>
+  <div class="win" style="top:676px">
+    <div class="wn">CARTRADE</div><div class="wm2">entered 04 Jun 2026 &middot; 97 days &middot; 1,935.52 &rarr; 3,069.40</div>
+    <div class="wp">+58.6%</div><div class="wl"></div>
+  </div>
+
+  <div class="rule" style="top:832px"></div>
+
+  <div class="gTitle">And the thirteen we are not naming.</div>
+  <div class="gSub">One square per holding in the book. Three worked hard, nine went sideways, two are down.</div>
+
+  <div class="grid">
+    <span class="sq g1"></span><span class="sq g1"></span><span class="sq g1"></span><span class="sq g1 e"></span>
+    <span class="sq g2"></span><span class="sq fl"></span><span class="sq fl"></span><span class="sq fl e"></span>
+    <span class="sq fl"></span><span class="sq fl"></span><span class="sq fl"></span><span class="sq fl e"></span>
+    <span class="sq fl"></span><span class="sq fl"></span><span class="sq rd"></span><span class="sq rd e"></span>
+  </div>
+
+  <div class="leg">
+    <div class="lrow">
+      <div class="ldot g1"></div><div class="lt cU">Up more than 25%</div>
+      <div class="ls">the three above, plus one more</div>
+      <div class="lc cU">4</div>
+    </div>
+    <div class="lrow">
+      <div class="ldot g2"></div><div class="lt cU">Up 10% to 25%</div>
+      <div class="ls">the steady climber</div>
+      <div class="lc cU">1</div>
+    </div>
+    <div class="lrow">
+      <div class="ldot fl"></div><div class="lt cF">Between &minus;10% and +10%</div>
+      <div class="ls">half the book sits flat here</div>
+      <div class="lc cF">9</div>
+    </div>
+    <div class="lrow">
+      <div class="ldot rd"></div><div class="lt cD">Down more than 10%</div>
+      <div class="ls">worst is &minus;18.8%</div>
+      <div class="lc cD">2</div>
+    </div>
+  </div>
+
+  <div class="ctaT">We show the misses too.</div>
+  <div class="ctaS">FINKHOZ Roboadvisory &middot; SEBI Registered Research Analyst INH000022297</div>
+
+  <div class="fine">
+    Investor education only, not investment advice. Figures are per-stock returns on buy average, unrealised, from live holdings at 09 Sep 2026, 12:35 IST, before brokerage, taxes and slippage. Each return runs from that stock&rsquo;s own entry date to 09 Sep 2026, not from a common start date, so the periods differ. Absolute, not annualised and not XIRR. No portfolio-level return is shown: what any individual earned depends on entry date, position size and which holdings they own, and will differ from these figures. The three named are the best performers in the book, not typical. Past performance is not indicative of future results.
+  </div>
+</div>
+</body>
+</html>
