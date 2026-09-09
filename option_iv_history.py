@@ -8,7 +8,11 @@ WHAT THIS BUILDS
     nightly and reads only the STOCK-FUTURES rows from (nse_fo_eod.py). Every option row in that
     file is currently parsed and discarded; this is the fix (cc#1858's own framing, step 4:
     "the compute is correct, already intraday [for TC]; the output is thrown away" -- same shape
-    here, but for the daily bhavcopy's option rows specifically).
+    here, but for the daily bhavcopy's option rows specifically). run_forward_tick() (below) is
+    the ONGOING daily capture, scheduled nightly (scheduler._bg_option_iv_daily, ~23:05 IST) so
+    storage keeps accumulating from the day it shipped regardless of the backfill's outcome --
+    the card's own step 1 requirement. run_backfill()/seed_dates() are the separate HISTORICAL
+    catch-up path; both call the same ingest_date(), never two compute paths.
 
 WHAT IT DOES NOT DO (do_not_touch, card cc#1858)
     Does NOT touch fo_eod, nse_fo_eod.py, or bg_fo_eod's dispatch in scheduler.py -- the nightly
@@ -321,6 +325,44 @@ def run_backfill() -> dict:
     finally:
         global _running
         _running = False
+
+
+def run_forward_tick() -> dict:
+    """Daily FORWARD capture -- called once nightly by scheduler.py's _bg_option_iv_daily, ~23:05
+    IST (5 min after bg_fo_eod fetches the same day's F&O bhavcopy, same public file). Seeds
+    today's date if not already present and ingests it via the SAME ingest_date() the backfill
+    uses -- not a second compute path. Idempotent: a re-run of an already-'done' date is a no-op,
+    so a scheduler retry or an overlapping manual trigger can never duplicate rows.
+
+    This is what makes storage keep accumulating from the day it shipped (09-Sep-2026),
+    independent of whether the historical backfill ever ran or finished -- card cc#1858 step 1's
+    explicit requirement: "This step must be shippable and verifiable ON ITS OWN... From the day
+    it ships you accumulate history whether or not the backfill ever completes." The backfill
+    (run_backfill/seed_dates, this same file) covers 2025-09-01..2026-08-31; this tick is what
+    covers 2026-09-01 onward."""
+    d = _ist_now().date()
+    with _conn() as conn, conn.cursor() as cur:
+        _ensure_tables(cur)
+        cur.execute("SELECT status FROM option_iv_backfill_status WHERE trade_date=%s", (d,))
+        r = cur.fetchone()
+        if r and r[0] == "done":
+            return {"ok": True, "skipped": "already done", "trade_date": str(d)}
+        cur.execute("""INSERT INTO option_iv_backfill_status (trade_date, status)
+                       VALUES (%s,'pending') ON CONFLICT (trade_date) DO NOTHING""", (d,))
+        conn.commit()
+    res = ingest_date(d)
+    with _conn() as conn, conn.cursor() as cur:
+        if res.get("ok"):
+            cur.execute("""UPDATE option_iv_backfill_status
+                           SET status='done', rows_written=%s, finished_at=NOW(), error=NULL
+                           WHERE trade_date=%s""", (res.get("rows_written", 0), d))
+        else:
+            cur.execute("""UPDATE option_iv_backfill_status
+                           SET status='error', error=%s, finished_at=NOW()
+                           WHERE trade_date=%s""", (res.get("error", "unknown")[:500], d))
+        conn.commit()
+    log.info(f"option_iv_history forward tick {d}: {res}")
+    return {"ok": bool(res.get("ok")), "trade_date": str(d), **res}
 
 
 def _claim_flag() -> bool:
