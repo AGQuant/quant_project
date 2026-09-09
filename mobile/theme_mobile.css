@@ -151,7 +151,10 @@ body[data-theme]{
   --grn:var(--t-win); --red:var(--t-loss);
   --blu:var(--t-accent); --cyan:var(--t-brand);
 }
-#gvp,#ckp,#v8p{
+#gvp,#ckp,#v8p,.c-sheet,.c-scrim{
+  /* cc#1854: .c-sheet/.c-scrim (mobile/check.html:49-50) are static siblings of #ckp, not
+     descendants -- added here so this file's own #ckp bridge (mirrors mobile_endpoints.py's,
+     per that file's own comment) reaches them too. Same fix, same reasoning, both copies. */
   --well:var(--t-panel); --chalk:var(--t-ink); --mute:var(--t-muted); --dim:var(--t-muted);
   --line:var(--t-edge); --gold:var(--t-brand);
   --gold-d:color-mix(in srgb, var(--t-brand) 12%, transparent);
