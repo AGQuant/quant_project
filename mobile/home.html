@@ -1842,6 +1842,24 @@ if (typeof CSS !== 'undefined' && typeof CSS.registerProperty === 'function'){
    added later declares its own index rather than inheriting this one by accident. */
 var TREND = { open: null, card: 0 };   /* which chip popup is open: 'adr' | 'pcr' | 'vix', and whose */
 
+/* cc#1888 P1/P2 (APP_GRID_FRAMEWORK_V1, session_log 42467, founder 09-Sep 15:43 IST): "hide" from
+   the Home tools grid, NEVER delete — the route stays live (reachable by direct URL / bottom nav /
+   wherever else it's linked), the page file stays, the endpoint stays, the NAV_REGISTRY entry
+   stays. ONE list, keyed by href (the stable identifier — several of these tiles' LABELS have
+   changed under the same route before, per APP_QA_R4 P8's own history two screens down).
+   Founder named six: Digest, Index Intel, Index Intel Web, V9 Pairs, V10 Basket Web, V14 Intraday.
+   P1 DISCOVERY (posted before building, per the card): FIVE matched an existing tile's label
+   exactly (Digest//m/digest, Index Intel//m/v10, Index Intel Web/dashboard#index, V9 Pairs//v9,
+   V14 Intraday//intraday). "V10 Basket Web" does NOT exist under that literal label anywhere in
+   this grid — nearest candidate is "V10 Desk · Web" (/v10), but that is a guess, not a match, and
+   the card's own instruction is to STOP and report rather than guess which was meant. /v10 is
+   therefore NOT in this list; flagged in the cc#1888 result and the Fable Room instead. */
+var HIDDEN_GRID_TILES = ['/m/digest', '/m/v10', '/dashboard#index', '/v9', '/intraday'];
+function gtile(href, glyph, label){
+  if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
+  return '<a class="tool slab dense" href="' + href + '"><span>' + glyph + '</span>' + esc(label) + '</a>';
+}
+
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function px(v){
@@ -5619,30 +5637,30 @@ function renderHome(d, pv){
       /* cc#1535 (founder 31-Aug): Alerts takes tile 1 \u2014 the approve surface leads the grid
          (the cc#1526 rationale, transferred). Wall of Trades left the grid for the bottom nav
          (labelled WoT), so it has no tile here; nothing else in the grid changes order. */
-      '<a class="tool slab dense" href="/m/alerts"><span>\u25ec</span>Alerts</a>'
+      gtile('/m/alerts', '\u25ec', 'Alerts')
       /* cc#1633 (founder 02-Sep 22:48): Wall of Trades is back on the grid as tile 2, right after
          Alerts, because the grid is the founder's daily path and the approval surface had no
          entry point here. It opens the WEB wall (/trades, the cc#1609 approve / dismiss surface,
          the same page the V8 header tab embeds) - one WoT view, two entry points - under the same
          16915 exception as Dashboard / AICIO below. The bottom-nav WoT (/m/trades, display only)
          is untouched. Glyph is a ballot tick so it never reads as the Alerts flag. */
-    + '<a class="tool slab dense" href="/trades"><span>\u2611</span>Wall of Trades</a>'
+    + gtile('/trades', '\u2611', 'Wall of Trades')
       /* cc#1635 (founder 02-Sep 22:59): Custom Alert as its own tile beside Wall of Trades. It opens
          the SAME New Alert flow the Alerts page + button used to open - the page reads #new and
          calls its own alOpen() (cc#1634) - so creation moved out of that page without a rebuild. */
-    + '<a class="tool slab dense" href="/m/alerts#new"><span>\uff0b</span>Custom Alert</a>'
+    + gtile('/m/alerts#new', '\uff0b', 'Custom Alert')
       /* cc#1638 (founder 03-Sep 07:58): Intel (news) left the nav and lives here, next to Custom
          Alert, opening the full /m/intel page as a normal navigation - no embed, no sheet. */
-    + '<a class="tool slab dense" href="/m/intel"><span>\u25a4</span>Intel</a>'
-    + '<a class="tool slab dense" href="/m/qb"><span>\u25a6</span>Baskets</a>'
-    + '<a class="tool slab dense" href="/m/screeners"><span>\u2637</span>Screeners</a>'
-    + '<a class="tool slab dense" href="/m/sector"><span>\u2b21</span>Sector Intel</a>'
-    + '<a class="tool slab dense" href="/m/results"><span>\u2263</span>Results</a>'
-    + '<a class="tool slab dense" href="/m/digest"><span>\u2600</span>Digest</a>'
-    + '<a class="tool slab dense" href="/m/fpc"><span>\u20b9</span>FPC</a>'
-    + '<a class="tool slab dense" href="/dashboard"><span>\u26a1</span>Dashboard</a>'
-    + '<a class="tool slab dense" href="/cio"><span>\u2299</span>AICIO</a>'
-    + '<a class="tool slab dense" href="/health"><span>\u2695</span>Portfolio Health</a>'
+    + gtile('/m/intel', '\u25a4', 'Intel')
+    + gtile('/m/qb', '\u25a6', 'Baskets')
+    + gtile('/m/screeners', '\u2637', 'Screeners')
+    + gtile('/m/sector', '\u2b21', 'Sector Intel')
+    + gtile('/m/results', '\u2263', 'Results')
+    + gtile('/m/digest', '\u2600', 'Digest')
+    + gtile('/m/fpc', '\u20b9', 'FPC')
+    + gtile('/dashboard', '\u26a1', 'Dashboard')
+    + gtile('/cio', '\u2299', 'AICIO')
+    + gtile('/health', '\u2695', 'Portfolio Health')
     // cc#897: 9 -> 12 tiles. All three open WEB pages, the same 16915 exception the founder
     // already approved for Dashboard / AICIO / Portfolio Health above.
     // The Index Intel hash was VERIFIED against the dashboard's own router, not assumed: the card
@@ -5651,16 +5669,16 @@ function renderHome(d, pv){
     // #indexintel would therefore have opened Master silently and looked like a working link.
     /* APP_QA_R4 P8 (F4): the app tile comes first and owns the name; the web page is kept
        but marked as the web one, so two tiles never claim the same label. */
-    + '<a class="tool slab dense" href="/m/v10"><span>\u25d0</span>Index Intel</a>'
-    + '<a class="tool slab dense" href="/dashboard#index"><span>\u25d0</span>Index Intel \u00b7 Web</a>'
-    + '<a class="tool slab dense" href="/v9"><span>\u21c4</span>V9 Pairs</a>'
-    + '<a class="tool slab dense" href="/v15"><span>\u25c9</span>V15 MF</a>'
+    + gtile('/m/v10', '\u25d0', 'Index Intel')
+    + gtile('/dashboard#index', '\u25d0', 'Index Intel \u00b7 Web')
+    + gtile('/v9', '\u21c4', 'V9 Pairs')
+    + gtile('/v15', '\u25c9', 'V15 MF')
     // cc#897 second pass: 12 -> 14. Routes taken from model_registry, not guessed \u2014 V10 is /v10
     // and V14 Intraday is /intraday there. Both open web pages, same 16915 exception as above.
     /* APP_QA_R4 P8: the old /v10 web tile is the same destination as the web Index Intel
        tile above in user terms, so it keeps its own route but stops being called "V10". */
-    + '<a class="tool slab dense" href="/v10"><span>\u25d1</span>V10 Desk \u00b7 Web</a>'
-    + '<a class="tool slab dense" href="/intraday"><span>\u25f4</span>V14 Intraday</a>'
+    + gtile('/v10', '\u25d1', 'V10 Desk \u00b7 Web')
+    + gtile('/intraday', '\u25f4', 'V14 Intraday')
     // cc#991 appended Wall of Trades as tile 15; cc#1526 moved it to tile 1 (top of this list).
     ;
   document.getElementById('body').appendChild(tools);
