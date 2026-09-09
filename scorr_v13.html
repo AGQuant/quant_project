@@ -437,7 +437,11 @@ function renderResults(){
   const cols=[['symbol','Stock'],['cmp','CMP'],['day_pct','Day%'],['gvm_score','GVM'],['segment','Seg']].concat(ak.map(k=>[k,k]));
   const head='<tr>'+cols.map(c=>`<th onclick="onRSort('${c[0]}')">${c[1]}${SORT_KEY===c[0]?(SORT_DIR<0?' ▼':' ▲'):''}</th>`).join('')+'</tr>';
   const body=matched.slice(0,300).map(r=>{
-    let tds=`<td class="rsym">${r.symbol}<div class="rseg">${r.segment||''}</div></td>`+
+    // cc#1872 (C-A-R-D audit): this table had no strip at all — every sibling results table
+    // (scorr_screeners.html, quant_basket.html) already calls the ONE shared row strip (cc#798),
+    // never a re-implementation. Same one-line pattern, feature-detected the same way.
+    const rstrip=(window.ScorrCardRow?window.ScorrCardRow(r.symbol):'');
+    let tds=`<td class="rsym">${r.symbol}${rstrip}<div class="rseg">${r.segment||''}</div></td>`+
       `<td>${r.cmp==null?'<span class="nt">--</span>':Number(r.cmp).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>`+
       `<td>${pctCell(r.day_pct)}</td><td>${fmtNum(r.gvm_score,2)}</td><td class="rseg" style="text-align:left">${r.segment||'--'}</td>`;
     ak.forEach(k=>{tds+=`<td>${fmtNum(r[k],2)}</td>`;});
