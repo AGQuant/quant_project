@@ -10,6 +10,48 @@
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <script src="/scorr_card_common.js"></script>
+<style>
+/* cc#1901 — Results condensed summary (re-*), inserted ABOVE the existing cc#1090/1645 forward
+   earnings calendar (untouched below). Same bridge-token + scorr_themes.css scale-token
+   discipline as every other section page this session — no raw hex. */
+.re-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.re-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.re-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.re-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.re-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.re-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.re-cell .re-k{font-size:var(--type-9)}
+.re-cell .re-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.re-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.re-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.re-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.re-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.re-rail::-webkit-scrollbar{display:none}
+.re-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.re-c.gap{border-style:dashed}
+.re-ch{display:flex;align-items:baseline;justify-content:space-between}
+.re-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.re-ch .n{font-size:var(--type-11);color:var(--mut)}
+.re-lst{margin-top:var(--space-9)}
+.re-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
+.re-lr:last-child{border-bottom:none}
+.re-lr .s{font-size:var(--type-125);font-weight:800}
+.re-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.re-lr .a{font-size:var(--type-115);color:var(--mut)}
+.re-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.re-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.re-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none;cursor:pointer}
+.re-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.re-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.re-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.re-note b{color:var(--mut)}
+.re-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+</style>
 </head>
 <body data-theme="goldnight">
 <!-- cc#1645 P4: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap).
@@ -22,7 +64,15 @@ var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <!-- cc#1645 P4: shared appshell header (VARIANT B). Existing .head strip below is untouched. -->
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Results</span></div><div class="as-slot"></div></div>
-<div class="screen">
+<!-- cc#1901 — Results condensed summary (design_refs/scorr_app_results_R1.html), ADDITIVE above
+     the existing cc#1090/1645 forward calendar below, not a replacement: that view is a
+     next-10-days earnings calendar with tap-to-read analysis — different in kind from this ref's
+     backward-looking "what's been written this season" summary. "See the calendar ›" scrolls
+     down to it instead of inventing a second route. Data from /api/mobile/results_app
+     (results_app_mobile.py). -->
+<div class="re-asof" id="re-asof">Loading…</div>
+<div id="re-body"><div class="re-empty">Loading results summary…</div></div>
+<div class="screen" id="results-corner">
   <div class="head as-hide"><h1>Results Corner</h1><div class="s" id="sub">loading…</div></div>
   <div class="body" id="body"><div class="loading">Loading calendar…</div></div>
   <div class="cover" id="cover"></div>
@@ -96,6 +146,95 @@ Promise.all([
     + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
   document.getElementById('sub').textContent='failed to load';
 });
+</script>
+<script>
+/* cc#1901 — Results condensed summary. Deliberately separate closure/prefix (re-*) — additive,
+   zero lines of the existing calendar script above touched. */
+(function(){
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dmd(ds){ if(!ds) return '—'; var p=String(ds).slice(0,10).split('-');
+  if(p.length!==3) return String(ds); var m=parseInt(p[1],10)-1;
+  return parseInt(p[2],10)+' '+(MON[m]||p[1]); }
+function scrollToCalendar(){ var el=document.getElementById('results-corner'); if(el) el.scrollIntoView({behavior:'smooth'}); }
+window.reScrollToCalendar = scrollToCalendar;
+
+function kmHtml(k){
+  return '<div class="re-km"><div class="re-k">Results written</div><div class="re-v">'+(k.results_written!=null?k.results_written:'—')+'</div>'
+    + '<div class="re-kg">'
+    + '<div class="re-cell"><div class="re-k">Q1FY27</div><div class="re-v">'+(k.q1fy27!=null?k.q1fy27:'—')+'</div></div>'
+    + '<div class="re-cell"><div class="re-k">Not yet written</div><div class="re-v">'+(k.not_yet_written!=null?k.not_yet_written:'—')+'</div></div>'
+    + '<div class="re-cell"><div class="re-k">Skipped</div><div class="re-v">'+(k.skipped!=null?k.skipped:'—')+'</div></div>'
+    + '<div class="re-cell"><div class="re-k">Last written</div><div class="re-v">'+dmd(k.last_written)+'</div></div>'
+    + '</div></div>';
+}
+function writtenUpCardHtml(d){
+  var w=d.written_up||{}, rows=w.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="re-lr"><span class="s">'+esc(r.label)+'</span><div class="r"><span class="a">'+esc(r.note||'')+'</span><span class="b">'+r.count+'</span></div></div>';
+  }).join('');
+  return '<div class="re-c"><div class="re-ch"><span class="t">Written up</span><span class="n">'+(w.total!=null?w.total:'—')+' total</span></div>'
+    + '<div class="re-lst">'+lst+'</div>'
+    + (w.message?'<div class="re-more">'+esc(w.message)+'</div>':'')
+    + '<a class="re-link" onclick="reScrollToCalendar()">Browse all &#8250;</a></div>';
+}
+function latestWrittenCardHtml(d){
+  var lw=d.latest_written||{}, rows=lw.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="re-lr"><span class="s">'+esc(r.symbol)+'</span><div class="r"><span class="a">'+esc(r.quarter||'')+'</span><span class="b">'+dmd(lw.as_of)+'</span></div></div>';
+  }).join('');
+  var more = lw.more>0 ? '<div class="re-more">+'+lw.more+' more</div>' : '';
+  return '<div class="re-c"><div class="re-ch"><span class="t">Latest written</span><span class="n">'+dmd(lw.as_of)+'</span></div>'
+    + '<div class="re-lst">'+lst+'</div>'+more
+    + (lw.message?'<div class="re-more">'+esc(lw.message)+'</div>':'')+'</div>';
+}
+function gapsCardHtml(d){
+  var g=d.coverage_gaps||{}, rows=g.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="re-lr"><span class="s">'+esc(r.label)+'</span><div class="r"><span class="a">'+esc(r.note||'')+'</span><span class="b">'+r.count+'</span></div></div>';
+  }).join('');
+  return '<div class="re-c"><div class="re-ch"><span class="t">Coverage gaps</span><span class="n">'+(rows[0]?rows[0].count:'—')+'</span></div>'
+    + '<div class="re-lst">'+lst+'</div>'
+    + (g.message?'<div class="re-more">'+esc(g.message)+'</div>':'')+'</div>';
+}
+function whySkippedCardHtml(d){
+  var ws=d.why_skipped||{};
+  return '<div class="re-c"><div class="re-ch"><span class="t">Why a company is skipped</span><span class="n">'+(ws.count!=null?ws.count:'—')+'</span></div>'
+    + '<div class="re-emp" style="margin-top:0">'+esc(ws.message||'')+'</div></div>';
+}
+function calendarCardHtml(d){
+  var c=d.calendar||{}, rows=c.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="re-lr"><span class="s">'+esc(r.label)+'</span><div class="r"><span class="a">'+esc(r.note||'')+'</span><span class="b">'+(r.count!=null?r.count:esc(r.value||''))+'</span></div></div>';
+  }).join('');
+  return '<div class="re-c"><div class="re-ch"><span class="t">Upcoming</span><span class="n">'+(c.count!=null?c.count+' dated':'')+'</span></div>'
+    + '<div class="re-lst">'+lst+'</div>'
+    + '<a class="re-link" onclick="reScrollToCalendar()">See the calendar &#8250;</a></div>';
+}
+
+function reRender(d){
+  var k=d.key_metrics||{};
+  document.getElementById('re-asof').textContent = 'Latest write-up '+dmd(k.last_written)+' · '+(k.results_written!=null?k.results_written:'—')+' stored · Q1FY27 season';
+  var html = kmHtml(k)
+    + '<div class="re-slab"><h2>This season</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="re-rail">'+writtenUpCardHtml(d)+latestWrittenCardHtml(d)+'</div>'
+    + '<div class="re-slab"><h2>What is missing</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="re-rail">'+gapsCardHtml(d)+whySkippedCardHtml(d)+'</div>'
+    + '<div class="re-slab"><h2>Calendar</h2><span class="hint">1 · swipe →</span></div>'
+    + '<div class="re-rail">'+calendarCardHtml(d)+'</div>'
+    + '<div class="re-note"><b>Nothing has been written since '+dmd(k.last_written)+'.</b> The as-of strip and the latest card both say so, because a results page that looks current while being stale is worse than one that admits the gap. '+(k.not_yet_written!=null?k.not_yet_written:'—')+' companies have results and no write-up yet; '+(k.skipped!=null?k.skipped:'—')+' were skipped deliberately because the filing had nothing worth saying. The full forward calendar, unchanged, is below.</div>';
+  document.getElementById('re-body').innerHTML = html;
+}
+
+(window.fetchWithTimeout || fetch)('/api/mobile/results_app', {credentials:'same-origin'})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.error){ document.getElementById('re-body').innerHTML = '<div class="re-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+    reRender(d);
+  })
+  .catch(function(e){ document.getElementById('re-body').innerHTML = '<div class="re-empty">Could not load results summary.</div>'; });
+})();
 </script>
 </body>
 </html>

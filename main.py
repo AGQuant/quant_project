@@ -117,6 +117,7 @@ from mobile_watchlist_stub import router as mobile_watchlist_stub_router   # cc#
 from qb_app_mobile import router as qb_app_mobile_router   # cc#1892: /api/mobile/qb_app — Quant Baskets app section
 from screeners_app_mobile import router as screeners_app_mobile_router   # cc#1899: /api/mobile/screeners_app — Screeners app section
 from sector_app_mobile import router as sector_app_mobile_router   # cc#1900: /api/mobile/sector_app — Sector Intel app section
+from results_app_mobile import router as results_app_mobile_router   # cc#1901: /api/mobile/results_app — Results app section
 from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
 from fy_end_backfill import router as fy_end_backfill_router   # cc#703 FY-end price backfill 2015-2021
@@ -892,6 +893,7 @@ app.include_router(mobile_watchlist_stub_router)   # cc#1897: /m/mywatchlist (st
 app.include_router(qb_app_mobile_router)   # cc#1892: /api/mobile/qb_app (mobile/qb.html's new data source)
 app.include_router(screeners_app_mobile_router)   # cc#1899: /api/mobile/screeners_app (mobile/screeners.html's new data source)
 app.include_router(sector_app_mobile_router)   # cc#1900: /api/mobile/sector_app (mobile/sector.html's new condensed summary, additive)
+app.include_router(results_app_mobile_router)   # cc#1901: /api/mobile/results_app (mobile/results.html's new condensed summary, additive)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
 app.include_router(trade_wall_approved_router)   # cc#1735: /api/tradewall/approved + /levels + /close
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
