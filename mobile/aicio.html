@@ -1,0 +1,146 @@
+<!doctype html>
+<!-- ══ mobile/aicio.html — AI CIO section page (cc#1904, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). NEW route — no /m/aicio page or Home-grid tile existed before this card.
+     Design authority: design_refs/scorr_app_aicio_R1.html, founder-approved 09-Sep-2026
+     (commit 3602575). Real GOLD NIGHT tokens only. Data from /api/mobile/aicio_app
+     (aicio_app_mobile.py). GATE CHECKED: max_chats confirmed the only chat-like table in the
+     schema. "Last used" corrected from the ref's created_at-based 13-Jun to the true
+     MAX(updated_at) — see aicio_app_mobile.py's docstring for the full account. Reachable via
+     the NAV array's mobile More sheet — PROTECTED + NAV_REGISTRY "nav-mobile" tier, same as
+     cc#1903's /m/mf. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI CIO · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+/* cc#1904 — page-local rules (ac-*). Same discipline as every other section page this session:
+   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex OR raw length — the
+   border-left below uses var(--bw-3), not the literal "3px" every earlier page this session
+   used (flagged as a finding on cc#1903/1902; fixed here, going forward). */
+.ac-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.ac-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:var(--bw-3) solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.ac-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.ac-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.ac-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.ac-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.ac-cell .ac-k{font-size:var(--type-9)}
+.ac-cell .ac-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.ac-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.ac-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.ac-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.ac-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ac-rail::-webkit-scrollbar{display:none}
+.ac-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.ac-c.gap{border-style:dashed}
+.ac-ch{display:flex;align-items:baseline;justify-content:space-between}
+.ac-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.ac-ch .n{font-size:var(--type-11);color:var(--mut)}
+.ac-lst{margin-top:var(--space-9)}
+.ac-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
+.ac-lr:last-child{border-bottom:none}
+.ac-lr .s{font-size:var(--type-125);font-weight:800}
+.ac-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.ac-lr .a{font-size:var(--type-115);color:var(--mut)}
+.ac-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.ac-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.ac-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.ac-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.ac-ft{margin-top:var(--space-9);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line);font-size:var(--type-105);color:var(--mut)}
+.ac-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.ac-note b{color:var(--mut)}
+.ac-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.ac-err{margin:var(--space-14)}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">AI CIO</span></div><div class="as-slot"></div></div>
+<div class="ac-asof" id="ac-asof">Loading…</div>
+<div id="ac-body"><div class="ac-empty">Loading…</div></div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dmd(ds){ if(!ds) return '—'; var p=String(ds).slice(0,10).split('-');
+  if(p.length!==3) return String(ds); var m=parseInt(p[1],10)-1;
+  return parseInt(p[2],10)+' '+(MON[m]||p[1]); }
+
+function kmHtml(k){
+  return '<div class="ac-km"><div class="ac-k">Conversations</div><div class="ac-v">'+(k.conversations!=null?k.conversations:'—')+'</div>'
+    + '<div class="ac-kg">'
+    + '<div class="ac-cell"><div class="ac-k">Last used</div><div class="ac-v">'+dmd(k.last_used)+'</div></div>'
+    + '<div class="ac-cell"><div class="ac-k">Ratings reach</div><div class="ac-v">'+esc(k.ratings_reach||'—')+'</div></div>'
+    + '<div class="ac-cell"><div class="ac-k">Sectors</div><div class="ac-v">'+(k.sectors!=null?k.sectors:'—')+'</div></div>'
+    + '<div class="ac-cell"><div class="ac-k">Result write-ups</div><div class="ac-v">'+(k.result_writeups!=null?k.result_writeups:'—')+'</div></div>'
+    + '</div></div>';
+}
+function whatItIsCardHtml(d){
+  var w=d.what_it_is||{};
+  return '<div class="ac-c"><div class="ac-ch"><span class="t">What it is</span><span class="n">open</span></div>'
+    + '<div class="ac-emp" style="margin-top:0">'+esc(w.message||'')+'</div>'
+    + (w.footnote?'<div class="ac-ft">'+esc(w.footnote)+'</div>':'')+'</div>';
+}
+function conversationsCardHtml(d){
+  var c=d.your_conversations||{};
+  var label = c.count ? 'Barely used so far' : 'Nothing yet';
+  return '<div class="ac-c gap"><div class="ac-ch"><span class="t">Your conversations</span><span class="n">'+(c.count!=null?c.count+' stored':'')+'</span></div>'
+    + '<div class="ac-emp"><b>'+esc(label)+'</b>'+esc(c.message||'')+'</div></div>';
+}
+function reachCardHtml(d){
+  var r=d.reach||{}, rows=r.rows||[];
+  var lst = rows.map(function(row){
+    return '<div class="ac-lr"><span class="s">'+esc(row.label)+'</span><div class="r">'+(row.note?'<span class="a">'+esc(row.note)+'</span>':'')+'<span class="b">'+esc(row.value)+'</span></div></div>';
+  }).join('');
+  return '<div class="ac-c"><div class="ac-ch"><span class="t">Data it can see</span><span class="n">live</span></div>'
+    + '<div class="ac-lst">'+lst+'</div>'
+    + (r.message?'<div class="ac-more">'+esc(r.message)+'</div>':'')+'</div>';
+}
+function limitsCardHtml(d){
+  var l=d.limits||{};
+  return '<div class="ac-c"><div class="ac-ch"><span class="t">What it will not do</span><span class="n">by design</span></div>'
+    + '<div class="ac-emp" style="margin-top:0">'+esc(l.message||'')+'</div></div>';
+}
+
+function render(d){
+  var k=d.key_metrics||{};
+  document.getElementById('ac-asof').textContent = (k.conversations!=null?k.conversations:'—')+' conversations stored · last '+dmd(k.last_used);
+  var html = kmHtml(k)
+    + '<div class="ac-slab"><h2>Ask the CIO</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="ac-rail">'+whatItIsCardHtml(d)+conversationsCardHtml(d)+'</div>'
+    + '<div class="ac-slab"><h2>What it can reach</h2><span class="hint">1 · swipe →</span></div>'
+    + '<div class="ac-rail">'+reachCardHtml(d)+'</div>'
+    + '<div class="ac-slab"><h2>Limits</h2><span class="hint">1 · swipe →</span></div>'
+    + '<div class="ac-rail">'+limitsCardHtml(d)+'</div>'
+    + '<div class="ac-note"><b>This surface is barely used.</b> max_chats holds '+(k.conversations!=null?k.conversations:'—')+' rows; the last one was active '+dmd(k.last_used)+'. This page shows the real count and the true last-activity date rather than an empty state that implies a fresh start.</div>';
+  document.getElementById('ac-body').innerHTML = html;
+}
+
+fetch('/api/mobile/aicio_app', {credentials:'same-origin'})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.error){ document.getElementById('ac-body').innerHTML = '<div class="ac-err ac-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+    render(d);
+  })
+  .catch(function(e){ document.getElementById('ac-body').innerHTML = '<div class="ac-err ac-empty">Could not load.</div>'; });
+</script>
+</body></html>

@@ -120,6 +120,7 @@ from sector_app_mobile import router as sector_app_mobile_router   # cc#1900: /a
 from results_app_mobile import router as results_app_mobile_router   # cc#1901: /api/mobile/results_app — Results app section
 from health_app_mobile import router as health_app_mobile_router   # cc#1902: /m/health + /api/mobile/health_app — Portfolio Health app section
 from mf_app_mobile import router as mf_app_mobile_router   # cc#1903: /m/mf + /api/mobile/mf_app — Mutual Funds app section
+from aicio_app_mobile import router as aicio_app_mobile_router   # cc#1904: /m/aicio + /api/mobile/aicio_app — AI CIO app section
 from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
 from fy_end_backfill import router as fy_end_backfill_router   # cc#703 FY-end price backfill 2015-2021
@@ -337,6 +338,10 @@ PROTECTED.add("/m/health")
 # NAV_REGISTRY + NAV array with the 'm' flag), per Fable's own cc#1907 correction that /m/ routes
 # belong in the NAV array by default — not held back to typed-url without a specific reason.
 PROTECTED.add("/m/mf")
+# cc#1904: /m/aicio — NEW page, no prior /m/ AI CIO route or Home-grid tile existed. Same shape
+# as cc#1903's Mutual Funds page: wired straight to "nav-mobile" tier (NAV array + PROTECTED +
+# NAV_REGISTRY), no conflicting founder-locked tile to hold it back to typed-url.
+PROTECTED.add("/m/aicio")
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
 # duplicates no auth logic of its own.
@@ -911,6 +916,7 @@ app.include_router(sector_app_mobile_router)   # cc#1900: /api/mobile/sector_app
 app.include_router(results_app_mobile_router)   # cc#1901: /api/mobile/results_app (mobile/results.html's new condensed summary, additive)
 app.include_router(health_app_mobile_router)   # cc#1902: /m/health + /api/mobile/health_app (new page, typed-url only — see ARCHITECTURE FLAG in health_app_mobile.py)
 app.include_router(mf_app_mobile_router)   # cc#1903: /m/mf + /api/mobile/mf_app (new page, wired via the NAV array's More sheet)
+app.include_router(aicio_app_mobile_router)   # cc#1904: /m/aicio + /api/mobile/aicio_app (new page, wired via the NAV array's More sheet)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
 app.include_router(trade_wall_approved_router)   # cc#1735: /api/tradewall/approved + /levels + /close
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
@@ -1492,6 +1498,7 @@ NAV_REGISTRY = {
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
+    "/m/aicio":      ("AI CIO (mobile)",         "nav-mobile"),   # cc#1904: new page, wired via the NAV array's More sheet
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),

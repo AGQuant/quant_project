@@ -458,7 +458,10 @@ PWA_JS = """
     // that a new /m/ page belongs here by default rather than being held back to typed-url
     // without a specific reason (unlike /m/health, cc#1902, where an existing grid tile pointing
     // elsewhere under a founder-locked exception WAS that reason).
-    ['/m/mf', '\\u25c9', 'Mutual Funds (mobile)', 'm']
+    ['/m/mf', '\\u25c9', 'Mutual Funds (mobile)', 'm'],
+    // cc#1904: AI CIO — same shape as cc#1903's Mutual Funds entry above. Glyph matches /cio's
+    // own desktop entry ('\\u2299', line ~401 in this same array) — not invented here.
+    ['/m/aicio', '\\u2299', 'AI CIO (mobile)', 'm']
     // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).
   ];
