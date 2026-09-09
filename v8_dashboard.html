@@ -6385,6 +6385,16 @@ async function loadQbb(){
      "fetch failed, nothing is guessed" instead of rendering an empty market as an error. */
   try{ D.qbb = await getJSON('/api/quality-bullish-basis'); }catch(e){ D.qbb = null; }
 }
+async function loadTc(){
+  /* cc#1881: Custom Screen Builder's TC/100 column - own fetch, tc_universe_ticks only (session_log
+     42648 TC_LIVE_INTRADAY_CANON_V1). A failure clears TC to empty so the column renders every dash
+     rather than a stale or guessed score. */
+  try{
+    const d = await getJSON('/api/v10/tc_screen');
+    TC.scores = d.scores || {};
+    TC.as_of = d.as_of || null;
+  }catch(e){ TC.scores = {}; TC.as_of = null; }
+}
 async function loadDivergence(){
   const d = await getJSON('/api/v10/divergence');
   D.loaded.divergence = true;   // cc#1154
@@ -8485,7 +8495,38 @@ function rFlowBasis(){
    because only then is every visible row guaranteed to be a VF member and so to actually carry
    one. This is a deliberate, disclosed reading of session_log 40520's "show only the columns
    relevant to what was filtered on" line — logged as a judgment call, not a silent deviation. */
+var TC = { scores: {}, as_of: null };   /* cc#1881: symbol -> {bucket -> {score100}}, loadTc() */
 var CSB = { build: null, flow: null, basis: {}, volr: {}, sort: { key: null, dir: 1 } };
+/* cc#1881 item 6: persist the 4 picker selections (build/flow/basis/volr — sort is NOT a filter
+   and is left out on purpose) across reloads, in their OWN key so this never collides with any
+   other page's positional localStorage string (per cc#1555 precedent). Restore is defensive: a
+   stored key that no longer names a real band/state option is dropped rather than trusted, so an
+   old build can never brick a newer picker set. */
+var CSB_STORE_KEY = 'scorr_csb_filters';
+function csbSave(){
+  try{
+    localStorage.setItem(CSB_STORE_KEY, JSON.stringify({
+      build: CSB.build, flow: CSB.flow, basis: CSB.basis, volr: CSB.volr,
+    }));
+  }catch(e){ /* private mode / quota — the picker still works in-memory, just not persisted */ }
+}
+function csbRestore(){
+  var raw;
+  try{ raw = localStorage.getItem(CSB_STORE_KEY); }catch(e){ return; }
+  if(!raw) return;
+  var saved;
+  try{ saved = JSON.parse(raw); }catch(e){ return; }
+  if(!saved || typeof saved !== 'object') return;
+  var buildKeys = [null].concat(BU_STATES.map(function(s){ return s.k; }));
+  if(buildKeys.indexOf(saved.build) !== -1) CSB.build = saved.build;
+  if(saved.flow === 'BULLISH' || saved.flow === 'BEARISH') CSB.flow = saved.flow;
+  if(saved.basis && typeof saved.basis === 'object'){
+    CSB_BASIS_BANDS.forEach(function(b){ if(saved.basis[b.k]) CSB.basis[b.k] = true; });
+  }
+  if(saved.volr && typeof saved.volr === 'object'){
+    CSB_VOLR_BANDS.forEach(function(b){ if(saved.volr[b.k]) CSB.volr[b.k] = true; });
+  }
+}
 var CSB_BASIS_BANDS = [
   { k: 'p1',   label: '0 to 1%',    test: function (v) { return v > 0 && v <= 1; } },
   { k: 'p1p',  label: '1%+',        test: function (v) { return v > 1; } },
@@ -8537,13 +8578,47 @@ function csbPool(){
       if (!CSB_VOLR_BANDS.some(function (b) { return CSB.volr[b.k] && b.test(volR); })) return;
     }
     var fRow = flow === 'BULLISH' ? bullRow[sym] : (flow === 'BEARISH' ? bearRow[sym] : null);
+    var tc = csbTcForRow(sym, flow);   // cc#1881: side-scoped max TC/100, tc_universe_ticks only
     rows.push({
       symbol: sym, cmp: r.price, day_pct: r.day_1d, oi_pct: r.oi_chg_pct,
       basis_pct: basisPct, vol_r: volR, vol_p: r.vol_p, vol_d: r.vol_d,
       week_pct: fRow ? fRow.week_chg_pct : null,
+      tc_score: tc.score, tc_bucket: tc.bucket,
     });
   });
   return rows;
+}
+// cc#1881: the row's OWN flow classification decides which buckets are in play — a row this
+// picker already knows is BULLISH only ever gets credit for a BUY-side card, mirroring how a
+// BULLISH row's "week" figure above is already read off the bullish list, never the bearish one.
+// Any/ABSENT (flow===null) takes the max across all four, same as a stock the picker has not
+// sided at all. Reads ONLY TC.scores (loadTc() -> /api/v10/tc_screen -> tc_universe_ticks) — never
+// tc_screener_cache / tc_cache / v8_tc_score_daily / tc_position_stars[_v2] / v8_tc_score_ticks.
+var CSB_TC_BUCKETS_BY_FLOW = {
+  BULLISH: ['BUY-MOM', 'BUY-REV'],
+  BEARISH: ['SELL-MOM', 'SELL-REV'],
+  ANY: ['BUY-MOM', 'BUY-REV', 'SELL-MOM', 'SELL-REV'],
+};
+function csbTcForRow(sym, flow){
+  var m = (TC.scores && TC.scores[sym]) || null;
+  if (!m) return { score: null, bucket: null };   // no tick today at all -> ABSENT, never a guess
+  var buckets = CSB_TC_BUCKETS_BY_FLOW[flow] || CSB_TC_BUCKETS_BY_FLOW.ANY;
+  var best = null, bestBucket = null;
+  buckets.forEach(function (b) {
+    var e = m[b];
+    if (e && e.score100 != null && (best === null || e.score100 > best)) { best = e.score100; bestBucket = b; }
+  });
+  return { score: best, bucket: bestBucket };
+}
+function csbTcCell(score, bucket){
+  if (score == null) return '<td>—</td>';
+  var buy = String(bucket || '').indexOf('BUY') === 0;
+  var col = buy ? 'var(--grn)' : 'var(--red)';
+  var bg = buy ? 'rgba(47,212,139,.12)' : 'rgba(255,92,108,.12)';
+  return '<td class="am">' + Number(score).toFixed(1)
+    + '<span style="display:inline-block;margin-left:5px;font-family:\'Sora\',sans-serif;font-size:8.5px;'
+    + 'font-weight:800;letter-spacing:.06em;padding:1px 5px;border-radius:999px;color:' + col + ';background:' + bg + '">'
+    + esc(bucket) + '</span></td>';
 }
 var CSB_SORT_GETTERS = {
   SYMBOL: function (r) { return r.symbol; },
@@ -8553,18 +8628,19 @@ var CSB_SORT_GETTERS = {
   VOLR:   function (r) { return r.vol_r; },
   VOLP:   function (r) { return r.vol_p; },
   VOLD:   function (r) { return r.vol_d; },
+  TC:     function (r) { return r.tc_score; },
   WK:     function (r) { return r.week_pct; },
 };
-var CSB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, OI: -1, BASIS: -1, VOLR: -1, VOLP: -1, VOLD: -1, WK: -1 };
+var CSB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, OI: -1, BASIS: -1, VOLR: -1, VOLP: -1, VOLD: -1, TC: -1, WK: -1 };
 function csbSort(key){
   if (CSB.sort.key === key) CSB.sort.dir = -CSB.sort.dir;
   else { CSB.sort.key = key; CSB.sort.dir = CSB_SORT_DEFAULT_DIR[key]; }
   render();
 }
-function csbSetBuild(k){ CSB.build = k; render(); }
-function csbSetFlow(k){ CSB.flow = k; render(); }
-function csbToggleBasis(k){ CSB.basis[k] = !CSB.basis[k]; render(); }
-function csbToggleVolr(k){ CSB.volr[k] = !CSB.volr[k]; render(); }
+function csbSetBuild(k){ CSB.build = k; csbSave(); render(); }
+function csbSetFlow(k){ CSB.flow = k; csbSave(); render(); }
+function csbToggleBasis(k){ CSB.basis[k] = !CSB.basis[k]; csbSave(); render(); }
+function csbToggleVolr(k){ CSB.volr[k] = !CSB.volr[k]; csbSave(); render(); }
 function csbChip(label, on, onclickExpr){
   return '<button type="button" class="csbchip' + (on ? ' on' : '') + '" onclick="' + onclickExpr + '">' + esc(label) + '</button>';
 }
@@ -8597,6 +8673,7 @@ function csbTable(rows){
     + _sortTh('Vol R', 'VOLR', CSB.sort, "iiCsbSort('VOLR')")
     + _sortTh('Vol P', 'VOLP', CSB.sort, "iiCsbSort('VOLP')")
     + _sortTh('Vol D', 'VOLD', CSB.sort, "iiCsbSort('VOLD')")
+    + _sortTh('TC /100', 'TC', CSB.sort, "iiCsbSort('TC')")
     + (showWk ? _sortTh('WK', 'WK', CSB.sort, "iiCsbSort('WK')") : '');
   var body = rows.map(function (r) {
     var d = r.day_pct;
@@ -8608,6 +8685,7 @@ function csbTable(rows){
       + (r.vol_r == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_r).toFixed(1) + '×</td>')
       + (r.vol_p == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
       + (r.vol_d == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>')
+      + csbTcCell(r.tc_score, r.tc_bucket)
       + (showWk ? vfCell(r.week_pct, 1) : '')
       + '</tr>';
   }).join('');
@@ -8620,14 +8698,24 @@ function csbGuide(){
     + '<p><b>Orderflow.</b> The same Bullish / Bearish definition as the Volume Flow cards above — 60%+ of recent volume on one side, day and week move both agreeing. A stock not on either list there will not match Bullish or Bearish here either.</p>'
     + '<p><b>Basis band.</b> The futures price minus the spot price, as a percent of the spot price. Positive means futures cost more than the stock. 0 to 1% and 1%+ are the two positive bands; 0 to -1% and beyond -1% mirror them on the negative side.</p>'
     + '<p><b>Volume R band.</b> Today\'s volume pace vs the normal pace at this time of day. These four breakpoints are a first guess — below 1.0x, 1.0-1.5x, 1.5-2.0x, 2.0x+ — not locked yet, and may change once seen against real data.</p>'
+    + '<p><b>TC /100.</b> The best Trade Check score for the row\'s own side — Bullish reads BUY-MOM and BUY-REV, Bearish reads SELL-MOM and SELL-REV, Any reads all four — at the latest tick TODAY, from tc_universe_ticks (the same live intraday tick the Check tabs read, never the 16:05 end-of-day row). No tick today for that symbol is a dash, same as any other missing column here.</p>'
     + '<p><b>A dash (—).</b> That stock has no number for that column right now. It is never a guess and never a zero standing in for missing data — and it is not the same as failing a filter.</p>'
-    + '<p><b>Honesty.</b> Every number here is read straight from the OI Build Ups and Volume Flow &amp; Basis cards above — nothing is recomputed differently for this table.</p>'
+    + '<p><b>Honesty.</b> Every number here is read straight from the OI Build Ups and Volume Flow &amp; Basis cards above, or (TC /100 only) from tc_universe_ticks — nothing is recomputed differently for this table.</p>'
     + '</div>');
+}
+function csbTcAsOf(){
+  // cc#1881: TC.as_of is already the naive IST string the backend converted (never wall clock,
+  // never a LIVE badge — ticks stop for the day at 15:20, so this always prints the literal tick
+  // time rather than borrowing scorrAsofStamp's LIVE/amber styling built for continuously-live feeds).
+  if (!TC.as_of) return '';
+  var hm = String(TC.as_of).replace('T', ' ').slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(hm) ? hm : '';
 }
 function rCustomScreen(){
   var bbCount = Object.keys(csbBackbone()).length;
   var rows = _sortByState(csbPool(), CSB.sort, CSB_SORT_GETTERS);
   var st = scorrAsofStamp(D.build && D.build.as_of);
+  var tcHm = csbTcAsOf();
   /* universe read LIVE off VF.data (the same registry query volume_flow itself runs) — never a
      hardcoded 208. Falls back to this card's own backbone count only until VF.data has loaded. */
   var universe = (VF.data && VF.data.universe) || bbCount;
@@ -8643,7 +8731,8 @@ function rCustomScreen(){
     + csbRow('Basis band', csbBandChips(CSB_BASIS_BANDS, CSB.basis, 'iiCsbToggleBasis'))
     + csbRow('Volume R band (first guess)', csbBandChips(CSB_VOLR_BANDS, CSB.volr, 'iiCsbToggleVolr'))
     + body
-    + (st.txt ? '<div class="scf' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + bbCount + ' of ' + universe + ' scanned</div>' : '')
+    + (st.txt ? '<div class="scf' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + bbCount + ' of ' + universe + ' scanned'
+        + (tcHm ? ' · TC as of ' + tcHm + ' IST' : '') + '</div>' : '')
     + '</div></section>';
 }
 
@@ -8834,7 +8923,7 @@ function idxMarkScroll(host){
 /* extend loaders with pivots + strike OI */
 var _origLoadLive=loadLive;
 loadLive=async function(){
-  const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI,loadQbb];   /* cc#1522: + quality-bullish · cc#1574: loadDivergence removed (card hidden) */
+  const tasks=[loadMood,loadIdxSpark,loadFoBan,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadPerf,loadPivots,loadStrikeOI,loadQbb,loadTc];   /* cc#1522: + quality-bullish · cc#1574: loadDivergence removed (card hidden) · cc#1881: + TC/100 (Custom Screen Builder) */
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[idx]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 };
@@ -8885,6 +8974,7 @@ window.idxBoot=function(){
   // tab could not retry because _idxBooted was already true. Latch only on success; a failed
   // boot leaves the flag down so the next tab activation tries again.
   if(_idxBooted) return;
+  csbRestore();   /* cc#1881 item 6: picker selections, before the first render reads CSB */
   loadLive().then(render).then(function(){ _idxBooted=true; vfLoad(); })
     .catch(function(e){ console.warn('[idx boot]',e); });
   setInterval(function(){ var p=document.getElementById('pane-index'); if(!p||p.style.display==='none')return;
