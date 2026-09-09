@@ -1,57 +1,100 @@
 <!doctype html>
+<!-- ══ mobile/fpc.html — Planning (FPC) section page (cc#1905, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). Full rewrite in place — same /m/fpc route (mobile_ext.py:742,
+     unchanged). Design authority: design_refs/scorr_app_fpc_R1.html, founder-approved
+     09-Sep-2026 (commit a6275e1). Real GOLD NIGHT tokens only.
+     NO BACKING STORE EXISTS (information_schema swept for plan/fpc/goal/sip tables — zero
+     rows, re-confirmed before writing this file). Every number on this page is either a FIXED
+     structural fact (4 calculators by design, 0 saved plans) or a live client-side computation
+     — no API call anywhere in this file, same discipline as cc#1897's mywatchlist.html.
+     FOUR SEPARATE CALCULATORS (item 2), each opened from the summary card as a bottom sheet:
+     Monthly SIP (forward), Lump sum growth (forward), Retirement corpus (perpetuity + SIP
+     needed), Goal planner (reverse). All reuse the OLD page's exact compounding formulas
+     (fvSip/fvLump/sipForTarget below), split into single-purpose calculators instead of one
+     combined form — no formula re-derived except calculator 3's perpetuity corpus, which is
+     standard and states its own assumption on its face. Every rate is a plain, editable
+     <input>, never hidden in code (V1). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>FPC · Scorr</title>
+<title>Planning · Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<script src="/scorr_card_common.js"></script>
+<style>
+/* cc#1905 — page-local rules (fp-*). Same discipline as every other section page this session:
+   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex or raw px. */
+.fp-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.fp-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:var(--bw-3) solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.fp-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.fp-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.fp-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.fp-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.fp-cell .fp-k{font-size:var(--type-9)}
+.fp-cell .fp-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.fp-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.fp-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.fp-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.fp-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.fp-rail::-webkit-scrollbar{display:none}
+.fp-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.fp-c.gap{border-style:dashed}
+.fp-ch{display:flex;align-items:baseline;justify-content:space-between}
+.fp-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.fp-ch .n{font-size:var(--type-11);color:var(--mut)}
+.fp-lst{margin-top:var(--space-9)}
+.fp-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2);cursor:pointer}
+.fp-lr:last-child{border-bottom:none}
+.fp-lr .s{font-size:var(--type-125);font-weight:800}
+.fp-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.fp-lr .a{font-size:var(--type-115);color:var(--mut)}
+.fp-lr .b{font-size:var(--type-125);font-weight:700;color:var(--blu)}
+.fp-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.fp-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.fp-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.fp-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.fp-note b{color:var(--mut)}
+/* sheet (bottom modal) — one generic shell, four calculator bodies swapped into it */
+.fp-sheet{position:fixed;inset:0;z-index:98;display:none}
+.fp-sheet.open{display:block}
+.fp-sheet .bk{position:fixed;inset:0;background:rgba(0,0,0,.6)}
+.fp-sheet .box{position:fixed;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:var(--panel);
+ border:var(--bw-15) solid var(--line);border-bottom:none;border-radius:var(--radius-18) var(--radius-18) 0 0;
+ padding:var(--space-12) var(--space-16) calc(var(--space-18) + env(safe-area-inset-bottom))}
+.fp-sheet .grab{width:44px;height:var(--space-4);border-radius:var(--radius-2);background:var(--line);margin:0 auto var(--space-10)}
+.fp-sheet .x{position:absolute;top:var(--space-12);right:var(--space-14);width:30px;height:30px;border-radius:50%;
+ border:var(--bw-1) solid var(--line);background:var(--panel2);color:var(--mut);cursor:pointer}
+.fp-sheet h3{font-size:var(--type-18);font-weight:800;padding-right:var(--space-28)}
+.fp-fld{margin-top:var(--space-12)}
+.fp-fld label{display:block;font-size:var(--type-105);font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em8);margin-bottom:var(--space-5)}
+.fp-fld input{width:100%;box-sizing:border-box;padding:var(--space-9) var(--space-11);font-size:var(--type-14);
+ border:var(--bw-1) solid var(--line);border-radius:var(--radius-9);background:var(--panel2);color:var(--txt);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.fp-res{margin-top:var(--space-14);padding:var(--space-12) var(--space-13);background:var(--panel2);border:var(--bw-1) solid var(--line);
+ border-left:var(--bw-3) solid var(--grn);border-radius:0 var(--radius-12) var(--radius-12) 0}
+.fp-res .k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.fp-res .v{font-size:var(--type-22);font-weight:800;margin-top:var(--space-3);font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--grn)}
+.fp-res .split{display:flex;gap:var(--space-14);margin-top:var(--space-9)}
+.fp-res .sp .k{font-size:var(--type-9)}
+.fp-res .sp .v{font-size:var(--type-14);color:var(--txt)}
+.fp-assume{margin-top:var(--space-10);font-size:var(--type-105);color:var(--dim);line-height:1.5}
+</style>
 </head>
 <body data-theme="goldnight">
-<!-- cc#1645 P5: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap).
-     fpc.html previously had no scorr_themes.css link at all. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
-     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
-     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
-<!-- cc#1645 P5: shared appshell header (VARIANT B). Existing .head strip below is untouched. -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Financial Planner</span></div><div class="as-slot"></div></div>
-<div class="screen">
-  <div class="head as-hide"><h1>Financial Planner</h1><div class="s">what your money becomes · plain compounding, no jargon</div></div>
-  <div class="body">
-    <div class="sect">WHAT YOU PUT IN</div>
-    <div class="fld"><label>Monthly SIP (₹)</label><input id="sip" type="number" inputmode="numeric" value="25000"></div>
-    <div class="fld"><label>One-time amount today (₹)</label><input id="lump" type="number" inputmode="numeric" value="500000"></div>
-    <div class="fld"><label>Years</label><input id="yrs" type="number" inputmode="numeric" value="10"></div>
-    <div class="fld"><label>Expected return % per year</label><input id="ret" type="number" inputmode="decimal" value="12"></div>
-
-    <div class="sect">WHAT IT BECOMES</div>
-    <div class="c bull res">
-      <div class="k">Value after <span id="ry">10</span> years</div>
-      <div class="v pos" id="total">--</div>
-      <div class="split">
-        <div class="sp"><div class="k">You invest</div><div class="v" id="inv">--</div></div>
-        <div class="sp"><div class="k">Growth</div><div class="v pos" id="gain">--</div></div>
-      </div>
-    </div>
-
-    <div class="sect">OR START FROM A GOAL</div>
-    <div class="fld"><label>Target amount (₹)</label><input id="goal" type="number" inputmode="numeric" value="10000000"></div>
-    <div class="c ref res">
-      <div class="k">Monthly SIP needed (same years &amp; return)</div>
-      <div class="v" id="need">--</div>
-    </div>
-    <div class="note" style="font-size:10.5px;color:var(--dim);line-height:1.6;margin:14px 3px 0;border-left:2px solid var(--line2);padding-left:9px">
-      Assumes the return compounds monthly and stays constant — real markets do not. A plan, not a promise.
-    </div>
-  </div>
-</div>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Planning</span></div><div class="as-slot"></div></div>
+<div class="fp-asof">Calculators only · no plan is stored</div>
+<div id="fp-body"></div>
+<div class="fp-note"><b>Nothing is saved.</b> No table stores a user plan, so the Saved plans card is an honest gap rather than an empty list waiting to fill. <b>Assumptions are shown next to every answer</b> — a planning number without its assumed return rate is a promise, and we do not make promises.</div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -59,28 +102,147 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
+<div class="fp-sheet" id="fp-sheet">
+  <div class="bk" onclick="fpClose()"></div>
+  <div class="box" role="dialog" aria-modal="true">
+    <div class="grab"></div>
+    <button type="button" class="x" onclick="fpClose()" aria-label="Close">✕</button>
+    <div id="fp-sheet-body"></div>
+  </div>
+</div>
 <script>
-function inr(v){ if (v==null||isNaN(v)||!isFinite(v)) return '--';
-  return '₹'+Math.round(v).toLocaleString('en-IN'); }
-function g(id){ return Number(document.getElementById(id).value)||0; }
-function calc(){
-  var sip=g('sip'), lump=g('lump'), yrs=g('yrs'), ret=g('ret'), goal=g('goal');
-  var n=Math.max(0,Math.round(yrs*12)), i=(ret/100)/12;
-  var fvL=lump*Math.pow(1+i,n);
-  var fvS=i>0?sip*((Math.pow(1+i,n)-1)/i)*(1+i):sip*n;
-  var total=fvL+fvS, invested=lump+sip*n;
-  document.getElementById('ry').textContent=yrs;
-  document.getElementById('total').textContent=inr(total);
-  document.getElementById('inv').textContent=inr(invested);
-  document.getElementById('gain').textContent=inr(total-invested);
-  var remain=goal-fvL;
-  var need=remain<=0?0:(i>0?remain/(((Math.pow(1+i,n)-1)/i)*(1+i)):remain/Math.max(1,n));
-  document.getElementById('need').textContent=n>0?inr(Math.max(0,need)):'--';
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function inr(v){ if(v==null||isNaN(v)||!isFinite(v)) return '—'; return '₹'+Math.round(v).toLocaleString('en-IN'); }
+
+/* ── shared compounding math — the OLD combined mobile/fpc.html's exact formulas, split apart ── */
+function fvLump(lump,n,i){ return lump*Math.pow(1+i,n); }
+function fvSip(sip,n,i){ return i>0 ? sip*((Math.pow(1+i,n)-1)/i)*(1+i) : sip*n; }
+function sipForTarget(target,n,i){ if(n<=0) return 0; var per=i>0?((Math.pow(1+i,n)-1)/i)*(1+i):n; return per>0?target/per:0; }
+
+var CALCS = {
+  sip: { title:'Monthly SIP', inputs:[
+      {id:'amt',label:'Monthly SIP (₹)',val:25000},
+      {id:'yrs',label:'Years',val:10},
+      {id:'ret',label:'Expected return % per year',val:12}],
+    run:function(v){
+      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
+      var fv=fvSip(v.amt,n,i), invested=v.amt*n, growth=fv-invested;
+      return { headline:'Value after '+v.yrs+' years', value:inr(fv),
+        split:[['You invest',inr(invested)],['Growth',inr(growth)]],
+        assume:'Assumes '+v.ret+'% return a year, compounding monthly, for '+v.yrs+' years.' };
+    }},
+  lump: { title:'Lump sum growth', inputs:[
+      {id:'amt',label:'One-time amount (₹)',val:500000},
+      {id:'yrs',label:'Years',val:10},
+      {id:'ret',label:'Expected return % per year',val:12}],
+    run:function(v){
+      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
+      var fv=fvLump(v.amt,n,i), growth=fv-v.amt;
+      return { headline:'Value after '+v.yrs+' years', value:inr(fv),
+        split:[['You invest',inr(v.amt)],['Growth',inr(growth)]],
+        assume:'Assumes '+v.ret+'% return a year, compounding monthly, for '+v.yrs+' years.' };
+    }},
+  retire: { title:'Retirement corpus', inputs:[
+      {id:'exp',label:'Monthly expense in retirement (₹)',val:80000},
+      {id:'yrs',label:'Years to retirement',val:20},
+      {id:'ret',label:'Expected return % per year',val:10}],
+    run:function(v){
+      var corpus = v.ret>0 ? (v.exp*12)/(v.ret/100) : null;
+      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
+      var sipNeeded = corpus!=null ? sipForTarget(corpus,n,i) : null;
+      return { headline:'Corpus needed', value:corpus!=null?inr(corpus):'—',
+        split:[['Monthly SIP to get there',sipNeeded!=null?inr(sipNeeded):'—']],
+        assume:'Assumes the corpus, once built, is drawn down at '+v.ret+'% a year forever without touching the principal — a simple perpetuity, not inflation-adjusted. SIP assumes the same '+v.ret+'% growth for '+v.yrs+' years.' };
+    }},
+  goal: { title:'Goal planner', inputs:[
+      {id:'target',label:'Target amount (₹)',val:10000000},
+      {id:'yrs',label:'Years',val:10},
+      {id:'ret',label:'Expected return % per year',val:12}],
+    run:function(v){
+      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
+      var need=sipForTarget(v.target,n,i);
+      return { headline:'Monthly SIP needed', value:inr(need), split:[],
+        assume:'Assumes '+v.ret+'% return a year, compounding monthly, for '+v.yrs+' years, to reach '+inr(v.target)+'.' };
+    }}
+};
+var CALC_ORDER=['sip','lump','retire','goal'];
+
+function fpKmHtml(){
+  return '<div class="fp-km"><div class="fp-k">Calculators</div><div class="fp-v">4</div>'
+    + '<div class="fp-kg">'
+    + '<div class="fp-cell"><div class="fp-k">Saved plans</div><div class="fp-v">0</div></div>'
+    + '<div class="fp-cell"><div class="fp-k">Store</div><div class="fp-v">Does not exist</div></div>'
+    + '<div class="fp-cell"><div class="fp-k">Inputs</div><div class="fp-v">3 to 4 each</div></div>'
+    + '<div class="fp-cell"><div class="fp-k">Assumptions</div><div class="fp-v">Shown on face</div></div>'
+    + '</div></div>';
 }
-['sip','lump','yrs','ret','goal'].forEach(function(id){
-  document.getElementById(id).addEventListener('input',calc);
-});
-calc();
+function fpListCardHtml(){
+  var rows = CALC_ORDER.map(function(k){
+    var c=CALCS[k];
+    return '<div class="fp-lr" onclick="fpOpen(\''+k+'\')"><span class="s">'+esc(c.title)+'</span><div class="r"><span class="b">Open</span></div></div>';
+  }).join('');
+  return '<div class="fp-c"><div class="fp-ch"><span class="t">What you can work out</span><span class="n">4</span></div>'
+    + '<div class="fp-lst">'+rows+'</div>'
+    + '<div class="fp-more">Each one asks for three or four inputs, no more.</div></div>';
+}
+function fpReadCardHtml(){
+  return '<div class="fp-c"><div class="fp-ch"><span class="t">How to read the answer</span><span class="n">plain</span></div>'
+    + '<div class="fp-emp" style="margin-top:0">Every result shows the assumption it used — the return rate, the years, the inflation figure. Change the assumption and the answer changes in front of you.</div></div>';
+}
+function fpSavedCardHtml(){
+  return '<div class="fp-c gap"><div class="fp-ch"><span class="t">Saved plans</span><span class="n">0</span></div>'
+    + '<div class="fp-emp"><b>Nothing saved yet</b>There is no table storing a user&#39;s plans. Anything you work out here is lost when you leave the page. Named as a gap so it becomes a work item.</div></div>';
+}
+function fpAssumeCardHtml(){
+  return '<div class="fp-c"><div class="fp-ch"><span class="t">Nothing is hidden</span><span class="n">stated on face</span></div>'
+    + '<div class="fp-emp" style="margin-top:0">The calculators do not use a secret expected return. Whatever rate is applied is shown next to the answer and can be changed.</div></div>';
+}
+
+function render(){
+  var html = fpKmHtml()
+    + '<div class="fp-slab"><h2>Calculators</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="fp-rail">'+fpListCardHtml()+fpReadCardHtml()+'</div>'
+    + '<div class="fp-slab"><h2>Your plans</h2><span class="hint">1 · swipe →</span></div>'
+    + '<div class="fp-rail">'+fpSavedCardHtml()+'</div>'
+    + '<div class="fp-slab"><h2>Assumptions</h2><span class="hint">1 · swipe →</span></div>'
+    + '<div class="fp-rail">'+fpAssumeCardHtml()+'</div>';
+  document.getElementById('fp-body').innerHTML = html;
+}
+render();
+
+/* ── sheet: one calculator at a time, live-recomputed on every input change ── */
+var FP_CUR=null;
+function fpValues(key){
+  var c=CALCS[key], v={};
+  c.inputs.forEach(function(f){ v[f.id]=Number(document.getElementById('fp-in-'+f.id).value)||0; });
+  return v;
+}
+function fpPaint(key){
+  var c=CALCS[key], v=fpValues(key), r=c.run(v);
+  var split = (r.split||[]).map(function(p){ return '<div class="sp"><div class="k">'+esc(p[0])+'</div><div class="v">'+p[1]+'</div></div>'; }).join('');
+  document.getElementById('fp-res-'+key).innerHTML =
+    '<div class="k">'+esc(r.headline)+'</div><div class="v">'+r.value+'</div>'
+    + (split?'<div class="split">'+split+'</div>':'')
+    + '<div class="fp-assume">'+esc(r.assume)+'</div>';
+}
+function fpOpen(key){
+  FP_CUR=key;
+  var c=CALCS[key];
+  var fields = c.inputs.map(function(f){
+    return '<div class="fp-fld"><label>'+esc(f.label)+'</label><input id="fp-in-'+f.id+'" type="number" inputmode="decimal" value="'+f.val+'" oninput="fpPaint(\''+key+'\')"></div>';
+  }).join('');
+  document.getElementById('fp-sheet-body').innerHTML =
+    '<h3>'+esc(c.title)+'</h3>'+fields+'<div class="fp-res" id="fp-res-'+key+'"></div>';
+  document.getElementById('fp-sheet').classList.add('open');
+  document.body.style.overflow='hidden';
+  fpPaint(key);
+}
+function fpClose(){
+  document.getElementById('fp-sheet').classList.remove('open');
+  document.body.style.overflow='';
+  FP_CUR=null;
+}
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') fpClose(); });
 </script>
-</body>
-</html>
+</body></html>

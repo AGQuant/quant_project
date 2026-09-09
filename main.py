@@ -342,6 +342,11 @@ PROTECTED.add("/m/mf")
 # as cc#1903's Mutual Funds page: wired straight to "nav-mobile" tier (NAV array + PROTECTED +
 # NAV_REGISTRY), no conflicting founder-locked tile to hold it back to typed-url.
 PROTECTED.add("/m/aicio")
+# cc#1905: /m/fpc — SAME pre-existing gap as /m/screeners and /m/sector before the cc#1907 fix:
+# a working route (mobile_ext.py:742) in NONE of PROTECTED/NAV_REGISTRY/NAV array. Wired to
+# "nav-mobile" tier per the cc#1907 default (NAV array + PROTECTED + NAV_REGISTRY), matching
+# every /m/ route added since that ruling.
+PROTECTED.add("/m/fpc")
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
 # duplicates no auth logic of its own.
@@ -1499,6 +1504,7 @@ NAV_REGISTRY = {
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
     "/m/aicio":      ("AI CIO (mobile)",         "nav-mobile"),   # cc#1904: new page, wired via the NAV array's More sheet
+    "/m/fpc":        ("Planning / FPC (mobile)", "nav-mobile"),   # cc#1905: pre-existing route, gap fixed per cc#1907 default
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),

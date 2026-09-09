@@ -461,7 +461,10 @@ PWA_JS = """
     ['/m/mf', '\\u25c9', 'Mutual Funds (mobile)', 'm'],
     // cc#1904: AI CIO — same shape as cc#1903's Mutual Funds entry above. Glyph matches /cio's
     // own desktop entry ('\\u2299', line ~401 in this same array) — not invented here.
-    ['/m/aicio', '\\u2299', 'AI CIO (mobile)', 'm']
+    ['/m/aicio', '\\u2299', 'AI CIO (mobile)', 'm'],
+    // cc#1905: Planning (FPC) — same pre-existing gap as /m/screeners and /m/sector had before
+    // cc#1907. Glyph matches this array's own desktop '/fpc' entry ('\\u25e7', line ~402).
+    ['/m/fpc', '\\u25e7', 'Planning / FPC (mobile)', 'm']
     // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).
   ];
