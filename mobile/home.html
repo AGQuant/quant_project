@@ -1898,7 +1898,11 @@ function gtile(href, glyph, label){
    cc#1895: My Portfolio now points to /m/myportfolio — its OWN new dedicated section page
    (APP_CARD_LAYOUT_LAW_V1 density: key metrics + swipeable rails), built against
    design_refs/scorr_app_myportfolio_R4.html. /m/holdings (cc#1779) is UNCHANGED and still live —
-   this only repoints the Dashboard row, per this page's own NAV-COMPLETE obligation. */
+   this only repoints the Dashboard row, per this page's own NAV-COMPLETE obligation.
+   cc#1896: My Alerts now points to /m/myalerts, its own new section page (splits price alerts
+   from QB basket notices — the trigger_price mix-up cc#1885 fixed on web, structural here so the
+   app can never make the same mistake), built against design_refs/scorr_app_myalerts_R3.html.
+   /m/alerts (the existing Approve/Dismiss feed) is UNCHANGED and still live. */
 function dashRow(href, glyph, label, sub){
   var empty = !href;
   var tag = empty ? 'div' : 'a';
@@ -1913,7 +1917,7 @@ function dashSectionHtml(){
     + '<div class="hdr"><span class="eyebrow">DASHBOARD</span><div class="rule"></div></div>'
     + dashRow('/m/myportfolio', '◈', 'My Portfolio', 'Holdings, allocation, unrealised P&L')
     + dashRow(null, '☆', 'My Watchlist', 'Nothing saved yet')
-    + dashRow('/m/alerts', '◬', 'My Alerts', 'Price triggers you set')
+    + dashRow('/m/myalerts', '◬', 'My Alerts', 'Price triggers you set')
     + '</div>';
 }
 

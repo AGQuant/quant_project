@@ -1,0 +1,175 @@
+<!doctype html>
+<!-- ══ mobile/myalerts.html — My Alerts section page (cc#1896, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). Home Dashboard section's own destination — NOT the same page as
+     /m/alerts (the existing Approve/Dismiss feed, still live, still the fuller operational
+     view). Design authority: design_refs/scorr_app_myalerts_R3.html, founder-approved
+     09-Sep-2026 (commit 9622eaa). Real GOLD NIGHT tokens only.
+     THE SPLIT IS THE WHOLE POINT (cc#1885's own web finding, made structural here): price
+     alerts and QB basket notices are two different kinds of record. trigger_price on a
+     rebalance_due row is a basket rupee figure, never a price level, and never appears in
+     the Basket notices section below. Data from /api/mobile/myalerts (trade_alerts_app.py). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Alerts · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+/* cc#1896 — page-local rules (ma-*). Same discipline as mobile/myportfolio.html's .mp-* block:
+   bridge colour tokens + scorr_themes.css scale tokens only. */
+.ma-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.ma-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.ma-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.ma-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.ma-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.ma-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.ma-cell .ma-k{font-size:var(--type-9)}
+.ma-cell .ma-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.ma-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.ma-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.ma-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.ma-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ma-rail::-webkit-scrollbar{display:none}
+.ma-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.ma-c.gap{border-style:dashed}
+.ma-ch{display:flex;align-items:baseline;justify-content:space-between}
+.ma-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.ma-ch .n{font-size:var(--type-11);color:var(--mut)}
+.ma-lst{margin-top:var(--space-9)}
+.ma-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
+.ma-lr:last-child{border-bottom:none}
+.ma-lr .s{font-size:var(--type-125);font-weight:800}
+.ma-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.ma-lr .a{font-size:var(--type-115);color:var(--mut)}
+.ma-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.ma-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.ma-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none}
+.ma-badge{display:inline-block;font-size:var(--type-105);font-weight:700;color:var(--mut);
+ background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-8);padding:1px var(--space-7)}
+.ma-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.ma-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.ma-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.ma-note b{color:var(--mut)}
+.ma-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.ma-err{margin:var(--space-14)}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">My Alerts</span></div><div class="as-slot"></div></div>
+<div class="ma-asof" id="ma-asof">Loading…</div>
+<div id="ma-body"><div class="ma-empty">Loading alerts…</div></div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function inr(v){ if (v==null||isNaN(Number(v))) return '—';
+  return '₹'+Number(v).toLocaleString('en-IN', {maximumFractionDigits:2}); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dmt(ts){ if(!ts) return '—'; var d=new Date(String(ts).replace(' ','T'));
+  if(isNaN(d)) return String(ts).slice(0,16);
+  var i=new Date(d.getTime()+(330+d.getTimezoneOffset())*60000);
+  return i.getDate()+' '+MON[i.getMonth()]+' '+('0'+i.getHours()).slice(-2)+':'+('0'+i.getMinutes()).slice(-2); }
+
+function kmHtml(k){
+  return '<div class="ma-km"><div class="ma-k">Alerts in the book</div><div class="ma-v">'+(k.total!=null?k.total:'—')+'</div>'
+    + '<div class="ma-kg">'
+    + '<div class="ma-cell"><div class="ma-k">Futures</div><div class="ma-v">'+(k.futures!=null?k.futures:'—')+'</div></div>'
+    + '<div class="ma-cell"><div class="ma-k">Equity</div><div class="ma-v">'+(k.equity!=null?k.equity:'—')+'</div></div>'
+    + '<div class="ma-cell"><div class="ma-k">Rebalance due</div><div class="ma-v">'+(k.rebalance_due!=null?k.rebalance_due:'—')+'</div></div>'
+    + '<div class="ma-cell"><div class="ma-k">Triggered</div><div class="ma-v">'+(k.triggered!=null?k.triggered:'—')+'</div></div>'
+    + '</div></div>';
+}
+function priceCardHtml(label, list, n){
+  if(!n) return '<div class="ma-c gap"><div class="ma-ch"><span class="t">'+esc(label)+'</span><span class="n">0</span></div>'
+    + '<div class="ma-emp"><b>Nothing here yet</b>No '+esc(label.toLowerCase())+' alert is in the book today. The card stays so you can see the kind exists.</div></div>';
+  var rows = list.map(function(a){
+    return '<div class="ma-lr"><span class="s">'+esc(a.symbol)+'</span><div class="r">'
+      + '<span class="a">'+esc(a.direction||'')+' · '+esc(a.status||'')+' '+dmt(a.created_at)+'</span>'
+      + '<span class="b">'+inr(a.trigger_price)+'</span></div></div>';
+  }).join('');
+  var more = n>list.length ? '<div class="ma-more">+'+(n-list.length)+' more</div>' : '';
+  return '<div class="ma-c"><div class="ma-ch"><span class="t">'+esc(label)+'</span><span class="n">'+n+'</span></div>'
+    + '<div class="ma-lst">'+rows+'</div>'+more+'<a class="ma-link" href="/m/alerts">Manage alerts ›</a></div>';
+}
+function rebalCardHtml(d){
+  var rows=d.basket_notices.rows, n=d.basket_notices.count;
+  if(!n) return '<div class="ma-c gap"><div class="ma-ch"><span class="t">Rebalance due</span><span class="n">0</span></div><div class="ma-emp"><b>Nothing due</b>No basket has a rebalance waiting for review.</div></div>';
+  var body = rows.map(function(r){
+    return '<div class="ma-lr"><span class="s">'+esc(r.basket)+'</span><div class="r">'
+      + '<span class="a">'+(r.candidate_count!=null?r.candidate_count+' names':'—')+'</span>'
+      + '<span class="ma-badge">Review</span></div></div>';
+  }).join('');
+  var more = n>rows.length ? '<div class="ma-more">+'+(n-rows.length)+' more</div>' : '';
+  var raised = rows.length ? dmt(rows[0].raised_at) : '';
+  return '<div class="ma-c"><div class="ma-ch"><span class="t">Rebalance due</span><span class="n">'+n+'</span></div>'
+    + '<div class="ma-lst">'+body+'</div>'+more
+    + '<div class="ma-more">Raised '+raised+'. These carry no trigger price and are not price alerts.</div>'
+    + '<a class="ma-link" href="/m/qb">Open baskets ›</a></div>';
+}
+function customCardHtml(d){
+  var n=d.own_alerts.custom_count, list=d.own_alerts.custom;
+  if(!n) return '<div class="ma-c gap"><div class="ma-ch"><span class="t">Custom</span><span class="n">0</span></div>'
+    + '<div class="ma-emp"><b>You have not set any</b>Price triggers you set yourself. The Custom alert tile on the grid writes into this card.</div>'
+    + '<a class="ma-link" href="/m/alerts#new">Set an alert ›</a></div>';
+  var rows = list.map(function(a){
+    return '<div class="ma-lr"><span class="s">'+esc(a.symbol)+'</span><div class="r"><span class="a">'+esc(a.direction||'')+'</span><span class="b">'+inr(a.trigger_price)+'</span></div></div>';
+  }).join('');
+  var more = n>list.length ? '<div class="ma-more">+'+(n-list.length)+' more</div>' : '';
+  return '<div class="ma-c"><div class="ma-ch"><span class="t">Custom</span><span class="n">'+n+'</span></div><div class="ma-lst">'+rows+'</div>'+more+'</div>';
+}
+function historyCardHtml(d){
+  var n=d.own_alerts.history_count, list=d.own_alerts.history;
+  if(!n) return '<div class="ma-c gap"><div class="ma-ch"><span class="t">History</span><span class="n">0</span></div>'
+    + '<div class="ma-emp"><b>Nothing has fired</b>Alerts that trigger or get dismissed land here with the date and the price at that moment.</div></div>';
+  var rows = list.map(function(a){
+    return '<div class="ma-lr"><span class="s">'+esc(a.symbol)+'</span><div class="r"><span class="a">'+esc(a.status||'')+' '+dmt(a.created_at)+'</span><span class="b">'+inr(a.trigger_price)+'</span></div></div>';
+  }).join('');
+  var more = n>list.length ? '<div class="ma-more">+'+(n-list.length)+' more</div>' : '';
+  return '<div class="ma-c"><div class="ma-ch"><span class="t">History</span><span class="n">'+n+'</span></div><div class="ma-lst">'+rows+'</div>'+more+'</div>';
+}
+
+function render(d){
+  var k=d.key_metrics||{};
+  document.getElementById('ma-asof').textContent = 'Read from '+d.as_of_source+' · '+(k.total!=null?k.total:'—')+' alerts';
+  var html = kmHtml(k)
+    + '<div class="ma-slab"><h2>Price alerts</h2><span class="hint">'+((d.price_alerts.futures_count||0)+(d.price_alerts.equity_count||0))+' · swipe →</span></div>'
+    + '<div class="ma-rail">'
+      + priceCardHtml('Futures', d.price_alerts.futures, d.price_alerts.futures_count)
+      + priceCardHtml('Equity', d.price_alerts.equity, d.price_alerts.equity_count)
+    + '</div>'
+    + '<div class="ma-slab"><h2>Basket notices</h2><span class="hint">'+(d.basket_notices.count||0)+' · swipe →</span></div>'
+    + '<div class="ma-rail">'+rebalCardHtml(d)+'</div>'
+    + '<div class="ma-slab"><h2>Your own alerts</h2><span class="hint">'+((d.own_alerts.custom_count||0)+(d.own_alerts.history_count||0)===0?'none set':'')+' · swipe →</span></div>'
+    + '<div class="ma-rail">'+customCardHtml(d)+historyCardHtml(d)+'</div>'
+    + '<div class="ma-note"><b>The split is the whole point.</b> trade_alerts holds two kinds of record. Basket notices carry no trigger price and are never rendered as one. Empty cards stay visible so the kinds are legible.</div>';
+  document.getElementById('ma-body').innerHTML = html;
+}
+
+fetch('/api/mobile/myalerts', {credentials:'same-origin'})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.error){ document.getElementById('ma-body').innerHTML = '<div class="ma-err ma-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+    render(d);
+  })
+  .catch(function(e){ document.getElementById('ma-body').innerHTML = '<div class="ma-err ma-empty">Could not load alerts.</div>'; });
+</script>
+</body></html>
