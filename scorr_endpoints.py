@@ -215,6 +215,7 @@ def smartgain_m2m():
                     ROUND(lp.basis_age_min::numeric, 1)                      AS basis_age_min,
                     lp.last_tick                                            AS last_tick,
                     lp.fut_ever_existed                                     AS fut_ever_existed,
+                    ROUND(lp.prev_close::numeric, 2)                        AS prev_close,   -- cc#1878 fix: was computed in the LATERAL (line ~291) but never projected here, so row["prev_close"] KeyError'd on every call
                     -- cc#304: auto-derived V8 basket tag. LIVE VLOOKUP to V8 open paper
                     -- positions (symbol + side match, status=OPEN). NULL when V8 is not
                     -- currently in this symbol+side -> card shows no tag (blank on no-match,
@@ -356,7 +357,7 @@ def smartgain_m2m():
                 row["entry_price"]        = float(row["entry_price"]) if row["entry_price"] is not None else None
                 row["ltp"]                = float(row["ltp"])         if row["ltp"]         is not None else None
                 row["mtm"]                = float(row["mtm"])         if row["mtm"]         is not None else None
-                row["prev_close"]         = float(row["prev_close"])  if row["prev_close"]  is not None else None   # cc#718
+                row["prev_close"]         = float(row["prev_close"])  if row.get("prev_close") is not None else None   # cc#718; cc#1878: .get() belt-and-braces on top of the fix 3 lines up -- an optional display field going missing must never take the whole endpoint down again
                 row["is_live"]            = bool(row["is_live"])
                 row["ltp_age_min"]        = float(row["ltp_age_min"]) if row["ltp_age_min"] is not None else None
                 row["spot_ltp"]           = float(row["spot_ltp"]) if row["spot_ltp"] is not None else None
@@ -427,7 +428,7 @@ def smartgain_m2m():
             # closes with Arpit's other trades (cross-contamination), and BUG C left it empty
             # so this tile read +0.00 all session. All three realised endpoints (/m2m,
             # /daily_m2m week card, /daily_m2m?range=1w) now read this same replay -> identical.
-            from smartgain_daily_m2m import current_week_realised, current_week_brokerage
+            from smartgain_daily_m2m import current_week_realised, current_week_brokerage, _monday, _ist_today
             replay_degraded = False
             try:
                 realised  = current_week_realised("MHK40")
@@ -437,19 +438,38 @@ def smartgain_m2m():
                 # a fill that oversells the book). NEVER fail the endpoint — fall back to the last stored
                 # weekly row (smartgain_weekly_pnl) and flag degraded so the WEEK M2M header shows a stale
                 # badge instead of "Could not load". The 09:10 resync (fix_1) prevents the desync upstream.
+                # cc#1878 fix (items 3-5): the fallback query used to read whatever row was NEWEST in
+                # smartgain_weekly_pnl with no week filter at all -- on 09-Sep that served a 5-week-old
+                # 407.00 row as "this week's" realised, confidently wrong rather than honestly absent.
+                # Scoped to the CURRENT ISO week now (_monday/_ist_today, reused from smartgain_daily_m2m,
+                # not a new week-start helper); a missing current-week row degrades to None (a dash), never
+                # a stale number and never a fabricated 0.0. The warning-only log is also upgraded to an
+                # ops_log row (same shape the outer except handler already writes) so BOTH degrade paths
+                # leave DB evidence, not just one.
                 import logging as _lg
                 _lg.getLogger("scorr").warning(f"smartgain_m2m replay degraded — weekly_pnl fallback: {e}")
+                try:
+                    cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                                   VALUES (CURRENT_DATE, NOW(), 'alert', 'SMARTGAIN_M2M_DEGRADED', %s::jsonb)""",
+                                (json.dumps({"error": str(e)[:300],
+                                             "note": "smartgain_m2m FIFO replay threw -- weekly_pnl fallback (inner)"}),))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                _wk_start = _monday(_ist_today())
                 cur.execute("""SELECT realised, brokerage FROM smartgain_weekly_pnl
-                               WHERE account='MHK40' ORDER BY week_start DESC LIMIT 1""")
+                               WHERE account='MHK40' AND week_start = %s""", (_wk_start,))
                 _w = cur.fetchone()
-                realised  = float(_w[0]) if (_w and _w[0] is not None) else 0.0
-                brokerage = float(_w[1]) if (_w and _w[1] is not None) else 0.0
+                realised  = float(_w[0]) if (_w and _w[0] is not None) else None
+                brokerage = float(_w[1]) if (_w and _w[1] is not None) else None
                 replay_degraded = True
 
             # ── GROSS: realised + unrealised ── (unrealised = live MTM on holdings, replay-independent)
-            gross = round(realised + unrealised, 2)
+            # cc#1878: realised can now be None (no current-week row, item 4) -- gross/net follow it into
+            # None rather than treating an absent realised as zero, which would silently understate P&L.
+            gross = round(realised + unrealised, 2) if realised is not None else None
             # cc#301: Gross / Brokerage / Net always three separate line items, never netted silently.
-            net = round(gross - brokerage, 2)
+            net = round(gross - brokerage, 2) if (gross is not None and brokerage is not None) else None
 
             return {
                 "account": "MHK40", "positions": rows,
@@ -486,9 +506,14 @@ def smartgain_m2m():
                 cur.execute("""SELECT symbol, direction, qty, entry_price, ltp, mtm, updated_at
                                FROM smartgain_holdings WHERE account='MHK40' ORDER BY id""")
                 hrows = cur.fetchall()
+                # cc#1878 fix (item 3, second occurrence -- "third_defect_same_handler"): this fallback
+                # had the identical unfiltered ORDER BY week_start DESC LIMIT 1, so the OUTER degrade
+                # path could serve the same stale row as the inner one. Same current-ISO-week scope.
+                from smartgain_daily_m2m import _monday as _monday2, _ist_today as _ist_today2
+                _wk_start2 = _monday2(_ist_today2())
                 cur.execute("""SELECT realised, unrealised, total, brokerage, net_pl, last_updated
-                               FROM smartgain_weekly_pnl WHERE account='MHK40'
-                               ORDER BY week_start DESC LIMIT 1""")
+                               FROM smartgain_weekly_pnl WHERE account='MHK40' AND week_start = %s""",
+                            (_wk_start2,))
                 w = cur.fetchone()
             # last-known positions from the holdings table (same shape the UI already renders)
             rows = []
@@ -507,13 +532,13 @@ def smartgain_m2m():
                 })
             # unrealised from the SAME holdings rows (never 0 while a book exists)
             unrealised = round(sum(r["mtm"] or 0 for r in rows), 2)
-            if w:
-                realised  = float(w[0] or 0)
-                brokerage = float(w[3] or 0)
-            else:
-                realised = brokerage = 0.0
-            gross = round(realised + unrealised, 2)
-            net = round(gross - brokerage, 2)
+            # cc#1878 item 4: a missing current-week row is ABSENT, not zero -- "a dash is honest;
+            # 407.00 from August is not" (the card's own words). realised/brokerage stay None so the
+            # surface renders a dash instead of a confident but wrong number.
+            realised  = float(w[0]) if (w and w[0] is not None) else None
+            brokerage = float(w[3]) if (w and w[3] is not None) else None
+            gross = round(realised + unrealised, 2) if realised is not None else None
+            net = round(gross - brokerage, 2) if (gross is not None and brokerage is not None) else None
             if rows or w:
                 return {"account": "MHK40", "positions": rows,
                         "realised": realised, "unrealised": unrealised, "total": gross,
