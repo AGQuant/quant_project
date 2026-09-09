@@ -607,13 +607,31 @@ def _cut_stats(r):
     }
 
 
+V10_OPT_BROKERAGE_PER_TRADE = 100.0
+# cc#1883: Rs 100 per lot, charged PER ROUND TRIP (one charge per closed option trade) — Fable's
+# stated default pending founder correction; the alternative reading is per LEG (entry+exit =
+# Rs 200/trade). Every OPT row in v10_trades is confirmed exactly 1 lot: lot_size is the CONTRACT
+# size (BANKNIFTY 30, NIFTY50 65), not a multiplier, and pnl == points * lot_size already holds
+# exactly — so this is a flat per-trade charge, never lot_size x rate (that would be Rs 3,000-6,500
+# a trade). Applies ONLY when the caller has already scoped to leg='OPT' — see the `leg == "OPT"`
+# guard below. Deliberately NOT unified with SmartGain's separate brokerage model
+# (smartgain_daily_m2m.BROKERAGE_RATE, Rs 1,000/crore/fill leg) — different books, different costs.
+
+
 def get_performance(leg=None):
     """Full live-paper stats from v10_trades for the dashboard performance panel.
 
     cc#1597 (V10_DISPLAY_OPTIONS_ONLY_V1, session_log 36703): optional `leg` ("OPT" / "FUT")
     restricts EVERY figure below to that leg's rows — one WHERE clause on the same queries, the
     same formulas, so a surface that must show the option book only gets the option book from
-    the server rather than filtering aggregates on the client. None = the whole book, as before."""
+    the server rather than filtering aggregates on the client. None = the whole book, as before.
+
+    cc#1883: brokerage/net_pnl/first_exit/last_exit are new, additive fields. brokerage and
+    net_pnl are populated ONLY when leg == "OPT" (None when the caller asked for the whole book
+    or the FUT leg alone) — V10_OPT_BROKERAGE_PER_TRADE is an option-only rate and applying it to
+    a mixed or FUT-only book would silently misprice those trades. first_exit/last_exit are
+    populated for every scope; they are what a caption should read its own as-of from, never a
+    hardcoded date string."""
     leg = (leg or "").strip().upper() or None
     if leg not in (None, "OPT", "FUT"):
         leg = None
@@ -628,8 +646,10 @@ def get_performance(leg=None):
                 "COALESCE(AVG(points) FILTER (WHERE pnl>0),0), "
                 "COALESCE(AVG(points) FILTER (WHERE pnl<=0),0), "
                 "COALESCE(SUM(pnl) FILTER (WHERE pnl>0),0), "
-                "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0) FROM v10_trades" + lw, lp)
-            tot, wins, pnl, avg_win, avg_loss, gross_profit, gross_loss = cur.fetchone()
+                "COALESCE(SUM(pnl) FILTER (WHERE pnl<0),0), "
+                "MIN(exit_ts::date), MAX(exit_ts::date) FROM v10_trades" + lw, lp)
+            (tot, wins, pnl, avg_win, avg_loss, gross_profit, gross_loss,
+             first_exit, last_exit) = cur.fetchone()
             # cc#1247: the two cuts now carry gross profit and gross loss as well, so win rate and
             # profit factor can be struck PER SEGMENT from the SAME formulas the total uses. This is
             # read-path aggregation only — two extra aggregate columns on queries that already
@@ -657,6 +677,17 @@ def get_performance(leg=None):
     tot = tot or 0
     gp, gl = float(gross_profit), float(gross_loss)
     pf = round(gp / abs(gl), 2) if gl != 0 else None
+    # cc#1883: brokerage/net_pnl are OPT-only — see V10_OPT_BROKERAGE_PER_TRADE's own comment for
+    # why this must not run against a mixed or FUT-only scope. by_symbol gets the identical
+    # per-segment treatment (Rs 100 x that segment's own trade count), so a symbol row sums to the
+    # same total the headline does.
+    brokerage = net_pnl = None
+    if leg == "OPT" and tot:
+        brokerage = round(tot * V10_OPT_BROKERAGE_PER_TRADE, 2)
+        net_pnl = round(float(pnl) - brokerage, 2)
+        for _sym_stats in by_symbol.values():
+            _sym_stats["brokerage"] = round(_sym_stats["trades"] * V10_OPT_BROKERAGE_PER_TRADE, 2)
+            _sym_stats["net_pnl"] = round(_sym_stats["pnl"] - _sym_stats["brokerage"], 2)
     return {
         "total_trades": tot,
         "win_rate": round(100 * wins / tot, 1) if tot else 0.0,
@@ -669,6 +700,13 @@ def get_performance(leg=None):
         "by_symbol": by_symbol,
         "by_leg": by_leg,
         "leg": leg,   # cc#1597: which leg these figures describe; None = whole book
+        # cc#1883: additive fields below. brokerage/net_pnl are None unless leg=="OPT" (an honest
+        # None, not a 0 that would read as "no cost" on the whole-book/FUT-only callers).
+        "brokerage": brokerage,
+        "brokerage_basis": "Rs 100 per lot, per round-trip trade" if brokerage is not None else None,
+        "net_pnl": net_pnl,
+        "first_exit": str(first_exit) if first_exit else None,
+        "last_exit": str(last_exit) if last_exit else None,
     }
 
 
