@@ -2257,8 +2257,18 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #gvp .g-bm .g-peer .g-rng{position:absolute;top:0;bottom:0;background:color-mix(in srgb, var(--mute) 25%, transparent)}
 #gvp .g-bm .g-peer .g-me{position:absolute;top:-4px;width:2px;height:12px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
 #gvp .g-bm .g-peer .g-med{position:absolute;top:-3px;width:1px;height:10px;background:var(--mute)}
-#gvp .g-legend{display:flex;gap:var(--space-14);font-family:var(--mono);font-size:var(--type-95);color:var(--dim);margin-top:var(--space-10)}
-#gvp .g-legend i{display:inline-block;width:8px;height:8px;margin-right:var(--space-4);vertical-align:-1px}
+#gvp .g-legend,#g-pilsheet .g-legend{display:flex;flex-wrap:wrap;gap:var(--space-8) var(--space-14);font-family:var(--mono);font-size:var(--type-95);color:var(--dim);margin-top:var(--space-10)}
+#gvp .g-legend i,#g-pilsheet .g-legend i{display:inline-block;width:8px;height:8px;margin-right:var(--space-4);vertical-align:-1px}
+/* cc#1866: pillarSheetOpen() (mobile/gvm.html) appends #g-pilsheet to document.body, OUTSIDE
+   #gvp -- the ID-scoped selector above never matched it, so its GRID_LEGEND rendered as bare
+   unstyled spans: no flex/gap (text ran together with no separator), no --dim colour (fell back
+   to the browser default), no margin-top (crowded the DONE button below it). Founder screenshot
+   09-Sep-2026, GULFOILLUB V-pillar sheet. Same bug CLASS already fixed twice this session for
+   other #ckp/#gvp sibling overlays (cc#1828 #scorrAnaOv, cc#1848 #alWrap) -- the fix is always
+   adding the sibling's id to the selector, never a token value change. flex-wrap + row-gap added
+   (matches GRID_LEGEND's own inline style, which already expected wrapping) so the trailing meta
+   span can drop to its own line on narrow viewports instead of forcing a horizontal scroll.
+   #g-psheet (paramSheetOpen) does not render a .g-legend, so it needs no matching entry here. */
 /* charts (ref svg.ch + .chart-cap) */
 #gvp svg.g-ch2{display:block;width:100%;height:auto}
 #gvp .g-cap2{display:flex;justify-content:space-between;font-family:var(--mono);font-size:var(--type-10);color:var(--dim);margin-top:var(--space-6)}
@@ -2329,7 +2339,11 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 /* states */
 #gvp .g-empty{padding:var(--space-18) var(--space-14);text-align:center;color:var(--mute);font-size:var(--type-13);line-height:1.5}
 #gvp .g-empty .chip{display:inline-block;margin-top:var(--space-10);padding:var(--space-8) var(--space-14);border:var(--bw-1) solid var(--line);border-radius:0;font-family:var(--mono);font-size:var(--type-11);color:var(--gold);cursor:pointer;clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
-#gvp .g-asof{font-family:var(--mono);font-size:var(--type-10);color:var(--dim);margin-top:var(--space-8);text-align:right}
+#gvp .g-asof,#g-pilsheet .g-asof{font-family:var(--mono);font-size:var(--type-10);color:var(--dim);margin-top:var(--space-8);text-align:right}
+/* cc#1866: same #g-pilsheet-outside-#gvp gap as .g-legend above -- without this, the "N checks ·
+   score as of DATE" line inherited no margin-top/text-align and ran flush against the legend's
+   last span, matching the founder's verbatim capture ("...chip = rating5 checksscore as of
+   2026-09-08" read as one unbroken string). */
 #gvp .g-foot{text-align:center;font-family:var(--mono);font-size:var(--type-10);color:var(--dim);margin-top:var(--space-18)}
 /* active bottom-nav slot takes the ref's gold (markup untouched) */
 .bnav .bn.on{color:var(--gold,#D4AF37);text-shadow:0 0 10px rgba(212,175,55,.35)}
