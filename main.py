@@ -820,6 +820,8 @@ from screener_expectations import router as screener_expectations_router   # cc#
 app.include_router(screener_expectations_router)
 from v8_approved_trades import router as v8_approved_trades_router   # cc#1867: Home APPROVED TRADES slider (v8_paper_positions OPEN rows, v8_book_canon formula, no second compute path)
 app.include_router(v8_approved_trades_router)
+from mobile_home_derivatives import router as mobile_home_derivatives_router   # cc#1875 phase 1: Home 3rd card, DERIVATIVES (index option chain summary), wraps oi_structure.oi_structure() -- no second formula
+app.include_router(mobile_home_derivatives_router)
 from ops_control_plane import control_plane_router   # cc#693: ops control plane (registries + job_runs spine + diagnosis)
 app.include_router(control_plane_router)
 app.include_router(performance_router)

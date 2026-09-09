@@ -174,6 +174,7 @@ def structure_from_rows(rows) -> Optional[dict]:
         "put_wall": pw[0] if pw else None, "put_wall_oi": int(pw[1]) if pw else None,
         "second_call_wall": cw2[0] if cw2 else None, "second_put_wall": pw2[0] if pw2 else None,
         "pcr": (round(tot_pe / tot_ce, 3) if tot_ce > 0 else None),
+        "ce_oi": int(tot_ce), "pe_oi": int(tot_pe),   # cc#1875: the raw totals behind the pcr ratio -- already computed here, just never returned before this card needed them
         "one_sided": side,            # None | 'PE_MISSING' | 'CE_MISSING'
         "strike_step": step,
     }
@@ -578,7 +579,8 @@ def oi_structure(underlying: str = "NIFTY"):
         "max_pain": st["max_pain"], "call_wall": st["call_wall"], "call_wall_oi": st["call_wall_oi"],
         "put_wall": st["put_wall"], "put_wall_oi": st["put_wall_oi"],
         "second_call_wall": st["second_call_wall"], "second_put_wall": st["second_put_wall"],
-        "pcr": st["pcr"], "one_sided": st["one_sided"], "strikes": st["n_strikes"],
+        "pcr": st["pcr"], "ce_oi": st["ce_oi"], "pe_oi": st["pe_oi"],   # cc#1875: raw OI totals alongside the ratio
+        "one_sided": st["one_sided"], "strikes": st["n_strikes"],
         "mp_dist_pct": mp_dist, "range_width_pct": width,
         "scenario": scenario or ("ONE_SIDED" if st["one_sided"] else None),
         "headline": w["headline"], "read": w["read"], "read_text": " ".join(w["read"]),
