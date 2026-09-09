@@ -858,6 +858,17 @@ window.addEventListener('scorr:theme', function(){
 #v10ChartBox .v10ln.x{color:var(--mut);border-color:var(--line2)}
 #v10ChartBox .v10ld{position:absolute;width:1px;background:rgba(148,166,210,.28);pointer-events:none}
 #v10ChartBox .v10ld.x{background:rgba(148,166,210,.42)}
+/* cc#1882: V10 chart TOP lane — same box model as .v10ln/.v10ld (cc#1756) above, just anchored at
+   the top of the pane instead of the foot. .v10cap is a P&L capsule: unclustered, it carries the
+   green/red P&L invariant (set inline per-capsule, never a fixed colour here — this is the one
+   place colour is not negotiable, scope item 2); a clustered ×N capsule falls back to the SAME
+   muted/bordered treatment .v10ln.x uses, because a fold-count is a lane fact, not a P&L. .v10cd
+   is its leader — identical low-contrast weight to .v10ld, so it reads as a guide, never a price
+   level or the existing dashed lines. */
+#v10ChartBox .v10cap{position:absolute;transform:translateX(-50%);pointer-events:auto;cursor:default;font:700 9.5px var(--f-m);letter-spacing:.02em;line-height:13px;padding:0 4px;border-radius:4px;background:var(--bg);white-space:nowrap;border:1px solid transparent}
+#v10ChartBox .v10cap.x{color:var(--mut);border-color:var(--line2)}
+#v10ChartBox .v10cd{position:absolute;width:1px;background:rgba(148,166,210,.28);pointer-events:none}
+#v10ChartBox .v10cd.x{background:rgba(148,166,210,.42)}
 /* record strip */
 #pane-index .rec{display:grid;grid-template-columns:auto auto auto 1fr auto;gap:22px;align-items:center;padding:14px 18px}
 #pane-index .rec .k{font:600 9.5px var(--f-m);letter-spacing:.14em;color:var(--tx3);text-transform:uppercase}
@@ -1443,7 +1454,7 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
       </div>
       <div style="flex:1;min-width:10px"></div>
       <!-- cc#1756: the legend describes what is DRAWN — markers on the plot, codes in the footer lane. -->
-      <div id="v10ChartLegend" style="font-size:10px;color:var(--mut)">on the plot: ▲ ▼ entry · ○ open leg · small square = exit (green target, red stop, grey other), pinned on the spot bar · in the footer lane, each tied to its candle by a thin vertical line: B / S entry · FLIP B / S = same-bar exit + entry · T / SL / other = exit · ×N = a cluster too dense to stagger (hover or tap it for the list) · hover or tap a candle or a lane label for the index level and option P&amp;L</div>
+      <div id="v10ChartLegend" style="font-size:10px;color:var(--mut)">on the plot: ▲ ▼ entry · ○ open leg · small square = exit (green target, red stop, grey other), pinned on the spot bar · in the footer lane, each tied to its candle by a thin vertical line: B / S entry · FLIP B / S = same-bar exit + entry · T / SL / other = exit · in the top lane, each closed leg's option P&amp;L in a capsule (green profit, red loss), tied to its candle the same way — entries carry no capsule · ×N in either lane = a cluster too dense to stagger (hover or tap it for the list) · hover or tap a candle, a lane label or a capsule for the index level and option P&amp;L</div>
       <button onclick="closeV10Chart()" title="Close (Esc)" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--line2);background:var(--surface2);color:var(--mut);cursor:pointer;font-size:14px;flex:none">&#10005;</button>
     </div>
     <div id="v10ChartBox" style="flex:1;min-height:0;position:relative"></div>
@@ -6944,6 +6955,32 @@ function _v10Reason(raw){
   const s=String(raw||'EXIT').trim(); const cut=s.search(/[\s\[]/);
   return (cut<0?s:s.slice(0,cut)).toUpperCase()||'EXIT';
 }
+// cc#1882: the row-packing algorithm cc#1756 wrote for the footer lane, EXTRACTED verbatim (same
+// left-to-right / first-row-that-fits / fold-into-predecessor-on-overflow logic) so the new top
+// P&L lane REUSES it instead of re-implementing it — the design principle the card itself states
+// ("mirror the footer lane, do not invent a second grammar"). Pure function: `items` need only an
+// `x` field, `labelOf(group)` decides what a (possibly folded) group displays, `textW` measures
+// it. drawLane() below calls this with its own code-based labelOf; drawTopLane() calls it with a
+// rupee-P&L-based one. Behaviour is unchanged from cc#1756 — only pulled out of drawLane()'s body.
+function _v10PackLane(items, rows, gap, textW, labelOf){
+  let groups=items.map(it=>({members:[it]}));
+  for(let guard=0;guard<600;guard++){
+    const rowEnds=[]; for(let k=0;k<rows;k++) rowEnds.push(-1e9);
+    let bad=-1;
+    for(let gi=0; gi<groups.length; gi++){
+      const G=groups[gi];
+      G.cx=Math.round(G.members.reduce((a,m)=>a+m.x,0)/G.members.length);
+      G.label=labelOf(G);
+      G.w=textW(G.label); G.left=G.cx-G.w/2; G.right=G.cx+G.w/2;
+      let r=-1; for(let k=0;k<rows;k++){ if(G.left>=rowEnds[k]+gap){ r=k; break; } }
+      if(r<0){ bad=gi; break; }
+      G.row=r; rowEnds[r]=G.right;
+    }
+    if(bad<1) break;   // every group placed (or, impossibly, the first one failed on empty rows)
+    groups[bad-1].members=groups[bad-1].members.concat(groups[bad].members); groups.splice(bad,1);   // fold into the predecessor -> ×N
+  }
+  return groups;
+}
 function buildV10Markers(candles, open, closed){
   /* cc#1573: the app chart's vocabulary (mobile/home.html pinCode/pinCol): B / S entry at the
      index level, T = TARGET (green), SL (red), any other reason printed as its keyword (grey),
@@ -6981,13 +7018,20 @@ function buildV10Markers(candles, open, closed){
       const col=e.reason==='TARGET'?UP:(e.reason==='SL'?DN:C.mut);
       tip(e.time,(code==='T'?'Target':code==='SL'?'Stop':code)+' exit · option P&L'+(pnlTxt(e.pnl)||' n/a'));
       /* cc#1756: `code` is the FOOTER-LANE label (T / SL / other keyword, muted); the plot keeps
-         the unlabelled square exactly as cc#1742 drew it. */
-      return {time:e.time,position:e.long?'aboveBar':'belowBar',color:col,shape:'square',size:0.6,text:'',code:code,lane:'exit'};
+         the unlabelled square exactly as cc#1742 drew it.
+         cc#1882: `pnl` is ADDITIVE — LightweightCharts' setMarkers() only reads time/position/
+         color/shape/size/text, so this extra field cannot affect the on-plot render (cc#1742 item
+         2/3 stay exactly as drawn). It is what the new TOP lane keys off of: only an object that
+         carries a pnl gets a capsule (scope item 3 — a plain entry never does). e.pnl is already
+         OPT-leg only, same filter buildV10Markers has always applied (isOpt() above). */
+      return {time:e.time,position:e.long?'aboveBar':'belowBar',color:col,shape:'square',size:0.6,text:'',code:code,lane:'exit',pnl:e.pnl};
     }
     tip(e.time,(e.long?'B':'S')+' at '+num(e.level,0)+(e.kind==='open'?' · OPEN leg':''));
     /* cc#1756 (founder 06-Sep "Dont overlap Buy Sell, better show in footer indicate by vertical
        lines point to that candle"): NO TEXT ON THE PLOT. The arrow / ring keeps its shape, colour
-       and position; the code (B, S, B · OPEN) moves to the footer lane, tied back by a leader. */
+       and position; the code (B, S, B · OPEN) moves to the footer lane, tied back by a leader.
+       cc#1882: no `pnl` field here — a plain B/S/OPEN entry has no realised P&L (scope item 3)
+       and must render no capsule; leaving pnl undefined is what the top lane's own filter reads. */
     return {time:e.time,position:e.long?'belowBar':'aboveBar',color:e.long?UP:DN,
       shape:e.kind==='open'?'circle':(e.long?'arrowUp':'arrowDown'),
       text:'',code:(e.long?'B':'S')+(e.kind==='open'?' · OPEN':''),lane:'entry'};
@@ -7000,8 +7044,14 @@ function buildV10Markers(candles, open, closed){
     if(ent&&ex){
       // the flip: one glyph, the entry's direction and colour; the level and the closed leg's option P&L go to the tooltip
       tip(ent.time,'FLIP '+(ent.long?'B':'S')+' at '+num(ent.level,0)+' · closed leg option P&L'+(pnlTxt(ex.pnl)||' n/a'));
+      // cc#1882 scope item 3: "capsules appear on T/SL/other-exit events, AND on the EXIT half of
+      // a FLIP" — a flip's exit (ex) never gets its own plot marker (only the FLIP entry glyph is
+      // drawn), but it IS a real closed leg with a real P&L, at the SAME x (same-bar by definition
+      // of a flip). Attaching ex.pnl to the FLIP marker itself — rather than inventing a second,
+      // invisible marker object — is the minimal way to give the top lane a capsule for it without
+      // adding anything to the plot (cc#1742's flip glyph is untouched: same shape/colour/text).
       out.push({time:ent.time,position:ent.long?'belowBar':'aboveBar',color:ent.long?UP:DN,
-        shape:ent.long?'arrowUp':'arrowDown',text:'',code:'FLIP '+(ent.long?'B':'S'),lane:'entry'});   // cc#1756: label in the lane, not on the plot
+        shape:ent.long?'arrowUp':'arrowDown',text:'',code:'FLIP '+(ent.long?'B':'S'),lane:'entry',pnl:ex.pnl});   // cc#1756: label in the lane, not on the plot
       rest.forEach(e=>out.push(one(e)));
     } else g.forEach(e=>out.push(one(e)));
   });
@@ -7090,11 +7140,85 @@ async function loadV10Chart(){
     const _wCache={}; const textW=t=>{ if(_wCache[t]==null){ probe.textContent=t; _wCache[t]=probe.offsetWidth||Math.round(t.length*6.2)+8; probe.textContent=''; } return _wCache[t]; };
     const ts=chart.timeScale();
     const laneGeom=()=>{ const tsH=ts.height(), psW=chart.priceScale('right').width(); const paneH=box.clientHeight-tsH; return {tsH,psW,paneH,laneTop:paneH-LANE_H}; };
-    const fitLane=()=>{ const g=laneGeom(); try{ series.priceScale().applyOptions({scaleMargins:{top:0.08,bottom:Math.min(0.6,(LANE_H+10)/Math.max(1,g.paneH))}}); }catch(e){} };
+    /* ── cc#1882 · THE TOP LANE (founder 09-Sep: "show P&L in capsule top part of chart indicate
+       by vertical dash lines line below") ──────────────────────────────────────────────────────
+       The cc#1756 footer lane's reflection, reusing its packing algorithm (_v10PackLane above) and
+       its whole design language — a fixed-height strip, this time at the TOP of the price pane,
+       thin low-contrast leaders down to each candle. Only markers carrying a `pnl` field populate
+       it (buildV10Markers attaches pnl ONLY to real exits and to a flip's closed leg — scope item
+       3: a plain B/S/OPEN entry has no realised P&L and gets no capsule, no leader, nothing). The
+       capsule TEXT is the signed rupee P&L, green/red per the P&L invariant (never muted, unlike
+       the footer lane's own neutral action codes) — that invariant is never themed away. */
+    const TOP_ROW=15, TOP_ROWS=3, TOP_H=TOP_ROW*TOP_ROWS+6, TOP_GAP=4;
+    const topLane=document.createElement('div'); topLane.id='v10TopLane';
+    topLane.style.cssText='position:absolute;left:0;top:0;height:'+TOP_H+'px;z-index:4;pointer-events:none;border-bottom:1px solid rgba(148,166,210,.14);background:'+C.bg+';overflow:hidden';
+    const topLeaders=document.createElement('div'); topLeaders.id='v10TopLeaders';
+    topLeaders.style.cssText='position:absolute;left:0;top:0;z-index:3;pointer-events:none;overflow:hidden';
+    const topProbe=document.createElement('div'); topProbe.className='v10cap'; topProbe.style.cssText='position:absolute;visibility:hidden;left:0;top:0;transform:none';
+    box.appendChild(topLeaders); box.appendChild(topLane); box.appendChild(topProbe);
+    topProbe.id='v10TopLaneProbe'; topProbe.setAttribute('aria-hidden','true');
+    const _topWCache={}; const topTextW=t=>{ if(_topWCache[t]==null){ topProbe.textContent=t; _topWCache[t]=topProbe.offsetWidth||Math.round(t.length*6.2)+8; topProbe.textContent=''; } return _topWCache[t]; };
+    const capTxt=p=>(p==null||isNaN(p))?'':((p>=0?'+':'−')+'₹'+num(Math.abs(p),0));   // signed, rupee-symbol capsule text — matches the footer tooltip's own pnlTxt sign convention (buildV10Markers, above)
+    const fitLane=()=>{
+      const g=laneGeom();
+      // cc#1882: ONE combined applyOptions call for both margins — two separate calls risk one
+      // overwriting the other depending on how the chart library merges scaleMargins internally,
+      // so top and bottom are always computed and set together.
+      try{ series.priceScale().applyOptions({scaleMargins:{
+        top:Math.min(0.6,(TOP_H+10)/Math.max(1,g.paneH)),
+        bottom:Math.min(0.6,(LANE_H+10)/Math.max(1,g.paneH))
+      }}); }catch(e){}
+    };
     function showLaneTip(lines,x,yTop){
       tipEl.innerHTML=lines.map(esc).join('<br>'); tipEl.style.display='block';
       tipEl.style.left=Math.max(8,Math.min(x-tipEl.offsetWidth/2, box.clientWidth-tipEl.offsetWidth-8))+'px';
       tipEl.style.top=Math.max(8,yTop-8-tipEl.offsetHeight)+'px';
+    }
+    function drawTopLane(){
+      if(!_v10chart||_v10chart!==chart) return;
+      const psW=chart.priceScale('right').width();
+      topLane.style.right=psW+'px'; topLeaders.style.right=psW+'px';
+      const items=[];
+      markers.forEach((m,i)=>{
+        if(m.pnl==null||isNaN(m.pnl)) return;   // scope item 3: only a real exit P&L gets a capsule
+        const x=ts.timeToCoordinate(m.time); if(x==null) return;
+        const bar=byTime[m.time]||{};
+        // mirror of the footer lane's own y logic (laneGeom comment above): anchor from the
+        // candle's HIGH (not low — this leader comes from ABOVE), nudged further up past the
+        // marker's own glyph when that marker is drawn aboveBar so the leader never runs through it.
+        let y=(bar.high!=null)?series.priceToCoordinate(bar.high):null;
+        if(y!=null) y-=(m.position==='aboveBar'?(m.shape==='square'?14:22):2);
+        items.push({i,x:Math.round(x),y:(y==null?TOP_H:Math.max(0,Math.min(TOP_H,Math.round(y)))),pnl:m.pnl,col:m.pnl>=0?UP:DN,time:m.time});
+      });
+      items.sort((a,b)=>a.x-b.x||a.i-b.i);
+      const groups=_v10PackLane(items, TOP_ROWS, TOP_GAP, topTextW, G=>G.members.length>1?('×'+G.members.length):capTxt(G.members[0].pnl));
+      topLane.innerHTML=''; topLeaders.innerHTML='';
+      const report=[];
+      groups.forEach(G=>{
+        const clustered=G.members.length>1;
+        // row 0 sits CLOSEST to the candles (bottom of this strip), deeper rows climb toward the
+        // very top of the box — the mirror of the footer lane's row 0-nearest-the-candles rule.
+        const top=(TOP_ROWS-1-G.row)*TOP_ROW+3;
+        const el=document.createElement('div'); el.className='v10cap'+(clustered?' x':'');
+        el.textContent=G.label; el.style.left=G.cx+'px'; el.style.top=top+'px';
+        if(!clustered) el.style.color=G.members[0].col;
+        el.title=clustered?G.members.map(m=>capTxt(m.pnl)).join(' · '):G.label;
+        const tipLines=clustered
+          ? G.members.map(m=>capTxt(m.pnl)+' — '+((_v10Tips[m.time]||[]).join(' / ')||'no detail'))
+          : (_v10Tips[G.members[0].time]||[G.label]);
+        el.onmouseenter=el.onclick=function(ev){ if(ev&&ev.stopPropagation) ev.stopPropagation(); showLaneTip(tipLines,G.cx,top+TOP_ROW); };
+        el.onmouseleave=function(){ tipEl.style.display='none'; };
+        topLane.appendChild(el);
+        const mid=G.members[Math.floor((G.members.length-1)/2)];
+        const lx=clustered?G.cx:G.members[0].x, ly=clustered?mid.y:G.members[0].y;
+        const capBottom=top+TOP_ROW-3;   // the capsule's own bottom edge — leader starts just under it, never through the text
+        const ln=document.createElement('div'); ln.className='v10cd'+(clustered?' x':'');
+        ln.style.left=lx+'px'; ln.style.top=capBottom+'px'; ln.style.height=Math.max(0,ly-capBottom)+'px';
+        topLeaders.appendChild(ln);
+        report.push({label:G.label,row:G.row,cx:G.cx,left:Math.round(G.left),right:Math.round(G.right),leaderX:lx,leaderBottom:ly,
+                     members:G.members.map(m=>({pnl:m.pnl,x:m.x,y:m.y,time:m.time}))});
+      });
+      window._v10TopLane={entries:report,events:items.length,markers:markers.length,topH:TOP_H,rows:TOP_ROWS,sym:_v10sym};
     }
     function drawLane(){
       if(!_v10chart||_v10chart!==chart) return;
@@ -7113,22 +7237,9 @@ async function loadV10Chart(){
         items.push({i,x:Math.round(x),y:(y==null?g.laneTop:Math.max(0,Math.min(g.laneTop,Math.round(y)))),code:m.code||'',col:m.color,time:m.time});
       });
       items.sort((a,b)=>a.x-b.x||a.i-b.i);
-      let groups=items.map(it=>({members:[it]}));
-      for(let guard=0;guard<600;guard++){
-        const rows=[]; for(let k=0;k<LANE_ROWS;k++) rows.push(-1e9);
-        let bad=-1;
-        for(let gi=0; gi<groups.length; gi++){
-          const G=groups[gi];
-          G.cx=Math.round(G.members.reduce((a,m)=>a+m.x,0)/G.members.length);
-          G.label=G.members.length>1?('×'+G.members.length):G.members[0].code;
-          G.w=textW(G.label); G.left=G.cx-G.w/2; G.right=G.cx+G.w/2;
-          let r=-1; for(let k=0;k<LANE_ROWS;k++){ if(G.left>=rows[k]+LANE_GAP){ r=k; break; } }
-          if(r<0){ bad=gi; break; }
-          G.row=r; rows[r]=G.right;
-        }
-        if(bad<1) break;   // every group placed (or, impossibly, the first one failed on empty rows)
-        groups[bad-1].members=groups[bad-1].members.concat(groups[bad].members); groups.splice(bad,1);   // fold into the predecessor -> ×N
-      }
+      // cc#1882: the packing loop that used to live inline here is now the shared _v10PackLane()
+      // (identical logic, just extracted) — the top P&L lane calls the same function below.
+      const groups=_v10PackLane(items, LANE_ROWS, LANE_GAP, textW, G=>G.members.length>1?('×'+G.members.length):G.members[0].code);
       lane.innerHTML=''; leaders.innerHTML='';
       const report=[];
       groups.forEach(G=>{
@@ -7154,8 +7265,8 @@ async function loadV10Chart(){
       window._v10Lane={entries:report,events:items.length,markers:markers.length,laneTop:g.laneTop,laneH:LANE_H,rows:LANE_ROWS,sym:_v10sym};
     }
     fitLane();
-    ts.subscribeVisibleLogicalRangeChange(function(){ requestAnimationFrame(drawLane); });
-    requestAnimationFrame(function(){ drawLane(); requestAnimationFrame(drawLane); });
+    ts.subscribeVisibleLogicalRangeChange(function(){ requestAnimationFrame(drawLane); requestAnimationFrame(drawTopLane); });
+    requestAnimationFrame(function(){ drawLane(); drawTopLane(); requestAnimationFrame(drawLane); requestAnimationFrame(drawTopLane); });
     /* cc#1742 scope 4 — detail on demand: the level and the option P&L that left the plot show in
        a tooltip on the bar under the crosshair (hover on desktop, tap on touch — LWC fires the
        crosshair move for both). Nothing is deleted from the data, only from the default view. */
@@ -7178,7 +7289,7 @@ async function loadV10Chart(){
       if(hit) _v10pendingScroll=hit.entry_ts;
     }
     if(_v10pendingScroll){var _sb=_v10SnapBar(candles,_v10pendingScroll);if(_sb){try{chart.timeScale().setVisibleRange({from:_sb.time-5400,to:_sb.time+5400});}catch(e){}}_v10pendingScroll=null;}
-    _v10ro=new ResizeObserver(()=>{ if(_v10chart){ _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); fitLane(); requestAnimationFrame(drawLane); } });   // cc#1756: the lane follows the pane
+    _v10ro=new ResizeObserver(()=>{ if(_v10chart){ _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); fitLane(); requestAnimationFrame(drawLane); requestAnimationFrame(drawTopLane); } });   // cc#1756/cc#1882: both lanes follow the pane
     _v10ro.observe(box);
   }catch(e){
     if(_v10chart){try{_v10chart.remove();}catch(e2){} _v10chart=null;_v10series=null;}
