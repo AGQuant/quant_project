@@ -260,6 +260,11 @@ function renderHero(d){
     '<div class="g-strip"></div>'+
     '<div class="g-trend well" id="g-trend" role="button" data-trend="1" aria-label="Open the score trend chart"><div class="g-thd"><span>GVM · 60-DAY TREND</span><span class="g-exp">tap for score chart ⤢</span></div><div class="g-empty" style="padding:10px">Loading the score history…</div></div>'+
     flagRow(d)+   /* cc#1619: was two static pnCol columns */
+    /* cc#1865 step 7: the "V button" -- opens Section A (Valuation & Potential Upside) + Section B
+       (Growth Outlook: quarter/year/sector) from GET /api/gvm/expectations/{symbol}. Same tap-
+       affordance styling as the pillar pills/trend card, same bottom-sheet pattern (expectations
+       SheetOpen(), mirrors pillarSheetOpen()). */
+    '<div class="g-trend well" role="button" data-vbtn="1" aria-label="Open valuation and growth outlook" style="margin-top:var(--space-8)"><div class="g-thd"><span>V · VALUATION &amp; GROWTH OUTLOOK</span><span class="g-exp">tap for detail ⤢</span></div></div>'+
     '<div class="g-hfoot"><span>score as of '+esc(d.score_date||'—')+(num(d.peer_count)?' · peers: '+d.peer_count+' in segment':'')+'</span><span>Pick a capsule below ↓</span></div>'+
     '</section>';
 }
@@ -538,6 +543,58 @@ function pillarSheetOpen(letter){
   });
 }
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape') pillarSheetClose(); });
+/* ── cc#1865 step 7: EXPECTATIONS SHEET — Section A (Valuation & Potential Upside) + Section B
+   (Growth Outlook: quarter/year/sector), from GET /api/gvm/expectations/{symbol}. Same bottom-
+   sheet chrome as pillarSheetOpen/paramSheetOpen (scrim, grab handle, close X, DONE, Esc).
+   cc#1865/cc#1866 lesson: pillarSheetOpen/paramSheetOpen append to document.body, a SIBLING of
+   #gvp -- which is exactly the bug cc#1866 had to patch selector-by-selector after the fact
+   (#gvp .g-legend/.g-asof never matched #g-pilsheet). Appending THIS sheet as a CHILD of #gvp
+   instead sidesteps the whole bug class: every #gvp-scoped rule (.g-bm/.g-bk/.g-bsub/.g-bval/
+   .g-empty, the --well/--chalk/--mute/--dim/--gold aliases) reaches it via normal descendant
+   inheritance, no selector list to maintain. position:fixed still resolves against the viewport
+   (#gvp has no transform/filter/perspective, confirmed by reading its CSS block) so the sheet's
+   own inset:0 scrim and bottom-anchored dialog are unaffected by living inside #gvp. */
+function expectationsSheetClose(){ var w = document.getElementById('g-expsheet'); if(w) w.remove(); }
+function expectationsRow(label, value, sub, available){
+  return '<div class="g-bm"><div class="g-bk">'+esc(label)+'</div><div class="g-bsub">'+esc(sub||'')+'</div>'
+       + '<div class="g-bval"><b class="'+(available===false?'mu':'')+'">'+esc(available===false?'—':value)+'</b></div></div>';
+}
+function expectationsSheetOpen(){
+  var sym = STATE.sym; if(!sym) return;
+  expectationsSheetClose();
+  var el = document.createElement('div'); el.id = 'g-expsheet';
+  el.innerHTML = '<div data-exp-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80"></div>'
+    + '<div role="dialog" aria-modal="true" aria-label="Valuation and growth outlook" style="position:fixed;left:0;right:0;bottom:0;max-height:84vh;display:flex;flex-direction:column;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0">'
+    + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 4px;flex-shrink:0"></div>'
+    + '<div style="overflow-y:auto;padding:4px 16px calc(22px + env(safe-area-inset-bottom,0px))">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div>'
+    + '<div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--gold)">VALUATION &amp; GROWTH OUTLOOK · '+esc(sym)+'</div></div>'
+    + '<button type="button" data-exp-close="1" aria-label="Close" style="background:transparent;border:1px solid var(--line);color:var(--chalk);width:32px;height:32px;border-radius:8px;font-size:16px;cursor:pointer;flex-shrink:0">×</button></div>'
+    + '<div id="g-exp-body" style="margin-top:12px" class="g-empty">Loading…</div>'
+    + '<button type="button" data-exp-close="1" style="width:100%;min-height:44px;margin-top:16px;border-radius:12px;border:0;background:var(--gold);color:var(--well);font-family:var(--mono);font-weight:800;font-size:12px;letter-spacing:1px;cursor:pointer">DONE</button></div></div>';
+  document.getElementById('gvp').appendChild(el);
+  el.addEventListener('click', function(e){ if(e.target.closest('[data-exp-close]')){ expectationsSheetClose(); return; } });
+  fetch('/api/gvm/expectations/'+encodeURIComponent(sym)).then(function(r){ return r.json(); }).then(function(x){
+    var body = document.getElementById('g-exp-body'); if(!body) return;
+    var a = x.section_a || {}, b = x.section_b || {};
+    var _sgn = function(v){ return num(v) ? (v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1) : '—'; };
+    var hdStyle = 'font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--mute)';
+    var html = '<div style="'+hdStyle+'">VALUATION &amp; POTENTIAL UPSIDE</div>'
+      + expectationsRow('PE now', fx(a.pe_now && a.pe_now.value,1)+'x', '', a.pe_now && num(a.pe_now.value))
+      + expectationsRow('PE next year', fx(a.pe_next_year && a.pe_next_year.value,1)+'x', a.pe_next_year && a.pe_next_year.basis, a.pe_next_year && num(a.pe_next_year.value))
+      + expectationsRow('Upside to fair value', fx(a.upside_to_fair_value && a.upside_to_fair_value.value,1)+'%', a.upside_to_fair_value && a.upside_to_fair_value.basis, a.upside_to_fair_value && num(a.upside_to_fair_value.value))
+      + expectationsRow('PE vs own 5Y avg', fx(a.pe_vs_own_5y_avg && a.pe_vs_own_5y_avg.value,1)+'x', '', a.pe_vs_own_5y_avg && num(a.pe_vs_own_5y_avg.value))
+      + expectationsRow('PE vs sector', fx(a.pe_vs_sector && a.pe_vs_sector.value,1)+'x', (a.pe_vs_sector && a.pe_vs_sector.note) || '', a.pe_vs_sector && a.pe_vs_sector.available)
+      + '<div style="'+hdStyle+';margin-top:14px">GROWTH OUTLOOK</div>'
+      + expectationsRow('Quarter (Q2FY27 YoY)', b.quarter && b.quarter.available ? _sgn(b.quarter.yoy_pct)+'%' : '', b.quarter && !b.quarter.available ? b.quarter.reason : (b.quarter && b.quarter.basis), b.quarter && b.quarter.available)
+      + expectationsRow('Year (FY27 growth)', b.year && num(b.year.primary) ? fx(b.year.primary,1)+'%' : '', b.year && b.year.second_opinion!=null ? 'second opinion '+fx(b.year.second_opinion,1)+'% · '+esc(b.year.second_opinion_source||'') : b.year && b.year.primary_source, b.year && num(b.year.primary))
+      + expectationsRow('Sector (segment median)', b.sector && b.sector.available ? fx(b.sector.median,1)+'%' : '', b.sector && b.sector.available ? b.sector.constituents+' constituents in '+esc(b.sector.segment||'') : (b.sector && b.sector.reason), b.sector && b.sector.available);
+    body.className = ''; body.innerHTML = html;
+  }).catch(function(){
+    var body = document.getElementById('g-exp-body'); if(body){ body.className = 'g-empty'; body.textContent = 'Could not load valuation and growth data right now.'; }
+  });
+}
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') expectationsSheetClose(); });
 function secGrowth(d){
   /* ref order first (8 rows), then any other G row except the holding rows (those live on Holders) */
   var ORDER = ['sales_5y','profit_5y','profit_3y','qoq_sales','qoq_profit','opm','opm_exp','roce'];
@@ -1428,6 +1485,7 @@ document.getElementById('gvp').addEventListener('click', function(e){
   var r = e.target.closest('[data-retry]'); if(r){ var s = r.getAttribute('data-retry'); if(s) loadCompany(s); else loadLanding(); return; }
   var t = e.target.closest('[data-trend]'); if(t){ openScoreTrend(); return; }   /* cc#1615: the score chart, not the chart card */
   var pl = e.target.closest('[data-pillar]'); if(pl){ pillarSheetOpen(pl.getAttribute('data-pillar')); return; }   /* cc#1827: G/V/M hero pills */
+  var vbn = e.target.closest('[data-vbtn]'); if(vbn){ expectationsSheetOpen(); return; }   /* cc#1865 step 7 */
   var vb = e.target.closest('[data-vbar]'); if(vb){ var k = Number(vb.getAttribute('data-vbar')); TAPE.pick = (TAPE.pick === k) ? null : k; repaintTape(); return; }   /* cc#1616 */
   var bg = e.target.closest('[data-bigday]'); if(bg){ TAPE.big = !TAPE.big; repaintTape(); return; }
   var gv = e.target.closest('[data-gv]'); if(gv){ gvView = gv.getAttribute('data-gv'); try{ localStorage.setItem('scorr_gvm_view', gvView); }catch(e){} refreshPillars(); syncCapVM(); return; }   /* cc#1618/cc#1664 */
