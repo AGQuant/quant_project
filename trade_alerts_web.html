@@ -152,6 +152,23 @@ var SHOW_ALERT_NOTES = false;
    column shows" means best_any_score100 here too, with the own-side score as the hover detail. */
 var TC_MAP = {}, TC_ASOF = null;
 
+/* cc#1885 P1: trade_alerts holds TWO different kinds of record rendered through one price-alert
+   template. kind='rebalance_due' rows (source_engine='qb') are QB Quant Basket notices, not price
+   alerts -- confirmed against real rows: symbol carries only the FIRST candidate of the basket
+   (never the alert's real subject), trigger_price carries a basket-level rupee figure (never a
+   price level -- ids 16-20 range 24,317 to 584,565 against stocks trading in the low thousands),
+   and trigger_condition carries the whole prose message ("QB REBALANCE DUE - N candidate(s):
+   SYM1, SYM2, ... +K more"), not a condition token. BUG_FIRST_RULE: fix what these rows actually
+   show before restyling anything. Render-side only -- the QB engine and what it writes into
+   trade_alerts are untouched (G1, whether rebalance-due belongs in trade_alerts at all, is a
+   founder question flagged in the task result, not decided here). */
+var REBAL_BASKET_LABEL = {mid_cap:'Mid Cap', large_cap:'Large Cap', contra_value:'Contra Value',
+  breakout_52w:'Breakout 52W', alpha_multicap:'Alpha Multicap'};
+function rebalBasketLabel(a){
+  var key = a.notes || (a.source_ref || '').split(':')[0];
+  return REBAL_BASKET_LABEL[key] || String(key || '').replace(/_/g, ' ');
+}
+
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 
@@ -215,6 +232,37 @@ function tabsHtml(){
 
 function rowHtml(a){
   var st = String(a.status || 'pending');
+  /* cc#1885 items 1-2: rebalance_due rows get their OWN render, entirely separate from the
+     price-alert path below -- every cell here is built from a field that actually describes a
+     QB rebalance notice, and trigger_price never appears anywhere in it. G1 (should these even be
+     written into trade_alerts, or moved to a Quant Basket surface) is a founder question, flagged
+     in the task result, not decided by this render fix. */
+  if (a.kind === 'rebalance_due') {
+    var basket = rebalBasketLabel(a);
+    var mCount = String(a.trigger_condition || '').match(/(\d+)\s*candidate/i);
+    var candList = String(a.trigger_condition || '').replace(/^.*candidate\(s\):\s*/i, '') || (a.trigger_condition || '');
+    var rebalTrig = mCount ? (mCount[1] + ' candidate' + (mCount[1] === '1' ? '' : 's')) : 'QB rebalance notice';
+    var rebalWhen = 'set ' + istStamp(a.created_at);
+    /* item 5: Approve/Dismiss offer an action that has no meaning here -- there is no trigger to
+       cross and nothing to approve. A neutral read-only badge, same visual family as the existing
+       Dismissed/no-action badge, rather than live buttons that would do something undefined. This
+       does NOT strand anything (see item 4/5 gate note above rowHtml for kind='entry' rows, which
+       keep their real Approve/Dismiss controls completely unchanged). */
+    var rebalAct = '<div class="twa"><span class="al-badge no" title="QB basket notice -- not a price trigger, nothing to approve or dismiss">Notice</span></div>';
+    return '<tr id="al-' + a.id + '">'
+      + '<td class="sym" title="' + esc(candList) + '">' + esc(basket) + '</td>'
+      + '<td class="al-tag">—</td>'
+      + '<td><span class="al-st ' + esc(st) + '">' + esc(st.toUpperCase()) + '</span></td>'
+      + '<td>' + (a.source_engine ? '<span class="al-eng">' + esc(a.source_engine) + '</span>' : '<span class="al-tag">manual</span>') + '</td>'
+      + '<td class="al-tag" title="' + esc(candList) + '">' + esc(rebalTrig) + '<span class="al-tag2">' + esc(rebalWhen) + '</span></td>'
+      + (SHOW_ALERT_WHEN ? '<td class="al-tag">' + esc(rebalWhen) + '</td>' : '')
+      + (SHOW_ALERT_NOTES ? '<td class="al-notes">' + esc(a.notes || '') + '</td>' : '<td class="al-tag">—</td>')
+      + '<td>' + rebalAct + '</td>'
+      + '</tr>';
+  }
+  /* kind='entry' — the genuine price-alert path, UNCHANGED below (item 5 gate: this is the only
+     live approve surface for a real alert, per cc#1537 — Wall of Trades is read-only-display by
+     founder ruling, so removing this here would strand approval entirely). */
   var dirCls = a.direction === 'BUY' ? 'long' : 'short';
   /* cc#1531: a signal-approved row (approve_signal — never was 'triggered') carries a sentinel
      trigger_price/trigger_condition, not a real watch level. Suppress the trigger cell for those
