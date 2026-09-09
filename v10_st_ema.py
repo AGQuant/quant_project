@@ -607,6 +607,12 @@ def _cut_stats(r):
     }
 
 
+V10_CAGR_CAPITAL_BASE = 300000.0
+# cc#1891 (founder ruling, 09-Sep-2026 16:16 IST, closing cc#1883 gate G2): V10's capital base is
+# Rs 3,00,000. ONE named constant — every reader of this figure moves in one edit. Used only when
+# leg=="OPT" (the same guard as brokerage/net_pnl below), on NET P&L (post-brokerage), never Gross
+# — "the number a person would actually have" per the card's own words.
+
 V10_OPT_BROKERAGE_PER_TRADE = 100.0
 # cc#1883: Rs 100 per lot, charged PER ROUND TRIP (one charge per closed option trade) — Fable's
 # stated default pending founder correction; the alternative reading is per LEG (entry+exit =
@@ -688,6 +694,16 @@ def get_performance(leg=None):
         for _sym_stats in by_symbol.values():
             _sym_stats["brokerage"] = round(_sym_stats["trades"] * V10_OPT_BROKERAGE_PER_TRADE, 2)
             _sym_stats["net_pnl"] = round(_sym_stats["pnl"] - _sym_stats["brokerage"], 2)
+    # cc#1891: CAGR on NET P&L (never Gross — "the number a person would actually have"), off the
+    # SAME leg=OPT/all-62/from-inception scope every other figure on this card uses (first_exit/
+    # last_exit are this scope's own real dates, not a hardcoded window). None unless leg=="OPT"
+    # and both a net figure and a real >0-day span exist — an honest None, never a 0%/100% off a
+    # single-day or missing span.
+    cagr_pct = cagr_days = None
+    if leg == "OPT" and net_pnl is not None and first_exit and last_exit:
+        cagr_days = (last_exit - first_exit).days
+        if cagr_days > 0:
+            cagr_pct = round((((1 + net_pnl / V10_CAGR_CAPITAL_BASE) ** (365.0 / cagr_days)) - 1) * 100, 1)
     return {
         "total_trades": tot,
         "win_rate": round(100 * wins / tot, 1) if tot else 0.0,
@@ -707,6 +723,10 @@ def get_performance(leg=None):
         "net_pnl": net_pnl,
         "first_exit": str(first_exit) if first_exit else None,
         "last_exit": str(last_exit) if last_exit else None,
+        # cc#1891: additive, OPT-only, honest-None like brokerage/net_pnl above.
+        "cagr_pct": cagr_pct,
+        "cagr_days": cagr_days,
+        "cagr_capital_base": V10_CAGR_CAPITAL_BASE if cagr_pct is not None else None,
     }
 
 
