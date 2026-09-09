@@ -452,6 +452,19 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         cur.executemany(f"INSERT INTO screener_raw ({colnames}) VALUES ({placeholders})", batch)
         conn.commit()
 
+    # cc#1865: append-only snapshot of the expectation fields, side-channel to the clean-replace
+    # above. screener_raw destroys the prior load on every upload, so this is the ONLY place these
+    # numbers survive to be scored against a later actual. Uses the SAME final df (post-slug,
+    # post-typing) this function just wrote -- never re-derives the columns a second way. Never
+    # allowed to fail the load itself: any exception here is caught and logged, not raised.
+    try:
+        import screener_expectations
+        _batch_id = f"{date.today().isoformat()}_full"
+        _snap = screener_expectations.snapshot_expectations(df, _batch_id)
+        log.info(f"screener_expectations snapshot: {_snap}")
+    except Exception as e:
+        log.warning(f"cc#1865 screener_expectations snapshot failed (screener_raw load still succeeded): {e}")
+
     log.info("load_screener: %d/%d rows (dropped %d no-nse_code, %d duplicate), %d columns "
              "(%d added: %s)", len(batch), rows_in_file, dropped_no_nse, dropped_dupe,
              len(cols), len(added), ", ".join(added) or "none")
