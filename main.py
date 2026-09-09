@@ -816,6 +816,8 @@ from bhavcopy_diagnostic import router as bhavcopy_diagnostic_router   # cc#1858
 app.include_router(bhavcopy_diagnostic_router)
 from option_iv_history import router as option_iv_history_router   # cc#1858 step 5/7: forward-storage + resumable backfill of option IV at ATM+-10 (no writes to fo_eod)
 app.include_router(option_iv_history_router)
+from screener_expectations import router as screener_expectations_router   # cc#1865: append-only screener expectations snapshot (write-on-upload hook lives in gvm_nightly.py) + V-button endpoint
+app.include_router(screener_expectations_router)
 from ops_control_plane import control_plane_router   # cc#693: ops control plane (registries + job_runs spine + diagnosis)
 app.include_router(control_plane_router)
 app.include_router(performance_router)
