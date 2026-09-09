@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI CIO &#183; Scorr design ref scorr_app_aicio_R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_app_aicio_R1
+   Locks section order for the app AI CIO surface. USAGE IS NEAR ZERO &#8212; the ref says so rather than dressing it up.
+   LAYOUT LAW: APP_CARD_LAYOUT_LAW_V1, session_log 42536.
+     - The page scrolls VERTICALLY through SECTIONS.
+     - KEY METRICS is ONE tall card pinned at the top. It is never a rail.
+     - Every other section is a label + ONE horizontally swipeable rail of cards.
+     - A card carries a SHORT LIST: title, count in the header, six rows max,
+       then a plain "+N more" line and a gold link out. Never one card per row.
+     - Empty rails STAY VISIBLE with a zero count and a line naming what is missing.
+   Built to APP_GRID_FRAMEWORK_V2 (session_log 42500): the app carries FULL COVERAGE
+   of every web section as condensed cards. Nothing is web-only. Depth stays lighter.
+   Palette hex is inlined ONLY so this ref renders standalone. The BUILD must use the
+   real GOLD NIGHT tokens from mobile/theme_mobile.css + scorr_themes.css. */
+
+:root{--field:#0a0a0b;--panel:#141416;--hi:#1c1c1f;--edge:#2a2a2e;--ink:#f4f4f2;
+ --muted:#8b8b90;--label:#6a6a70;--brand:#d4af37;--glow:rgba(212,175,55,.28);
+ --win:#2fd48b;--loss:#ff5c6c}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:80px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--edge);
+ position:sticky;top:0;z-index:30;background:var(--field)}
+.wm{font-size:15px;font-weight:800;letter-spacing:.14em;color:var(--ink);text-decoration:none}
+.wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--glow)}
+.pg{flex:1;text-align:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.slot{width:64px;text-align:right;font-size:11px;color:var(--label)}
+.asof{padding:10px 16px 0;font-size:10px;color:var(--label);letter-spacing:.04em}
+.asof b{color:var(--muted);font-weight:600}
+.km{margin:10px 16px 0;background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--brand);
+ border-radius:0 16px 16px 0;padding:15px 16px}
+.km .k{font-size:10px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.1em}
+.km .v{font-size:29px;font-weight:800;line-height:1.03;margin-top:5px}
+.km.up{border-left-color:var(--win)}.km.dn{border-left-color:var(--loss)}
+.kg{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}
+.cell{background:var(--hi);border:1px solid var(--edge);border-radius:11px;padding:9px 11px}
+.cell .k{font-size:9px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.07em}
+.cell .v{font-size:13.5px;font-weight:700;margin-top:3px}
+.slab{display:flex;align-items:baseline;justify-content:space-between;padding:20px 16px 8px}
+.slab h2{font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.slab .hint{font-size:10px;color:var(--label)}
+.rail{display:flex;gap:11px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 16px 4px;
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.rail::-webkit-scrollbar{display:none}
+.c{flex:0 0 62vw;max-width:250px;scroll-snap-align:start;background:var(--panel);border:1px solid var(--edge);
+ border-radius:14px;padding:12px 13px;position:relative}
+.c.w{flex:0 0 78vw;max-width:320px}
+.c.n{flex:0 0 46vw;max-width:172px}
+.c.up{border-left:3px solid var(--win);border-radius:0 14px 14px 0}
+.c.dn{border-left:3px solid var(--loss);border-radius:0 14px 14px 0}
+.c.gap{border-style:dashed;border-color:#3a3a40}
+.top{display:flex;align-items:baseline;justify-content:space-between}
+.sy{font-size:13.5px;font-weight:800}
+.pill{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;
+ border-radius:20px;background:var(--hi);border:1px solid var(--edge);color:var(--muted)}
+.big{font-size:19px;font-weight:800;margin-top:7px;line-height:1}
+.mt{font-size:10.5px;color:var(--label);margin-top:4px}
+.ft{margin-top:9px;padding-top:8px;border-top:1px solid var(--edge);font-size:10.5px;color:var(--muted)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+.bar{height:5px;border-radius:3px;background:var(--hi);margin-top:8px}
+.bar i{display:block;height:5px;border-radius:3px;background:var(--brand)}
+.emp{font-size:11.5px;color:var(--label);line-height:1.6;margin-top:7px}
+.emp b{display:block;color:var(--ink);font-size:12.5px;font-weight:700;margin-bottom:5px}
+.note{margin:22px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;
+ font-size:11px;color:var(--label);line-height:1.65}
+.note b{color:var(--muted)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);
+ border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+ font-size:11px;font-weight:600;color:var(--muted);text-decoration:none}
+.bn .i{font-size:17px}.bn.on{color:var(--brand)}
+.lst{margin-top:9px}
+.lr{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--hi)}
+.lr:last-child{border-bottom:none}
+.lr .s{font-size:12.5px;font-weight:800}
+.lr .r{display:flex;gap:11px;align-items:baseline}
+.lr .a{font-size:11.5px;color:var(--muted)}
+.lr .b{font-size:12.5px;font-weight:700;min-width:52px;text-align:right}
+.more{font-size:11px;color:var(--label);padding:7px 0 0}
+.link{display:block;margin-top:9px;padding-top:9px;border-top:1px solid var(--edge);
+ font-size:11.5px;font-weight:700;color:var(--brand);text-decoration:none}
+.ch{display:flex;align-items:baseline;justify-content:space-between}
+.ch .t{font-size:11px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.08em}
+.ch .n{font-size:11px;color:var(--muted)}
+.sb{margin-top:9px}
+.sb .row{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px}
+.sb .row span:last-child{color:var(--muted)}
+</style></head><body>
+<div class="hdr"><a class="wm" href="/m/home">SC<i>O</i>RR</a><div class="pg">AI CIO</div><div class="slot">2</div></div>
+<div class="asof"><b>2 conversations stored</b> &#183; last 13 Jun 2026</div>
+<div class="km "><div class="k">Conversations</div><div class="v ">2</div><div class="kg"><div class="cell"><div class="k">Last used</div><div class="v ">13 Jun</div></div><div class="cell"><div class="k">Ratings reach</div><div class="v ">full</div></div><div class="cell"><div class="k">Sectors</div><div class="v ">128</div></div><div class="cell"><div class="k">Result write-ups</div><div class="v ">774</div></div></div></div>
+<div class="slab"><h2>Ask the CIO</h2><span class="hint">2 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w"><div class="ch"><span class="t">What it is</span><span class="n">open</span></div><div class="emp" style="color:var(--ink)">Ask a question about a stock, a sector or your own portfolio and get an answer built from the same data the rest of the app uses.</div><div class="ft">Answers cite what they were built from.</div></div>
+<div class="c w gap"><div class="ch"><span class="t">Your conversations</span><span class="n">2 stored</span></div><div class="emp"><b>Barely used so far</b>Only 2 chats are stored and the last one was 13 Jun 2026. This card shows the real count rather than an inviting empty state, because the honest read is that the surface is not in use yet.</div></div>
+</div>
+<div class="slab"><h2>What it can reach</h2><span class="hint">1 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w "><div class="ch"><span class="t">Data it can see</span><span class="n">live</span></div><div class="lst"><div class="lr"><span class="s">Ratings</span><div class="r"><span class="a">full universe</span><span class="b ">GVM</span></div></div><div class="lr"><span class="s">Trade scores</span><div class="r"><span class="a">all futures names</span><span class="b ">TC</span></div></div><div class="lr"><span class="s">Baskets</span><div class="r"><span class="a">7 on the app</span><span class="b ">Quant</span></div></div><div class="lr"><span class="s">Sectors</span><div class="r"><span class="a"></span><span class="b ">128</span></div></div><div class="lr"><span class="s">Results write-ups</span><div class="r"><span class="a"></span><span class="b ">774</span></div></div></div><div class="more">It answers from stored data only. It does not invent a number that is not there.</div></div>
+</div>
+<div class="slab"><h2>Limits</h2><span class="hint">1 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w"><div class="ch"><span class="t">What it will not do</span><span class="n">by design</span></div><div class="emp" style="color:var(--ink)">It will not give a number it cannot source, and it will not tell you what to buy. It explains what the data says and leaves the decision with you.</div></div>
+</div>
+<div class="note"><b>This surface is not in use.</b> max_chats holds 2 rows and the last is 13 Jun 2026. The ref shows that number on the key metrics card instead of an empty state that implies a fresh start. If the count is wrong because chats are stored somewhere else, that is a finding worth having before the build, not after.</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">&#9703;</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">&#9672;</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">&#9678;</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">&#9783;</span>WoT</a>
+  <a class="bn on" href="/m/dash"><span class="i">&#9677;</span>Dash</a>
+</nav></body></html>
