@@ -141,12 +141,23 @@ body{ --field:#0A0A0C; }
 /* 2 · OPEN POSITIONS — rows are .slab.dense from the shared sheet; inner names prefixed (see top) */
 #v8p .plist{display:flex;flex-direction:column;gap:var(--space-16)}   /* cc#1656 P1: gap between position cards 8 -> 16 (two steps) */
 #v8p .prow{display:grid;grid-template-columns:1fr auto;gap:var(--space-10) var(--space-14);align-items:center}   /* cc#1656 P2: header row items gap one step (6/10 -> 10/14) */
-#v8p .prow .psym{display:flex;align-items:center;gap:7px;font-weight:800;font-size:15px;letter-spacing:.2px;flex-wrap:wrap}
-#v8p .prow .psym .tag{margin-left:2px}
-#v8p .prow .pnl{font-family:var(--mono);font-size:16px;font-weight:800;text-align:right;letter-spacing:-.2px}
-#v8p .prow .pmeta{grid-column:1 / span 2;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 12px;font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:var(--space-8)}   /* cc#1656 P2: --space-8 between the header and the price line */
+/* cc#1868 (founder 09-Sep-2026, "too flashy, make it simple, highly key numbers"): symbol is the
+   first thing read and must never truncate -- was overflow:hidden;ellipsis (cc#1726), now the side/
+   basket badges that used to compete with it for width are gone (moved to .pmeta2 below), so the
+   symbol alone has the room it needs without shrinking. Weight 800->500: emphasis now comes from
+   SIZE/position (item 7), not maximum boldness on every element. */
+#v8p .prow .psym{display:flex;align-items:center;gap:7px;font-weight:500;font-size:15px;letter-spacing:.2px;flex-wrap:nowrap}
+#v8p .prow .psym .tag{margin-left:2px}   /* still used by the CLOSED book row (posRow's .psym no longer carries a .tag) */
+#v8p .prow .psym .sym{overflow:visible;text-overflow:clip;white-space:nowrap}
+#v8p .prow .pnl{font-family:var(--mono);font-size:17px;font-weight:500;text-align:right;letter-spacing:-.2px}
+/* cc#1868 item 5: ONE muted meta line -- side, basket, days held -- replacing the coloured SHORT
+   badge + basket badge that used to sit beside the symbol (bkTag() removed, now unused; the plain
+   side/basket badge markup removed from posRow()). 11-12px muted, per item 7. */
+#v8p .prow .pmeta2{grid-column:1 / span 2;font-family:var(--mono);font-size:11.5px;color:var(--mute);margin-top:var(--space-4)}
+#v8p .prow .pmeta{grid-column:1 / span 2;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 12px;font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:var(--space-8)}   /* cc#1656 P2: --space-8 between the header and the price line -- unchanged, still correct for the CLOSED row which has no pmeta2 above it */
+#v8p .prow .pmeta2 + .pmeta{margin-top:var(--space-4)}   /* cc#1868: OPEN row only (the only .prow with a .pmeta2 sibling) -- tighter gap since pmeta2 already sits directly above */
 #v8p .prow .pmeta b{color:var(--chalk);font-weight:600}
-#v8p .prow .pmeta .age{margin-left:auto;color:var(--dim)}
+#v8p .prow .pmeta .age{margin-left:auto;color:var(--dim)}   /* still used by the CLOSED book row (cc#1868's OPEN row no longer nests .age inside .pmeta) */
 /* cc#1660: rail grows from a bare 6px fill bar to SL/entry/CMP/target on the bar. Axis is now
    RAW PRICE, low->high, left->right, for BOTH long and short (trkAxis/trkFrac below) -- the old
    axis put SL at the left end unconditionally by direction; this one never mirrors, so the
@@ -160,30 +171,23 @@ body{ --field:#0A0A0C; }
 #v8p .trk{grid-column:1 / span 2;position:relative;height:10px;margin-top:var(--space-18);margin-bottom:var(--space-16);background:var(--well);border:1px solid var(--line);border-radius:2px}   /* cc#1660: footprint budget -- old margin-top(8)+height(6)+margin-bottom(12)=26px; new 18+10+16=44px, exactly the spec's +18px cap. Tick labels sit at top:-15px (3px clearance inside the 18px margin); end labels sit at bottom:-14px (2px clearance inside the 16px margin) -- both measured, not eyeballed, see cc_task_logs. */
 #v8p .trk .tfill{position:absolute;top:0;bottom:0;left:0}
 #v8p .trk.pnl-win .tfill{background:var(--up)} #v8p .trk.pnl-loss .tfill{background:var(--down)} #v8p .trk.pnl-flat .tfill{background:var(--mute)}
-#v8p .trk .cap{position:absolute;top:0;bottom:0;width:26%;pointer-events:none}
-#v8p .trk .cap.l{left:0} #v8p .trk .cap.r{right:0}
-#v8p .trk .cap.sl.l{background:linear-gradient(90deg,color-mix(in srgb, var(--down) 55%, transparent),transparent)}
-#v8p .trk .cap.sl.r{background:linear-gradient(270deg,color-mix(in srgb, var(--down) 55%, transparent),transparent)}
-#v8p .trk .cap.tgt.l{background:linear-gradient(90deg,color-mix(in srgb, var(--up) 55%, transparent),transparent)}
-#v8p .trk .cap.tgt.r{background:linear-gradient(270deg,color-mix(in srgb, var(--up) 55%, transparent),transparent)}
-#v8p .trk .cmp{position:absolute;top:-4px;width:2px;height:18px;background:var(--gold);box-shadow:0 0 6px var(--gold);z-index:2}
-#v8p .trk .z{position:absolute;top:-4px;width:1px;height:18px;background:var(--dim);z-index:2}
+/* cc#1868 item 2 (founder 09-Sep-2026): .cap end-wash gradients REMOVED -- "REMOVE THE GRADIENT
+   RAIL... Replace with a FLAT neutral track plus a single flat fill in the P&L hue of the
+   position. No gradient anywhere on the card." .tfill above is already a flat solid fill (kept
+   unchanged); the two-gradient end caps stacked under it are what read as a multi-stop wash. */
+#v8p .trk .cmp{position:absolute;top:-2px;width:3px;height:14px;background:var(--gold);z-index:2}   /* cc#1868 item 3: no box-shadow/glow, 2px->3px flat tick */
+#v8p .trk .z{position:absolute;top:-2px;width:2px;height:14px;background:var(--dim);opacity:.6;z-index:2}   /* cc#1868 item 6: entry stays an unlabelled faint tick, no glow */
 #v8p .trk.none{border-style:dashed;background:transparent}
-#v8p .trk .lbl{position:absolute;font-family:var(--mono);font-size:var(--type-8);letter-spacing:.3px;white-space:nowrap;z-index:3}
-#v8p .trk .lbl.end{bottom:-14px;color:var(--dim)}
+#v8p .trk .lbl{position:absolute;font-family:var(--mono);font-size:11px;letter-spacing:.3px;white-space:nowrap;z-index:3}   /* cc#1868 item 6: "quiet 11px muted text" */
+#v8p .trk .lbl.end{bottom:-16px;color:var(--dim)}
 #v8p .trk .lbl.end.l{left:0} #v8p .trk .lbl.end.r{right:0}
-#v8p .trk .lbl.tick{top:-15px}
-#v8p .trk .lbl.tick.entry{color:var(--mute)} #v8p .trk .lbl.tick.cmp{color:var(--gold)} #v8p .trk .lbl.tick.combo{color:var(--mute)}
-/* cc#1726 (founder 05-Sep, /m/v8 screenshot "Data overlap in V8 open pos cards"): when the ENTRY and
-   CMP tick labels would share pixels, ENTRY drops BELOW the rail onto the SL/TGT row (trkFixLabels,
-   measured after render, never guessed from a % of track); CMP always stays above and lit. */
-#v8p .trk .lbl.tick.entry.below{top:auto;bottom:-14px}
-/* cc#1726 root cause of the missed collision: the CMP LABEL carries class "cmp", so the MARKER rule
-   above (#v8p .trk .cmp — width:2px, height:18px, gold background + glow) also styled the label:
-   its box was 2px wide with the text overflowing it, so any box-based check (the old 12% rule
-   included) saw no overlap while the glyphs sat on top of each other. The label is text: undo the
-   marker geometry on it so its box IS its text. The marker <i class="cmp"> is untouched. */
-#v8p .trk .lbl.tick.cmp{width:auto;height:auto;background:none;box-shadow:none}
+/* cc#1868 item 6 (founder 09-Sep-2026) REMOVES the ENTRY/CMP top tick labels entirely -- "Entry
+   becomes a faint tick on the rail, unlabelled... CMP is the marker itself and is already shown
+   in the entry-to-CMP line above, so it does not need a second label." The cc#1726 collision-
+   avoidance machinery those two labels needed (.lbl.tick.entry.below, the CMP label/marker box
+   conflict, trkFixLabels()/trkTickStyle() in the script below) is now MOOT -- there is nothing
+   left to collide -- and is removed with them rather than left as dead code guarding labels that
+   no longer render. Only the SL/TGT end labels remain (.lbl.end above). */
 /* cc#1726 header row = ONE line: symbol ellipsises, the basket chip abbreviates at <=360px
    (SELL MOM -> S.MOM), P&L never wraps and never leaves the top line. */
 #v8p .prow .psym{flex-wrap:nowrap;min-width:0}
@@ -577,66 +581,13 @@ function trkFrac(v, ax){
   if(!num(v) || !ax) return null;
   return Math.max(0, Math.min(1, (v - ax.lo) / ax.span));
 }
-/* cc#1660 item 2: the four mono end/tick labels. End labels (SL, TARGET) sit BELOW the track at
-   their own physical end (whichever side trkAxis put them on); tick labels (ENTRY, CMP) sit ABOVE
-   at their own fraction, price only where the tag is implied by colour/position -- except the two
-   NAMED remedies below still carry a short tag, per spec ("their prices" alongside SL/TGT/ENTRY/
-   CMP). Collision rule: if entry and cmp fall within 12% of the track width, drop both individual
-   tick labels for ONE combined "entry -> cmp" label at their midpoint, so text never overlaps.
-   Near either edge (<=15% or >=85% of the track), a tick label anchors to that edge and grows
-   inward instead of centering, so it can never bleed off the card. */
-function trkTickStyle(f){
-  if(f <= 0.15) return 'left:0;text-align:left';
-  if(f >= 0.85) return 'left:100%;transform:translateX(-100%);text-align:right';
-  return 'left:'+Math.round(f*100)+'%;transform:translateX(-50%);text-align:center';
-}
-function trkLabels(p, fz, fc, slEnd, tgtEnd){
-  var slPx = px(p.stop_loss), tgtPx = px(p.target), enPx = px(p.entry_price), cmpPx = num(p.cmp) ? px(p.cmp) : '—';
-  var bottom = '<i class="lbl end '+slEnd+'">SL '+slPx+'</i><i class="lbl end '+tgtEnd+'">TGT '+tgtPx+'</i>';
-  var top;
-  if(fz == null){
-    top = '<i class="lbl tick cmp" style="'+trkTickStyle(fc)+'">CMP '+cmpPx+'</i>';
-  } else {
-    /* cc#1726: the old "within 12% of the track -> one combined label" rule is gone. It guessed
-       text width from a fraction of the track, so two ~70px labels on a ~300px track overlapped
-       whenever CMP sat 1-3% from entry (M&M, HCLTECH, TCS on the founder's screenshot). Both
-       labels always render with their own tag; trkFixLabels() below measures the real boxes after
-       the cards are in the DOM and drops ENTRY under the rail when they would touch. */
-    top = '<i class="lbl tick entry" style="'+trkTickStyle(fz)+'">ENTRY '+enPx+'</i>'
-        + '<i class="lbl tick cmp" style="'+trkTickStyle(fc)+'">CMP '+cmpPx+'</i>';
-  }
-  return bottom + top;
-}
-/* cc#1726 · LABEL COLLISION PASS. Runs once per render over every rail in the list. Rule: if the
-   ENTRY box and the CMP box would share pixels (a 6px gap counts as touching), ENTRY moves BELOW
-   the rail onto the SL / TGT row, centred on its own marker; if there it would touch SL or TGT
-   text, it is pushed just clear of that end label (right of a left-end label, left of a right-end
-   label) and clamped to the rail. CMP is always the label that stays above and lit. Measured with
-   getBoundingClientRect, so it is right for any symbol length, font or viewport. */
-function trkFixLabels(root){
-  var GAP = 6, trks = (root || document).querySelectorAll('#v8p .trk');
-  for(var i = 0; i < trks.length; i++){
-    var trk = trks[i], en = trk.querySelector('.lbl.tick.entry'), cm = trk.querySelector('.lbl.tick.cmp');
-    if(!en || !cm) continue;
-    var tr = trk.getBoundingClientRect(); if(!tr.width) continue;
-    /* measure the TEXT, not the element box — a stray rule could shrink the box while the glyphs
-       still paint (exactly what hid this bug), so the range rect is the one that can be trusted */
-    var box = function(el){ try { var r = document.createRange(); r.selectNodeContents(el); var b = r.getBoundingClientRect(); if(b.width) return b; } catch(e){} return el.getBoundingClientRect(); };
-    var re = box(en), rc = box(cm);
-    if(!(re.right + GAP > rc.left && rc.right + GAP > re.left)) continue;   // clear above: nothing to do
-    en.classList.add('below');
-    re = box(en);
-    var ends = trk.querySelectorAll('.lbl.end');
-    for(var j = 0; j < ends.length; j++){
-      var e = ends[j], rr = box(e);
-      if(!(re.right + GAP > rr.left && rr.right + GAP > re.left)) continue;
-      var left = e.classList.contains('l') ? (rr.right - tr.left + GAP) : (rr.left - tr.left - GAP - re.width);
-      left = Math.max(0, Math.min(left, tr.width - re.width));
-      en.style.left = Math.round(left) + 'px'; en.style.transform = 'none';
-      en.style.textAlign = e.classList.contains('l') ? 'left' : 'right';
-      re = box(en);
-    }
-  }
+/* cc#1868 item 6 (founder 09-Sep-2026): the ENTRY/CMP top tick labels and the cc#1726 collision-
+   avoidance pass they needed (trkTickStyle, trkFixLabels) are REMOVED -- "CMP is the marker itself
+   and is already shown in the entry-to-CMP line above" and "Entry becomes a faint tick...
+   unlabelled". Only the two end labels (SL, TARGET) remain, at their own physical end per trkAxis
+   -- quiet 11px muted text below the rail, never competing with the marker for attention. */
+function trkLabels(p, slEnd, tgtEnd){
+  return '<i class="lbl end '+slEnd+'">SL '+px(p.stop_loss)+'</i><i class="lbl end '+tgtEnd+'">TGT '+px(p.target)+'</i>';
 }
 /* held time from entry_ts (naive IST string, cc#844: compare with IST wall-clock, no offset) */
 function heldLabel(p){
@@ -723,13 +674,16 @@ function renderMarkerChips(rows){
     + chip('dmaDn', '\u25a0', '#f87171', '5<20', c.dmaDn, dmaTip)
     + '<span class="chip" data-mk-legend="1" title="What the flags mean" aria-label="Marker legend">?</span>';
 }
-function bkTag(p){
-  var l = String(p.basket_label||p.basket||'').replace(/reversal/i,'Rev').replace(/momentum/i,'Mom').replace(/_/g,' ');
-  if(!l) return '';
-  var full = l.toUpperCase(), w = full.split(/\s+/);
-  /* cc#1726: two-word basket names carry an abbreviation for <=360px (SELL MOM -> S.MOM); one-word names keep their text */
-  var abbr = w.length >= 2 ? (w[0].charAt(0)+'.'+w.slice(1).join(' ')) : full;
-  return '<span class="tag bk"><span class="full">'+esc(full)+'</span><span class="abbr">'+esc(abbr)+'</span></span>';
+/* cc#1868 item 5 (founder 09-Sep-2026): replaces bkTag() (a separate coloured basket badge) --
+   side, basket and days-held now render as ONE muted text line instead of three competing objects
+   (a flag glyph, a red SHORT badge, a teal basket badge) before the eye reaches the P&L number.
+   The flag glyph (mkFlag) is KEPT beside the symbol -- it encodes real marker state (TC strong/
+   S1 rev/R1 mirror/Vol-OI/DMA cross, see mkFired/mkFlag above), it is not decorative. */
+function posMetaLine(p){
+  var side = (p.side||'').toUpperCase(), sideTxt = side === 'SHORT' ? 'Short' : side === 'LONG' ? 'Long' : (side || '—');
+  var bk = String(p.basket_label||p.basket||'').replace(/reversal/i,'Reversal').replace(/momentum/i,'Momentum').replace(/_/g,' ');
+  bk = bk.replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+  return [sideTxt, bk, heldLabel(p)].filter(Boolean).join(' · ');
 }
 function posRow(p){
   var side = (p.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
@@ -752,20 +706,20 @@ function posRow(p){
     var pnl = num(p.unrealised) ? p.unrealised : null, pnlCls = pnl == null ? 'flat' : (pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'flat');
     var fillFrom = (fz == null ? fc : fz);
     trk = '<div class="trk pnl-'+pnlCls+'">'
-      + '<i class="cap sl '+slEnd+'"></i><i class="cap tgt '+tgtEnd+'"></i>'
       + '<i class="tfill" style="left:'+Math.round(Math.min(fillFrom, fc)*100)+'%;width:'+Math.round(Math.abs(fc-fillFrom)*100)+'%"></i>'
       + (fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')
       + '<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i>'
-      + trkLabels(p, fz, fc, slEnd, tgtEnd)
+      + trkLabels(p, slEnd, tgtEnd)
       + '</div>';
   }
   var cmpTxt = num(p.cmp) ? px(p.cmp) : '—';
   return '<div class="slab dense prow" data-side="'+sl+'" data-basket="'+esc(p.basket||'')+'">'+
-    '<div class="psym"><span class="sym">'+esc(p.symbol)+'</span>'+mkFlag(p)+'<span class="tag '+sl+'">'+esc(side||'—')+'</span>'+bkTag(p)+'</div>'+
+    '<div class="psym"><span class="sym">'+esc(p.symbol)+'</span>'+mkFlag(p)+'</div>'+
     '<div class="pnl '+sgn(p.unrealised)+'">'+inr(p.unrealised)+'</div>'+
-    /* cc#1660 item 4: the tgt/sl half of this line is gone -- both numbers are on the bar now. */
-    '<div class="pmeta"><span>'+px(p.entry_price)+' → <b>'+cmpTxt+'</b>'+(p.cmp_is_live===false?' <span class="mu">(last close)</span>':'')+'</span>'+
-    '<span class="age">'+heldLabel(p)+'</span></div>'+trk+'</div>';
+    '<div class="pmeta2">'+esc(posMetaLine(p))+'</div>'+
+    /* cc#1660 item 4 (kept): the tgt/sl half of this line is gone -- both numbers are on the bar now.
+       cc#1868: age/heldLabel moved up into pmeta2 above -- not duplicated here. */
+    '<div class="pmeta"><span>'+px(p.entry_price)+' → <b>'+cmpTxt+'</b>'+(p.cmp_is_live===false?' <span class="mu">(last close)</span>':'')+'</span></div>'+trk+'</div>';
 }
 function renderOpen(){
   var bk = STATE.book, el = document.getElementById('sec-open'), more = document.getElementById('open-more');
@@ -787,7 +741,8 @@ function renderOpen(){
   /* cc#1629: the caption gets clear air under the last track (it read as sitting on the bar), and
      uses the session stamp so a closed market says close · HH:MM, never LIVE (cc#1611 / 1621 rule) */
   el.innerHTML = show.map(posRow).join('') + asofSession(bk.as_of, 'book · CMP '+(rows[0].cmp_at||'')).replace('class="asof', 'style="margin-top:14px" class="asof');
-  trkFixLabels(el);   // cc#1726: measure the rendered rails, drop ENTRY below where it would touch CMP
+  /* cc#1868: trkFixLabels() call removed with the function -- the ENTRY/CMP tick labels it
+     measured for collisions no longer render (item 6). */
   if(rows.length > OPEN_LIMIT) more.innerHTML = '<span class="chip" data-open-toggle="1">'+(openAll ? 'Show fewer ▴' : 'Show all '+rows.length+' ▾')+'</span>';
 }
 /* ── top bar ──────────────────────────────────────────────────────────────────────────── */
