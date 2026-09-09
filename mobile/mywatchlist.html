@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- ══ mobile/mywatchlist.html — My Watchlist section page (cc#1897, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). Home Dashboard section's own destination. Design authority:
+     design_refs/scorr_app_mywatchlist_R3.html, founder-approved 09-Sep-2026 (commit 544adeb).
+     Real GOLD NIGHT tokens only. NO BACKING STORE EXISTS — re-confirmed 09-Sep-2026 against
+     information_schema (only intraday_watchlist and v14_watchlist match '%watchlist%', neither
+     a user-personal list). This page is PURE STATIC COPY, not a live endpoint — every card below
+     is a deliberate, named empty state, not a sample row and not a hidden tile (item 5). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Watchlist · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+/* cc#1897 — page-local rules (mw-*). Same discipline as mobile/myportfolio.html's .mp-* block. */
+.mw-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.mw-asof b{color:var(--mut);font-weight:600}
+.mw-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.mw-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.mw-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.mw-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.mw-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.mw-cell .mw-k{font-size:var(--type-9)}
+.mw-cell .mw-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.mw-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.mw-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.mw-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.mw-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.mw-rail::-webkit-scrollbar{display:none}
+.mw-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.mw-c.gap{border-style:dashed}
+.mw-ch{display:flex;align-items:baseline;justify-content:space-between}
+.mw-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.mw-ch .n{font-size:var(--type-11);color:var(--mut)}
+.mw-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.mw-emp.ink{color:var(--txt)}
+.mw-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.mw-ft{margin-top:var(--space-9);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line);font-size:var(--type-105);color:var(--mut)}
+.mw-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none}
+.mw-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.mw-note b{color:var(--mut)}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">My Watchlist</span></div><div class="as-slot"></div></div>
+<div class="mw-asof"><b>No watchlist store in the database</b> · schema checked 09 Sep 2026</div>
+
+<div class="mw-km"><div class="mw-k">Names saved</div><div class="mw-v">0</div>
+  <div class="mw-kg">
+    <div class="mw-cell"><div class="mw-k">Store</div><div class="mw-v">Does not exist</div></div>
+    <div class="mw-cell"><div class="mw-k">Write path</div><div class="mw-v">Not built</div></div>
+    <div class="mw-cell"><div class="mw-k">Rating data</div><div class="mw-v">Live already</div></div>
+    <div class="mw-cell"><div class="mw-k">Price data</div><div class="mw-v">Live already</div></div>
+  </div>
+</div>
+
+<div class="mw-slab"><h2>Saved names</h2><span class="hint">none · swipe →</span></div>
+<div class="mw-rail">
+  <div class="mw-c gap"><div class="mw-ch"><span class="t">Watchlist</span><span class="n">0</span></div>
+    <div class="mw-emp"><b>Nothing saved yet</b>There is no watchlist table anywhere in the database. Fable checked the full schema. This card fills the moment one exists — it is not hiding anything today.</div></div>
+  <div class="mw-c"><div class="mw-ch"><span class="t">How it fills</span><span class="n">design intent</span></div>
+    <div class="mw-emp ink">Tap the star on any stock — from GVM, a screener, a basket or Trade Check — and the name lands here. One store, written from every surface.</div>
+    <div class="mw-ft">Not built. Needs a table, a write path and an owner.</div></div>
+</div>
+
+<div class="mw-slab"><h2>What changed</h2><span class="hint">waiting · swipe →</span></div>
+<div class="mw-rail">
+  <div class="mw-c gap"><div class="mw-ch"><span class="t">Rating moves</span><span class="n">—</span></div>
+    <div class="mw-emp"><b>Waiting on saved names</b>Which of your names changed GVM rating since you added them. Rating data is live for the whole universe already; the list to apply it to is what is missing.</div></div>
+  <div class="mw-c gap"><div class="mw-ch"><span class="t">Price moves</span><span class="n">—</span></div>
+    <div class="mw-emp"><b>Waiting on saved names</b>Day and week move per saved name. Price data is live already.</div></div>
+</div>
+
+<div class="mw-slab"><h2>Alerts on these</h2><span class="hint">waiting · swipe →</span></div>
+<div class="mw-rail">
+  <div class="mw-c gap"><div class="mw-ch"><span class="t">Alerts</span><span class="n">—</span></div>
+    <div class="mw-emp"><b>Waiting on saved names</b>Only the alerts sitting on watchlist names, so this stays short and useful.</div>
+    <a class="mw-link" href="/m/myalerts">All my alerts ›</a></div>
+</div>
+
+<div class="mw-note"><b>Read this before building.</b> There is no watchlist table in the schema. Every card here is deliberately empty and says why. An enumerated gap is a work item; an omitted section is invisible. Do NOT fill these with sample rows and do NOT hide the tile because it is empty. The section order is correct; only the data is absent.</div>
+
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+</body></html>
