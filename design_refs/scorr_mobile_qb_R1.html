@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quant Baskets · Scorr — design ref R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_mobile_qb_R1 — locks the SWIPEABLE CARD form for the app Quant
+   Basket section, per APP_GRID_FRAMEWORK_V1 (session_log 42467). Founder rule:
+   "avoid detailing, build swipable cards per section. Detailed analysis will always
+   be kept on Website View."
+   THIS IS A REFERENCE, NOT THE BUILD. Tokens are inlined so the ref renders
+   standalone. The BUILD must use the real GOLD NIGHT tokens from
+   mobile/theme_mobile.css + scorr_themes.css exactly as mobile/qb.html already
+   does — do NOT copy these hex values into the build. */
+:root{
+  --field:#0a0a0b; --panel:#141416; --hi:#1c1c1f; --edge:#2a2a2e;
+  --ink:#f4f4f2; --muted:#8b8b90; --label:#6a6a70;
+  --brand:#d4af37; --brandglow:rgba(212,175,55,.28); --accent:#d4af37;
+  --win:#2fd48b; --loss:#ff5c6c;
+  --type-9:9px; --type-10:10px; --type-11:11px; --type-12:12px;
+  --type-13:13px; --type-15:15px; --type-17:17px; --type-22:22px; --type-30:30px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:78px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.as-hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;
+  border-bottom:1px solid var(--edge);position:sticky;top:0;z-index:30;background:var(--field)}
+.as-wm{font-size:var(--type-15);font-weight:800;letter-spacing:.14em;color:var(--ink);text-decoration:none}
+.as-wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--brandglow)}
+.as-pg{flex:1;text-align:center;font-size:var(--type-12);font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.as-slot{width:52px;text-align:right;font-size:var(--type-11);color:var(--label)}
+/* as-of strip. Never optional. Every surface states its own as-of. */
+.asof{display:flex;align-items:center;gap:6px;padding:9px 16px 0;font-size:var(--type-10);color:var(--label);letter-spacing:.04em}
+.asof b{color:var(--muted);font-weight:600}
+.total{margin:10px 16px 4px;padding:14px 16px;border:1px solid var(--edge);border-radius:16px;background:var(--panel)}
+.total .k{font-size:var(--type-10);font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.1em}
+.total .v{font-size:var(--type-30);font-weight:800;line-height:1.05;margin-top:5px}
+.total .row{display:flex;gap:18px;margin-top:10px}
+.total .row div{flex:1}
+.total .row .kk{font-size:var(--type-10);color:var(--label);text-transform:uppercase;letter-spacing:.08em}
+.total .row .vv{font-size:var(--type-15);font-weight:700;margin-top:3px}
+.slab{display:flex;align-items:baseline;justify-content:space-between;padding:18px 16px 8px}
+.slab h2{font-size:var(--type-12);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.slab .hint{font-size:var(--type-10);color:var(--label)}
+/* THE SWIPE DECK. Horizontal scroll-snap, one basket = one card, no accordion.
+   Card width 78vw so the NEXT card always peeks — that peek is what tells a thumb
+   there is more to the right without a caption saying so. */
+.deck{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;
+  padding:2px 16px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.deck::-webkit-scrollbar{display:none}
+.card{flex:0 0 78vw;max-width:330px;scroll-snap-align:start;border:1px solid var(--edge);
+  border-radius:18px;background:var(--panel);padding:15px 16px 13px;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.card.up::before{background:var(--win)}
+.card.dn::before{background:var(--loss)}
+.chd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.nm{font-size:var(--type-17);font-weight:800;line-height:1.15}
+.tag{display:inline-block;margin-top:7px;padding:3px 8px;border-radius:20px;font-size:var(--type-9);
+  font-weight:800;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--edge);color:var(--muted);background:var(--hi)}
+.ret{font-size:var(--type-22);font-weight:800;white-space:nowrap}
+.up .ret,.pos{color:var(--win)}
+.dn .ret,.neg{color:var(--loss)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:13px}
+.cell{background:var(--hi);border:1px solid var(--edge);border-radius:11px;padding:8px 10px}
+.cell .k{font-size:var(--type-9);font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.07em}
+.cell .v{font-size:var(--type-13);font-weight:700;margin-top:3px}
+.hold{margin-top:12px}
+.hold .k{font-size:var(--type-9);font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{font-size:var(--type-10);font-weight:700;padding:4px 8px;border-radius:8px;background:var(--hi);border:1px solid var(--edge);color:var(--ink)}
+.pill.more{color:var(--label);font-weight:600}
+.cfoot{display:flex;align-items:center;justify-content:space-between;margin-top:13px;padding-top:11px;border-top:1px solid var(--edge)}
+.reb{font-size:var(--type-10);color:var(--label)}
+.web{font-size:var(--type-11);font-weight:700;color:var(--brand);text-decoration:none}
+.dots{display:flex;gap:5px;justify-content:center;padding:9px 0 2px}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--edge)}
+.dot.on{background:var(--brand);width:16px;border-radius:3px}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:var(--type-11);font-weight:600;color:var(--muted);text-decoration:none}
+.bn .i{font-size:var(--type-17)}
+.bn.on{color:var(--brand)}
+.note{margin:20px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;font-size:var(--type-11);color:var(--label);line-height:1.6}
+.note b{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="as-hdr">
+  <a class="as-wm" href="#">SC<i>O</i>RR</a>
+  <div class="as-pg">Quant Baskets</div>
+  <div class="as-slot">7</div>
+</div>
+<div class="asof">Marked <b>09 Sep 2026, EOD</b> · 7 baskets</div>
+<div class="total">
+  <div class="k">Total basket value</div>
+  <div class="v mono">₹23,39,994</div>
+  <div class="row">
+    <div><div class="kk">Unrealised</div><div class="vv mono pos">+₹2,59,138</div></div>
+    <div><div class="kk">Open stocks</div><div class="vv mono">85</div></div>
+  </div>
+</div>
+<div class="slab"><h2>Baskets</h2><span class="hint">swipe →</span></div>
+<div class="deck">
+  <div class="card up">
+    <div class="chd"><div><div class="nm">Small Cap</div><span class="tag">Quant</span></div><div class="ret mono">+21.50%</div></div>
+    <div class="grid2">
+      <div class="cell"><div class="k">Value</div><div class="v mono">₹3,83,454</div></div>
+      <div class="cell"><div class="k">Unrealised</div><div class="v mono pos">+₹67,850</div></div>
+      <div class="cell"><div class="k">Stocks</div><div class="v mono">14 / 20</div></div>
+      <div class="cell"><div class="k">Rebalance</div><div class="v">Quarterly</div></div>
+    </div>
+    <div class="hold"><div class="k">Top holdings</div>
+      <div class="pills"><span class="pill">SKYGOLD</span><span class="pill">MENONBE</span><span class="pill">RUBYMILLS</span><span class="pill more">+11</span></div></div>
+    <div class="cfoot"><span class="reb">Next review 01 Dec 2026</span><a class="web" href="#">Full detail on web ›</a></div>
+  </div>
+  <div class="card up">
+    <div class="chd"><div><div class="nm">Mid Cap</div><span class="tag">Quant</span></div><div class="ret mono">+17.70%</div></div>
+    <div class="grid2">
+      <div class="cell"><div class="k">Value</div><div class="v mono">₹4,55,396</div></div>
+      <div class="cell"><div class="k">Unrealised</div><div class="v mono pos">+₹68,481</div></div>
+      <div class="cell"><div class="k">Stocks</div><div class="v mono">12 / 20</div></div>
+      <div class="cell"><div class="k">Rebalance</div><div class="v">Monthly</div></div>
+    </div>
+    <div class="hold"><div class="k">Top holdings</div>
+      <div class="pills"><span class="pill">APLAPOLLO</span><span class="pill">GLAND</span><span class="pill">MCX</span><span class="pill more">+9</span></div></div>
+    <div class="cfoot"><span class="reb">Next review 06 Oct 2026</span><a class="web" href="#">Full detail on web ›</a></div>
+  </div>
+  <div class="card up">
+    <div class="chd"><div><div class="nm">Alpha Multicap</div><span class="tag">Quant</span></div><div class="ret mono">+16.94%</div></div>
+    <div class="grid2">
+      <div class="cell"><div class="k">Value</div><div class="v mono">₹5,84,622</div></div>
+      <div class="cell"><div class="k">Unrealised</div><div class="v mono pos">+₹84,697</div></div>
+      <div class="cell"><div class="k">Stocks</div><div class="v mono">16 / 15</div></div>
+      <div class="cell"><div class="k">Rebalance</div><div class="v">Monthly</div></div>
+    </div>
+    <div class="hold"><div class="k">Top holdings</div>
+      <div class="pills"><span class="pill">CHENNPETRO</span><span class="pill">IPCALAB</span><span class="pill">APARINDS</span><span class="pill more">+13</span></div></div>
+    <div class="cfoot"><span class="reb">Next review 06 Oct 2026</span><a class="web" href="#">Full detail on web ›</a></div>
+  </div>
+  <div class="card up">
+    <div class="chd"><div><div class="nm">52-Week Breakout</div><span class="tag">Quant</span></div><div class="ret mono">+9.39%</div></div>
+    <div class="grid2">
+      <div class="cell"><div class="k">Value</div><div class="v mono">₹2,93,894</div></div>
+      <div class="cell"><div class="k">Unrealised</div><div class="v mono pos">+₹25,237</div></div>
+      <div class="cell"><div class="k">Stocks</div><div class="v mono">6 / 10</div></div>
+      <div class="cell"><div class="k">Rebalance</div><div class="v">Monthly</div></div>
+    </div>
+    <div class="hold"><div class="k">Top holdings</div>
+      <div class="pills"><span class="pill">MENONBE</span><span class="pill">BODALCHEM</span><span class="pill">SBC</span><span class="pill more">+3</span></div></div>
+    <div class="cfoot"><span class="reb">Next review 06 Oct 2026</span><a class="web" href="#">Full detail on web ›</a></div>
+  </div>
+  <div class="card up">
+    <div class="chd"><div><div class="nm">Large Cap</div><span class="tag">Quant</span></div><div class="ret mono">+2.78%</div></div>
+    <div class="grid2">
+      <div class="cell"><div class="k">Value</div><div class="v mono">₹4,98,496</div></div>
+      <div class="cell"><div class="k">Unrealised</div><div class="v mono pos">+₹13,498</div></div>
+      <div class="cell"><div class="k">Stocks</div><div class="v mono">16 / 15</div></div>
+      <div class="cell"><div class="k">Rebalance</div><div class="v">Monthly</div></div>
+    </div>
+    <div class="hold"><div class="k">Top holdings</div>
+      <div class="pills"><span class="pill">SOLARINDS</span><span class="pill">GRASIM</span><span class="pill">BOSCHLTD</span><span class="pill more">+13</span></div></div>
+    <div class="cfoot"><span class="reb">Next review 06 Oct 2026</span><a class="web" href="#">Full detail on web ›</a></div>
+  </div>
+  <div class="card up">
+    <div class="chd"><div><div class="nm">Model Portfolio</div><span class="tag">Discretionary</span></div><div class="ret mono">+0.42%</div></div>
+    <div class="grid2">
+      <div class="cell"><div class="k">Value</div><div class="v mono">₹1,00,258</div></div>
+      <div class="cell"><div class="k">Unrealised</div><div class="v mono pos">+₹417</div></div>
+      <div class="cell"><div class="k">Stocks</div><div class="v mono">20 / 20</div></div>
+      <div class="cell"><div class="k">Rebalance</div><div class="v">Monthly</div></div>
+    </div>
+    <div class="hold"><div class="k">Top holdings</div>
+      <div class="pills"><span class="pill">SKYGOLD</span><span class="pill">ADANIPORTS</span><span class="pill">HAL</span><span class="pill more">+17</span></div></div>
+    <div class="cfoot"><span class="reb">Next review 05 Oct 2026</span><a class="web" href="#">Full detail on web ›</a></div>
+  </div>
+  <div class="card dn">
+    <div class="chd"><div><div class="nm">Contra Value</div><span class="tag">Quant</span></div><div class="ret mono">−4.18%</div></div>
+    <div class="grid2">
+      <div class="cell"><div class="k">Value</div><div class="v mono">₹23,874</div></div>
+      <div class="cell"><div class="k">Unrealised</div><div class="v mono neg">−₹1,042</div></div>
+      <div class="cell"><div class="k">Stocks</div><div class="v mono">1 / 10</div></div>
+      <div class="cell"><div class="k">Rebalance</div><div class="v">Monthly</div></div>
+    </div>
+    <div class="hold"><div class="k">Top holdings</div><div class="pills"><span class="pill">HBLENGINE</span></div></div>
+    <div class="cfoot"><span class="reb">Next review 06 Oct 2026</span><a class="web" href="#">Full detail on web ›</a></div>
+  </div>
+</div>
+<div class="dots">
+  <span class="dot on"></span><span class="dot"></span><span class="dot"></span>
+  <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+</div>
+<div class="note">
+  <b>What this ref locks.</b> One basket = one card. Card carries return %, value,
+  unrealised, filled/max stocks, rebalance cadence, three holding names and a link out.
+  It does NOT carry per-stock entry, CMP, P&amp;L, weight, stop or GVM — that is the
+  website. The next card always peeks, so the swipe is discoverable without a caption.
+  Every number is real data pulled 09-Sep-2026 EOD, so the layout is proven against
+  true string lengths, not lorem.
+</div>
+<nav class="bnav">
+  <a class="bn" href="#"><span class="i">◧</span>Home</a>
+  <a class="bn" href="#"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="#"><span class="i">◎</span>Check</a>
+  <a class="bn" href="#"><span class="i">☷</span>WoT</a>
+  <a class="bn on" href="#"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+/* Dots follow the deck. Build must use native scroll-snap + this pattern (or an
+   IntersectionObserver), NOT a carousel library — native snap is what makes the
+   momentum feel right on a real thumb. */
+var deck=document.querySelector('.deck'),dots=document.querySelectorAll('.dot');
+deck.addEventListener('scroll',function(){
+  var i=Math.round(deck.scrollLeft/(deck.querySelector('.card').offsetWidth+12));
+  dots.forEach(function(d,n){d.classList.toggle('on',n===i);});
+},{passive:true});
+</script>
+</body>
+</html>
