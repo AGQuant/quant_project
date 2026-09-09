@@ -1,0 +1,160 @@
+<!doctype html>
+<!-- ══ mobile/health.html — Portfolio Health section page (cc#1902, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). NEW route — no prior /m/health page existed. Design authority:
+     design_refs/scorr_app_health_R1.html, founder-approved 09-Sep-2026 (commit e5377b0). Real
+     GOLD NIGHT tokens only. REAL CLIENT NAMES render here (never the ref's masked "Portfolio 1/2/3"
+     — that masking is for the repo copy only, see the ref's own header comment and
+     health_app_mobile.py's docstring). Data from /api/mobile/health_app (health_app_mobile.py).
+
+     ARCHITECTURE FLAG — READ BEFORE ASSUMING THIS TILE IS LINKED FROM THE HOME GRID. Home's
+     existing "Portfolio Health" grid tile (mobile/home.html) deliberately opens the WEB /health
+     page today — a founder-approved named exception under APP_VS_WEB_AUDIENCE_SPLIT_V1 (session_
+     log 16915; see mobile_endpoints.py:1676 for the prior verified ruling). This build does NOT
+     repoint that tile: /m/health ships PROTECTED and complete but reachable by TYPED URL ONLY
+     (main.py NAV_REGISTRY tier "typed-url", same class as /preview) pending a founder/Fable
+     ruling on whether this card (alongside its AI CIO / Dashboard siblings targeting the same
+     three 16915-exception tiles) is meant to close that exception for Portfolio Health
+     specifically. Repointing a founder-locked tile is not CC's call to make unilaterally
+     (CLAUDE.md rule 12) — flagged in the cc_task_logs, not silently decided here. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Portfolio Health · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+/* cc#1902 — page-local rules (he-*). Same discipline as every other section page this session:
+   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex. */
+.he-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.he-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.he-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.he-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.he-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.he-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.he-cell .he-k{font-size:var(--type-9)}
+.he-cell .he-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.he-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.he-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.he-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.he-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.he-rail::-webkit-scrollbar{display:none}
+.he-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.he-c.gap{border-style:dashed}
+.he-ch{display:flex;align-items:baseline;justify-content:space-between}
+.he-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.he-ch .n{font-size:var(--type-11);color:var(--mut)}
+.he-lst{margin-top:var(--space-9)}
+.he-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
+.he-lr:last-child{border-bottom:none}
+.he-lr .s{font-size:var(--type-125);font-weight:800}
+.he-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.he-lr .a{font-size:var(--type-115);color:var(--mut)}
+.he-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.he-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.he-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none}
+.he-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.he-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.he-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.he-note b{color:var(--mut)}
+.he-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.he-err{margin:var(--space-14)}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Portfolio Health</span></div><div class="as-slot"></div></div>
+<div class="he-asof" id="he-asof">Loading…</div>
+<div id="he-body"><div class="he-empty">Loading portfolios…</div></div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+function kmHtml(k){
+  return '<div class="he-km"><div class="he-k">Portfolios saved</div><div class="he-v">'+(k.portfolios_saved!=null?k.portfolios_saved:'—')+'</div>'
+    + '<div class="he-kg">'
+    + '<div class="he-cell"><div class="he-k">Holdings</div><div class="he-v">'+(k.holdings!=null?k.holdings:'—')+'</div></div>'
+    + '<div class="he-cell"><div class="he-k">Realised trades</div><div class="he-v">'+(k.realised_trades!=null?k.realised_trades:'—')+'</div></div>'
+    + '<div class="he-cell"><div class="he-k">Ledger rows</div><div class="he-v">'+(k.ledger_rows!=null?k.ledger_rows:'—')+'</div></div>'
+    + '<div class="he-cell"><div class="he-k">Report</div><div class="he-v">'+(k.report_pages!=null?k.report_pages+' pages':'—')+'</div></div>'
+    + '</div></div>';
+}
+function savedCardHtml(d){
+  var sp=d.saved_portfolios||{}, rows=sp.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="he-lr"><span class="s">'+esc(r.name)+'</span><div class="r"><span class="a">'+(r.n_holdings!=null?r.n_holdings+' holdings':'')+'</span><span class="b">'+esc(r.status||'')+'</span></div></div>';
+  }).join('');
+  var more = sp.more>0 ? '<div class="he-more">+ '+sp.more+' more</div>' : '';
+  return '<div class="he-c"><div class="he-ch"><span class="t">Saved portfolios</span><span class="n">'+(sp.count!=null?sp.count:'—')+'</span></div>'
+    + '<div class="he-lst">'+lst+'</div>'+more
+    + '<a class="he-link" href="/adaptive">Open a report &#8250;</a></div>';
+}
+function coversCardHtml(d){
+  var rc=d.report_contents||{}, rows=rc.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="he-lr"><span class="s">'+esc(r.label)+'</span><div class="r"><span class="b">'+esc(r.page)+'</span></div></div>';
+  }).join('');
+  return '<div class="he-c"><div class="he-ch"><span class="t">What a report covers</span><span class="n">'+rows.length+' pages</span></div>'
+    + '<div class="he-lst">'+lst+'</div>'
+    + (rc.footer?'<div class="he-more">'+esc(rc.footer)+'</div>':'')+'</div>';
+}
+function storedCardHtml(d){
+  var s=d.stored||{}, rows=s.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="he-lr"><span class="s">'+esc(r.label)+'</span><div class="r">'+(r.note?'<span class="a">'+esc(r.note)+'</span>':'')+'<span class="b">'+r.count+'</span></div></div>';
+  }).join('');
+  return '<div class="he-c"><div class="he-ch"><span class="t">Stored</span><span class="n">live</span></div><div class="he-lst">'+lst+'</div></div>';
+}
+function profitCardHtml(d){
+  var p=d.profit_basis||{};
+  return '<div class="he-c"><div class="he-ch"><span class="t">How profit is measured</span><span class="n">invested basis</span></div>'
+    + '<div class="he-emp" style="margin-top:0">'+esc(p.message||'')+'</div></div>';
+}
+function addCardHtml(d){
+  var a=d.add_portfolio||{};
+  return '<div class="he-c"><div class="he-ch"><span class="t">Add a portfolio</span><span class="n">open</span></div>'
+    + '<div class="he-emp" style="margin-top:0">'+esc(a.message||'')+'</div>'
+    + (a.footnote?'<div class="he-more">'+esc(a.footnote)+'</div>':'')+'</div>';
+}
+
+function render(d){
+  var k=d.key_metrics||{};
+  document.getElementById('he-asof').textContent = (k.portfolios_saved!=null?k.portfolios_saved:'—')+' portfolios · '+(k.holdings!=null?k.holdings:'—')+' holdings · '+(k.realised_trades!=null?k.realised_trades:'—')+' realised trades';
+  var html = kmHtml(k)
+    + '<div class="he-slab"><h2>Reports</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="he-rail">'+savedCardHtml(d)+coversCardHtml(d)+'</div>'
+    + '<div class="he-slab"><h2>The numbers behind them</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="he-rail">'+storedCardHtml(d)+profitCardHtml(d)+'</div>'
+    + '<div class="he-slab"><h2>Make a new one</h2><span class="hint">1 · swipe →</span></div>'
+    + '<div class="he-rail">'+addCardHtml(d)+'</div>'
+    + '<div class="he-note"><b>Real client names, not a masked sample.</b> The design ref masked every client as "Portfolio 1/2/3" for the repo copy only — this page reads actual names from hr_portfolios. <b>Reports stay white-label</b> — they never say Scorr or GVM, only Rating.</div>';
+  document.getElementById('he-body').innerHTML = html;
+}
+
+fetch('/api/mobile/health_app', {credentials:'same-origin'})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.error){ document.getElementById('he-body').innerHTML = '<div class="he-err he-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+    render(d);
+  })
+  .catch(function(e){ document.getElementById('he-body').innerHTML = '<div class="he-err he-empty">Could not load portfolios.</div>'; });
+</script>
+</body></html>
