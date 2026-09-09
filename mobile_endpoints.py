@@ -1135,6 +1135,7 @@ _MOBILE_DESTINATIONS = [
     # template that would drift out of step the first time someone forgot.
     ("/m/screeners", "Screeners"), ("/m/sector", "Sector"),
     ("/m/holdings", "My Portfolio"), ("/m/fpc", "FPC Planner"),
+    ("/m/myportfolio", "My Portfolio (Dashboard)"),   # cc#1895: Home Dashboard section's own page
     ("/preview", "Previews"),
 ]
 

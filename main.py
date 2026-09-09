@@ -111,6 +111,7 @@ from v12_backtest import router as v12_backtest_router   # cc#394 V12 Basket Bui
 from test_cio_endpoints import router as test_cio_router
 from fyers_range_backfill_endpoints import router as fyers_range_backfill_router
 from smartgain_daily_m2m import router as smartgain_daily_m2m_router
+from smartgain_app_portfolio import router as smartgain_app_portfolio_router   # cc#1895: My Portfolio section page
 from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
 from fy_end_backfill import router as fy_end_backfill_router   # cc#703 FY-end price backfill 2015-2021
@@ -299,6 +300,7 @@ PROTECTED.add("/m/v10")      # cc#1069: V10 signal view — gated like every oth
 PROTECTED.add("/m/alerts")
 PROTECTED.add("/m/models")   # cc#886 slot 5
 PROTECTED.add("/m/holdings")   # cc#1779: My Portfolio full page — PROTECTED-only like every /m/ screen (theme head injected; NOT _PWA_INJECT_PATHS)
+PROTECTED.add("/m/myportfolio")   # cc#1895: Dashboard-section My Portfolio page — same PROTECTED-only convention as /m/holdings
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
 # duplicates no auth logic of its own.
@@ -864,6 +866,7 @@ app.include_router(v8_book_canon_router)
 app.include_router(v8_era_router)   # cc#1604: era caption + suspension flag, one source
 app.include_router(v8_daylog_extras_router)   # cc#1561: Day Log P&L series + return facts
 app.include_router(mobile_ext_router)
+app.include_router(smartgain_app_portfolio_router)   # cc#1895: /m/myportfolio + /api/mobile/myportfolio
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
 app.include_router(trade_wall_approved_router)   # cc#1735: /api/tradewall/approved + /levels + /close
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
@@ -1433,6 +1436,7 @@ NAV_REGISTRY = {
     # the registry saying which bar an entry actually appears on, so the registry cannot claim a
     # desktop destination that the desktop never renders.
     "/m/intel":      ("Intel (mobile)",       "grid-tile"),   # cc#1638: out of the nav, Home grid tile next to Custom Alert
+    "/m/myportfolio": ("My Portfolio (mobile, Dashboard section)", "grid-tile"),   # cc#1895
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),
