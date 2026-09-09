@@ -1133,7 +1133,7 @@ _MOBILE_DESTINATIONS = [
     # list — Fable could not edit this file safely at the time. Done: the server is the one
     # source again, so adding a screen is one line here rather than one line here AND one in a
     # template that would drift out of step the first time someone forgot.
-    ("/m/screeners", "Screeners"), ("/m/sector", "Sector"),
+    ("/m/screeners", "Screeners"), ("/m/sector", "Sector"), ("/m/mf", "Mutual Funds"),   # cc#1903
     ("/m/holdings", "My Portfolio"), ("/m/fpc", "FPC Planner"),
     ("/m/myportfolio", "My Portfolio (Dashboard)"),   # cc#1895: Home Dashboard section's own page
     ("/m/myalerts", "My Alerts (Dashboard)"),   # cc#1896: Home Dashboard section's own page
