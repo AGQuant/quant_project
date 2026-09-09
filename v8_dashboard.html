@@ -9315,9 +9315,23 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-wrap .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;animation:idxpdot 2s infinite}
 .tc13-wrap .stats{display:flex;gap:14px;margin-left:auto;font:500 11px var(--f-m);color:var(--tx3);flex-wrap:wrap;align-items:center}
 .tc13-wrap .stats b{color:var(--tx2);font-weight:600}
-/* cc#1809 TC_SCANNER_PL_SUMMARY_V1: LONG/SHORT tappable filter tags for the Open Book only. */
+/* cc#1809 TC_SCANNER_PL_SUMMARY_V1: LONG/SHORT tappable filter tags. cc#1884 item 9 extends this
+   to the Closed Book too — same tag, same behaviour, its own state var (_tc13ClosedSide). */
 .tc13-sidetag{font:600 10px var(--f-m);letter-spacing:.05em;padding:3px 9px;border-radius:11px;border:1px solid var(--line2);color:var(--tx3);cursor:pointer;user-select:none;transition:.15s}
 .tc13-sidetag.on{color:var(--tx);border-color:var(--cy);background:rgba(var(--cy-rgb),.10)}
+/* cc#1884 items 4/5/6: ONE capsule component, two placements (Open Book's Unrealised+Realised,
+   Closed Book's Realised+Accuracy+Avg Profit) — promoted from the old inline .stats <span> into
+   a proper tile: bigger number, qualifying context (item 4's "n positions, one lot each" etc.)
+   kept but visually subordinate, never dropped. .cv carries the P&L green/red invariant ONLY when
+   the capsule IS a P&L figure (Unrealised/Realised/Avg Profit) — Accuracy is a percentage, not a
+   P&L, and stays neutral (.flat) so the one non-negotiable colour rule is never borrowed for a
+   number it doesn't apply to (item 5: no third colour, no gradient, no borrowed invariant either). */
+.tc13-caps{display:flex;gap:10px;flex-wrap:wrap;width:100%;margin:2px 0 2px}
+.tc13-cap{background:var(--well);border:1px solid var(--line);border-radius:10px;padding:9px 15px;min-width:118px}
+.tc13-cap .cl{font:600 9.5px var(--f-m);letter-spacing:.1em;text-transform:uppercase;color:var(--tx3)}
+.tc13-cap .cv{font:700 21px var(--f-d);margin-top:3px;line-height:1.1}
+.tc13-cap .cv.pos{color:var(--gr)} .tc13-cap .cv.neg{color:var(--rd)} .tc13-cap .cv.flat{color:var(--tx)}
+.tc13-cap .cs{font:500 10px var(--f-m);color:var(--tx3);margin-top:3px}
 /* cc#1684: renamed from .rcard -- that class name collides with the shared Results Card modal's
    OWN unscoped .rcard{max-width:620px;width:100%} rule, injected site-wide by RESULTS_CARD_JS
    (pwa_endpoints.py, cc#573). CSS cascades per-property: since this rule never set width/max-width,
@@ -9371,6 +9385,26 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-wrap .pill.target{color:var(--gr);border-color:rgba(var(--gr-rgb),.45);background:rgba(var(--gr-rgb),.12)}
 .tc13-wrap .pill.sl{color:var(--rd);border-color:rgba(var(--rd-rgb),.45);background:rgba(var(--rd-rgb),.12)}
 .tc13-wrap .pill.time{color:var(--mut);border-color:var(--line2);background:transparent}  /* cc#1746: 7-day time stop — a clock, not a verdict */
+/* cc#1884 item 1: the Open Book table now renders through the shared sortTbl()/drawTbl() (same
+   component the Custom Screen Builder results table uses) instead of a hand-built <table class=
+   "tbl">. sortTbl's own wrapper is <div id="tw_tc13open"><div class="scroll"><table>... with no
+   .tbl/.tbl-hold/.tbl-scroll classes of its own, so it is styled here by ID — same visual result
+   (font size, padding, borders, hover, scrollbar) as .tc13-wrap .tbl above, not a second look. */
+#tw_tc13open table{width:100%;border-collapse:collapse;font-size:13.5px}
+#tw_tc13open th{font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+#tw_tc13open th:first-child,#tw_tc13open th:nth-child(2),#tw_tc13open td:first-child,#tw_tc13open td:nth-child(2){text-align:left}
+#tw_tc13open td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
+#tw_tc13open tr:last-child td{border-bottom:none}
+#tw_tc13open tr:hover td{background:var(--raise)}
+#tw_tc13open .sym{font:700 13.5px var(--f-d);font-family:var(--f-d)!important}
+#tw_tc13open .scroll{position:relative;overflow-x:auto;scrollbar-width:thin}
+#tw_tc13open .scroll::-webkit-scrollbar{height:7px}
+#tw_tc13open .scroll::-webkit-scrollbar-track{background:transparent}
+#tw_tc13open .scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+#tw_tc13open .scroll::after{content:'';position:absolute;top:0;right:0;bottom:0;width:36px;
+    pointer-events:none;opacity:0;transition:opacity .18s ease;background:linear-gradient(90deg,transparent,var(--well))}
+#tw_tc13open .scroll.clipped::after{opacity:1}
+#tw_tc13open .empty{text-align:center;color:var(--tx3);font-family:var(--f-d);padding:22px 12px}
 .tc13-wrap .prox{width:96px;display:inline-block}
 .tc13-wrap .prail{position:relative;height:4px;border-radius:2px;background:linear-gradient(90deg,rgba(var(--rd-rgb),.4),var(--line2) 46%,var(--line2) 54%,rgba(var(--gr-rgb),.4))}
 .tc13-wrap .pdot{position:absolute;top:50%;width:7px;height:7px;border-radius:50%;transform:translate(-50%,-50%);background:var(--cy);box-shadow:0 0 6px var(--cy)}
@@ -9432,25 +9466,21 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     return '<span class="tc13-side-badge '+(side==='SELL'?'sell':'buy')+'">'+esc(side)+'</span>';
   }
 
-  // cc#1296 scope 3: closed-bucket stats (Closed/Wins/WR%/Net%) computed client-side over the
-  // MERGED buy+sell rows, using the identical formula tc_scanner_endpoints.py's own _stats() runs
-  // server-side per-side — not a third set of numbers, the same math over the combined row set the
-  // endpoint already sends down (both d.buy and d.sell arrive as full rows, not pre-aggregated-only).
-  function closedStats(rows){
-    var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
-    var wins=closed.filter(function(r){return String(r.exit_reason||'').indexOf('TARGET')===0;});  // cc#1599: 'TARGET (cash-daily)' is a win
-    var net=Math.round(closed.reduce(function(s,r){return s+(r.pnl_pct||0);},0)*100)/100;
-    var wr=closed.length?Math.round(wins.length/closed.length*1000)/10:null;
-    return {closed:closed.length,wins:wins.length,wr_pct:wr,net_pts_pct:net};
-  }
+  // cc#1296 scope 3 (SUPERSEDED by cc#1884 item 7): this used to compute Closed/Wins/WR%/Net%
+  // client-side, TARGET-exit-reason-classified, mirroring tc_scanner_endpoints.py's own _stats().
+  // REMOVED, not merely unused — the founder asked for Accuracy specifically, a P&L-sign-based
+  // metric (closedKpis() below), and item 7's own instruction is explicit: "do not label it Win
+  // Rate on one surface and Accuracy on another." Keeping this function defined-but-uncalled
+  // beside closedKpis() would be exactly that second label, one edit away from drifting back in.
+  // The engine's own TARGET-based Win Rate is unchanged server-side (tc_scanner_endpoints._stats)
+  // — only this page's now-unused client mirror of it is gone.
 
   // cc#1530 (TC_SCANNER_R1_V1): the R1 renderers. Open Book first, Closed Book second, each in
   // the mock's .sh + .tc13-card/.tbl grammar (scoped under .tc13-wrap; .tc13-card was named
   // .rcard until cc#1684 renamed it away from the shared Results Card modal's own class). The
-  // proximity rail is the
-  // mock's prox() VERBATIM — side-aware: SELL runs Target..SL, BUY runs SL..Target, dot at
-  // clamp((cmp-lo)/(hi-lo)*100, 0, 100). closedStats() above is unchanged and still feeds the
-  // Closed Book stat chips (the spec's own instruction).
+  // proximity rail is the mock's prox() VERBATIM — side-aware: SELL runs Target..SL, BUY runs
+  // SL..Target, dot at clamp((cmp-lo)/(hi-lo)*100, 0, 100). cc#1884: closedKpis() (below,
+  // near the side-tag helpers) is what feeds the Closed Book capsule strip now.
   function prox(target,sl,cmp,side){
     if(target==null||sl==null||cmp==null) return '<span style="color:var(--tx3)">—</span>';
     var lo=side==='SELL'?target:sl, hi=side==='SELL'?sl:target;
@@ -9472,12 +9502,29 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     var t=String(ts);
     return t.length>=16 ? t.slice(11,16) : '—';   // 'YYYY-MM-DD HH:MM:SS' -> 'HH:MM'
   }
-  function daysHeld(entryTs){
-    if(!entryTs) return '—';
+  // cc#1884 item 1/V6: DAYS HELD must sort NUMERICALLY (today before 2d), not as the display
+  // string ("today" would sort after "2d" alphabetically). daysHeldNum() is the one place that
+  // does the date math; daysHeld() (display) and the sort key attached per-row both call it,
+  // so there is exactly one days-held computation on this table, not two that could drift.
+  function daysHeldNum(entryTs){
+    if(!entryTs) return null;
     var e=new Date(String(entryTs).replace(' ','T'));
-    if(isNaN(e.getTime())) return '—';
+    if(isNaN(e.getTime())) return null;
     var d=Math.floor((new Date()-e)/86400000);
-    return d<0 ? '—' : (d===0 ? 'today' : d+'d');
+    return d<0 ? null : d;
+  }
+  function daysHeld(entryTs){
+    var d=daysHeldNum(entryTs);
+    return d==null ? '—' : (d===0 ? 'today' : d+'d');
+  }
+  // cc#1884: the SAME position-on-rail math prox() already draws, exposed as a plain 0-100 number
+  // so the SL·Target column can sort like every other column (item 1: "every column sortable").
+  // prox() itself is untouched — this mirrors its two branches, it does not replace them.
+  function proxPct(target,sl,cmp,side){
+    if(target==null||sl==null||cmp==null) return null;
+    var lo=side==='SELL'?target:sl, hi=side==='SELL'?sl:target;
+    if(hi===lo) return null;
+    return Math.max(0,Math.min(100,(cmp-lo)/(hi-lo)*100));
   }
   function pnlTxt(v){ return v!=null?((v>=0?'+':'')+v+'%'):'—'; }
   function cl2(v){ return v==null?'':(v>0?'pos':(v<0?'neg':'flat')); }
@@ -9538,11 +9585,52 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     _tc13OpenSide = (_tc13OpenSide===v) ? 'ALL' : v;   // tap the active tag again to clear back to All
     if(_tc13LastData) render(_tc13LastData);
   }
-  function _tc13SideTag(label, val){
-    var on=_tc13OpenSide===val;
+  // cc#1884 item 9: the Closed Book gets its OWN Long/Short filter, its own state var — never
+  // shared with the Open Book's _tc13OpenSide (they filter two different tables independently).
+  var _tc13ClosedSide='ALL';
+  function setTc13ClosedSide(v){
+    _tc13ClosedSide = (_tc13ClosedSide===v) ? 'ALL' : v;
+    if(_tc13LastData) render(_tc13LastData);
+  }
+  // cc#1884: generalised to take the active value + setter name, defaulting to the Open Book's
+  // own pair so the existing openTable() call sites (_tc13SideTag('Long','BUY')) are unchanged —
+  // ONE tag component, two placements, exactly like the capsule (items 4/6's own principle).
+  function _tc13SideTag(label, val, activeVal, setterName){
+    activeVal = activeVal===undefined ? _tc13OpenSide : activeVal;
+    setterName = setterName || 'setTc13OpenSide';
+    var on=activeVal===val;
     return '<span class="tc13-sidetag'+(on?' on':'')+'" tabindex="0" role="button" aria-pressed="'+on+'"'
-      +' onclick="setTc13OpenSide(\''+val+'\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();setTc13OpenSide(\''+val+'\');}"'
+      +' onclick="'+setterName+'(\''+val+'\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+setterName+'(\''+val+'\');}"'
       +'>'+label+'</span>';
+  }
+  // cc#1884 items 4/5/6: the ONE capsule component. cls is 'pos'|'neg'|'flat' — flat for a
+  // non-P&L metric (Accuracy) or a genuine zero, never a colour invented beyond the P&L invariant.
+  function tc13Cap(label, valueTxt, cls, sub){
+    return '<div class="tc13-cap"><div class="cl">'+esc(label)+'</div><div class="cv '+cls+'">'+valueTxt+'</div>'
+      +(sub?'<div class="cs">'+sub+'</div>':'')+'</div>';
+  }
+  // cc#1884: a bookRs() total is a real sum only when at least one row fed it — with ZERO rows
+  // (the old bookChip's own guard, `if(!b.n) return ''`) rsTxt(0) would print "+₹0", a fabricated
+  // zero standing in for "nothing here" rather than the genuine absence it is. — never 0.
+  function capBookTxt(b){ return b.n ? rsTxt(b.total) : '—'; }
+  function capBookCls(b){ return b.n ? cl2(b.total) : 'flat'; }
+  // cc#1884 items 7/8: ACCURACY (positive pnl_rs / priced closed trades — NOT the exit_reason=
+  // TARGET classification closedStats() uses for the engine's own Win Rate; the founder asked for
+  // Accuracy, a different, P&L-sign-based metric, and it must not wear the Win Rate label per item
+  // 7's own instruction) and AVG PROFIT (mean pnl_rs across ALL priced closed trades, winners and
+  // losers together — the figure that x count = the total, per item 8's Fable default). Both read
+  // pnl_rs, the SAME cc#1763 one-lot figure the table and the Realised capsule already use — no
+  // second conversion (V3).
+  function closedKpis(rows){
+    var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
+    var priced=closed.filter(function(r){return r.pnl_rs!=null;});
+    var wins=priced.filter(function(r){return Number(r.pnl_rs)>0;});
+    return {
+      closed: closed.length, priced: priced.length,
+      accuracy_pct: priced.length ? Math.round(wins.length/priced.length*1000)/10 : null,
+      wins: wins.length,
+      avg_profit_rs: priced.length ? Math.round(priced.reduce(function(s,r){return s+Number(r.pnl_rs);},0)/priced.length*100)/100 : null
+    };
   }
 
   // cc#1744 (founder 06-Sep "In TC scanner no open and closed book?"): the Open Book is NOT
@@ -9551,28 +9639,45 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // on the Closed Book, which is the only table it governs. The empty sentence "No open TC13
   // positions" prints ONLY when the payload carries open_all and it is genuinely empty; an
   // older payload without the key says so instead of implying a healthy zero.
+  // cc#1884 item 1: cols for the shared sortTbl() component (Custom Screen Builder's own
+  // caret/click sort, reused rather than a second sorter). Key = the field sortTbl sorts on
+  // directly off each row object; label = the header text. _daysN/_prox are precomputed numeric
+  // twins of the display-only daysHeld()/prox() strings (V6: "today" must sort before "2d", which
+  // a string compare cannot do).
+  var TC13_OPEN_COLS=[["symbol","Symbol"],["side","Side"],["entry_price","Entry"],["target","Target"],
+    ["sl","SL"],["cmp","CMP"],["pnl_pct","P&L%"],["lot_size","Lot"],["pnl_rs","P&L ₹ (1 lot)"],
+    ["_prox","SL · Target"],["entry_ts","Entry Time"],["_daysN","Days Held"]];
+  function tc13OpenRow(r){
+    return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
+      +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
+      +'<td>'+n2(r.entry_price)+'</td>'
+      +'<td>'+n2(r.target)+'</td>'
+      +'<td>'+n2(r.sl)+'</td>'
+      +'<td>'+n2(r.cmp)+'</td>'
+      +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
+      +'<td>'+lotTxt(r)+'</td>'
+      +'<td class="'+cl2(r.pnl_rs)+'" title="one lot x price move, unrealised vs CMP">'+rsTxt(r.pnl_rs)+'</td>'
+      +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td>'
+      +'<td>'+eTime(r.entry_ts)+'</td>'
+      +'<td>'+daysHeld(r.entry_ts)+'</td></tr>';
+  }
   function openTable(rows, meta){
     var live = nseOpen();
     // cc#1809: LONG/SHORT filter is Open Book only, scoped by the existing side values (BUY=Long,
     // SELL=Short). Filters BOTH the table body and the Unrealised total together -- a filtered
     // table next to an unfiltered total would be exactly the ambiguity this card exists to remove.
     var fRows = _tc13OpenSide==='ALL' ? rows : rows.filter(function(r){return r.side===_tc13OpenSide;});
+    fRows.forEach(function(r){ r._daysN=daysHeldNum(r.entry_ts); r._prox=proxPct(r.target,r.sl,r.cmp,r.side); });   // cc#1884: sort-key twins
     var emptyMsg = !meta.hasOpenAll ? 'Open Book unavailable in this payload (no open_all key) — not a healthy zero'
       : (_tc13OpenSide!=='ALL' ? 'No open '+(_tc13OpenSide==='BUY'?'Long':'Short')+' TC Scanner positions' : 'No open TC Scanner positions');
-    var body=fRows.length ? fRows.map(function(r){
-      return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
-        +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
-        +'<td>'+n2(r.entry_price)+'</td>'
-        +'<td>'+n2(r.target)+'</td>'
-        +'<td>'+n2(r.sl)+'</td>'
-        +'<td>'+n2(r.cmp)+'</td>'
-        +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
-        +'<td>'+lotTxt(r)+'</td>'
-        +'<td class="'+cl2(r.pnl_rs)+'" title="one lot x price move, unrealised vs CMP">'+rsTxt(r.pnl_rs)+'</td>'
-        +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td>'
-        +'<td>'+eTime(r.entry_ts)+'</td>'
-        +'<td>'+daysHeld(r.entry_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="12">'+esc(emptyMsg)+'</td></tr>';
+    // cc#1884 item 2: sort must survive the Long/Short filter, which re-renders this whole
+    // section from scratch (setTc13OpenSide -> render()) rather than an in-place tblSort() swap.
+    // Carry the CURRENT sort (if any) forward into the fresh sortTbl() call instead of letting it
+    // silently reset to the default on every filter tap.
+    var _prevSort=SORTREG['tc13open'];
+    var openTbl=sortTbl('tc13open', TC13_OPEN_COLS, fRows, tc13OpenRow,
+      {sortKey:_prevSort?_prevSort.sortKey:'entry_ts', dir:_prevSort?_prevSort.dir:-1, empty:emptyMsg, wrapClass:''});
+    var unreal=bookRs(fRows);
     return '<section><div class="sh"><h2>Open Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC SCANNER &middot; V2 SCORE100</span>'
@@ -9581,21 +9686,28 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
             :'<span class="badge b-eng" title="All open holds as of this time — the date control below governs the Closed Book only">as of '+esc(meta.asOf||'')+'</span>')
       +'<div class="stats"><span>Open <b>'+fRows.length+'</b></span>'
       +'<span style="font-size:10.5px;color:var(--tx3)">all open holds · not date-filtered</span>'
-      +bookChip('Unrealised', fRows)
-      +'<span>Realised <b class="'+cl2(meta.realised.total)+'">'+rsTxt(meta.realised.total)+'</b>'
-      +'<span style="font-size:10.5px;color:var(--tx3)"> ('+meta.realised.n+' closed · today)</span></span>'
       +_tc13SideTag('Long','BUY')+_tc13SideTag('Short','SELL')
-      +'</div></div>'   /* cc#1763 C3: the open book at one lot each; cc#1809: + Realised + Long/Short */
-      +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
-      +'<th>Target</th><th>SL</th><th>CMP</th><th>P&amp;L%</th><th title="futures_universe.lot_size">Lot</th><th title="one lot per signal, display only">P&amp;L &#8377; (1 lot)</th><th>SL &middot; Target</th><th>Entry Time</th><th>Days Held</th></tr></thead>'
-      +'<tbody>'+body+'</tbody></table></div></div></div></section>';
+      +'</div></div>'
+      // cc#1884 items 4/5: promoted from small inline text into proper capsules -- ONE component
+      // (tc13Cap), shared with the Closed Book strip below.
+      +'<div class="tc13-caps">'
+      +tc13Cap('Unrealised', capBookTxt(unreal), capBookCls(unreal),
+          unreal.n+(unreal.n===1?' position':' positions')+', one lot each'+(unreal.blank?' · '+unreal.blank+' without lot/CMP not in total':''))
+      +tc13Cap('Realised', rsTxt(meta.realised.total), cl2(meta.realised.total), meta.realised.n+' closed &middot; today')
+      +'</div>'
+      +'<div class="tc13-card">'+openTbl+'</div></section>';
   }
 
   // cc#1744: the date control lives HERE now, labelled for the one table it governs. The empty
   // state names the last date that had closures so a zero reads as "quiet day", not "dead engine".
+  // cc#1884 item 9: `rows` is the FULL exit-date set from the endpoint; the Long/Short filter is
+  // applied HERE, first, so the table, the capsules and closedKpis() all read the SAME filtered
+  // set — a filtered table beside an unfiltered KPI would be the exact ambiguity cc#1809 already
+  // ruled out for the Open Book (same principle, this book).
   function closedTable(rows, dateStr, lastClosure){
-    var closed=rows.filter(function(r){return r.exit_reason!=='OPEN';});
-    var stats=closedStats(rows);
+    var fRows = _tc13ClosedSide==='ALL' ? rows : rows.filter(function(r){return r.side===_tc13ClosedSide;});
+    var closed=fRows.filter(function(r){return r.exit_reason!=='OPEN';});
+    var kpi=closedKpis(fRows);
     var body=closed.length ? closed.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
         +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
@@ -9605,8 +9717,10 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
         +'<td class="'+cl2(r.pnl_rs)+'" title="one lot ('+(r.lot_size!=null?r.lot_size:'no lot size')+') x price move, realised at exit">'+rsTxt(r.pnl_rs)+'</td>'
         +'<td>'+dShort(r.exit_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="8">No closed TC Scanner positions on '+esc(dateStr||'this date')
+    }).join('') : '<tr class="empty-row"><td colspan="8">No closed '
+        +(_tc13ClosedSide!=='ALL'?(_tc13ClosedSide==='BUY'?'Long ':'Short '):'')+'TC Scanner positions on '+esc(dateStr||'this date')
         +(lastClosure?' &middot; last closures: '+esc(lastClosure):'')+'</td></tr>';
+    var realised=bookRs(closed);
     return '<section><div class="sh"><h2>Closed Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC SCANNER &middot; V2 SCORE100</span>'
@@ -9615,12 +9729,22 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<div class="stats">'
       +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">Closed Book date</label>'
       +'<input type="date" id="tc13Date" value="'+esc(dateStr||'')+'" title="Governs the Closed Book only — the Open Book is never date-filtered"></span>'
-      +'<span>Closed <b>'+stats.closed+'</b></span>'
-      +'<span>Wins <b>'+stats.wins+'</b></span>'
-      +'<span>WR <b>'+(stats.wr_pct!=null?stats.wr_pct+'%':'—')+'</b></span>'
-      +'<span>Net <b class="'+cl2(stats.net_pts_pct)+'">'
-        +(stats.closed?((stats.net_pts_pct>=0?'+':'')+stats.net_pts_pct+'%'):'—')+'</b></span>'
-      +bookChip('Realised', closed)+'</div></div>'   /* cc#1763 C3: the closed book at one lot each; WR/Net stay on percent (C5) */
+      +'<span>Closed <b>'+kpi.closed+'</b></span>'
+      +_tc13SideTag('Long','BUY',_tc13ClosedSide,'setTc13ClosedSide')+_tc13SideTag('Short','SELL',_tc13ClosedSide,'setTc13ClosedSide')
+      +'</div></div>'
+      // cc#1884 items 6/7/8: Realised (rupees, green/red), Accuracy (positive-pnl_rs win rate,
+      // WITH its denominator per item 7 -- "62% - 8 of 13", never a bare percentage) and Avg
+      // Profit (mean pnl_rs across every priced closed trade, winners and losers together, item
+      // 8's Fable default) — the SAME tc13Cap() capsule the Open Book uses above (items 4/6: one
+      // component, two placements). Item 10: no trend arrow, no sparkline, no better/worse framing
+      // — the number, the label, the denominator, nothing else.
+      +'<div class="tc13-caps">'
+      +tc13Cap('Realised', capBookTxt(realised), capBookCls(realised), realised.n+(realised.n===1?' closed position':' closed positions')+', one lot each'+(realised.blank?' · '+realised.blank+' without lot not in total':''))
+      +tc13Cap('Accuracy', kpi.accuracy_pct!=null?(kpi.accuracy_pct+'%'):'—', 'flat',
+          kpi.priced?(kpi.wins+' of '+kpi.priced+' priced closed trades positive'):'no priced closed trades yet')
+      +tc13Cap('Avg Profit', kpi.avg_profit_rs!=null?rsTxt(kpi.avg_profit_rs):'—', kpi.avg_profit_rs!=null?cl2(kpi.avg_profit_rs):'flat',
+          'mean P&amp;L across all '+kpi.priced+' priced closed trades, winners and losers')
+      +'</div>'
       +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
       +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th title="one lot per signal (futures_universe.lot_size), display only">P&amp;L &#8377; (1 lot)</th><th>Date</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
@@ -9640,6 +9764,20 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       var mark=function(){
         var more = sc.scrollWidth - sc.clientWidth - sc.scrollLeft > 1;
         hold.classList.toggle('clipped', more);
+        if(hint) hint.classList.toggle('on', more);
+      };
+      mark();
+      if(!sc._ccScrollBound){ sc.addEventListener('scroll', mark, {passive:true}); sc._ccScrollBound=true; }
+    });
+    // cc#1884: the Open Book's sortTbl()-rendered table has ONE scroll div (#tw_tc13open .scroll),
+    // not the two-layer .tbl-hold>.tbl-scroll the hand-built tables use — same fade-hint behaviour,
+    // the div toggling its own 'clipped' class since there is no separate wrapper here.
+    host.querySelectorAll('#tw_tc13open .scroll').forEach(function(sc){
+      var section=sc.closest('section');
+      var hint=section?section.querySelector('.scrollhint'):null;
+      var mark=function(){
+        var more = sc.scrollWidth - sc.clientWidth - sc.scrollLeft > 1;
+        sc.classList.toggle('clipped', more);
         if(hint) hint.classList.toggle('on', more);
       };
       mark();
