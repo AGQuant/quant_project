@@ -314,18 +314,44 @@ def qb_fix_all_allocations(x_admin_token: Optional[str] = Header(None)):
 
 @router.get("/positions")
 def qb_positions(basket_name: str = "large_cap", status: str = "open"):
-    return api_query("""
-        SELECT symbol, entry_price, entry_date, qty,
-               ROUND(qty*entry_price,2) AS cost_basis,
-               current_price, current_value,
-               ROUND(pnl,2) AS pnl, ROUND(pnl_pct,2) AS pnl_pct,
-               stop_loss_price, gvm_at_entry AS gvm,
-               g_at_entry AS g, v_at_entry AS v, m_at_entry AS m,
-               status, exit_price, exit_date, notes, updated_at
-        FROM quant_paper_positions
-        WHERE basket_name=%s AND status=%s
-        ORDER BY pnl_pct DESC NULLS LAST
-    """, (basket_name, status))
+    # cc#1886: day_pct is ADDITIVE to the existing row shape — every field above is unchanged,
+    # returned exactly as api_query() always built it. Rolled off api_query() only because this
+    # one field needs a second query on the SAME cursor (prev_close.prev_session_close_many).
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT symbol, entry_price, entry_date, qty,
+                       ROUND(qty*entry_price,2) AS cost_basis,
+                       current_price, current_value,
+                       ROUND(pnl,2) AS pnl, ROUND(pnl_pct,2) AS pnl_pct,
+                       stop_loss_price, gvm_at_entry AS gvm,
+                       g_at_entry AS g, v_at_entry AS v, m_at_entry AS m,
+                       status, exit_price, exit_date, notes, updated_at
+                FROM quant_paper_positions
+                WHERE basket_name=%s AND status=%s
+                ORDER BY pnl_pct DESC NULLS LAST
+            """, (basket_name, status))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            # cc#1886 DAY % = (CMP - prior_close) / prior_close x 100. prior_close is resolved
+            # PER SYMBOL via prev_close.prev_session_close_many() — the ONE platform-wide
+            # previous-session-close anchor (cc#1565, prev_close.py), reused rather than a
+            # second price-resolution path (price_resolver.py serves a different purpose —
+            # GVM's DISPLAY price for feed vs non-feed symbols — and was not the fit here).
+            # raw_prices coverage is uneven per symbol (some jump 08-Sep -> 04-Sep with no
+            # 07-Sep row) — a single shared prior-date would silently misprice some rows, which
+            # is exactly what the batched per-symbol resolver avoids.
+            import prev_close
+            syms = [r["symbol"] for r in rows if r.get("symbol")]
+            prevs = prev_close.prev_session_close_many(cur, syms) if syms else {}
+            for r in rows:
+                pc = (prevs.get(str(r["symbol"]).strip().upper()) or (None, None, None))[0]
+                cp = r.get("current_price")
+                r["day_pct"] = (round((float(cp) - float(pc)) / float(pc) * 100, 2)
+                                if (pc not in (None, 0) and cp is not None) else None)
+            return rows
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @router.get("/ledger")
