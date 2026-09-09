@@ -91,9 +91,13 @@ body{ --field:#0A0A0C; }
 #v8p .tag.res.t{color:var(--up)} #v8p .tag.res.s{color:var(--down)} #v8p .tag.res.g{color:var(--amber)}
 /* 1 · MARKET MOOD hero */
 #v8p .hero .eyebrow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;letter-spacing:2px;color:var(--mute);text-transform:uppercase}
-#v8p .hero .gword{font-family:var(--display);font-size:56px;line-height:.95;letter-spacing:-1px;margin:8px 0 6px;transform:skewX(-6deg);transform-origin:left center;color:var(--gold)}
-#v8p .hero .gword.bear{color:var(--down);text-shadow:0 0 28px rgba(255,92,108,.35)}
-#v8p .hero .gword.bull{color:var(--up);text-shadow:0 0 28px rgba(47,212,139,.35)}
+/* cc#1874 (founder 09-Sep-2026): the verdict word softens from a 56px hero to ~22px -- "collapse
+   the 2-slide carousel into ONE softer card." Verdict colour (gold/up/down by mood) stays the
+   ONE accent on the card; the glow behind it (text-shadow) is removed along with the size, per
+   the card's explicit "no glow behind the verdict" instruction. */
+#v8p .hero .gword{font-family:var(--display);font-size:22px;font-weight:800;line-height:1.1;letter-spacing:-.2px;margin:6px 0 8px;color:var(--gold)}
+#v8p .hero .gword.bear{color:var(--down)}
+#v8p .hero .gword.bull{color:var(--up)}
 #v8p .hero .sub{color:var(--mute);font-size:13px;margin-bottom:12px}
 #v8p .hero .sub b{color:var(--chalk);font-family:var(--mono)}
 #v8p .checks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-9);margin:var(--space-12) 0}   /* cc#1659 item 2: gap one step DOWN from 1656's --space-10 (10->9, the same magnitude as 1656's own one-step 6->10) + minmax(0,1fr) so the tracks can shrink below content instead of overflowing the row. */
@@ -108,20 +112,26 @@ body{ --field:#0A0A0C; }
 #v8p .slot .l b{color:var(--chalk);font-size:13px;letter-spacing:0}
 #v8p .sbar{height:8px;background:var(--well);border:1px solid var(--line);overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)}
 #v8p .sbar i{display:block;height:100%}
-#v8p .sbar.buy i{background:linear-gradient(90deg,var(--up),var(--up-d))} #v8p .sbar.sell i{background:linear-gradient(90deg,var(--down),var(--down-d))}
+/* cc#1874 (founder 09-Sep-2026): "slot bars are CAPACITY, not P&L -- 8/8 and 14/14 are full
+   because the book is full, that is neither profit nor loss. Render NEUTRAL." The old buy/sell
+   gradient (var(--up)/var(--down)) spent the P&L colour exemption on a fullness meter and taught
+   the wrong read; one flat neutral fill for both bars now, no gradient anywhere on the card. */
+#v8p .sbar i{background:var(--mute)}
 #v8p .hero .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-top:var(--space-14);font-family:var(--mono);font-size:10.5px;color:var(--dim)}   /* cc#1656 P2: --space-14 above the footer line */
-/* 1b · MARKET MOOD deck (cc#1659): 2-page swipe (Mood | Evidence), same gesture as home.html's
-   .swipe-t/.dots decks (cc#1350 scroll-snap-stop:always) - not a third dialect. This page has no
-   bare .swipe/.swipe-t/.dots collision in the shared sheet (checked), so these are unprefixed like
-   home.html's; the PAGE class is .mpg (not the shared sheet's bare .c, which this file's own top
-   comment says to avoid - a bare .c rule from mobile_app.css would add unwanted padding/border). */
-#v8p .swipe{margin-bottom:0}
-#v8p .swipe-t{display:flex;align-items:flex-start;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-#v8p .swipe-t::-webkit-scrollbar{display:none}
-#v8p .swipe-t > .mpg{flex:0 0 100%;min-width:0;scroll-snap-align:center;scroll-snap-stop:always;cursor:pointer}
-#v8p .dots{display:flex;justify-content:center;gap:var(--space-6);margin-top:var(--space-7)}
-#v8p .dots i{width:5px;height:5px;border-radius:50%;background:var(--line);transition:.2s}
-#v8p .dots i.on{background:var(--gold);width:16px;border-radius:var(--radius-3)}
+/* 1b · MARKET MOOD (cc#1874, founder 09-Sep-2026): "collapse the 2-slide carousel into ONE softer
+   card." The cc#1659 2-page swipe (.swipe/.swipe-t/.mpg/.dots, Mood | Evidence) is gone -- grepped
+   the whole file first (only mood used any of the four classes) so removing them is provably dead
+   code, not a guess. The ADR/DAY/WEEK/MONTH grid that was page 2 moves behind an Evidence
+   disclosure instead (below) -- it duplicates the Home tape exactly (ADR/DAY/WEEK/MONTH, verified
+   live against a same-session Home capture) and does not need to sit in the default view; the gate
+   verdict + checks-pass line + BUY/SELL slot allocation are genuinely V8-only and stay on the
+   card itself. */
+#v8p .mev-tog{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:var(--space-14);padding:var(--space-9) 0 0;border:0;border-top:1px solid var(--line);background:none;color:var(--mute);font-family:var(--mono);font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;cursor:pointer}
+#v8p .mev-tog .mev-chev{font-size:11px;color:var(--dim)}
+#v8p .mev-body{margin-top:var(--space-12)}
+#v8p .mev-body .foot{margin-top:var(--space-14)}
+#v8p .slotnote{margin-top:var(--space-10);font-family:var(--mono);font-size:10px;color:var(--dim);line-height:1.4}
+#v8p .passline{font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:var(--space-10)}
 /* 2a · KPI wells (.well-up from the shared sheet) + filter chips */
 #v8p .kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-12);margin-bottom:10px}   /* cc#1656 P2: gap between tiles one step (8->12) */
 #v8p .kw{padding:var(--space-15) var(--space-15) var(--space-14);min-width:0}   /* cc#1656 P2: padding two steps (10/10/9 -> 15/15/14); cc#1856 min-width:0 so a grid item can shrink below its nowrap child's content width instead of blowing out the row */
@@ -327,6 +337,7 @@ var STATE = { mood:null, book:null, sectors:null, n50:null, daylog:null, funnel:
    score rows) and the marker quick-filter set — in memory for the visit only. */
 var MK = { stars:{}, act:{}, dma:{}, tcs:{}, legend:null, tcRows:[] };
 var openMarkers = {};
+var MOOD_EV_OPEN = false;   /* cc#1874: Market Mood's Evidence disclosure -- closed by default, in-memory for the visit, survives the 5-min poll re-render */
 function getJ(url){
   return fetchWithTimeout(url).then(function(r){ if(!r.ok) throw new Error(url+' '+r.status); return r.json(); });
 }
@@ -368,22 +379,24 @@ function emptyBox(id, words){
   el.innerHTML = '<div class="empty">'+esc(words)+'<br><span class="chip" data-retry="1">Retry</span></div>';
 }
 /* ── 1 · MARKET MOOD ─────────────────────────────────────────────────────────────────── */
-/* ── cc#1627 · Market Mood is ONE card again (founder 02-Sep 22:26: the cc#1621 verdict-only
-   first card was empty space around a word already shown big). Top to bottom in the single
-   .pressed card: eyebrow MARKET GATE · date, the mood word big, the coloured mood bar, ONE plain
-   sentence, then the N OF 4 CHECKS FAILED line, the four check tiles, BUY / SELL slot bars, the
-   breadth line and the gate footer. No carousel, no swipe, no dots. Every number is the same
-   payload as before (market_mood + book); nothing re-derived. What survives from cc#1621 is the
-   closed-market pill: footer status after 15:30 IST reads "close · HH:MM", never LIVE
-   (sessionStamp / asofSession, same rule as cc#1611 / 1607).
-   cc#1628: ADR is a STRIP, not a boxed number - a two-colour split bar in the ADR cell (green =
-   advances share, red = declines share) with A / D under it and the ratio as the value; DAY /
-   WEEK / MONTH stay boxed numbers (single-direction moves, not ratios). The whole card is
-   tappable and opens a bottom sheet (moodOpen: grab handle, X, Esc, scrim - the cc#1593 / 1618
-   pattern) with the four rules in plain words, the ADR strip larger with the full counts, slot
-   usage by basket from the open book, and the gate timestamp / source line. Tapping the ADR
-   strip itself jumps to the ADR part of the sheet. Nothing re-derived: every figure is the
-   market_mood payload plus STATE.book.positions. */
+/* ── cc#1627 · Market Mood is ONE card (founder 02-Sep 22:26: the cc#1621 verdict-only first card
+   was empty space around a word already shown big). cc#1659 later split it into a 2-page swipe
+   (Mood | Evidence); cc#1874 (founder 09-Sep-2026) collapses that back into ONE card, softer this
+   time: eyebrow MARKET GATE · date, the verdict word SMALL (22px, no glow -- cc#1874 item), the
+   coloured mood bar (flat, the verdict colour is the ONE accent on the card), ONE plain sentence,
+   the N OF 4 CHECKS PASS line (cc#1874: pass-direction, matching the sector block directly above
+   it which already reads "Pass = how many of N checks the sector clears" -- two adjacent blocks
+   were counting opposite directions), and BUY/SELL slot bars in a single NEUTRAL fill (capacity,
+   not P&L -- cc#1874). The ADR/DAY/WEEK/MONTH grid -- verified against a same-session Home tape
+   capture to be the exact same four metrics Home already shows -- moves behind an "Evidence"
+   disclosure below the card, closed by default, along with the breadth line and slot_note (the
+   standard-pool / 09:30-entry / shorts-never-gate-exit sentence the endpoint already carries,
+   v8_endpoints.py L1058). The whole card stays tappable and opens the full gate-rules sheet
+   (moodOpen: grab handle, X, Esc, scrim -- cc#1593/1618); tapping the ADR box inside Evidence
+   still jumps to the ADR part of that sheet. The closed-market pill survives from cc#1621: footer
+   status after 15:30 IST reads "close · HH:MM", never LIVE (sessionStamp/asofSession, same rule
+   as cc#1611/1607). Nothing here is re-derived -- every figure is the market_mood payload plus
+   STATE.book.positions, exactly as before. */
 function sessionStamp(asof){
   /* the shared stamp says LIVE HH:MM while the page is fresh; on a closed market the honest word
      is close, with the same time */
@@ -421,10 +434,10 @@ function renderMood(){
       + '<div style="font-family:var(--mono);font-size:9px;color:var(--mute);white-space:nowrap">'+(adShare == null ? 'no count' : 'A '+adA+' / D '+adD)+'</div></div>';
     return '<div class="ck '+(ind?'':(c.pass?'ok':'bad'))+'" title="'+esc(c.required||'')+'"><div class="cl">'+esc(LBL[c.filter]||c.filter)+'</div><div class="cv">'+v+'</div></div>';
   }).join('');
-  function slot(name, used, total, kind){
+  function slot(name, used, total){
     var w = (num(used) && num(total) && total>0) ? Math.max(0, Math.min(100, Math.round(used/total*100))) : 0;
     var lbl = num(used) ? used+' / '+(num(total)?total:'—') : (num(total) ? '— / '+total : '—');
-    return '<div class="slot"><div class="l"><span>'+name+'</span><b>'+lbl+'</b></div><div class="sbar '+kind+'"><i style="width:'+w+'%"></i></div></div>';
+    return '<div class="slot"><div class="l"><span>'+name+'</span><b>'+lbl+'</b></div><div class="sbar"><i style="width:'+w+'%"></i></div></div>';   /* cc#1874: no buy/sell class -- one neutral fill for both, capacity not P&L */
   }
   var sentence = mode + ' ' + (num(usedL) && num(usedS)
     ? '<b>'+usedL+' of '+(num(B)?B:'—')+'</b> buy slots, <b>'+usedS+' of '+(num(S)?S:'—')+'</b> sell slots in use.'
@@ -435,48 +448,32 @@ function renderMood(){
   var adrCk = checks.filter(function(c){ return c.filter==='ADR'; })[0];
   if(adrCk && num(adrCk.value)) breadth += ' · ADR '+adrCk.value.toFixed(2);
   if(ad.adr_date) breadth += ' · '+esc(ad.adr_date);
-  /* cc#1659: the card is now a 2-page swipe deck (Mood | Evidence). data-mood-open/role/title move
-     from the outer #sec-mood section onto EACH page div instead of staying on the section itself --
-     the dots row sits OUTSIDE both page divs (siblings of .swipe-t, same as home.html's book deck),
-     so a dot tap never also bubbles into a data-mood-open ancestor and fires moodOpen(). Tapping
-     inside either page still opens the gate sheet exactly as the single-card version did; the ADR
-     box's own data-mood-adr still narrows the sheet to the ADR section (line ~1139, unchanged). */
   var moodBarHtml = '<div class="moodbar"><i style="display:block;height:100%;width:'+Math.max(barW, cls ? 8 : 0)+'%;background:'+barCol+'"></i></div>';
-  var pageMood =
-      '<div class="mpg" role="button" data-mood-open="1" title="Tap for the gate rules">'
+  /* cc#1874: ONE card again, verdict + checks-PASS line + slots -- the Evidence disclosure (grid,
+     breadth, slot_note) is a SIBLING, not nested inside the tappable div, the same trick the old
+     dots row used to avoid bubbling into data-mood-open. MOOD_EV_OPEN persists the disclosure's
+     open/closed state across the 5-min poll re-render (renderAll runs renderMood() on every
+     refresh) -- without it, a founder who opened Evidence would see it silently re-collapse on
+     the next silent background load. */
+  var card =
+      '<div role="button" data-mood-open="1" title="Tap for the gate rules">'
     + '<div class="eyebrow"><span>Market gate</span><span>'+esc(String(m.checked_at||''))+'</span></div>'
     + '<div class="gword '+cls+'">'+esc(mood)+'</div>'
     + moodBarHtml
     + '<div class="sub">'+sentence+'</div>'
+    + '<div class="passline">'+passed+' of '+checks.length+' checks pass</div>'
+    + '<div class="slots">'+slot('BUY SLOTS', usedL, B)+slot('SELL SLOTS', usedS, S)+'</div>'
     + moodFoot(m)
     + '</div>';
-  var pageEvidence =
-      '<div class="mpg" role="button" data-mood-open="1" title="Tap for the gate rules">'
-    + '<div class="eyebrow" data-mood-fails="1"><span>'+fails+' of '+checks.length+' checks failed</span><span>evidence</span></div>'
-    + moodBarHtml
+  var evidence =
+      '<button type="button" class="mev-tog" data-mood-evtoggle="1" aria-expanded="'+(MOOD_EV_OPEN?'true':'false')+'" aria-controls="mood-evbody"><span>Evidence</span><span class="mev-chev">'+(MOOD_EV_OPEN?'▴':'▾')+'</span></button>'
+    + '<div class="mev-body" id="mood-evbody" data-mood-open="1" title="Tap for the gate rules"'+(MOOD_EV_OPEN?'':' hidden')+'>'
     + '<div class="checks">'+ck+'</div>'
-    + '<div class="slots">'+slot('BUY SLOTS', usedL, B, 'buy')+slot('SELL SLOTS', usedS, S, 'sell')+'</div>'
     + '<div class="foot"><span>'+breadth+'</span><span style="color:var(--gold)">rules →</span></div>'
+    + (m.slot_note ? '<div class="slotnote">'+esc(m.slot_note)+'</div>' : '')
     + '</div>';
-  el.innerHTML =
-    '<div class="swipe"><div class="swipe-t" id="moodTrack">'
-    + pageMood + pageEvidence
-    + '</div><div class="dots" id="moodDots"><i class="on"></i><i></i></div></div>';
-  /* cc#1659: bound via addEventListener, not an inline onscroll="" attribute -- this whole script
-     runs inside one IIFE (unlike home.html's, which is not wrapped), so an inline handler would
-     look up moodDots() on window and fail. Re-bound every render since innerHTML above just
-     replaced the node. */
-  var mt = document.getElementById('moodTrack'); if (mt) mt.addEventListener('scroll', moodDots);
+  el.innerHTML = card + evidence;
   if(r) r.textContent = String(m.checked_at||'');
-}
-/* cc#1659: dot indicator for the mood deck, same shape as home.html's heroDots() (indicator only,
-   no tap-to-jump -- unlike bookDots(), this card's whole page is already a tap target for the gate
-   sheet, so a second, different tap behaviour on the dots themselves would be a mixed signal). */
-function moodDots(){
-  var tr = document.getElementById('moodTrack'), dots = document.getElementById('moodDots');
-  if (!tr || !dots) return;
-  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
-  Array.prototype.forEach.call(dots.children, function(el, j){ el.className = (j === i ? 'on' : ''); });
 }
 /* cc#1634: ONE footer line on the hero card carries what the header corner used to say:
    "gate <date> · market open · LIVE HH:MM" in session, "gate <date> · market closed · HH:MM"
@@ -524,7 +521,11 @@ function moodSheetHtml(){
     + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px"><span class="up">'+(adA == null ? '—' : adA+' advancing')+'</span><span class="dn">'+(adD == null ? '—' : adD+' declining')+'</span></div>'
     + '<div style="font-size:12px;color:var(--mute);margin-top:6px">'+(adShare == null ? 'No count for this session yet.' : adShare+'% of counted stocks were up'+(adU != null ? ', '+adU+' unchanged' : '')+'.')+(ad.adr_date ? ' Counted '+esc(ad.adr_date)+'.' : '')+(ad.source ? ' Source '+esc(String(ad.source).replace(/_/g, ' '))+'.' : '')+'</div></div>';
   var foot = '<div style="padding:8px 14px 22px;font-family:var(--mono);font-size:10px;color:var(--dim);line-height:1.6">gate computed '+esc(String(m.checked_at||''))+(m.breadth_source ? ' · breadth '+esc(String(m.breadth_source).replace(/_/g, ' ')) : '')+(m.nifty_source ? ' · Nifty '+esc(String(m.nifty_source).replace(/_/g, ' ')) : '')+(m.slot_note ? ' · '+esc(m.slot_note) : '')+(st.txt ? ' · '+esc(st.txt) : '')+'</div>';
-  return head + sec((num(m.fails) ? m.fails : checks.filter(function(c){ return !c.pass; }).length)+' of '+checks.length+' checks failed') + rows
+  /* cc#1874: pass-direction, matching the card that opens this sheet (and the sector block, which
+     already reads "Pass = how many checks the sector clears") -- was "N of 4 checks failed" until
+     this pass, the opposite direction from the card one tap away. */
+  var failsCount = num(m.fails) ? m.fails : checks.filter(function(c){ return !c.pass; }).length;
+  return head + sec((checks.length - failsCount)+' of '+checks.length+' checks pass') + rows
     + sec('Breadth') + adr
     + sec('Slots in use') + slotRow('BUY SLOTS', usedL, B, 'buy', 'Long positions: '+list(by.L)) + slotRow('SELL SLOTS', usedS, S, 'sell', 'Short positions: '+list(by.S))
     + foot;
@@ -1469,6 +1470,8 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var fb = e.target.closest('[data-fn-basket]'); if(fb){ fnBasket = fb.getAttribute('data-fn-basket'); renderFunnel(); return; }
   var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); return; }
   var fs = e.target.closest('[data-fn-sym]'); if(fs){ location.href = '/m/check#tc?sym=' + encodeURIComponent(fs.getAttribute('data-fn-sym')); return; }   /* cc#1614: row -> Trade Check */
+  var ev = e.target.closest('[data-mood-evtoggle]');
+  if(ev){ MOOD_EV_OPEN = !MOOD_EV_OPEN; renderMood(); return; }   /* cc#1874: re-render carries the new state, same pattern as every other disclosure/toggle on this page */
   var mo = e.target.closest('[data-mood-open]'); if(mo){ moodOpen(e.target.closest('[data-mood-adr]') ? 'adr' : null); return; }   /* cc#1628: card -> gate sheet */
 });
 load();
