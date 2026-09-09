@@ -536,10 +536,16 @@ def gvm_company_report(symbol: str):
                         ev_map[code] = ev_f
                     if peg_f is not None:
                         peg_map[code] = peg_f   # cc#507: PEG can be legitimately negative (loss-making) -- keep
+                # cc#1864 fix: this used to read input_raw.fy27_growth directly and label the RAW
+                # growth input "Annual Upside (FY27e)" -- e.g. GULFOILLUB showed +18.0% (raw
+                # fy27_growth) instead of the actual computed upside, 13.88 (screener_loader.
+                # calc_potential_upside: fy27_growth * (pe/historical_pe) = 18 * (13.19/17.1)).
+                # The correct value is already computed nightly and stored in gvm_scores.
+                # upside_raw -- read that instead of recomputing or re-reading the raw input.
                 cur.execute("""
-                    SELECT nse_code, fy27_growth
-                    FROM input_raw
-                    WHERE nse_code = ANY(%s)
+                    SELECT symbol, upside_raw FROM gvm_scores
+                    WHERE symbol = ANY(%s)
+                      AND score_date = (SELECT MAX(score_date) FROM gvm_scores)
                 """, (ladder_syms,))
                 for code, ups_v in cur.fetchall():
                     ups_f = _f(ups_v)
