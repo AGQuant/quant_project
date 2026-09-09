@@ -904,6 +904,18 @@ def run_tick(conn=None) -> Dict[str, Any]:
         # UNIQUE(symbol, star_date, direction), so a symbol carrying both a pivot marker and an
         # activity marker logs both — and no ALTER TABLE is needed (cc#351). level_value carries
         # whichever leg fired, so the row is self-describing.
+        # cc#1887 P0 FIX: cc#1811 rewrote evaluate_activity()'s return shape to the Vol R/P/D/AD
+        # four-check tally (checks_passed/checks/note) but left THIS write loop consuming the OLD
+        # pre-cc#1811 shape (a["trigger"]/a["rvol"]/a["vol_p"]/a["oi_dod_pct"]) — none of those keys
+        # exist on the new dict, so a["trigger"] raised KeyError('trigger') on every single tick
+        # since cc#1811 shipped (scheduler_master: bg_pivot_star active=true, last_status=error).
+        # pivot_star() below reads the GREEN activity marker from this LOG, not a live re-eval
+        # (cc#1008 DISPLAY_PARITY), so the failure silently froze the lightning-bolt marker on the
+        # V8 dashboard at whatever last logged before the KeyError started — not merely a scheduler
+        # red light. level_name='VOL_4CHECK' is a new, self-describing trigger value (same pattern
+        # as the existing VOL/OI/VOL+OI legs) so no ALTER TABLE is needed (cc#351); level_value
+        # carries checks_passed (2-4, the row's own minimum to log per evaluate_activity's own
+        # `if passed < 2: continue` gate).
         acts = evaluate_activity(conn, d)
         awrote = 0
         with conn.cursor() as cur:
@@ -914,12 +926,7 @@ def run_tick(conn=None) -> Dict[str, Any]:
                        level_name, level_value, cmp_at_star, day_1d)
                     VALUES (%s,%s,%s,%s,'ACTIVITY','GREEN',%s,%s,NULL,NULL)
                     ON CONFLICT (symbol, star_date, direction) DO NOTHING
-                """, (d, ts, a["symbol"], None, a["trigger"],
-                      # cc#1441: level_value carries the vol value that fired (RVOL first, else
-                      # VOL P) for VOL / VOL+OI triggers, the OI figure for pure OI — the row
-                      # stays self-describing under the amended legs.
-                      (a["rvol"] if a["rvol"] is not None else a["vol_p"])
-                      if a["trigger"] != "OI" else a["oi_dod_pct"]))
+                """, (d, ts, a["symbol"], None, "VOL_4CHECK", a["checks_passed"]))
                 awrote += cur.rowcount
         conn.commit()
         # cc#1682: the third family, now a STATE not a cross (supersedes cc#1539's fresh-cross-only
@@ -1129,6 +1136,12 @@ def pivot_star(star_date: Optional[str] = None):
                         lv = _f(lval)
                         trig = (lname or "").upper()
                         facts = []
+                        # cc#1887: rows logged after this fix carry level_name='VOL_4CHECK' (the
+                        # Vol R/P/D/AD tally, cc#1811) — a third era alongside the two cc#1441
+                        # already documents below. Old rows are never deleted/rewritten, so all
+                        # three eras must keep rendering correctly off whatever they actually hold.
+                        if trig == "VOL_4CHECK" and lv is not None:
+                            facts.append(f"{int(lv)} of 4 volume checks pass")
                         # cc#1441: "usual pace" wording is honest for BOTH eras of logged rows —
                         # old rows hold the retired v8_metrics day ratio, new rows hold RVOL/VOL P.
                         if trig in ("VOL", "VOL+OI") and lv is not None:
