@@ -66,6 +66,44 @@ def _ist():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
+# ── cc#1909 TC_LIVE_INTRADAY_CANON_V1 (session_log 42648, founder-locked 09-Sep-2026) ───────────
+# The canon TC score is the LAST tick of TODAY in tc_universe_ticks — never a live recompute of
+# EOD-frozen raw_prices inputs (which is what _load_one/_compute_result see after close, and which
+# is why the on-demand endpoint exactly reproduced the 16:05 tc_screener_v2 row: same inputs, same
+# formula, just called at a different clock time), and never tc_screener_v2 itself. Isolated as its
+# own function, imported fresh (ZoneInfo, not this module's older naive _ist() offset arithmetic),
+# because tc_universe_ticks.ts is a real TIMESTAMPTZ and a naive-datetime comparison against it is
+# exactly the kind of off-by-timezone bug this file cannot afford on a scoring path.
+def _tc_tick_today(cur, symbol):
+    """{bucket: {score10, verdict10, weighted, cmp, ts}} from tc_universe_ticks for TODAY (IST
+    calendar date) only, latest tick per bucket. A bucket absent from the result has NO tick today
+    — callers must render that as no score, never fall back to a live recompute or tc_screener_v2."""
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as _tz
+    ist = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    start_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_tz.utc)
+    try:
+        cur.execute("""
+            SELECT DISTINCT ON (bucket) bucket, score100, verdict10, weighted, cmp, ts
+            FROM tc_universe_ticks
+            WHERE symbol = %s AND ts >= %s
+            ORDER BY bucket, ts DESC
+        """, (symbol, start_utc))
+        out = {}
+        for bucket, score100, verdict10, weighted, cmp_v, ts in cur.fetchall():
+            out[bucket] = {
+                "score10": round(float(score100) / 10.0, 2) if score100 is not None else None,
+                "verdict10": verdict10, "weighted": bool(weighted),
+                "cmp": (float(cmp_v) if cmp_v is not None else None), "ts": ts,
+            }
+        return out
+    except Exception:
+        # A tick-table read failure must not take down the whole Check page — the caller renders
+        # "no score today" for every card, which is the honest state when this lookup cannot run.
+        return {}
+
+
 def _fmt_event_date(iso):
     """cc#451: render an imminent result date as 'DD-Mon (relative)' — e.g. '13-Jul (tomorrow)',
     '14-Jul (Tue)', 'today' — relative to IST today, for the G2 gate chip/banner."""
@@ -1759,9 +1797,15 @@ def best_card(cards, side=None):
     return max(pool, key=card_pct, default=None)
 
 
-def _compute_result(d, symbol, side):
+def _compute_result(d, symbol, side, cur=None):
     """Score both style cards for each requested side and assemble the dual result. Shared by the
-    dual endpoint and the detail endpoint (cc#408) so scores are identical by construction."""
+    dual endpoint and the detail endpoint (cc#408) so scores are identical by construction.
+
+    cur: an open DB cursor, used ONLY for the cc#1909 tick overlay below (the rest of this function
+    is pure computation on the already-loaded `d`). Opens its own short-lived connection when the
+    caller has none open at this point (trade_check_v4_dual's own connection is already closed by
+    the time it calls this — see that function) rather than restructuring every caller's connection
+    lifetime for one extra read."""
     # cc#677 (founder-final, spec id=9035): ZERO-VETO. The verdict is SCORE BANDS ALONE — no gate ever
     # rejects. Every risk condition (F&O ban / result proximity / GVM floor / DTE) is an ALERT CHIP.
     # Both style cards are scored for each requested side; the best card by score sets the verdict.
@@ -1792,6 +1836,58 @@ def _compute_result(d, symbol, side):
     # payload for display. Flipping the selector is one line and its own push, once the four
     # buckets are comparable again.
     best = best_card(cards)
+
+    # ── cc#1909 TICK OVERLAY — the DISPLAYED score changes source here, the SELECTION above does
+    # not. `best` was already chosen on the live raw score/max ratio (do_not_touch, TC_LIVE_
+    # INTRADAY_CANON_V1: "the V2 rule set... is unchanged. Only the source each surface reads
+    # changes") — this block only overwrites each card's score10/verdict10/score10_weighted/
+    # score100 with today's tick, in place, so `best` (a reference into `cards`) picks it up too.
+    # The rule-by-rule breakdown (`rules`, `score`, `max`) stays live — tc_universe_ticks stores
+    # only the aggregate per bucket, not a per-rule history, so the detail panel cannot be tick-
+    # sourced without that table growing a column that does not exist today (flagged separately,
+    # not invented here). A card with no tick today gets score10/verdict10/score100 = None and
+    # no_score_today = True — never a silent fall-back to the live ratio or to tc_screener_v2.
+    _own_conn = None
+    if cur is None:
+        try:
+            _own_conn = psycopg.connect(_DB)
+            cur = _own_conn.cursor()
+        except Exception:
+            cur = None
+    tick_map = _tc_tick_today(cur, symbol) if cur is not None else {}
+    if _own_conn is not None:
+        try:
+            _own_conn.close()
+        except Exception:
+            pass
+    latest_tick_ts = None
+    for c in cards:
+        t = tick_map.get(c.get("label"))
+        if t is not None:
+            c["score10"] = t["score10"]
+            c["verdict10"] = t["verdict10"]
+            c["score10_weighted"] = t["weighted"]
+            c["score100"] = round(t["score10"] * 10.0, 1) if t["score10"] is not None else None
+            c["no_score_today"] = False
+            c["tick_ts"] = t["ts"].isoformat() if t["ts"] else None
+            if t["ts"] is not None and (latest_tick_ts is None or t["ts"] > latest_tick_ts):
+                latest_tick_ts = t["ts"]
+        else:
+            c["score10"] = None
+            c["verdict10"] = None
+            c["score10_weighted"] = False
+            c["score100"] = None
+            c["no_score_today"] = True
+            c["tick_ts"] = None
+
+    tick_ts_ist = None
+    if latest_tick_ts is not None:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tick_ts_ist = latest_tick_ts.astimezone(_ZI("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S IST")
+        except Exception:
+            tick_ts_ist = None
+
     return {
         "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
         "alerts": _alerts(d),                       # cc#677: informational chips only (never gate)
@@ -1808,9 +1904,18 @@ def _compute_result(d, symbol, side):
         # to say when a 10-scale number is uncalibrated rather than print it as if it were the
         # founder-locked one.
         "best_score10_weighted": (bool(best.get("score10_weighted")) if best else False),
+        "no_score_today": (bool(best.get("no_score_today")) if best else True),
         "cards": cards,
         "pivots": {k: _r(v) for k, v in d["pivots"].items()},
-        "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
+        # cc#1909: computed_at is now the TICK time (tc_universe_ticks), never render time — the
+        # exact defect the founder ruling named ("Scored 21:43 IST" on a 16:06 score). None when
+        # no bucket has a tick today; a surface must render "no score" then, not a wall clock.
+        "computed_at": tick_ts_ist,
+        # Render time is kept separately for the evidence panel (bars/dma/rsi/peers etc, still a
+        # live read below this — tc_universe_ticks has no room for that detail) so a surface that
+        # wants "evidence as of" for its own labelling still can, without it masquerading as the
+        # score time again.
+        "evidence_computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
         "spec_ref": SPEC_REF, "version": VERSION,
     }
 
@@ -1825,13 +1930,15 @@ def trade_check_v4_dual(symbol, side="ALL"):
     try:
         with psycopg.connect(_DB) as conn, conn.cursor() as cur:
             d = _load_one(cur, symbol)
+            if not d["daily"]:
+                return {"error": f"no raw_prices history for {symbol}"}
+            if d["cmp"] is None:
+                return {"error": f"no CMP available for {symbol}"}
+            # cc#1909: cur passed through so the tick overlay reuses this connection instead of
+            # opening a second one per request.
+            return _compute_result(d, symbol, side, cur=cur)
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
-    if not d["daily"]:
-        return {"error": f"no raw_prices history for {symbol}"}
-    if d["cmp"] is None:
-        return {"error": f"no CMP available for {symbol}"}
-    return _compute_result(d, symbol, side)
 
 
 def _peer_rows(cur, segment, symbol, side):
@@ -1953,7 +2060,7 @@ def trade_check_v4_detail(symbol, side="BUY"):
                 return {"error": f"no raw_prices history for {symbol}"}
             if d["cmp"] is None:
                 return {"error": f"no CMP available for {symbol}"}
-            res = _compute_result(d, symbol, side)
+            res = _compute_result(d, symbol, side, cur=cur)   # cc#1909: same connection, one tick read
             ev_side = side
             if side == "ALL":
                 ev_side = ((res.get("best") or {}).get("side")) or "BUY"
