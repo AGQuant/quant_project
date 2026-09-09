@@ -349,8 +349,13 @@
   }
 
   // ---- holdings table: sortable headers (cc#1680 pattern), default Weight % desc ----
+  // cc#1886 (founder 09-Sep "Replace P&L value by Day %"): the P&L Rs column is replaced by
+  // DAY % in the SAME position — day_pct is additive on the /api/qb/positions payload
+  // (qb_endpoints.py, prev_close.py-resolved per symbol), sorts numerically through the exact
+  // same HSORT/sortedHoldings machinery every other column here already uses (kind:'num'), no
+  // new sort component needed. P&L % (life-of-position return) is untouched, a few columns over.
   var HCOLS = [['symbol','Symbol','txt'],['qty','Qty','num'],['entry_price','Entry','num'],['current_price','CMP','num'],
-               ['current_value','Value','num'],['pnl','P&amp;L ₹','num'],['pnl_pct','P&amp;L %','num'],['weight','Weight %','num'],['stop_loss_price','Stop','num']];
+               ['current_value','Value','num'],['day_pct','Day %','num'],['pnl_pct','P&amp;L %','num'],['weight','Weight %','num'],['stop_loss_price','Stop','num']];
   var HSORT = { key: 'weight', dir: 1 };   // dir 1 = descending (cc#1680 convention)
   // cc#1821: pulled out of holdingsHtml so the Copy Symbols button can read the SAME sorted list
   // that function renders from, not a second, possibly-drifting re-derivation of the sort. Output
@@ -383,7 +388,7 @@
       return '<tr style="border-bottom:1px solid var(--line,#1E2A44)">'
         + '<td class="sym" style="padding:8px 10px">' + esc(r.symbol) + (window.ScorrCardRow ? window.ScorrCardRow(r.symbol) : '') + '</td>'
         + td(r.qty != null ? r.qty : '—') + td(num2(r.entry_price)) + td(num2(r.current_price)) + td(inr2(r.current_value))
-        + td('<span class="' + cls(r.pnl) + '">' + inr2(r.pnl) + '</span>') + td('<span class="' + cls(r.pnl_pct) + '">' + pct(r.pnl_pct) + '</span>')
+        + td('<span class="' + cls(r.day_pct) + '">' + pct(r.day_pct) + '</span>') + td('<span class="' + cls(r.pnl_pct) + '">' + pct(r.pnl_pct) + '</span>')
         + td(r.weight == null ? '—' : (+r.weight).toFixed(1) + '%') + td(num2(r.stop_loss_price)) + '</tr>';
     }).join('');
     return tableWrap('<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody>', 'mp-sticky');   // cc#1731: pinned header
