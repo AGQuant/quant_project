@@ -136,6 +136,16 @@ body{ --field:#0A0A0C; }
 #v8p .kw .kn.kn2{font-size:13px}
 #v8p .kw .ks{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:var(--space-7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* cc#1656 P2: --space-6 more below the number (1px -> 7px); cc#1856 one line, ellipsis over a second wrap */
 #v8p .filters{display:flex;gap:var(--space-10);margin:var(--space-16) 0 var(--space-18);overflow-x:auto;scrollbar-width:none}   /* cc#1656 P2: row gap one step (6->10), row-to-row two steps (8/10 -> 16/18) */
+/* cc#1870 (founder 09-Sep-2026, "buttons could be smaller and fixed"): scoped to #open-filter-bar
+   only -- the shared .chip class is also used by the Show-all/retry/marker-legend chips elsewhere
+   on this page, which are NOT part of this card's scope and must not shrink. */
+#open-filter-bar{position:sticky;top:0;z-index:6;background:var(--field);padding-top:var(--space-4);margin:var(--space-10) 0 0}   /* item 2: pins below the page header, list scrolls under it -- #v8p .top is display:none (theme_mobile.css), so this bar is the only sticky header on the page */
+#open-filter-bar .filter-row1{display:flex;align-items:center;gap:var(--space-8)}
+#open-filter-bar .filter-row1 .filters{flex:1;min-width:0;margin:0 0 var(--space-8)}
+#open-filter-bar .chip{font-size:12px;padding:4px var(--space-10);min-height:32px;display:inline-flex;align-items:center;border-radius:999px;clip-path:none}   /* item 1: compact pill, item 3: hit box stays >=32px via min-height even though the visual box is smaller */
+#open-filter-bar .chip.gd{background:var(--gold-d);border-color:color-mix(in srgb, var(--gold) 40%, transparent);color:var(--gold)}   /* selected = accent fill, per item 1 */
+#open-filter-bar .filters .chip:not(.gd){background:transparent}   /* unselected chips stay outline-only, per item 1 */
+#open-filter-bar .sort-btn{flex:none;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--well);border:1px solid var(--line);border-radius:8px;color:var(--mute);font-size:15px;cursor:pointer}
 #v8p .filters::-webkit-scrollbar{display:none}
 #v8p .filters .chip{flex:none}
 /* 2 · OPEN POSITIONS — rows are .slab.dense from the shared sheet; inner names prefixed (see top) */
@@ -257,8 +267,14 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <section class="pressed hero" id="sec-mood" aria-label="Market mood gate"><div class="empty">Loading the market gate…</div></section>
   <div class="sect">Open positions <span class="n" id="open-n"></span><span class="r" id="open-r"></span></div>
   <div class="kpi" id="open-kpi"></div>
-  <div class="filters" id="open-filters"></div>
-  <div class="filters" id="open-markers" style="margin-top:-4px"></div>
+  <!-- cc#1870 (founder 09-Sep-2026, "buttons could be smaller and fixed"): #open-filter-bar is the
+       STICKY unit (both chip rows pin together below the page header while the list scrolls under
+       them, item 2). Row 1 is a flex row: the horizontal-scrolling side/basket chips (#open-filters)
+       plus the sort icon button, which stays fixed at the right and never scrolls with the chips. -->
+  <div class="filter-bar" id="open-filter-bar">
+    <div class="filter-row1"><div class="filters" id="open-filters"></div><button type="button" class="sort-btn" data-open-sort="1" aria-label="Sort positions">⇅</button></div>
+    <div class="filters" id="open-markers" style="margin-top:-4px"></div>
+  </div>
   <div class="plist" id="sec-open"><div class="slab dense empty">Loading the open book…</div></div>
   <div class="vmore" id="open-more"></div>
   <div class="sect">Sectors <span class="n" id="sec-n"></span><span class="r" id="sec-r"></span></div>
@@ -530,6 +546,47 @@ function moodOpen(jump){
 function moodClose(){ var ov = document.getElementById('v8-mood-ov'); if(ov) ov.style.display = 'none'; document.body.style.overflow = ''; }
 /* ── 2 · OPEN POSITIONS ──────────────────────────────────────────────────────────────── */
 var OPEN_LIMIT = 8, openAll = false, openFilter = 'all';
+/* cc#1870 (founder 09-Sep-2026, "give a sort icon to view by p&l, date"): openSort persists for
+   the page's lifetime (JS state, not localStorage -- "does not need to survive an app restart"
+   per the card). Default is pnl_desc, matching what renderOpen() already did unconditionally
+   before this card (state in the report per item 5's own instruction). */
+var openSort = 'pnl_desc';
+var OPEN_SORTS = [
+  { key: 'pnl_desc', label: 'P&L highest first' },
+  { key: 'pnl_asc',  label: 'P&L lowest first' },
+  { key: 'date_desc', label: 'Newest first' },
+  { key: 'date_asc',  label: 'Oldest first' }
+];
+/* cc#1870 item 6: sorts the FILTERED set (called after applyFilter+applyMarkers in renderOpen,
+   never before) on the SAME unrealised figure the card displays -- list order and card numbers
+   can never disagree. Date sort reads entry_ts (v8_paper_positions.entry_ts) directly. */
+function sortRows(rows){
+  var r = rows.slice();
+  if(openSort === 'pnl_desc') r.sort(function(a,b){ return (num(b.unrealised)?b.unrealised:-Infinity) - (num(a.unrealised)?a.unrealised:-Infinity); });
+  else if(openSort === 'pnl_asc') r.sort(function(a,b){ return (num(a.unrealised)?a.unrealised:Infinity) - (num(b.unrealised)?b.unrealised:Infinity); });
+  else if(openSort === 'date_desc') r.sort(function(a,b){ return String(b.entry_ts||'').localeCompare(String(a.entry_ts||'')); });
+  else if(openSort === 'date_asc') r.sort(function(a,b){ return String(a.entry_ts||'').localeCompare(String(b.entry_ts||'')); });
+  return r;
+}
+function openSortSheetHtml(){
+  return '<div data-sort-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80"></div>'
+    + '<div role="dialog" aria-modal="true" aria-label="Sort positions" style="position:fixed;left:0;right:0;bottom:0;z-index:81;background:var(--panel);border-top:1px solid var(--line);border-radius:14px 14px 0 0;padding:4px 16px calc(18px + env(safe-area-inset-bottom,0px))">'
+    + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 12px"></div>'
+    + OPEN_SORTS.map(function(s){
+        return '<button type="button" data-sort-pick="'+s.key+'" style="display:flex;align-items:center;justify-content:space-between;width:100%;min-height:44px;padding:0 4px;background:none;border:0;border-bottom:1px solid var(--line);color:var(--chalk);font-family:var(--body);font-size:14px;cursor:pointer;text-align:left">'
+          + esc(s.label) + (openSort===s.key ? '<span style="color:var(--gold);font-weight:800">✓</span>' : '') + '</button>';
+      }).join('')
+    + '</div>';
+}
+function openSortSheetOpen(){
+  var el = document.getElementById('open-sort-sheet'); if(el) return;
+  el = document.createElement('div'); el.id = 'open-sort-sheet'; el.innerHTML = openSortSheetHtml();
+  document.getElementById('v8p').appendChild(el);   /* cc#1866/1867 lesson: child of #v8p, not document.body, so #v8p's token bridge reaches it */
+  el.addEventListener('click', function(e){
+    if(e.target.closest('[data-sort-close]')){ el.remove(); return; }
+    var b = e.target.closest('[data-sort-pick]'); if(b){ openSort = b.getAttribute('data-sort-pick'); el.remove(); renderOpen(); }
+  });
+}
 function kpiWell(label, val, cls, sub){ return '<div class="kw well-up"><div class="kl">'+label+'</div><div class="kn '+cls+'">'+val+'</div><div class="ks">'+sub+'</div></div>'; }
 /* wells read the canon keys straight off the payload (rule 13): unrealised / long / short */
 function renderKpi(bk, rows){
@@ -552,6 +609,9 @@ function renderFilters(rows){
   var h = chip('all','All '+rows.length) + chip('side:LONG','Long '+nL) + chip('side:SHORT','Short '+nS);
   Object.keys(bks).sort().forEach(function(k){ h += chip('bk:'+k, esc(String(bks[k].label).replace(/reversal/i,'Rev').replace(/momentum/i,'Mom'))+' '+bks[k].n); });
   el.innerHTML = h;
+  /* cc#1870 item 4: the selected chip scrolls into view on load/re-render, so a non-"all" filter
+     is never left off-screen after the row shrank enough to fit fewer chips at once. */
+  var sel = el.querySelector('.chip.gd'); if(sel && sel.scrollIntoView) sel.scrollIntoView({block:'nearest', inline:'nearest'});
 }
 function applyFilter(rows){
   if(openFilter==='all') return rows;
@@ -726,13 +786,18 @@ function renderOpen(){
   var n = document.getElementById('open-n'), r = document.getElementById('open-r');
   more.innerHTML = '';
   if(!bk || !bk.positions){ n.textContent=''; r.textContent=''; renderKpi(null, []); renderFilters([]); renderMarkerChips([]); el.innerHTML='<div class="slab dense" id="open-empty"></div>'; emptyBox('open-empty', 'Open book is not available right now.'); return; }
-  var all = bk.positions.slice().sort(function(a,b){ return (num(b.unrealised)?b.unrealised:-Infinity) - (num(a.unrealised)?a.unrealised:-Infinity); });
+  /* cc#1870: the unconditional P&L-desc sort that used to live here is gone -- item 6 requires
+     sort to apply to the FILTERED set, not the full 22, so it now runs after applyFilter/
+     applyMarkers below via sortRows(openSort). "all" stays in whatever order bk.positions itself
+     arrives in (used only for counts and the KPI/filter chip builders, which do not care about
+     order). */
+  var all = bk.positions.slice();
   n.textContent = String(all.length);
   r.textContent = num(bk.brokerage_per_trade) ? 'net of ₹'+bk.brokerage_per_trade+'/trade' : '';
   renderKpi(bk, all); renderFilters(all);
   var rows = applyFilter(all);
   renderMarkerChips(rows);          // cc#1610: counts over the side/basket-filtered rows
-  rows = applyMarkers(rows);        // OR among markers, AND with the chips above
+  rows = sortRows(applyMarkers(rows));   // cc#1870 item 6: sort AFTER filter+markers, on the same figure the card shows
   if(!all.length){
     el.innerHTML = '<div class="slab dense empty">No open positions right now. The engine enters only when a stock clears all 9 checks and a slot is free.</div>'+asofSession(bk.as_of);
     return;
@@ -1291,6 +1356,7 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var t = e.target.closest('[data-retry]'); if(t){ load(); return; }
   var o = e.target.closest('[data-open-toggle]'); if(o){ openAll = !openAll; renderOpen(); return; }
   var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); return; }
+  var so = e.target.closest('[data-open-sort]'); if(so){ openSortSheetOpen(); return; }   /* cc#1870 item 5 */
   var mk = e.target.closest('[data-mk-sym]'); if(mk){ e.stopPropagation(); mkOpen(mk.getAttribute('data-mk-sym'), mk.getAttribute('data-mk-side')); return; }
   var mc = e.target.closest('[data-open-marker]'); if(mc){ var k = mc.getAttribute('data-open-marker'); openMarkers[k] = !openMarkers[k]; openAll = false; renderOpen(); return; }
   var ml = e.target.closest('[data-mk-legend]'); if(ml){ mkLegendOpen(); return; }
