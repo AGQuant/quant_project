@@ -27,7 +27,17 @@
 body{ --field:#0A0A0C; }
 #v8p{
   --field:#0A0A0C; --panel:#17171B; --well:#131316; --sunk:#0C0C0F;
-  --chalk:#F5F2EA; --mute:#8A8A93; --dim:#5E5E66; --line:#2A2A31;
+  --chalk:#F5F2EA; --mute:#8A8A93; --dim:#828288; --line:#2A2A31;
+  /* cc#1854 (09-Sep-2026): --dim was #5E5E66, computed at 2.78-3.08:1 against this page's own
+     --well/--panel/--field (WCAG relative luminance, real hex) -- fails AA outright (needs 4.5:1
+     body text) regardless of which theme is selected app-wide, because #v8p is INTENTIONALLY
+     locked to this one gold-night palette (cc#1590, session_log 36482, founder order 02-Sep-2026:
+     "declared on #v8p so they are page-local fallbacks and never reach another page"). That order
+     stands -- this is NOT a migration to var(--dim)/the global theme (which would reverse it
+     without new founder permission per the supersession rule), it is an in-palette value fix: only
+     --dim's own hex changes, to #828288 (4.68-5.18:1 across well/panel/field), clearing AA while
+     staying visibly dimmer than --mute (#8A8A93, 5.22:1). --chalk/--mute/--line/--gold and every
+     other token in this block are untouched -- confirmed AA-clean already, not part of this fix. */
   --gold:#D4AF37; --gold-lo:#7A6320; --gold-hi:#F0D070;
   --up:#2FD48B; --down:#FF5C6C; --amber:#FF9F45;
   --up-d:rgba(47,212,139,.14); --down-d:rgba(255,92,108,.14); --gold-d:rgba(212,175,55,.12);

@@ -2355,8 +2355,15 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
    this sheet's bare selectors (.v .k .s .bar .tag .word .on …) cannot restyle the ref's classes.
    Shell classes shared with the app (.pressed .slab .well-up) are used as-is. The old CHECK block
    above stays: fpc / holdings / home / positions still read its .v / .tg / .ct rules. */
-#ckp{
-  /* cc#1782 · TOKENS ONLY. Every colour name this block reads is now an alias of the 21-key contract
+#ckp,#c-sheet,#c-scrim{
+  /* cc#1854: .c-sheet/.c-scrim (mobile/check.html:49-50) are static SIBLINGS of #ckp -- #ckp closes
+     at line 46 -- so this block's --well/--chalk/--mute/--dim/etc alias declarations never reached
+     them (CSS custom properties only inherit down the DOM tree). That is why the score-bar band
+     labels, RULE-CREDIT-WEIGHT header and every c-vrow/c-bx row inside the "rule detail" sheet
+     rendered with browser-default colours -- founder screen recording, 09-Sep-2026. Same bug CLASS
+     already fixed for other #ckp/#gvp sibling overlays this session (cc#1828 #scorrAnaOv, cc#1848
+     #alWrap, cc#1866 #g-pilsheet) -- add the sibling's id to the selector, never a token value.
+  cc#1782 · TOKENS ONLY. Every colour name this block reads is now an alias of the 21-key contract
      scorr_themes.css declares on body[data-theme] — the goldnight literals that sat here resolve to
      the SAME values on goldnight (--hi for the old well, --ink, --muted, --edge, --brand for the
      gold, --win/--loss) and to each set's own values elsewhere. No fallback hex: the app always
