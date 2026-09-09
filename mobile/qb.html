@@ -1,4 +1,11 @@
 <!doctype html>
+<!-- ══ mobile/qb.html — Quant Baskets app section page (cc#1892, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). REWRITTEN in place — same /m/qb route (mobile_endpoints.py), same nav
+     slot; the OLD accordion (tap-a-basket-to-expand-inline) is retired, not the route.
+     Design authority: design_refs/scorr_app_quantbasket_R4.html, founder-approved 09-Sep-2026
+     (commit c14cd41, "this is perfect"). Real GOLD NIGHT tokens only.
+     Data from /api/mobile/qb_app?basket=<name> (qb_app_mobile.py) — a thin assembly over
+     qb_endpoints.py's own qb_summary/qb_positions/qb_registry, nothing re-derived. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -7,55 +14,72 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
-<style>
-/* ══ APP_QA_R5 P9 · /m/qb MIGRATION ═══════════════════════════════════════════════
-   Refs: scorr_sprint2_goldnight_R1 @ cd75e2c (scale) + scorr_appshell_R1 @ a20ae0d (shell).
-   The .screen scope issue is present here too (checked, same as P7): mobile_app.css declares the
-   palette on `.screen,.bnav`, so body tokens are shadowed for page content without this bridge.
-   No legacy palette hex on this page — cc#897 folded its CSS into the shared sheet. */
-body[data-theme]{
-  --t-field:var(--field); --t-panel:var(--panel); --t-hi:var(--hi); --t-edge:var(--edge);
-  --t-ink:var(--ink); --t-muted:var(--muted); --t-win:var(--win); --t-loss:var(--loss);
-  --t-brand:var(--brand); --t-accent:var(--accent); --t-label:var(--label);
-}
-.screen,.bnav{
-  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
-  --line:var(--t-edge); --line2:var(--t-edge);
-  --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
-  --grn:var(--t-win); --red:var(--t-loss);
-  --blu:var(--t-accent); --cyan:var(--t-brand);
-}
-/* raised scale, goldnight ref — 9.5px floor, page-scoped */
-.bnav .bn{font-size:var(--type-11)}
-.bnav .bn .i{font-size:var(--type-16)}
-.bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
-.tool{font-size:var(--type-12)}
-.tool span{font-size:var(--type-19);text-shadow:0 0 10px var(--brandglow)}
-</style>
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<script src="/scorr_card_common.js"></script>
+<style>
+/* cc#1892 — page-local rules (qa-*). Same discipline as mobile/myportfolio.html's .mp-* block:
+   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex. */
+.qa-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.qa-asof b{color:var(--mut);font-weight:600}
+.qa-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.qa-km.up{border-left-color:var(--grn)} .qa-km.dn{border-left-color:var(--red)}
+.qa-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.qa-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.qa-v.up{color:var(--grn)} .qa-v.dn{color:var(--red)}
+.qa-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.qa-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.qa-cell .qa-k{font-size:var(--type-9)}
+.qa-cell .qa-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.qa-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.qa-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.qa-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.qa-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.qa-rail::-webkit-scrollbar{display:none}
+.qa-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.qa-c.gap{border-style:dashed}
+.qa-ch{display:flex;align-items:baseline;justify-content:space-between}
+.qa-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.qa-ch .n{font-size:var(--type-11);color:var(--mut)}
+.qa-lst{margin-top:var(--space-9)}
+.qa-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2);
+ cursor:pointer;background:none;border-left:0;border-right:0;border-top:0;width:100%;text-align:left;color:inherit;font:inherit}
+.qa-lr:last-child{border-bottom:none}
+.qa-lr .s{font-size:var(--type-125);font-weight:800}
+.qa-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.qa-lr .a{font-size:var(--type-115);color:var(--mut)}
+.qa-lr .b{font-size:var(--type-125);font-weight:700;min-width:52px;text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.qa-lr .b.up{color:var(--grn)} .qa-lr .b.dn{color:var(--red)}
+.qa-lr.on .s{color:var(--blu)}
+.qa-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.qa-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none;cursor:pointer;background:none;border-left:0;border-right:0;width:100%;text-align:left;font-family:inherit}
+.qa-sb{margin-top:var(--space-9)}
+.qa-sb .row{display:flex;justify-content:space-between;font-size:var(--type-115);margin-bottom:var(--space-3)}
+.qa-sb .row span:last-child{color:var(--mut)}
+.qa-bar{height:5px;border-radius:3px;background:var(--panel2);margin-top:var(--space-8);margin-bottom:var(--space-9)}
+.qa-bar i{display:block;height:5px;border-radius:3px;background:var(--blu)}
+.qa-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.qa-emp.ink{color:var(--txt)}
+.qa-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.qa-ft{margin-top:var(--space-9);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line);font-size:var(--type-105);color:var(--mut)}
+.qa-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.qa-note b{color:var(--mut)}
+.qa-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.qa-err{margin:var(--space-14)}
+</style>
 </head>
 <body data-theme="goldnight">
-<!-- APP_QA_R5 P9: goldnight forced before first paint; stored key read and KEPT. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119: the sprint gate is lifted for the two DARK themes. Only goldnight and dark are
-     applied; a stored goldday is KEPT and simply not used, so nothing is rewritten by omission and
-     White-Golden ships the day its 44 missing light values are specified. */}}catch(e){}
-var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));})();</script>
-<!-- cc#1645 P4: shared appshell header (VARIANT B). Existing .head strip below is untouched. -->
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Quant Baskets</span></div><div class="as-slot"></div></div>
-<div class="screen">
-  <!-- cc#1661 P3: this page's own wordmark link (duplicating the shell's .as-wm) is removed, not
-       hidden; the title stays for now and is hidden by the shared .head rule in theme_mobile.css. -->
-  <div class="head as-hide" style="display:flex;align-items:center;gap:12px">
-    <div style="flex:1;min-width:0"><h1>Quant Baskets</h1><div class="s" id="sub">loading…</div></div></div>
-  <div class="tot" id="tot" style="display:none">
-    <div class="b"><div class="k">Market value</div><div class="v" id="tv"></div></div>
-    <div class="b"><div class="k">Unrealised</div><div class="v" id="tu"></div></div>
-  </div>
-  <div class="body" id="body"><div class="loading">Loading baskets…</div></div>
-</div>
+<div class="qa-asof" id="qa-asof">Loading…</div>
+<div id="qa-body"><div class="qa-empty">Loading baskets…</div></div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -64,68 +88,119 @@ var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
 <script>
-var STATE={d:null,open:0};
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function px(v){ if (v==null||isNaN(Number(v))) return '--';
-  var x=Number(v); return x<100?x.toFixed(1):Math.round(x).toLocaleString('en-IN'); }
-function inr(v){ if (v==null||isNaN(Number(v))) return '--';
-  var x=Number(v); return (x<0?'\u2212':'')+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
-function pct(v){ if (v==null||isNaN(Number(v))) return '--';
-  var x=Number(v); return (x>=0?'+':'')+x.toFixed(2)+'%'; }
-function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
-function railHtml(r){ if(!r) return '';
-  var s=(r.state||'CLOSED').toLowerCase();
-  return '<span class="rail rail-'+s+'" title="'+esc(r.why||'')+'"><i></i>'+esc(r.state)+'</span>'; }
+function inr(v){ if (v==null||isNaN(Number(v))) return '—';
+  var x=Number(v); return (x<0?'−':'')+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function pct(v){ if (v==null||isNaN(Number(v))) return '—';
+  var x=Number(v); return (x>=0?'+':'−')+Math.abs(x).toFixed(1)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>=0?'up':'dn'); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3 ? (p[2]+' '+MON[Number(p[1])-1]+' '+p[0]) : String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s); }
 
-function holding(h){
-  return '<div class="h2"><span class="sy">'+esc(h.symbol)+'</span>'
-    + '<span class="q">'+(h.qty==null?'':Number(h.qty).toLocaleString('en-IN'))
-    + (h.since?' · since '+esc(h.since):'')+'</span>'
-    + '<span class="p"><span>'+px(h.entry)+' \u2192 '+px(h.cmp)+'</span> '
-    + '<span class="'+cls(h.pnl)+'">'+inr(h.pnl)+'</span></span></div>';
+var QA = { data: null, basket: null };
+
+function kmHtml(k){
+  var updn = k.total_unrealised>=0 ? 'up' : 'dn';
+  return '<div class="qa-km '+updn+'"><div class="qa-k">All baskets · unrealised</div><div class="qa-v '+updn+'">'+inr(k.total_unrealised)+'</div>'
+    + '<div class="qa-kg">'
+    + '<div class="qa-cell"><div class="qa-k">Market value</div><div class="qa-v">'+inr(k.total_value)+'</div></div>'
+    + '<div class="qa-cell"><div class="qa-k">Baskets</div><div class="qa-v">'+k.baskets+'</div></div>'
+    + '<div class="qa-cell"><div class="qa-k">Names held</div><div class="qa-v">'+k.names_held+'</div></div>'
+    + '<div class="qa-cell"><div class="qa-k">Showing</div><div class="qa-v">'+esc(QA.data.selected_label)+'</div></div>'
+    + '</div></div>';
 }
-function card(b,i){
-  var open=STATE.open===i;
-  /* cc#1090 P5: the basket card takes the shell. Tappable — tog(i) opens its holdings inside the
-     card — so slab, not pressed. NOT dense: six baskets carry open positions today, well under the
-     8-row line. bull/bear stay: that rail is the P&L language and the shell never touches it. */
-  var h='<div class="c slab'+((b.unrealised||0)>=0?' bull':' bear')+'">'
-    + '<div class="bh" onclick="tog('+i+')">'
-    + '<span class="n">'+esc(b.label)+'<div class="meta" style="margin:3px 0 0">'
-    + '<span class="tag cat">'+b.positions+' stocks</span>'
-    + (b.ret_pct!=null?'<span class="tag '+((b.ret_pct>=0)?'bull':'bear')+'">'+pct(b.ret_pct)+'</span>':'')
-    + '</div></span>'
-    + '<span class="v">'+inr(b.market_value)
-    + '<div class="u '+cls(b.unrealised)+'">'+inr(b.unrealised)+' unrl</div></span>'
-    + '<span class="chev" style="color:var(--dim)">'+(open?'\u2304':'\u203a')+'</span></div>';
-  if (open) h += (b.holdings||[]).map(holding).join('');
-  return h+'</div>';
+function basketsCardHtml(d){
+  var rows=d.baskets.rows;
+  var body = rows.map(function(b){
+    var on = b.basket===d.selected ? ' on' : '';
+    return '<button type="button" class="qa-lr'+on+'" onclick="pickBasket(\''+b.basket+'\')"><span class="s">'+esc(b.label)+'</span><div class="r">'
+      + '<span class="a">'+b.names+' names'+(b.value!=null?' · '+inr(b.value):'')+'</span>'
+      + '<span class="b '+cls(b.return_pct)+'">'+(b.return_pct!=null?pct(b.return_pct):'—')+'</span></div></button>';
+  }).join('');
+  return '<div class="qa-c" style="flex-basis:92vw;max-width:380px"><div class="qa-ch"><span class="t">All baskets</span><span class="n">'+d.baskets.count+'</span></div>'
+    + '<div class="qa-lst">'+body+'</div>'
+    + '<div class="qa-more">Tap any basket to load it below</div></div>';
 }
+function holdingsCardHtml(d){
+  var h=d.holdings, rows=h.rows;
+  if(!rows.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Holdings</span><span class="n">0</span></div><div class="qa-emp"><b>No open positions</b>This basket is not currently holding any names.</div></div>';
+  var body = rows.map(function(r){
+    return '<div class="qa-lr"><span class="s">'+esc(r.symbol)+'</span><div class="r"><span class="a">'+inr(r.value)+'</span><span class="b '+cls(r.pnl_pct)+'">'+pct(r.pnl_pct)+'</span></div></div>';
+  }).join('');
+  var more = h.count>rows.length ? '<div class="qa-more">+ '+(h.count-rows.length)+' more</div>' : '';
+  return '<div class="qa-c"><div class="qa-ch"><span class="t">Holdings</span><span class="n">'+h.count+'</span></div><div class="qa-lst">'+body+'</div>'+more+'</div>';
+}
+function laggardsCardHtml(d){
+  var l=d.laggards, rows=l.rows;
+  if(!rows.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Laggards</span><span class="n">0</span></div><div class="qa-emp"><b>Nothing in the red</b>Every open position in this basket is at or above its entry price.</div></div>';
+  var body = rows.map(function(r){
+    return '<div class="qa-lr"><span class="s">'+esc(r.symbol)+'</span><div class="r"><span class="a">'+inr(r.value)+'</span><span class="b dn">'+pct(r.pnl_pct)+'</span></div></div>';
+  }).join('');
+  var more = l.count>rows.length ? '<div class="qa-more">+ '+(l.count-rows.length)+' more</div>' : '';
+  return '<div class="qa-c"><div class="qa-ch"><span class="t">Laggards</span><span class="n">'+l.count+' in the red</span></div><div class="qa-lst">'+body+'</div>'+more+'</div>';
+}
+function sectorCardHtml(mix){
+  if(!mix||!mix.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Sector mix</span><span class="n">0</span></div><div class="qa-emp"><b>No open positions</b>Nothing to break down by sector today.</div></div>';
+  var rows = mix.map(function(s){
+    return '<div class="qa-sb"><div class="row"><span>'+esc(s.group)+'</span><span>'+s.pct.toFixed(1)+'%</span></div><div class="qa-bar"><i style="width:'+Math.min(100,s.pct)+'%"></i></div></div>';
+  }).join('');
+  return '<div class="qa-c"><div class="qa-ch"><span class="t">Sector mix</span><span class="n">'+mix.length+'</span></div>'+rows+'</div>';
+}
+function themeCardHtml(theme){
+  return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Theme split</span><span class="n">no data</span></div>'
+    + '<div class="qa-emp"><b>Not tagged yet</b>'+esc(theme.note)+'</div></div>';
+}
+function methodCardHtml(m){
+  return '<div class="qa-c"><div class="qa-ch"><span class="t">How it picks</span><span class="n">'+esc(m.cadence||'—')+'</span></div>'
+    + '<div class="qa-emp ink">'+esc(m.text)+'</div>'
+    + '<div class="qa-ft">Reviewed '+esc((m.cadence||'').toLowerCase()||'periodically')+' · '+m.holdings_count+' names held'
+    + (m.next_rebalance?' · next '+dm(m.next_rebalance):'')+'</div></div>';
+}
+function rebalCardHtml(rh){
+  var rows=rh.rows;
+  if(!rows.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Rebalance history</span><span class="n">0</span></div><div class="qa-emp"><b>Nothing stored</b>No entry-date history recorded for this basket yet.</div></div>';
+  var body = rows.map(function(r){
+    return '<div class="qa-lr"><span class="s">'+dm(r.date)+'</span><div class="r"><span class="a">'+r.n_entered+' name'+(r.n_entered===1?'':'s')+' entered · '+esc(r.label)+'</span><span class="b">'+r.n_still_open+' held today</span></div></div>';
+  }).join('');
+  return '<div class="qa-c"><div class="qa-ch"><span class="t">Rebalance history</span><span class="n">'+rh.count+' change'+(rh.count===1?'':'s')+'</span></div>'
+    + '<div class="qa-lst">'+body+'</div>'
+    + '<div class="qa-more">'+esc(rh.note)+'</div></div>';
+}
+
 function render(){
-  var d=STATE.d;
-  document.getElementById('sub').innerHTML =
-    d.count+' baskets · marked daily '+railHtml(d.rail);
-  if (d.count){
-    document.getElementById('tot').style.display='flex';
-    document.getElementById('tv').textContent=inr(d.total_value);
-    var tu=document.getElementById('tu'); tu.textContent=inr(d.total_unrealised);
-    tu.className='v '+cls(d.total_unrealised);
-  }
-  document.getElementById('body').innerHTML = d.count
-    ? d.baskets.map(card).join('')
-    : '<div class="empty"><b>No baskets yet</b>Ready-made baskets appear here.</div>';
+  var d = QA.data;
+  var open = d.holdings.count;
+  document.getElementById('qa-asof').innerHTML = 'Marked <b>'+dmt(d.as_of)+'</b> · '+d.key_metrics.baskets+' baskets · '+d.key_metrics.names_held+' names · showing <b>'+esc(d.selected_label)+'</b>';
+  var html = kmHtml(d.key_metrics)
+    + '<div class="qa-slab"><h2>Baskets</h2><span class="hint">'+d.baskets.count+' · swipe →</span></div>'
+    + '<div class="qa-rail">'+basketsCardHtml(d)+'</div>'
+    + '<div class="qa-slab"><h2>'+esc(d.selected_label)+' · holdings</h2><span class="hint">'+open+' · swipe →</span></div>'
+    + '<div class="qa-rail">'+holdingsCardHtml(d)+laggardsCardHtml(d)+'</div>'
+    + '<div class="qa-slab"><h2>Where the money sits</h2><span class="hint">'+(d.sector_mix?d.sector_mix.length:0)+' sectors · swipe →</span></div>'
+    + '<div class="qa-rail">'+sectorCardHtml(d.sector_mix)+themeCardHtml(d.theme)+'</div>'
+    + '<div class="qa-slab"><h2>'+esc(d.selected_label)+' · the method</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="qa-rail">'+methodCardHtml(d.method)+rebalCardHtml(d.rebalance_history)+'</div>'
+    + '<div class="qa-note"><b>The Baskets card is the switcher.</b> Tap a basket in it and every section below reloads for that basket. <b>Seven baskets, not thirteen</b> — the six finz_ baskets stay off the app, and the filter reads the registry, never a hardcoded name list. <b>Theme split is empty and says so</b>, because no theme tag exists on any holding.</div>';
+  document.getElementById('qa-body').innerHTML = html;
 }
-function tog(i){ STATE.open=(STATE.open===i?-1:i); render(); }
-fetchWithTimeout('/api/mobile/qb').then(function(r){return r.json();}).then(function(d){
-  if (d.error) throw new Error(d.error);
-  STATE.d=d; render();
-}).catch(function(e){
-  document.getElementById('body').innerHTML =
-    '<div class="empty"><b>Could not load</b>'+esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-  document.getElementById('sub').textContent='failed to load';
-});
+
+function load(basket){
+  var url = '/api/mobile/qb_app' + (basket ? ('?basket=' + encodeURIComponent(basket)) : '');
+  fetch(url, {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.error){ document.getElementById('qa-body').innerHTML = '<div class="qa-err qa-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+      QA.data = d; QA.basket = d.selected;
+      render();
+    })
+    .catch(function(e){ document.getElementById('qa-body').innerHTML = '<div class="qa-err qa-empty">Could not load baskets.</div>'; });
+}
+function pickBasket(name){
+  if(name===QA.basket) return;
+  load(name);   // cc#1892 P12: page scroll position is untouched by a basket switch — no forced scrollTo anywhere in this file
+}
+load();
 </script>
-</body>
-</html>
+</body></html>

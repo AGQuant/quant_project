@@ -114,6 +114,7 @@ from smartgain_daily_m2m import router as smartgain_daily_m2m_router
 from smartgain_app_portfolio import router as smartgain_app_portfolio_router   # cc#1895: My Portfolio section page
 from trade_alerts_app import router as trade_alerts_app_router   # cc#1896: My Alerts section page
 from mobile_watchlist_stub import router as mobile_watchlist_stub_router   # cc#1897: My Watchlist section page (static, no store)
+from qb_app_mobile import router as qb_app_mobile_router   # cc#1892: /api/mobile/qb_app — Quant Baskets app section
 from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
 from fy_end_backfill import router as fy_end_backfill_router   # cc#703 FY-end price backfill 2015-2021
@@ -873,6 +874,7 @@ app.include_router(mobile_ext_router)
 app.include_router(smartgain_app_portfolio_router)   # cc#1895: /m/myportfolio + /api/mobile/myportfolio
 app.include_router(trade_alerts_app_router)   # cc#1896: /m/myalerts + /api/mobile/myalerts
 app.include_router(mobile_watchlist_stub_router)   # cc#1897: /m/mywatchlist (static, no backing store)
+app.include_router(qb_app_mobile_router)   # cc#1892: /api/mobile/qb_app (mobile/qb.html's new data source)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
 app.include_router(trade_wall_approved_router)   # cc#1735: /api/tradewall/approved + /levels + /close
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
