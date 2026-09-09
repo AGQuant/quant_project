@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sector intel &#183; Scorr design ref scorr_app_sector_R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_app_sector_R1
+   Locks section order for the app Sector Intel surface.
+   LAYOUT LAW: APP_CARD_LAYOUT_LAW_V1, session_log 42536.
+     - The page scrolls VERTICALLY through SECTIONS.
+     - KEY METRICS is ONE tall card pinned at the top. It is never a rail.
+     - Every other section is a label + ONE horizontally swipeable rail of cards.
+     - A card carries a SHORT LIST: title, count in the header, six rows max,
+       then a plain "+N more" line and a gold link out. Never one card per row.
+     - Empty rails STAY VISIBLE with a zero count and a line naming what is missing.
+   Built to APP_GRID_FRAMEWORK_V2 (session_log 42500): the app carries FULL COVERAGE
+   of every web section as condensed cards. Nothing is web-only. Depth stays lighter.
+   Palette hex is inlined ONLY so this ref renders standalone. The BUILD must use the
+   real GOLD NIGHT tokens from mobile/theme_mobile.css + scorr_themes.css. */
+
+:root{--field:#0a0a0b;--panel:#141416;--hi:#1c1c1f;--edge:#2a2a2e;--ink:#f4f4f2;
+ --muted:#8b8b90;--label:#6a6a70;--brand:#d4af37;--glow:rgba(212,175,55,.28);
+ --win:#2fd48b;--loss:#ff5c6c}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:80px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--edge);
+ position:sticky;top:0;z-index:30;background:var(--field)}
+.wm{font-size:15px;font-weight:800;letter-spacing:.14em;color:var(--ink);text-decoration:none}
+.wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--glow)}
+.pg{flex:1;text-align:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.slot{width:64px;text-align:right;font-size:11px;color:var(--label)}
+.asof{padding:10px 16px 0;font-size:10px;color:var(--label);letter-spacing:.04em}
+.asof b{color:var(--muted);font-weight:600}
+.km{margin:10px 16px 0;background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--brand);
+ border-radius:0 16px 16px 0;padding:15px 16px}
+.km .k{font-size:10px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.1em}
+.km .v{font-size:29px;font-weight:800;line-height:1.03;margin-top:5px}
+.km.up{border-left-color:var(--win)}.km.dn{border-left-color:var(--loss)}
+.kg{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}
+.cell{background:var(--hi);border:1px solid var(--edge);border-radius:11px;padding:9px 11px}
+.cell .k{font-size:9px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.07em}
+.cell .v{font-size:13.5px;font-weight:700;margin-top:3px}
+.slab{display:flex;align-items:baseline;justify-content:space-between;padding:20px 16px 8px}
+.slab h2{font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.slab .hint{font-size:10px;color:var(--label)}
+.rail{display:flex;gap:11px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 16px 4px;
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.rail::-webkit-scrollbar{display:none}
+.c{flex:0 0 62vw;max-width:250px;scroll-snap-align:start;background:var(--panel);border:1px solid var(--edge);
+ border-radius:14px;padding:12px 13px;position:relative}
+.c.w{flex:0 0 78vw;max-width:320px}
+.c.n{flex:0 0 46vw;max-width:172px}
+.c.up{border-left:3px solid var(--win);border-radius:0 14px 14px 0}
+.c.dn{border-left:3px solid var(--loss);border-radius:0 14px 14px 0}
+.c.gap{border-style:dashed;border-color:#3a3a40}
+.top{display:flex;align-items:baseline;justify-content:space-between}
+.sy{font-size:13.5px;font-weight:800}
+.pill{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;
+ border-radius:20px;background:var(--hi);border:1px solid var(--edge);color:var(--muted)}
+.big{font-size:19px;font-weight:800;margin-top:7px;line-height:1}
+.mt{font-size:10.5px;color:var(--label);margin-top:4px}
+.ft{margin-top:9px;padding-top:8px;border-top:1px solid var(--edge);font-size:10.5px;color:var(--muted)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+.bar{height:5px;border-radius:3px;background:var(--hi);margin-top:8px}
+.bar i{display:block;height:5px;border-radius:3px;background:var(--brand)}
+.emp{font-size:11.5px;color:var(--label);line-height:1.6;margin-top:7px}
+.emp b{display:block;color:var(--ink);font-size:12.5px;font-weight:700;margin-bottom:5px}
+.note{margin:22px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;
+ font-size:11px;color:var(--label);line-height:1.65}
+.note b{color:var(--muted)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);
+ border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+ font-size:11px;font-weight:600;color:var(--muted);text-decoration:none}
+.bn .i{font-size:17px}.bn.on{color:var(--brand)}
+.lst{margin-top:9px}
+.lr{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--hi)}
+.lr:last-child{border-bottom:none}
+.lr .s{font-size:12.5px;font-weight:800}
+.lr .r{display:flex;gap:11px;align-items:baseline}
+.lr .a{font-size:11.5px;color:var(--muted)}
+.lr .b{font-size:12.5px;font-weight:700;min-width:52px;text-align:right}
+.more{font-size:11px;color:var(--label);padding:7px 0 0}
+.link{display:block;margin-top:9px;padding-top:9px;border-top:1px solid var(--edge);
+ font-size:11.5px;font-weight:700;color:var(--brand);text-decoration:none}
+.ch{display:flex;align-items:baseline;justify-content:space-between}
+.ch .t{font-size:11px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.08em}
+.ch .n{font-size:11px;color:var(--muted)}
+.sb{margin-top:9px}
+.sb .row{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px}
+.sb .row span:last-child{color:var(--muted)}
+</style></head><body>
+<div class="hdr"><a class="wm" href="/m/home">SC<i>O</i>RR</a><div class="pg">Sector intel</div><div class="slot">128</div></div>
+<div class="asof">Scored <b>08 Sep 2026</b> &#183; 128 segments &#183; market-cap weighted GVM</div>
+<div class="km "><div class="k">Segments rated</div><div class="v ">128</div><div class="kg"><div class="cell"><div class="k">Good</div><div class="v ">7</div></div><div class="cell"><div class="k">Average</div><div class="v ">101</div></div><div class="cell"><div class="k">Weak</div><div class="v ">20</div></div><div class="cell"><div class="k">Briefs cached</div><div class="v ">128</div></div></div></div>
+<div class="slab"><h2>The spread</h2><span class="hint">2 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w "><div class="ch"><span class="t">Verdict split</span><span class="n">128 segments</span></div><div class="lst"><div class="lr"><span class="s">Average</span><div class="r"><span class="a">most of the market</span><span class="b ">101</span></div></div><div class="lr"><span class="s">Weak</span><div class="r"><span class="a"></span><span class="b ">20</span></div></div><div class="lr"><span class="s">Good</span><div class="r"><span class="a"></span><span class="b ">7</span></div></div></div><div class="more">Only 7 of 128 segments rate Good today. That is the headline, not a rounding note.</div></div>
+<div class="c w "><div class="ch"><span class="t">Strongest</span><span class="n">top 4</span></div><div class="lst"><div class="lr"><span class="s">Pipes &amp; Tubes</span><div class="r"><span class="a">16 stocks</span><span class="b ">7.32</span></div></div><div class="lr"><span class="s">Organic Chemicals &#183; Large</span><div class="r"><span class="a">15 stocks</span><span class="b ">7.27</span></div></div><div class="lr"><span class="s">Pharma &#183; Bulk &amp; API</span><div class="r"><span class="a">8 stocks</span><span class="b ">7.27</span></div></div><div class="lr"><span class="s">Oil Services &amp; Small</span><div class="r"><span class="a">11 stocks</span><span class="b ">7.21</span></div></div></div><a class="link" href="#">All 128 segments &#8250;</a></div>
+</div>
+<div class="slab"><h2>Weakest</h2><span class="hint">1 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w "><div class="ch"><span class="t">Bottom of the table</span><span class="n">3</span></div><div class="lst"><div class="lr"><span class="s">Paints</span><div class="r"><span class="a">Weak</span><span class="b ">5.35</span></div></div><div class="lr"><span class="s">Footwear</span><div class="r"><span class="a">Weak</span><span class="b ">5.39</span></div></div><div class="lr"><span class="s">Refineries &amp; Exploration &#183; Large</span><div class="r"><span class="a">Weak</span><span class="b ">5.45</span></div></div></div><div class="more">Scored on market-cap weighted GVM, so a big weak name pulls its whole segment down.</div></div>
+</div>
+<div class="slab"><h2>Read the sector</h2><span class="hint">2 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w"><div class="ch"><span class="t">Plain-words brief</span><span class="n">128 cached</span></div><div class="emp" style="color:var(--ink)">Every segment has a short written brief explaining what is driving its score right now.</div><div class="ft">Cached, refreshed with the daily score run.</div></div>
+<div class="c w gap"><div class="ch"><span class="t">Sector trend</span><span class="n">0 rows</span></div><div class="emp"><b>No trend series yet</b>sector_ops_trends is empty, so there is nothing to chart a sector's score over time. Today's score is honest; a trend line would not be.</div></div>
+</div>
+<div class="note"><b>Only 7 segments of 128 rate Good.</b> That skew is the most useful thing on the page and the key metrics card leads with it. Scores are market-cap weighted, so one large weak name drags a whole segment. The trend card is empty because sector_ops_trends has zero rows &#8212; a trend line drawn from a single day would be a fabrication.</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">&#9703;</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">&#9672;</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">&#9678;</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">&#9783;</span>WoT</a>
+  <a class="bn on" href="/m/dash"><span class="i">&#9677;</span>Dash</a>
+</nav></body></html>
