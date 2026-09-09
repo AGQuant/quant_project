@@ -313,6 +313,7 @@ var URLS = {
   sectors:'/api/v8/theme_sectors',
   n50:    '/api/v8/nifty50_sectors',
   daylog: '/api/v8/daylog',
+  daylogSeries: '/api/v8/daylog/series',   /* cc#1873: cumulative net/gross P&L, folded server-side from daylog (v8_daylog_extras.py) */
   funnel: '/api/mobile/v8funnel',
   pass:   '/api/v8/stock_passcount/',
   paper:  '/api/paper/status',
@@ -1037,10 +1038,14 @@ function daylogSince(dl){
 }
 function daylogSheetHtml(){
   var dl = STATE.daylog, s = (dl && dl.summary) || null, days = dl && dl.days;
+  /* cc#1873: the chart glyph only offers what the sheet itself has data for -- no point wiring a
+     chart button onto the empty/failed state, days is already known here before either branch. */
+  var chartBtn = days ? '<button type="button" data-dlchart-open="1" aria-label="P&amp;L chart" title="Cumulative P&amp;L chart" style="background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;min-width:32px;min-height:32px;font-size:15px;cursor:pointer">\ud83d\udcc8</button>' : '';
   var head = '<div class="pressed" style="position:sticky;top:0;z-index:2;padding:12px 14px 10px;border-radius:0">'
     + '<div style="display:flex;align-items:center;gap:10px"><div style="font-family:var(--mono);font-size:12px;font-weight:800;letter-spacing:.12em;color:var(--gold,#D4AF37)">DAY LOG</div>'
     + '<div style="font-family:var(--mono);font-size:10px;color:var(--mute)">' + esc(daylogSince(dl)) + '</div>'
-    + '<button type="button" data-daylog-close="1" aria-label="Close" style="margin-left:auto;background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;min-width:32px;min-height:32px;font-size:14px;cursor:pointer">\u2715</button></div>';
+    + '<span style="margin-left:auto;display:flex;gap:8px">' + chartBtn
+    + '<button type="button" data-daylog-close="1" aria-label="Close" style="background:none;border:1px solid var(--line);color:var(--mute);border-radius:8px;min-width:32px;min-height:32px;font-size:14px;cursor:pointer">\u2715</button></span></div>';
   if(!days){
     return head + '</div><div class="empty" style="margin:14px">Day log is not available right now.<br><span class="chip" data-daylog-retry="1">Retry</span></div>';
   }
@@ -1081,6 +1086,7 @@ function daylogOpen(){
     ov.addEventListener('click', function(e){
       if(e.target === ov || e.target.closest('[data-daylog-close]')){ daylogClose(); return; }
       if(e.target.closest('[data-daylog-retry]')){ daylogRetry(); return; }
+      if(e.target.closest('[data-dlchart-open]')){ dlChartOpen(); return; }   /* cc#1873 */
     });
     document.body.appendChild(ov);
   }
@@ -1093,7 +1099,100 @@ function daylogRetry(){
   var sh = document.getElementById('v8-daylog-sheet'); if(sh) sh.innerHTML = '<div class="empty" style="margin:14px">Loading the day log\u2026</div>';
   getJ(URLS.daylog).then(function(d){ STATE.daylog = d; renderDay(); daylogOpen(); }).catch(function(){ STATE.daylog = null; daylogOpen(); });
 }
-document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ daylogClose(); moodClose(); } });
+/* \u2500\u2500 cc#1873 \u00b7 DAY LOG CUMULATIVE P&L CHART \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   CONSUME CARD, NOT A BUILD CARD (Fable, verbatim). The DAY PERFORMANCE bars above (cc#1611)
+   plot each SESSION's own net P&L; this is the running TOTAL over the era -- the same chart
+   the website's Day Log tab glyph draws (cc#1561/1579/1678) -- read from the SAME endpoint the
+   website consumes, /api/v8/daylog/series, never re-derived. v8_daylog_extras.py folds
+   v8_endpoints.v8_daylog (fresh era, retired-basket registry exclusion, Rs.500/trade brokerage --
+   rule 13) into the cumulative series server-side ("ONE SOURCE, NOT A SECOND FORMULA"), so this
+   chart can never disagree with the Day Log sheet's own totals strip it opens from.
+   ONE-SERIES rule carried over from cc#1678: the Net/Gross pill draws ONE line, never a second
+   fainter one for the series not picked. cagr_pct never renders without cagr_note; under the
+   endpoint's own 7-calendar-day floor cagr_pct is null and renders "n/a", never 0. The series
+   itself already starts on the first day with closed>0 (server-side) -- nothing here pads it.
+   No deep link to the web tab (cc#1612) -- this is an in-app sheet or nothing.
+   Cached per session (DL_SERIES) -- one fetch, reused on reopen and on every pill switch.
+   Stacked ABOVE the Day Log sheet it opens from (z-index 9100 > 9000), same body-level +
+   inline-fallback-var() pattern as daylogOpen/moodOpen -- this file's OWN established shape for
+   a full sheet (every var() carries its own hex fallback, so DOM position never matters), not the
+   small-popover class of component that needed the #v8p-child fix (cc#1866/1867/1870). */
+var DL_SERIES = null, DL_FOCUS = 'net';
+function dlSeriesLoad(){
+  if(DL_SERIES) return Promise.resolve(DL_SERIES);
+  return getJ(URLS.daylogSeries).then(function(d){ DL_SERIES = d; return d; });
+}
+function dlChartSvg(d){
+  var pts = d.points || [], key = DL_FOCUS === 'gross' ? 'gross_cum' : 'net_cum';
+  var vs = pts.map(function(p){ return num(p[key]) ? p[key] : 0; });
+  var lo = Math.min.apply(null, vs.concat([0])), hi = Math.max.apply(null, vs.concat([0]));   // 0 is always in range so the zero line always has somewhere to draw
+  var rng = (hi - lo) || 1, n = pts.length;
+  var W = 320, H = 150, PL = 6, PR = 6, PT = 10, PB = 18;
+  var xs = function(i){ return PL + (n === 1 ? 0 : i / (n - 1) * (W - PL - PR)); };
+  var ys = function(v){ return PT + (1 - (v - lo) / rng) * (H - PT - PB); };
+  var last = vs[n - 1];
+  var col = last < 0 ? 'var(--down,#FF5C6C)' : 'var(--up,#2FD48B)';   // colour follows the sign of the LATEST cumulative value, same rule the website chart uses
+  var line = pts.map(function(p, i){ return xs(i).toFixed(1) + ',' + ys(vs[i]).toFixed(1); }).join(' ');
+  var zy = ys(0).toFixed(1);
+  var area = PL + ',' + zy + ' ' + line + ' ' + xs(n - 1).toFixed(1) + ',' + zy;
+  var d0 = dmy(pts[0].date), d1 = dmy(pts[n - 1].date);
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + H + 'px;display:block">'
+    + (lo < 0 && hi > 0 ? '<line x1="0" y1="' + zy + '" x2="' + W + '" y2="' + zy + '" stroke="var(--line,#22293A)" stroke-width="1" stroke-dasharray="4 3"/>' : '')
+    + '<polygon points="' + area + '" fill="' + col + '" opacity=".12"/>'
+    + '<polyline points="' + line + '" fill="none" stroke="' + col + '" stroke-width="2"/>'
+    + '<circle cx="' + xs(n - 1).toFixed(1) + '" cy="' + ys(last).toFixed(1) + '" r="3" fill="' + col + '"/>'
+    + '<text x="' + PL + '" y="' + (H - 4) + '" font-family="var(--mono)" font-size="9" fill="var(--dim,#5E6B8F)">' + esc(d0) + '</text>'
+    + '<text x="' + (W - PR) + '" y="' + (H - 4) + '" text-anchor="end" font-family="var(--mono)" font-size="9" fill="var(--dim,#5E6B8F)">' + esc(d1) + '</text>'
+    + '</svg>';
+}
+function dlChartPill(k, label){
+  var on = DL_FOCUS === k;
+  return '<button type="button" data-dlchart-focus="' + k + '" style="border:1px solid var(--line,#22293A);border-radius:999px;padding:3px 12px;font-family:var(--mono);font-size:11px;cursor:pointer;' + (on ? 'background:var(--line,#22293A);color:var(--txt,#fff);font-weight:800' : 'background:none;color:var(--dim,#5E6B8F)') + '">' + label + '</button>';
+}
+function dlChartSheetHtml(d){
+  var head = '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px 0"><div style="font-family:var(--mono);font-size:12px;font-weight:800;letter-spacing:.12em;color:var(--gold,#D4AF37)">P&amp;L CHART</div>'
+    + '<button type="button" data-dlchart-close="1" aria-label="Close" style="margin-left:auto;background:none;border:1px solid var(--line,#22293A);color:var(--dim,#5E6B8F);border-radius:8px;min-width:32px;min-height:32px;font-size:14px;cursor:pointer">\u2715</button></div>';
+  if(!d){
+    return head + '<div class="empty" style="margin:14px">Chart failed to load.<br><span class="chip" data-dlchart-retry="1">Retry</span></div>';
+  }
+  var pts = d.points || [];
+  if(!pts.length){
+    return head + '<div class="empty" style="margin:14px">No closed trades in this era yet. The line starts with the first exit.</div>';
+  }
+  var sub = 'Since ' + dmy(d.window_start) + ' \u00b7 ' + (d.trading_days || 0) + ' trading day' + (d.trading_days === 1 ? '' : 's') + ' \u00b7 cumulative by exit date';
+  var brokNote = DL_FOCUS === 'net' ? 'Net is after \u20b9500/closed trade brokerage' : 'Gross is before brokerage';
+  var pills = '<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">' + dlChartPill('net', 'Net') + dlChartPill('gross', 'Gross') + '<span style="font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F)">' + brokNote + '</span></div>';
+  var cagrTxt = d.cagr_pct == null ? 'n/a (window under 7 days)' : pct(d.cagr_pct, 2);
+  var foot = '<div style="padding:10px 14px 4px;font-family:var(--mono);font-size:10.5px;color:var(--mute,#8C99BD);display:flex;flex-wrap:wrap;gap:4px 16px">'
+    + '<span>Return <b class="' + sgn(d.return_pct) + '">' + pct(d.return_pct, 2) + '</b></span>'
+    + '<span>Annualised (CAGR) <b class="' + (d.cagr_pct == null ? '' : sgn(d.cagr_pct)) + '">' + esc(cagrTxt) + '</b></span></div>'
+    + '<div style="padding:0 14px 22px;font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F);line-height:1.4">' + esc(d.cagr_note || '') + '</div>';
+  return head + '<div style="padding:6px 14px 0;font-family:var(--mono);font-size:10px;color:var(--mute,#8C99BD)">' + esc(sub) + '</div>'
+    + pills + '<div style="padding:10px 14px 0">' + dlChartSvg(d) + '</div>' + foot;
+}
+function dlChartOpen(){
+  var ov = document.getElementById('v8-dlchart-ov');
+  if(!ov){
+    ov = document.createElement('div'); ov.id = 'v8-dlchart-ov';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9100;background:rgba(4,8,18,.62);display:flex;align-items:flex-end';   /* 9100 > daylog's 9000 -- stacks above the sheet it opens from */
+    ov.innerHTML = '<div id="v8-dlchart-sheet" role="dialog" aria-modal="true" aria-label="P&amp;L chart" style="width:100%;max-height:88vh;overflow:auto;background:var(--panel,#0E1526);color:var(--txt,#fff);border-top:1px solid var(--line,#22293A);border-radius:16px 16px 0 0"></div>';
+    ov.addEventListener('click', function(e){
+      if(e.target === ov || e.target.closest('[data-dlchart-close]')){ dlChartClose(); return; }
+      if(e.target.closest('[data-dlchart-retry]')){ DL_SERIES = null; dlChartOpen(); return; }
+      var f = e.target.closest('[data-dlchart-focus]'); if(f){ DL_FOCUS = f.getAttribute('data-dlchart-focus'); dlChartRender(); return; }
+    });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'flex';
+  var sh = document.getElementById('v8-dlchart-sheet');
+  sh.innerHTML = DL_SERIES ? dlChartSheetHtml(DL_SERIES) : '<div class="empty" style="margin:14px">Loading the P&L chart\u2026</div>';   // paint-then-fill: reuse the cache instantly, fetch only on the first open
+  dlSeriesLoad().then(dlChartRender).catch(function(){ DL_SERIES = null; dlChartRender(); });
+}
+function dlChartRender(){
+  var sh = document.getElementById('v8-dlchart-sheet'); if(sh) sh.innerHTML = dlChartSheetHtml(DL_SERIES);
+}
+function dlChartClose(){ var ov = document.getElementById('v8-dlchart-ov'); if(ov) ov.style.display = 'none'; }   // the Day Log sheet is always still open beneath this one -- it, not this function, owns body overflow
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ dlChartClose(); daylogClose(); moodClose(); } });
 /* ── 5 · CLOSED ──────────────────────────────────────────────────────────────────────── */
 /* Wells read the canon keys straight off /api/mobile/v8book (rule 13): realised is NET of
    brokerage, wins = TARGET, losses = SL, win_rate on decided. Nothing is re-added on the page. */
