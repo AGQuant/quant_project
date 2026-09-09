@@ -2252,7 +2252,20 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #gvp .g-bm .g-bval{grid-column:2;grid-row:1 / span 2;text-align:right;display:flex;flex-direction:column;align-items:flex-end;justify-content:center}
 #gvp .g-bm .g-bval b{font-family:var(--mono);font-size:var(--type-15);font-weight:800}
 #gvp .g-rt{font-family:var(--mono);font-size:var(--type-10);letter-spacing:var(--track-px7);padding:var(--space-1) var(--space-6);margin-top:var(--space-2);clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px)}
-#gvp .g-rt.hi{background:var(--up-d);color:var(--up)} #gvp .g-rt.mid{background:var(--amber-d);color:var(--amber)} #gvp .g-rt.lo{background:var(--down-d);color:var(--down)} #gvp .g-rt.na{background:var(--well);color:var(--dim);border:var(--bw-1) solid var(--line)}
+/* cc#1869 (founder 09-Sep-2026): "no pillar rating chip or card fill may use a green or red hue"
+   -- the rating chip (0-10 score) used var(--up)/var(--amber)/var(--down) exactly like gridTone's
+   old card fill, the SAME violation one level down. Rebuilt as three GOLD steps (tints/steps of
+   the existing gold token, per the card's own wording) instead of a fourth hue: hi = the page's
+   own established "filled" pairing (background:var(--gold-d);color:var(--gold), the exact same
+   pair .tag.gd already uses two rules above); mid = an outline step, same gold at lower emphasis
+   (mirrors #gvp .g-pv .g-pp's existing color-mix(in srgb, var(--gold) 50%, transparent) border
+   pattern); lo = plain/neutral -- de-emphasised rather than red-flagged, since the softer framing
+   this card asks for is "not leading" rather than "failing." na (no rating -- item 3, one absent
+   state) is unchanged, it was already correctly neutral. */
+#gvp .g-rt.hi{background:var(--gold-d);color:var(--gold)}
+#gvp .g-rt.mid{background:var(--well);color:var(--gold);border:var(--bw-1) solid color-mix(in srgb, var(--gold) 50%, transparent)}
+#gvp .g-rt.lo{background:var(--well);color:var(--mute);border:var(--bw-1) solid var(--line)}
+#gvp .g-rt.na{background:var(--well);color:var(--dim);border:var(--bw-1) solid var(--line)}
 #gvp .g-bm .g-peer{grid-column:1 / span 2;grid-row:3;position:relative;height:6px;margin-top:var(--space-6);background:var(--well);border:var(--bw-1) solid var(--line)}
 #gvp .g-bm .g-peer .g-rng{position:absolute;top:0;bottom:0;background:color-mix(in srgb, var(--mute) 25%, transparent)}
 #gvp .g-bm .g-peer .g-me{position:absolute;top:-4px;width:2px;height:12px;background:var(--gold);box-shadow:0 0 6px var(--gold)}
