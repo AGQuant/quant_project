@@ -818,6 +818,8 @@ from option_iv_history import router as option_iv_history_router   # cc#1858 ste
 app.include_router(option_iv_history_router)
 from screener_expectations import router as screener_expectations_router   # cc#1865: append-only screener expectations snapshot (write-on-upload hook lives in gvm_nightly.py) + V-button endpoint
 app.include_router(screener_expectations_router)
+from v8_approved_trades import router as v8_approved_trades_router   # cc#1867: Home APPROVED TRADES slider (v8_paper_positions OPEN rows, v8_book_canon formula, no second compute path)
+app.include_router(v8_approved_trades_router)
 from ops_control_plane import control_plane_router   # cc#693: ops control plane (registries + job_runs spine + diagnosis)
 app.include_router(control_plane_router)
 app.include_router(performance_router)

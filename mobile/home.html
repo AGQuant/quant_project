@@ -1200,6 +1200,43 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    carousel) too, and this card names the Book deck alone, so the selector is ID-scoped rather
    than widening .dots i.on itself, which would have leaked the gradient onto the hero dot. */
 body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var(--brand),var(--wayfind))}
+/* ══ cc#1867: APPROVED TRADES slider — design_refs/scorr_home_approved_cards_R1.html. Token rules
+   carried in: green/red ONLY on .end-sl/.end-tp/.cmp-pnl/.rail-fill (the P&L exemption); chips use
+   tinted, non-P&L tokens; card 12px radius, hairline border, no gradient, no glow. */
+.approved-slider{margin-bottom:var(--space-9)}
+.approved-slider .hdr{display:flex;align-items:center;gap:var(--space-10);margin-bottom:var(--space-6)}
+.approved-slider .eyebrow{font-size:var(--type-11);font-weight:700;letter-spacing:var(--track-px16);color:var(--txt);text-transform:uppercase}
+.approved-slider .rule{flex:1;height:1px;background:var(--line2)}
+.approved-slider .count{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);color:var(--dim)}
+.approved-slider .hint{font-size:var(--type-105);color:var(--dim);margin-bottom:var(--space-6)}
+.tr-track{display:flex;gap:var(--space-9);overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.tr-track .tcard{flex:0 0 88%;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line2);border-radius:12px;padding:var(--space-14)}
+.tcard .row-top{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-10)}
+.tcard .sym{font-size:var(--type-14);font-weight:800;color:var(--txt)}
+.tcard .meta{font-size:var(--type-9);color:var(--dim);margin-top:var(--space-2)}
+.tcard .right{text-align:right}
+.tcard .lbl{font-size:var(--type-85);letter-spacing:var(--track-px8);color:var(--dim);text-transform:uppercase}
+.tcard .val{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);color:var(--txt);margin-top:var(--space-2)}
+.tcard .chips{display:flex;gap:var(--space-6);margin-top:var(--space-8)}
+.tcard .chip{font-size:var(--type-85);font-weight:700;letter-spacing:var(--track-px6);text-transform:uppercase;padding:2px var(--space-8);border-radius:var(--radius-3)}
+.tcard .chip-basket{background:var(--panel2);color:var(--blu)}
+.tcard .chip-side{background:var(--panel2);color:var(--cyan)}
+.tcard .cmp{display:flex;align-items:baseline;gap:var(--space-8);margin-top:var(--space-10)}
+.tcard .cmp-px{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-18);font-weight:800;color:var(--txt)}
+.tcard .cmp-pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);font-weight:700}
+.tcard .cmp-pnl.pos{color:var(--grn)} .tcard .cmp-pnl.neg{color:var(--red)}
+.tcard .rail{position:relative;height:6px;background:var(--panel2);border-radius:var(--radius-3);margin:var(--space-10) 0}
+.tcard .rail-track{position:absolute;inset:0;background:var(--panel2);border-radius:var(--radius-3)}
+.tcard .rail-fill{position:absolute;top:0;bottom:0;border-radius:var(--radius-3)}
+.tcard .rail-fill.pos{background:var(--grn)} .tcard .rail-fill.neg{background:var(--red)}
+.tcard .rail-entry{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--dim);opacity:.6;transform:translateX(-1px)}
+.tcard .rail-dot{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:var(--txt);border:2px solid var(--panel);transform:translateX(-6px);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.tcard .ends{display:flex;justify-content:space-between;margin-top:var(--space-4)}
+.tcard .end-sl,.tcard .end-tp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);font-weight:700}
+.tcard .end-sl{color:var(--red)} .tcard .end-tp{color:var(--grn)}
+.tcard .foot{display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line2)}
+.tcard .foot-lbl{font-size:var(--type-9);letter-spacing:var(--track-px8);color:var(--dim);text-transform:uppercase}
+.tcard .foot-val{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:700;color:var(--txt)}
 /* cc#1374: .irowpair/.icol/.ibar/.isr REMOVED — idxRowPair no longer has a caller (see the
    note by idxFooter/heroCard2). .ixpv below is the one line of this rule set still needed —
    the pivot-side tag, now inline in Card 1's own index row instead of a column of its own. */
@@ -3043,6 +3080,79 @@ function ibkSetSym(sym){
   if (IBK.sym === sym) return;
   IBK.sym = sym;
   renderIbkDeck();
+}
+/* ══ cc#1867: APPROVED TRADES slider — replaces the V8 OPEN BOOK aggregate in this home slot.
+   V8 stays in the bottom nav and its own page (aggregate + 22-position list) is UNCHANGED; this
+   is a NEW read from GET /api/mobile/home/approved-trades (v8_paper_positions status=OPEN),
+   which reuses v8_book_canon's ONE unrealised formula — no money computed client-side.
+   Paint-then-fill, same pattern as loadIndexBook()/loadHeroPositions(): the shell paints with
+   #apTr immediately, loadApprovedTrades() fills it after. */
+function apTrBasketLabel(b){
+  return b ? String(b).replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); }) : '';
+}
+function apTrSideLabel(s){ s = String(s || '').toUpperCase(); return s.charAt(0) + s.slice(1).toLowerCase(); }
+function apTrOpenedTxt(iso){
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return 'Opened ' + d.toLocaleDateString('en-IN', {day:'2-digit', month:'short'}) + ', '
+    + d.toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:false});
+}
+function apTrCardHtml(p){
+  var hasCmp = num(p.cmp) && num(p.marker_pct);
+  var pnlCls = cls(p.unrealised);
+  var leftIsTarget = p.rail_left_label === 'target';
+  var leftLbl = leftIsTarget ? 'Target' : 'Stop', rightLbl = leftIsTarget ? 'Stop' : 'Target';
+  var leftVal = leftIsTarget ? p.target : p.stop_loss, rightVal = leftIsTarget ? p.stop_loss : p.target;
+  var leftCls = leftIsTarget ? 'end-tp' : 'end-sl', rightCls = leftIsTarget ? 'end-sl' : 'end-tp';
+  var rail = '<div class="rail"><div class="rail-track"></div>'
+    + ((hasCmp && num(p.entry_pct)) ? '<div class="rail-fill ' + pnlCls + '" style="left:'
+        + Math.min(p.entry_pct, p.marker_pct) + '%;width:' + Math.abs(p.marker_pct - p.entry_pct) + '%"></div>' : '')
+    + (num(p.entry_pct) ? '<div class="rail-entry" style="left:' + p.entry_pct + '%"></div>' : '')
+    + (hasCmp ? '<div class="rail-dot" style="left:' + p.marker_pct + '%"></div>' : '')
+    + '</div>';
+  return '<div class="tcard">'
+    + '<div class="row-top"><div><div class="sym">' + esc(p.symbol) + '</div><div class="meta">' + esc(apTrOpenedTxt(p.opened_at)) + '</div></div>'
+    + '<div class="right"><div class="lbl">Entry</div><div class="val">' + esc(inr(p.entry)) + '</div></div></div>'
+    + '<div class="chips"><span class="chip chip-basket">' + esc(apTrBasketLabel(p.basket)) + '</span><span class="chip chip-side">' + esc(apTrSideLabel(p.side)) + '</span></div>'
+    + '<div class="cmp"><span class="cmp-px">' + (num(p.cmp) ? esc(inr(p.cmp)) : '—') + '</span>'
+    + (num(p.unrealised) ? '<span class="cmp-pnl ' + pnlCls + '">' + esc(inr(p.unrealised)) + '</span>' : '') + '</div>'
+    + rail
+    + '<div class="ends"><div><div class="lbl">' + leftLbl + '</div><div class="' + leftCls + '">' + esc(inr(leftVal)) + '</div></div>'
+    + '<div class="right"><div class="lbl">' + rightLbl + '</div><div class="' + rightCls + '">' + esc(inr(rightVal)) + '</div></div></div>'
+    + (num(p.potential_left) ? '<div class="foot"><span class="foot-lbl">Potential left</span><span class="foot-val">' + esc(inr(p.potential_left)) + '</span></div>' : '')
+    + '</div>';
+}
+function apTrShellHtml(){
+  return '<div class="approved-slider"><div class="hdr"><span class="eyebrow">APPROVED TRADES</span><div class="rule"></div><span class="count" id="apTrCount"></span></div>'
+    + '<div class="g-empty" id="apTrBody" style="padding:18px 0">Loading…</div></div>';
+}
+function apTrDots(){
+  var tr = document.getElementById('apTrTrack'), dots = document.getElementById('apTrDots');
+  if (!tr || !dots) return;
+  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
+  Array.prototype.forEach.call(dots.children, function(el, j){
+    el.className = (j === i ? 'on' : '');
+    el.onclick = function(){ tr.scrollTo({ left: j * tr.clientWidth, behavior: 'smooth' }); };
+  });
+}
+function loadApprovedTrades(){
+  fetch('/api/mobile/home/approved-trades').then(function(r){ return r.json(); }).then(function(x){
+    var body = document.getElementById('apTrBody'); if (!body) return;
+    var cnt = document.getElementById('apTrCount'); if (cnt) cnt.textContent = x.count || 0;
+    var positions = x.positions || [];
+    if (!positions.length){
+      body.className = 'g-empty'; body.style.padding = '18px 0';
+      body.textContent = 'No approved trades open right now.'; return;
+    }
+    body.className = ''; body.style.padding = '';
+    body.innerHTML = '<p class="hint">Swipe for more</p>'
+      + '<div class="tr-track" id="apTrTrack" onscroll="apTrDots()">' + positions.map(apTrCardHtml).join('') + '</div>'
+      + (positions.length > 1 ? '<div class="dots" id="apTrDots">' + positions.map(function(_, i){ return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>' : '');
+  }).catch(function(){
+    var body = document.getElementById('apTrBody');
+    if (body){ body.className = 'g-empty'; body.style.padding = '18px 0'; body.textContent = 'Could not load approved trades right now.'; }
+  });
 }
 function loadIndexBook(){
   function leg(symbol){
@@ -5243,43 +5353,14 @@ function renderHome(d, pv){
     + heroCardPositions(d)
     + '</div><div class="dots" id="heroDots">' + heroDotsHtml + '</div></div>';
 
-  /* 2 · V8 OPEN BOOK — unrealised split with % of capital deployed (founder 08-Aug) */
+  /* 2 · V8 book data -- still needed by bookFace2() (Realised/Win Rate Long/Win Rate Short)
+     below. bookFace1() (the OPEN BOOK Unrealised/Long Unrl/Short Unrl trio) and its trioCell()
+     helper are REMOVED here (cc#1867, founder 09-Sep-2026): that block no longer renders on
+     Home, replaced by the APPROVED TRADES slider above. V8's own page (aggregate + full position
+     list) is untouched -- this removes ONE home surface and nothing else. bookFace2 is no longer
+     paired with face1 in a 2-face swipe deck (cc#950's gesture-sharing rationale no longer
+     applies to this pair); it renders standalone under its own "THE BOOK" heading. */
   var bk = d.book || {};
-  function trioCell(k, o, totPct, totVal){
-    /* total cell passes its own value/pct; side cells pass their object */
-    var v = (o == null) ? totVal : o.unrealised;
-    var p = (o == null) ? totPct : o.pct;
-    return '<div class="st"><div class="k">' + k + '</div>'
-      + '<div class="v ' + cls(v) + '" title="' + esc(inr(v)) + '">' + inrShort(v) + '</div>'
-      + '<div class="p ' + cls(p) + '">' + (p == null ? '--' : pct(p)) + '</div></div>';
-  }
-  /* ══ cc#950 — THE BOOK TILE HAS A SECOND FACE ══════════════════════════════════════════════
-     cc#943 put the Open <-> Realised swipe on /m/v8; the founder wants it on the Home tile too.
-     Template-only: /api/mobile/home2 already ships realised, gross, brokerage, wins, losses and
-     trades on the same book payload, so nothing server-side changes.
-
-     THE GESTURE IS THE ONE THIS FILE ALREADY HAS, NOT A NEW ONE. The card describes the market
-     card's mechanism as an axis-locked touch handler; it is not — the market deck (cc#927) is a
-     CSS scroll-snap track with an onscroll dot updater, and that is what is reused here. It is
-     the better of the two for a tile sitting inside a scrolling page: native horizontal scroll
-     cannot swallow a vertical drag, so "vertical scroll unaffected" holds by construction rather
-     than by a threshold I would have to tune. No second handler exists to fork.
-
-     THE ANCHOR WRAPS EACH FACE, NOT THE DECK. Putting a horizontal scroller inside one <a> risks
-     a swipe ending as a navigation; giving each face its own card-link keeps the tap target and
-     the destination identical to before while the track owns the drag. */
-  function bookFace1(){
-    return '<a class="card-link" href="/m/v8"><div class="c slab"><div class="chd">'
-      + '<div class="t">V8 Open Book</div>'
-      + '<div class="rgt">' + (bk.open || 0) + ' positions <span class="h-chev">\u203a</span></div></div>'
-      + '<div class="trio">'
-      + trioCell('Unrealised', null, bk.unrealised_pct, bk.unrealised)
-      + trioCell('Long Unrl', bk.long || {})
-      + trioCell('Short Unrl', bk.short || {})
-      + '</div>'
-      + '<div class="sum" style="margin-top:7px">% on capital deployed per side.</div>'
-      + '</div></a>';
-  }
   /* ══ cc#961 — THE WIN RATE IS SPLIT BY SIDE, AND THE TRADES CELL IS GONE ═════════════
      Why the split earns a cell and the count does not: at build time the long book reads 92%
      on 13 decided and the short book 20% on 5. One blended number (72%) hides the only thing
@@ -5357,10 +5438,13 @@ function renderHome(d, pv){
      audit stands) but now target #heroCard3Body inside the deck; see heroCard3()\u2019s own
      comment for why its content host, not this section, is the paint-then-fill target. */
 
-  h += '<div class="sect">THE BOOK</div>'
-    + '<div class="swipe"><div class="swipe-t" id="bookTrack" onscroll="bookDots()">'
-    + bookFace1() + bookFace2()
-    + '</div><div class="dots" id="bookDots"><i class="on"></i><i></i></div></div>';
+  /* cc#1867 (founder 09-Sep-2026): V8 OPEN BOOK aggregate (bookFace1, the UNREALISED/LONG UNRL/
+     SHORT UNRL trio) is REMOVED from home -- V8 stays in the bottom nav, its own page and
+     everything it renders (aggregate + 22-position list) is untouched. This slot now opens with
+     the APPROVED TRADES slider; V8 Closed Book (bookFace2) keeps its own heading below, no
+     longer sharing a 2-face swipe deck with a face that no longer exists. */
+  h += apTrShellHtml()
+    + '<div class="sect">THE BOOK</div>' + bookFace2();
 
   /* 3 · MY PORTFOLIO — cc#911: rendered by renderPortfolio() into #pfblock, so a row tap can
      redraw just this card instead of the whole page. */
@@ -5374,6 +5458,7 @@ function renderHome(d, pv){
   document.getElementById('body').innerHTML = h;
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
   loadIndexBook();    /* cc#1382: #heroCard3Body only exists after this paint, same as the mood letters */
+  loadApprovedTrades();  /* cc#1867: #apTrBody only exists after this paint, same reason */
   loadHeroPositions(); /* cc#1386: #heroPositionsBody, same reason */
   heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
   glitterSync();          /* cc#1378: sets the initial active-face class, same reason */
