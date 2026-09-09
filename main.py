@@ -118,6 +118,7 @@ from qb_app_mobile import router as qb_app_mobile_router   # cc#1892: /api/mobil
 from screeners_app_mobile import router as screeners_app_mobile_router   # cc#1899: /api/mobile/screeners_app — Screeners app section
 from sector_app_mobile import router as sector_app_mobile_router   # cc#1900: /api/mobile/sector_app — Sector Intel app section
 from results_app_mobile import router as results_app_mobile_router   # cc#1901: /api/mobile/results_app — Results app section
+from health_app_mobile import router as health_app_mobile_router   # cc#1902: /m/health + /api/mobile/health_app — Portfolio Health app section
 from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
 from fy_end_backfill import router as fy_end_backfill_router   # cc#703 FY-end price backfill 2015-2021
@@ -322,6 +323,14 @@ PROTECTED.add("/m/screeners")
 # never the bottom nav/More sheet) — not NAV array, not _PWA_INJECT_PATHS, same reasoning as
 # every other grid-tile page this session.
 PROTECTED.add("/m/sector")
+# cc#1902: /m/health is a NEW page — no /m/health route existed before this card. NOT wired into
+# the Home grid: the existing "Portfolio Health" tile deliberately opens the WEB /health page,
+# a founder-approved named exception (APP_VS_WEB_AUDIENCE_SPLIT_V1, session_log 16915; verified
+# via mobile_endpoints.py:1676's own prior ruling). Repointing that tile is a real architecture
+# decision, not CC's to make unilaterally (rule 12) — flagged in cc_task_logs for Fable/founder.
+# PROTECTED so the page is gated like every other /m/ screen even while reachable by typed URL
+# only; NAV_REGISTRY below uses "typed-url" (main.py's own /preview precedent), not "grid-tile".
+PROTECTED.add("/m/health")
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
 # duplicates no auth logic of its own.
@@ -894,6 +903,7 @@ app.include_router(qb_app_mobile_router)   # cc#1892: /api/mobile/qb_app (mobile
 app.include_router(screeners_app_mobile_router)   # cc#1899: /api/mobile/screeners_app (mobile/screeners.html's new data source)
 app.include_router(sector_app_mobile_router)   # cc#1900: /api/mobile/sector_app (mobile/sector.html's new condensed summary, additive)
 app.include_router(results_app_mobile_router)   # cc#1901: /api/mobile/results_app (mobile/results.html's new condensed summary, additive)
+app.include_router(health_app_mobile_router)   # cc#1902: /m/health + /api/mobile/health_app (new page, typed-url only — see ARCHITECTURE FLAG in health_app_mobile.py)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
 app.include_router(trade_wall_approved_router)   # cc#1735: /api/tradewall/approved + /levels + /close
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
@@ -1468,6 +1478,7 @@ NAV_REGISTRY = {
     "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "grid-tile"),   # cc#1897
     "/m/screeners":  ("Screeners (mobile)",     "grid-tile"),   # cc#1899: Home grid entry point, same tier as /m/intel
     "/m/sector":     ("Sector Intel (mobile)",  "grid-tile"),   # cc#1900: Home grid entry point, same tier as /m/intel
+    "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),

@@ -1138,6 +1138,7 @@ _MOBILE_DESTINATIONS = [
     ("/m/myportfolio", "My Portfolio (Dashboard)"),   # cc#1895: Home Dashboard section's own page
     ("/m/myalerts", "My Alerts (Dashboard)"),   # cc#1896: Home Dashboard section's own page
     ("/m/mywatchlist", "My Watchlist (Dashboard)"),   # cc#1897: Home Dashboard section's own page
+    ("/m/health", "Portfolio Health"),   # cc#1902: not yet on the Home grid, reachable here — see health_app_mobile.py
     ("/preview", "Previews"),
 ]
 
