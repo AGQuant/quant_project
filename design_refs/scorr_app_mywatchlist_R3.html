@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My watchlist &#183; Scorr design ref scorr_app_mywatchlist_R3</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_app_mywatchlist_R3
+   Locks section order for My Watchlist. NO BACKING STORE EXISTS &#8212; every card is an honest empty state naming what is missing.
+   LAYOUT LAW (founder, 09-Sep-2026, supersedes the single-rail R1/R2 refs):
+     - The page scrolls VERTICALLY through SECTIONS.
+     - KEY METRICS is ONE tall card pinned at the top. It is never a rail.
+     - Every other section is a label + ONE horizontally swipeable rail of cards.
+     - Cards inside a rail are all the SAME kind of thing. Never mix kinds in a rail.
+   Built to APP_GRID_FRAMEWORK_V2 (session_log 42500): the app carries FULL COVERAGE
+   of every web section as condensed cards. Nothing is web-only. Depth stays lighter.
+   Palette hex is inlined ONLY so this ref renders standalone. The BUILD must use the
+   real GOLD NIGHT tokens from mobile/theme_mobile.css + scorr_themes.css. */
+
+:root{--field:#0a0a0b;--panel:#141416;--hi:#1c1c1f;--edge:#2a2a2e;--ink:#f4f4f2;
+ --muted:#8b8b90;--label:#6a6a70;--brand:#d4af37;--glow:rgba(212,175,55,.28);
+ --win:#2fd48b;--loss:#ff5c6c}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:80px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--edge);
+ position:sticky;top:0;z-index:30;background:var(--field)}
+.wm{font-size:15px;font-weight:800;letter-spacing:.14em;color:var(--ink);text-decoration:none}
+.wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--glow)}
+.pg{flex:1;text-align:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.slot{width:64px;text-align:right;font-size:11px;color:var(--label)}
+.asof{padding:10px 16px 0;font-size:10px;color:var(--label);letter-spacing:.04em}
+.asof b{color:var(--muted);font-weight:600}
+/* ── KEY METRICS: one TALL card at the top of the page, never a rail. ───────── */
+.km{margin:10px 16px 0;background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--brand);
+ border-radius:0 16px 16px 0;padding:15px 16px}
+.km .k{font-size:10px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.1em}
+.km .v{font-size:29px;font-weight:800;line-height:1.03;margin-top:5px}
+.km.up{border-left-color:var(--win)}.km.dn{border-left-color:var(--loss)}
+.kg{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}
+.cell{background:var(--hi);border:1px solid var(--edge);border-radius:11px;padding:9px 11px}
+.cell .k{font-size:9px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.07em}
+.cell .v{font-size:13.5px;font-weight:700;margin-top:3px}
+/* ── SECTION = a label + ONE horizontally swipeable rail. Page scrolls DOWN
+      through sections; each rail scrolls SIDEWAYS. Never one long mixed rail. ── */
+.slab{display:flex;align-items:baseline;justify-content:space-between;padding:20px 16px 8px}
+.slab h2{font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.slab .hint{font-size:10px;color:var(--label)}
+.rail{display:flex;gap:11px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 16px 4px;
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.rail::-webkit-scrollbar{display:none}
+.c{flex:0 0 62vw;max-width:250px;scroll-snap-align:start;background:var(--panel);border:1px solid var(--edge);
+ border-radius:14px;padding:12px 13px;position:relative}
+.c.w{flex:0 0 78vw;max-width:320px}
+.c.n{flex:0 0 46vw;max-width:172px}
+.c.up{border-left:3px solid var(--win);border-radius:0 14px 14px 0}
+.c.dn{border-left:3px solid var(--loss);border-radius:0 14px 14px 0}
+.c.gap{border-style:dashed;border-color:#3a3a40}
+.top{display:flex;align-items:baseline;justify-content:space-between}
+.sy{font-size:13.5px;font-weight:800}
+.pill{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;
+ border-radius:20px;background:var(--hi);border:1px solid var(--edge);color:var(--muted)}
+.big{font-size:19px;font-weight:800;margin-top:7px;line-height:1}
+.mt{font-size:10.5px;color:var(--label);margin-top:4px}
+.ft{margin-top:9px;padding-top:8px;border-top:1px solid var(--edge);font-size:10.5px;color:var(--muted)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+.bar{height:5px;border-radius:3px;background:var(--hi);margin-top:8px}
+.bar i{display:block;height:5px;border-radius:3px;background:var(--brand)}
+.emp{font-size:11.5px;color:var(--label);line-height:1.6;margin-top:7px}
+.emp b{display:block;color:var(--ink);font-size:12.5px;font-weight:700;margin-bottom:5px}
+.note{margin:22px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;
+ font-size:11px;color:var(--label);line-height:1.65}
+.note b{color:var(--muted)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);
+ border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+ font-size:11px;font-weight:600;color:var(--muted);text-decoration:none}
+.bn .i{font-size:17px}.bn.on{color:var(--brand)}
+
+.lst{margin-top:9px}
+.lr{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--hi)}
+.lr:last-child{border-bottom:none}
+.lr .s{font-size:12.5px;font-weight:800}
+.lr .r{display:flex;gap:11px;align-items:baseline}
+.lr .a{font-size:11.5px;color:var(--muted)}
+.lr .b{font-size:12.5px;font-weight:700;min-width:52px;text-align:right}
+.more{font-size:11px;color:var(--label);padding:7px 0 0}
+.link{display:block;margin-top:9px;padding-top:9px;border-top:1px solid var(--edge);
+ font-size:11.5px;font-weight:700;color:var(--brand);text-decoration:none}
+.ch{display:flex;align-items:baseline;justify-content:space-between}
+.ch .t{font-size:11px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.08em}
+.ch .n{font-size:11px;color:var(--muted)}
+.sb{margin-top:9px}
+.sb .row{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px}
+.sb .row span:last-child{color:var(--muted)}
+
+</style></head><body>
+<div class="hdr"><a class="wm" href="/m/home">SC<i>O</i>RR</a><div class="pg">My watchlist</div><div class="slot">0</div></div>
+<div class="asof"><b>No watchlist store in the database</b> &#183; schema checked 09 Sep 2026</div>
+<div class="km "><div class="k">Names saved</div><div class="v ">0</div><div class="kg"><div class="cell"><div class="k">Store</div><div class="v ">Does not exist</div></div><div class="cell"><div class="k">Write path</div><div class="v ">Not built</div></div><div class="cell"><div class="k">Rating data</div><div class="v ">Live already</div></div><div class="cell"><div class="k">Price data</div><div class="v ">Live already</div></div></div></div>
+<div class="slab"><h2>Saved names</h2><span class="hint">none &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w gap"><div class="ch"><span class="t">Watchlist</span><span class="n">0</span></div><div class="emp"><b>Nothing saved yet</b>There is no watchlist table anywhere in the database. Fable checked the full schema. This card fills the moment one exists &#8212; it is not hiding anything today.</div></div>
+<div class="c w"><div class="ch"><span class="t">How it fills</span><span class="n">design intent</span></div><div class="emp" style="color:var(--ink)">Tap the star on any stock &#8212; from GVM, a screener, a basket or Trade Check &#8212; and the name lands here. One store, written from every surface.</div><div class="ft">Not built. Needs a table, a write path and an owner.</div></div>
+</div>
+<div class="slab"><h2>What changed</h2><span class="hint">waiting &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w gap"><div class="ch"><span class="t">Rating moves</span><span class="n">&#8212;</span></div><div class="emp"><b>Waiting on saved names</b>Which of your names changed GVM rating since you added them. Rating data is live for the whole universe already; the list to apply it to is what is missing.</div></div>
+<div class="c w gap"><div class="ch"><span class="t">Price moves</span><span class="n">&#8212;</span></div><div class="emp"><b>Waiting on saved names</b>Day and week move per saved name. Price data is live already.</div></div>
+</div>
+<div class="slab"><h2>Alerts on these</h2><span class="hint">waiting &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w gap"><div class="ch"><span class="t">Alerts</span><span class="n">&#8212;</span></div><div class="emp"><b>Waiting on saved names</b>Only the alerts sitting on watchlist names, so this stays short and useful.</div><a class="link" href="#">All my alerts &#8250;</a></div>
+</div>
+<div class="note"><b>Read this before building.</b> There is no watchlist table in the schema. Every card here is deliberately empty and says why. An enumerated gap is a work item; an omitted section is invisible. Do NOT fill these with sample rows and do NOT hide the tile because it is empty. The section order is correct; only the data is absent.</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">&#9703;</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">&#9672;</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">&#9678;</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">&#9783;</span>WoT</a>
+  <a class="bn on" href="/m/dash"><span class="i">&#9677;</span>Dash</a>
+</nav></body></html>
