@@ -115,6 +115,7 @@ from smartgain_app_portfolio import router as smartgain_app_portfolio_router   #
 from trade_alerts_app import router as trade_alerts_app_router   # cc#1896: My Alerts section page
 from mobile_watchlist_stub import router as mobile_watchlist_stub_router   # cc#1897: My Watchlist section page (static, no store)
 from qb_app_mobile import router as qb_app_mobile_router   # cc#1892: /api/mobile/qb_app — Quant Baskets app section
+from screeners_app_mobile import router as screeners_app_mobile_router   # cc#1899: /api/mobile/screeners_app — Screeners app section
 from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
 from fy_end_backfill import router as fy_end_backfill_router   # cc#703 FY-end price backfill 2015-2021
@@ -306,6 +307,13 @@ PROTECTED.add("/m/holdings")   # cc#1779: My Portfolio full page — PROTECTED-o
 PROTECTED.add("/m/myportfolio")   # cc#1895: Dashboard-section My Portfolio page — same PROTECTED-only convention as /m/holdings
 PROTECTED.add("/m/myalerts")   # cc#1896: Dashboard-section My Alerts page — same PROTECTED-only convention
 PROTECTED.add("/m/mywatchlist")   # cc#1897: Dashboard-section My Watchlist page — same PROTECTED-only convention
+# cc#1899: /m/screeners was a working route (mobile_ext.py:630) in NONE of PROTECTED/NAV_REGISTRY/
+# NAV array before this card — a real pre-existing gap, not a deliberate omission. Filed here as
+# "grid-tile" (Home grid gtile is its only entry point per home.html/scorr_card_common.js), the
+# SAME PROTECTED-only convention as /m/holdings/myportfolio/myalerts/mywatchlist above — NOT
+# added to _PWA_INJECT_PATHS, which is desktop-only theme injection and never used for any /m/*
+# screen (every /m/ page carries its own inline theme-boot + 5-item bottom nav, cc#1898 finding).
+PROTECTED.add("/m/screeners")
 # /m/login is DELIBERATELY NOT PROTECTED (cc#874 item 7). Putting the login page behind the login
 # gate is a lockout with no way back in. It posts to the existing /login in scorr_auth.py and
 # duplicates no auth logic of its own.
@@ -875,6 +883,7 @@ app.include_router(smartgain_app_portfolio_router)   # cc#1895: /m/myportfolio +
 app.include_router(trade_alerts_app_router)   # cc#1896: /m/myalerts + /api/mobile/myalerts
 app.include_router(mobile_watchlist_stub_router)   # cc#1897: /m/mywatchlist (static, no backing store)
 app.include_router(qb_app_mobile_router)   # cc#1892: /api/mobile/qb_app (mobile/qb.html's new data source)
+app.include_router(screeners_app_mobile_router)   # cc#1899: /api/mobile/screeners_app (mobile/screeners.html's new data source)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
 app.include_router(trade_wall_approved_router)   # cc#1735: /api/tradewall/approved + /levels + /close
 app.include_router(model_launcher_router)   # cc#860: /api/models/status
@@ -1447,6 +1456,7 @@ NAV_REGISTRY = {
     "/m/myportfolio": ("My Portfolio (mobile, Dashboard section)", "grid-tile"),   # cc#1895
     "/m/myalerts":    ("My Alerts (mobile, Dashboard section)",    "grid-tile"),   # cc#1896
     "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "grid-tile"),   # cc#1897
+    "/m/screeners":  ("Screeners (mobile)",     "grid-tile"),   # cc#1899: Home grid entry point, same tier as /m/intel
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),

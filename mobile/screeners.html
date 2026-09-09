@@ -1,4 +1,14 @@
 <!doctype html>
+<!-- ══ mobile/screeners.html — Screeners section page (cc#1899, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). Full rewrite in place — same /m/screeners route (mobile_ext.py:630),
+     same nav slot. Design authority: design_refs/scorr_app_screeners_R1.html, founder-approved
+     09-Sep-2026 (commit e67a872). Real GOLD NIGHT tokens only.
+     SCREEN COUNT: the ref says 6 screens; live registry is 15 (7 scorr + 8 finz) — this page
+     renders the TRUE, current, registry-derived count. Universe card renders GVM-tracked
+     Screener/Trendlyne coverage, not the ref's uncheckable 92%/37% — see screeners_app_mobile.py
+     module docstring for the full account of both discrepancies. Data from
+     /api/mobile/screeners_app (screeners_app_mobile.py), which itself reuses screeners_endpoints.
+     screeners_list() directly for the registry data. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -9,30 +19,57 @@
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<script src="/scorr_card_common.js"></script>
-<script src="/scorr_card_strip.js"></script>
-<script src="/scorr_chart_card.js"></script>
-<script src="/scorr_analysis_card.js"></script>
-<script src="/results_card.js"></script>
-<script src="/scorr_cockpit_card.js"></script>
+<style>
+/* cc#1899 — page-local rules (sc-*). Same discipline as myportfolio.html/myalerts.html:
+   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex. */
+.sc-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.sc-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.sc-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.sc-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.sc-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.sc-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.sc-cell .sc-k{font-size:var(--type-9)}
+.sc-cell .sc-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.sc-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.sc-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.sc-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.sc-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.sc-rail::-webkit-scrollbar{display:none}
+.sc-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.sc-c.gap{border-style:dashed}
+.sc-ch{display:flex;align-items:baseline;justify-content:space-between}
+.sc-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.sc-ch .n{font-size:var(--type-11);color:var(--mut)}
+.sc-lst{margin-top:var(--space-9)}
+.sc-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
+.sc-lr:last-child{border-bottom:none}
+.sc-lr .s{font-size:var(--type-125);font-weight:800}
+.sc-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.sc-lr .a{font-size:var(--type-115);color:var(--mut)}
+.sc-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.sc-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.sc-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none}
+.sc-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.sc-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.sc-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.sc-note b{color:var(--mut)}
+.sc-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.sc-err{margin:var(--space-14)}
+</style>
 </head>
 <body data-theme="goldnight">
-<!-- cc#1645 P3: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap).
-     screeners.html previously had no scorr_themes.css link at all. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
-     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
-     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
-<!-- cc#1645 P3: shared appshell header (VARIANT B). Existing .head strip below is untouched. -->
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Screeners</span></div><div class="as-slot"></div></div>
-<div class="screen">
-  <div class="head as-hide"><h1>Screeners</h1><div class="s" id="sub">7 ready-made screens · refreshed nightly</div></div>
-  <div class="chips" id="chips"></div>
-  <div class="body" id="body"><div class="loading">Loading screens…</div></div>
-  <div class="cover" id="cover"></div>
-</div>
+<div class="sc-asof" id="sc-asof">Loading…</div>
+<div id="sc-body"><div class="sc-empty">Loading screens…</div></div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -41,81 +78,91 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
 </nav>
 <script>
-var STATE={list:[],cur:null};
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function num(v,dp){ if(v==null||isNaN(Number(v)))return null;
-  var x=Number(v); return dp==null?(Math.abs(x)>=100?Math.round(x).toLocaleString('en-IN'):x.toFixed(1)):x.toFixed(dp); }
-function cls(v){ return v==null?'':(Number(v)>=0?'pos':'neg'); }
-function arr(d){ return d.screeners||d.presets||d.screens||(Array.isArray(d)?d:[]); }
-function rowsOf(d){ return d.rows||d.results||d.members||d.stocks||(Array.isArray(d)?d:[]); }
-function strip(sym){
-  try { if (window.ScorrCardRow) return window.ScorrCardRow(sym); } catch(e) {}
-  return '';
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dmd(ds){ if(!ds) return '—'; var p=String(ds).slice(0,10).split('-');
+  if(p.length!==3) return String(ds); var m=parseInt(p[1],10)-1;
+  return parseInt(p[2],10)+' '+(MON[m]||p[1]); }
+
+function kmHtml(k){
+  return '<div class="sc-km"><div class="sc-k">Screens live</div><div class="sc-v">'+(k.screens_live!=null?k.screens_live:'—')+'</div>'
+    + '<div class="sc-kg">'
+    + '<div class="sc-cell"><div class="sc-k">Names surfaced</div><div class="sc-v">'+(k.names_surfaced!=null?k.names_surfaced:'—')+'</div></div>'
+    + '<div class="sc-cell"><div class="sc-k">Last run</div><div class="sc-v">'+dmd(k.last_run)+'</div></div>'
+    + '<div class="sc-cell"><div class="sc-k">Stale screens</div><div class="sc-v">'+(k.stale_screens!=null?k.stale_screens:'—')+'</div></div>'
+    + '<div class="sc-cell"><div class="sc-k">Saved screens</div><div class="sc-v">'+(k.saved_screens!=null?k.saved_screens:'—')+'</div></div>'
+    + '</div></div>';
 }
-var CORE={symbol:1,name:1,company_name:1,cmp:1,price:1,day_pct:1,day_1d:1,chg_pct:1,id:1,screen_id:1};
-function stockCard(r,labels){
-  var sym=r.symbol||r.ticker||'--';
-  var cmp=r.cmp!=null?r.cmp:r.price;
-  var day=r.day_pct!=null?r.day_pct:(r.day_1d!=null?r.day_1d:r.chg_pct);
-  var kvs='';
-  Object.keys(r).forEach(function(k){
-    if (CORE[k]) return;
-    var v=r[k];
-    if (v==null||typeof v==='object') return;
-    var shown=(typeof v==='number')?num(v):(String(v).length<=14?esc(String(v)):null);
-    if (shown==null) return;
-    kvs+='<div class="kv2">'+esc((labels&&labels[k])||k.replace(/_/g,' '))+' <b>'+shown+'</b></div>';
-  });
-  /* cc#1090 P7 dense sweep: v13_screen_results holds 3 to 152 rows per screen, five of the
-     seven screens over the 8-row line. */
-  return '<div class="c slab dense"><div class="sc-srow"><span class="sy">'+esc(sym)+'</span>'
-    + strip(sym)
-    + (cmp!=null?'<span class="px2">'+num(cmp)+'</span>':'')
-    + (day!=null?'<span class="dd '+cls(day)+'">'+(day>=0?'+':'')+num(day,2)+'%</span>':'')
-    + '</div>'
-    + (kvs?'<div class="kvs">'+kvs+'</div>':'')
-    + '</div>';
-}
-function renderChips(){
-  document.getElementById('chips').innerHTML = STATE.list.map(function(s,i){
-    var n=s.count!=null?s.count:(s.members!=null?s.members:s.n);
-    return '<button class="chip'+(STATE.cur===i?' on':'')+'" onclick="pick('+i+')">'
-      + esc(s.name||s.title||('Screen '+(i+1)))
-      + (n!=null?' <span class="n">'+n+'</span>':'')+'</button>';
+function screensCardHtml(d){
+  var rr=d.ready_screens, rows=rr.rows||[];
+  if(!rows.length) return '<div class="sc-c gap"><div class="sc-ch"><span class="t">Screens</span><span class="n">0</span></div>'
+    + '<div class="sc-emp"><b>No screens found</b>The registry has no global screen on record right now.</div></div>';
+  var lst = rows.map(function(r){
+    return '<div class="sc-lr"><span class="s">'+esc(r.name)+'</span><div class="r">'
+      + '<span class="a">ran '+dmd(r.last_run)+'</span><span class="b">'+(r.members!=null?r.members:'—')+'</span></div></div>';
   }).join('');
+  var more = rr.more>0 ? '<div class="sc-more">+'+rr.more+' more</div>' : '';
+  var note = rr.message ? '<div class="sc-more">'+esc(rr.message)+' Each screen is shown as of its own run date, never as today.</div>' : '';
+  return '<div class="sc-c"><div class="sc-ch"><span class="t">Screens</span><span class="n">'+rr.count+' live</span></div>'
+    + '<div class="sc-lst">'+lst+'</div>'+more+note+'</div>';
 }
-function pick(i){
-  STATE.cur=i; renderChips();
-  var s=STATE.list[i];
-  var id=s.id!=null?s.id:s.screen_id;
-  document.getElementById('body').innerHTML='<div class="loading">Loading '+esc(s.name||'screen')+'…</div>';
-  fetchWithTimeout('/api/screeners/'+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){
-    if (d.error) throw new Error(d.error);
-    var rows=rowsOf(d), labels=d.labels||d.field_labels||null;
-    var never=(rows.length===0)&&(s.last_run==null&&d.last_run==null);
-    document.getElementById('body').innerHTML = rows.length
-      ? rows.map(function(r){return stockCard(r,labels);}).join('')
-      : '<div class="empty"><b>'+(never?'Never run yet':'No stocks qualify today')+'</b>'
-        + (never?'This screen has not produced a run yet — honest empty, not an error.'
-                :'The filter found nothing in the latest run.')+'</div>';
-    document.getElementById('cover').textContent = rows.length?('showing '+rows.length+' stocks'):'';
-  }).catch(function(e){
-    document.getElementById('body').innerHTML='<div class="empty"><b>Could not load</b>'+esc(e.message)+'</div>';
-  });
+function todayCardHtml(d){
+  var t=d.today, rows=t.rows||[];
+  if(!rows.length) return '<div class="sc-c gap"><div class="sc-ch"><span class="t">What came up today</span><span class="n">0</span></div>'
+    + '<div class="sc-emp"><b>Nothing new yet</b>No screen has surfaced a fresh name on its most recent run.</div></div>';
+  var lst = rows.map(function(r){
+    return '<div class="sc-lr"><span class="s">'+esc(r.symbol)+'</span><div class="r"><span class="a">'+esc(r.screen_name)+'</span></div></div>';
+  }).join('');
+  return '<div class="sc-c"><div class="sc-ch"><span class="t">What came up today</span><span class="n">'+rows.length+' named</span></div>'
+    + '<div class="sc-lst">'+lst+'</div>'
+    + '<div class="sc-more">'+(t.rows_stored_total!=null?t.rows_stored_total:'—')+' screen rows stored in all.</div></div>';
 }
-fetchWithTimeout('/api/screeners').then(function(r){return r.json();}).then(function(d){
-  if (d.error) throw new Error(d.error);
-  STATE.list=arr(d);
-  if (!STATE.list.length){
-    document.getElementById('body').innerHTML='<div class="empty"><b>No screens found</b></div>'; return;
-  }
-  pick(0);
-}).catch(function(e){
-  document.getElementById('body').innerHTML =
-    '<div class="empty"><b>Could not load screeners</b>'+esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-});
+function builderCardHtml(d){
+  var c=d.custom_builder||{};
+  return '<div class="sc-c"><div class="sc-ch"><span class="t">Custom screen builder</span><span class="n">open</span></div>'
+    + '<div class="sc-emp" style="margin-top:0">'+esc(c.message||'')+'</div>'
+    + (c.footnote?'<div class="sc-more">'+esc(c.footnote)+'</div>':'')+'</div>';
+}
+function savedCardHtml(d){
+  var s=d.saved_screens_card||{};
+  return '<div class="sc-c gap"><div class="sc-ch"><span class="t">Saved screens</span><span class="n">'+(s.count!=null?s.count:0)+'</span></div>'
+    + '<div class="sc-emp"><b>Nothing saved yet</b>'+esc(s.message||'')+'</div></div>';
+}
+function universeCardHtml(d){
+  var u=d.universe||{};
+  return '<div class="sc-c"><div class="sc-ch"><span class="t">Universe</span><span class="n">'+esc(u.basis||'full')+'</span></div>'
+    + '<div class="sc-lst">'
+    + '<div class="sc-lr"><span class="s">Screener base</span><div class="r"><span class="a">Screener.in</span><span class="b">'+(u.screener_pct!=null?u.screener_pct+'%':'—')+'</span></div></div>'
+    + '<div class="sc-lr"><span class="s">Trendlyne overlap</span><div class="r"><span class="a">verification only</span><span class="b">'+(u.trendlyne_pct!=null?u.trendlyne_pct+'%':'—')+'</span></div></div>'
+    + '</div><div class="sc-more">'+esc(u.note||'')+'</div></div>';
+}
+function historyCardHtml(d){
+  var h=d.run_history||{};
+  return '<div class="sc-c gap"><div class="sc-ch"><span class="t">Run history</span><span class="n">not stored</span></div>'
+    + '<div class="sc-emp"><b>No run log</b>'+esc(h.message||'')+'</div></div>';
+}
+
+function render(d){
+  var k=d.key_metrics||{};
+  document.getElementById('sc-asof').textContent = 'Screens last ran '+dmd(k.last_run)+' · '+(d.today&&d.today.rows_stored_total!=null?d.today.rows_stored_total:'—')+' rows stored';
+  var html = kmHtml(k)
+    + '<div class="sc-slab"><h2>Ready screens</h2><span class="hint">'+(k.screens_live||0)+' · swipe →</span></div>'
+    + '<div class="sc-rail">'+screensCardHtml(d)+todayCardHtml(d)+'</div>'
+    + '<div class="sc-slab"><h2>Build your own</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="sc-rail">'+builderCardHtml(d)+savedCardHtml(d)+'</div>'
+    + '<div class="sc-slab"><h2>Coverage</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="sc-rail">'+universeCardHtml(d)+historyCardHtml(d)+'</div>'
+    + '<div class="sc-note"><b>Each screen states its own run date.</b> A screen is never shown as if it ran today when it did not. Saved screens and run history are both absent from the schema and are named as gaps rather than left off the page.</div>';
+  document.getElementById('sc-body').innerHTML = html;
+}
+
+fetch('/api/mobile/screeners_app', {credentials:'same-origin'})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.error){ document.getElementById('sc-body').innerHTML = '<div class="sc-err sc-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+    render(d);
+  })
+  .catch(function(e){ document.getElementById('sc-body').innerHTML = '<div class="sc-err sc-empty">Could not load screeners.</div>'; });
 </script>
-</body>
-</html>
+</body></html>
