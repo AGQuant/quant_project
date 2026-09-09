@@ -1885,24 +1885,20 @@ function gtile(href, glyph, label){
 }
 
 /* cc#1888 P4-P7 (APP_GRID_FRAMEWORK_V1): the new DASHBOARD section. My Portfolio and My Alerts
-   REUSE existing real surfaces (P5/P6 — checked first, per the card, rather than building new):
-   My Portfolio -> /m/holdings, the cc#1779 MY PORTFOLIO full page (design ref
-   scorr_mobile_myportfolio_R1); My Alerts -> /m/alerts, the same page + endpoint the Alerts grid
-   tile already opens. My Watchlist has NO backing store anywhere in the codebase — grepped every
+   originally REUSED existing real surfaces (P5/P6): My Portfolio -> /m/holdings (cc#1779), My
+   Alerts -> /m/alerts. My Watchlist has NO backing store anywhere in the codebase — grepped every
    .py file for "watchlist": every hit is an unrelated engine concept (intraday_watchlist/
    v14_watchlist are scanner candidate logs the engines write), none is a user-personal saved
    list. Per item 7, it ships as an HONEST EMPTY STATE this sprint — visible (never hidden because
    empty), no href (there is genuinely nowhere to send a tap), a plain one-line caption instead of
    a fake number or an invented table.
    cc#1894 (APP_CARD_LAYOUT_LAW_V1, 42536): My Trades Shortlist row REMOVED — three rows now, in
-   this order: My Portfolio, My Watchlist, My Alerts. THE ROUTES THIS CARD LANDS: unchanged for
-   now — My Portfolio and My Alerts stay pointed at their current REAL, working pages (/m/holdings,
-   /m/alerts); no new route is registered here (so V4's "every route added appears in the NAV
-   array" is vacuous — none was added) and nothing that returned 200 before stops returning 200
-   (V5). cc#1895/1896/1897 each build a NEW dedicated section page per the design refs; repointing
-   a row to its new page is that page's own NAV-COMPLETE obligation (rule 8 ties a nav entry to
-   the PAGE landing, not to this grid card) — done as each of those cards ships, not pre-wired to
-   a route that does not exist yet (never a dead link, never placeholder content in the interim). */
+   this order: My Portfolio, My Watchlist, My Alerts. cc#1894 itself left My Portfolio/My Alerts
+   pointed at their existing pages (no route pre-wired before its content existed).
+   cc#1895: My Portfolio now points to /m/myportfolio — its OWN new dedicated section page
+   (APP_CARD_LAYOUT_LAW_V1 density: key metrics + swipeable rails), built against
+   design_refs/scorr_app_myportfolio_R4.html. /m/holdings (cc#1779) is UNCHANGED and still live —
+   this only repoints the Dashboard row, per this page's own NAV-COMPLETE obligation. */
 function dashRow(href, glyph, label, sub){
   var empty = !href;
   var tag = empty ? 'div' : 'a';
@@ -1915,7 +1911,7 @@ function dashRow(href, glyph, label, sub){
 function dashSectionHtml(){
   return '<div class="dash-section">'
     + '<div class="hdr"><span class="eyebrow">DASHBOARD</span><div class="rule"></div></div>'
-    + dashRow('/m/holdings', '◈', 'My Portfolio', 'Holdings, allocation, unrealised P&L')
+    + dashRow('/m/myportfolio', '◈', 'My Portfolio', 'Holdings, allocation, unrealised P&L')
     + dashRow(null, '☆', 'My Watchlist', 'Nothing saved yet')
     + dashRow('/m/alerts', '◬', 'My Alerts', 'Price triggers you set')
     + '</div>';

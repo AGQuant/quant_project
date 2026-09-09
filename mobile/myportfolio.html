@@ -1,0 +1,195 @@
+<!doctype html>
+<!-- ══ mobile/myportfolio.html — My Portfolio section page (cc#1895, APP_CARD_LAYOUT_LAW_V1,
+     session_log 42536). Home Dashboard section's own destination — NOT the same page as
+     /m/holdings (cc#1779, still live, still the fuller sortable/filterable view this page links
+     out to). Design authority: design_refs/scorr_app_myportfolio_R4.html, founder-approved
+     09-Sep-2026 (commit 9b98b18). Real GOLD NIGHT tokens only (--bg/--panel/--panel2/--line/
+     --txt/--mut/--dim/--grn/--red/--blu, --space-*/--type-*/--radius-*/--track-*/--bw-* scale
+     tokens) — the ref's inlined hex was for standalone rendering only, never copied here.
+     Every number is served by /api/mobile/myportfolio (smartgain_app_portfolio.py), which is
+     itself a thin assembly over EXISTING canonical sources (scorr_endpoints.smartgain_m2m() for
+     every KPI — the cc#1878 ISO-week-scoped realised fix lives there, reused not re-derived).
+     Density law: a card carries a short list, a count in its header, six rows max then a plain
+     "+N more" line, then a gold link out — never one card per holding. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Portfolio · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+/* cc#1895 — page-local rules (mp-*). Colours are bridge names only; every length is a
+   scorr_themes.css scale token, same discipline as mobile/holdings.html's .pf-* block. */
+.mp-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.mp-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.mp-km.up{border-left-color:var(--grn)} .mp-km.dn{border-left-color:var(--red)}
+.mp-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.mp-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.mp-v.up{color:var(--grn)} .mp-v.dn{color:var(--red)} .mp-v.na{color:var(--dim)}
+.mp-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.mp-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.mp-cell .mp-k{font-size:var(--type-9)}
+.mp-cell .mp-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.mp-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.mp-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.mp-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.mp-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.mp-rail::-webkit-scrollbar{display:none}
+.mp-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.mp-ch{display:flex;align-items:baseline;justify-content:space-between}
+.mp-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.mp-ch .n{font-size:var(--type-11);color:var(--mut)}
+.mp-lst{margin-top:var(--space-9)}
+.mp-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
+.mp-lr:last-child{border-bottom:none}
+.mp-lr .s{font-size:var(--type-125);font-weight:800}
+.mp-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.mp-lr .a{font-size:var(--type-115);color:var(--mut)}
+.mp-lr .b{font-size:var(--type-125);font-weight:700;min-width:56px;text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.mp-lr .b.up{color:var(--grn)} .mp-lr .b.dn{color:var(--red)}
+.mp-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.mp-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none}
+.mp-sb{margin-top:var(--space-9)}
+.mp-sb .row{display:flex;justify-content:space-between;font-size:var(--type-115);margin-bottom:var(--space-3)}
+.mp-sb .row span:last-child{color:var(--mut)}
+.mp-bar{height:5px;border-radius:3px;background:var(--panel2);margin-top:var(--space-8);margin-bottom:var(--space-9)}
+.mp-bar i{display:block;height:5px;border-radius:3px;background:var(--blu)}
+.mp-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.mp-note b{color:var(--mut)}
+.mp-gap{font-size:var(--type-105);color:var(--dim);font-style:italic;padding:var(--space-6) 0 0}
+.mp-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.mp-err{margin:var(--space-14)}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">My Portfolio</span></div><div class="as-slot"></div></div>
+<div class="mp-asof" id="mp-asof">Loading…</div>
+<div id="mp-body"><div class="mp-empty">Loading portfolio…</div></div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
+  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function inr(v, signed){ if (v==null||isNaN(Number(v))) return '—';
+  var x=Number(v), s = x<0 ? '−' : (signed && x>0 ? '+' : '');
+  return s+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function fK(v){ if (v==null||isNaN(Number(v))) return '—';
+  var x=Math.abs(Number(v)); return (x>=100000?(x/100000).toFixed(1)+'L':x>=1000?(x/1000).toFixed(1)+'k':Math.round(x)); }
+function cls(v){ return v==null?'na':(Number(v)>0?'up':(Number(v)<0?'dn':'')); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3 ? (p[2]+' '+MON[Number(p[1])-1]) : String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16)+' IST'; }
+
+function kmHtml(k){
+  var flat = !k.open_count;
+  return '<div class="mp-km '+cls(k.realised_this_week)+'"><div class="mp-k">Realised this week</div>'
+    + '<div class="mp-v '+cls(k.realised_this_week)+'">'+inr(k.realised_this_week,true)+'</div>'
+    + '<div class="mp-kg">'
+    + '<div class="mp-cell"><div class="mp-k">Open value</div><div class="mp-v"'+(flat?' class="mp-v na"':'')+'>'+(flat?'—':inr(k.open_value))+'</div></div>'
+    + '<div class="mp-cell"><div class="mp-k">Unrealised</div><div class="mp-v '+(flat?'na':cls(k.unrealised))+'">'+(flat?'—':inr(k.unrealised,true))+'</div></div>'
+    + '<div class="mp-cell"><div class="mp-k">Positions</div><div class="mp-v">'+(k.open_count==null?'—':k.open_count+' open')+'</div></div>'
+    + '<div class="mp-cell"><div class="mp-k">Brokerage</div><div class="mp-v">'+(k.brokerage==null?'—':inr(-Math.abs(k.brokerage)))+'</div></div>'
+    + '</div></div>';
+}
+
+function openCardHtml(d){
+  var open=(d.positions&&d.positions.open)||[], n=(d.positions&&d.positions.open_count)||0;
+  var rows = open.length ? open.map(function(p){
+    return '<div class="mp-lr"><span class="s">'+esc(p.symbol)+'</span><div class="r">'
+      + '<span class="a">'+(p.qty!=null?p.qty:'—')+' · '+inr(p.value)+'</span>'
+      + '<span class="b '+cls(p.pnl)+'">'+inr(p.pnl,true)+'</span></div></div>';
+  }).join('') : '<div class="mp-empty">No open positions.</div>';
+  var more = n>open.length ? '<div class="mp-more">+'+(n-open.length)+' more</div>' : '';
+  return '<div class="mp-c"><div class="mp-ch"><span class="t">Open</span><span class="n">'+n+'</span></div>'
+    + '<div class="mp-lst">'+rows+'</div>'+more
+    + (n ? '<a class="mp-link" href="/m/holdings">All with entry, stop and age ›</a>' : '') + '</div>';
+}
+function closedCardHtml(d){
+  var closed=(d.positions&&d.positions.closed_this_week)||[], n=(d.positions&&d.positions.closed_this_week_count)||0;
+  var rows = closed.length ? closed.map(function(c){
+    return '<div class="mp-lr"><span class="s">'+esc(c.symbol)+'</span><div class="r">'
+      + '<span class="a">'+(c.entry!=null?c.entry:'—')+' → '+(c.exit!=null?c.exit:'—')+'</span>'
+      + '<span class="b '+cls(c.pnl)+'">'+inr(c.pnl,true)+'</span></div></div>';
+  }).join('') : '<div class="mp-empty">No trades closed this week.</div>';
+  var more = n>closed.length ? '<div class="mp-more">+'+(n-closed.length)+' more</div>' : '';
+  return '<div class="mp-c"><div class="mp-ch"><span class="t">Closed this week</span><span class="n">'+n+'</span></div>'
+    + '<div class="mp-lst">'+rows+'</div>'+more
+    + (n ? '<a class="mp-link" href="/m/holdings">Full trade book ›</a>' : '') + '</div>';
+}
+function sectorCardHtml(mix){
+  if(!mix||!mix.length) return '<div class="mp-c"><div class="mp-ch"><span class="t">Sector mix</span><span class="n">0</span></div><div class="mp-empty">No open positions to break down.</div></div>';
+  var rows = mix.map(function(s){
+    return '<div class="mp-sb"><div class="row"><span>'+esc(s.segment)+'</span><span>'+s.pct.toFixed(1)+'%</span></div>'
+      + '<div class="mp-bar"><i style="width:'+Math.min(100,s.pct)+'%"></i></div></div>';
+  }).join('');
+  return '<div class="mp-c"><div class="mp-ch"><span class="t">Sector mix</span><span class="n">'+mix.length+'</span></div>'+rows+'</div>';
+}
+function byNameCardHtml(d){
+  var names=d.by_name||[], n=d.by_name_count||0;
+  var rows = names.length ? names.map(function(x){
+    return '<div class="mp-lr"><span class="s">'+esc(x.symbol)+'</span><div class="r"><span class="b">'+x.pct.toFixed(1)+'%</span></div></div>';
+  }).join('') : '<div class="mp-empty">No open positions.</div>';
+  var more = n>names.length ? '<div class="mp-more">+'+(n-names.length)+' more</div>' : '';
+  return '<div class="mp-c"><div class="mp-ch"><span class="t">By name</span><span class="n">'+n+'</span></div><div class="mp-lst">'+rows+'</div>'+more+'</div>';
+}
+function weekCardHtml(d){
+  var weeks=d.week_history||[];
+  var rows = weeks.slice().reverse().map(function(w){
+    return '<div class="mp-lr"><span class="s">'+dm(w.week_start)+'</span><div class="r">'
+      + '<span class="a">'+(w.current?'this week':'')+'</span>'
+      + '<span class="b '+cls(w.realised)+'">'+inr(w.realised,true)+'</span></div></div>';
+  }).join('');
+  var gap = d.week_history_gap_note ? '<div class="mp-gap">'+esc(d.week_history_gap_note)+'</div>' : '';
+  return '<div class="mp-c"><div class="mp-ch"><span class="t">Week by week</span><span class="n">'+weeks.length+' stored</span></div>'
+    + '<div class="mp-lst">'+rows+'</div>'+gap
+    + '<a class="mp-link" href="/m/holdings">Full history ›</a></div>';
+}
+function costsCardHtml(c){
+  return '<div class="mp-c"><div class="mp-ch"><span class="t">Costs</span><span class="n">this week</span></div>'
+    + '<div class="mp-lst">'
+    + '<div class="mp-lr"><span class="s">Brokerage</span><div class="r"><span class="a">'+(c.legs||0)+' legs, '+(c.round_trips||0)+' round trips</span><span class="b">'+inr(-Math.abs(c.brokerage||0))+'</span></div></div>'
+    + '<div class="mp-lr"><span class="s">Rate</span><div class="r"><span class="a">per leg</span><span class="b">'+esc(c.rate_note||'')+'</span></div></div>'
+    + '</div><div class="mp-more">Costs are always shown, never netted away silently.</div></div>';
+}
+
+function render(d){
+  var openC=(d.positions&&d.positions.open_count)||0, closedC=(d.positions&&d.positions.closed_this_week_count)||0;
+  document.getElementById('mp-asof').textContent = 'Marked ' + dmt(d.as_of) + ' · ' + openC + ' open · ' + closedC + ' closed this week';
+  var html = kmHtml(d.key_metrics||{})
+    + '<div class="mp-slab"><h2>Positions</h2><span class="hint">'+openC+' open · swipe →</span></div>'
+    + '<div class="mp-rail">'+openCardHtml(d)+closedCardHtml(d)+'</div>'
+    + '<div class="mp-slab"><h2>Where the money sits</h2><span class="hint">'+(d.sector_mix?d.sector_mix.length:0)+' sectors · swipe →</span></div>'
+    + '<div class="mp-rail">'+sectorCardHtml(d.sector_mix)+byNameCardHtml(d)+'</div>'
+    + '<div class="mp-slab"><h2>Profit over time</h2><span class="hint">'+((d.week_history&&d.week_history.length)||0)+' weeks · swipe →</span></div>'
+    + '<div class="mp-rail">'+weekCardHtml(d)+costsCardHtml(d.costs||{})+'</div>'
+    + '<div class="mp-note"><b>Density rule.</b> A card carries a short list with a count in its header and a link out — six rows at most, then a plain "+N more" line. Every number is real, from the reconciled book. A missing week is named on the card face rather than skipped.</div>';
+  document.getElementById('mp-body').innerHTML = html;
+}
+
+fetch('/api/mobile/myportfolio', {credentials:'same-origin'})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.error){ document.getElementById('mp-body').innerHTML = '<div class="mp-err mp-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+    render(d);
+  })
+  .catch(function(e){ document.getElementById('mp-body').innerHTML = '<div class="mp-err mp-empty">Could not load portfolio.</div>'; });
+</script>
+</body></html>
