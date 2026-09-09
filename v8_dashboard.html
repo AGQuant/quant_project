@@ -6781,22 +6781,50 @@ function rPerf(){
      different cards were rendering through one class, so a change to either moved both. */
   const stat=(k,v,col)=>`<div class="stat"><div class="n" style="color:${col||'var(--txt)'}">${v}</div><div class="l">${k}</div></div>`;
   const pf=p.profit_factor!=null?Number(p.profit_factor).toFixed(2):'—';
+  // cc#1883 item 2/3/4: brokerage/net_pnl are server-struck (v10_st_ema.get_performance,
+  // V10_OPT_BROKERAGE_PER_TRADE = Rs 100/lot, ROUND TRIP — Fable default pending founder
+  // correction) so this card can never disagree with By Symbol below. Never lot_size x rate —
+  // every OPT row is confirmed exactly 1 lot. Total P&L stays Gross, unreplaced; Brokerage and
+  // Net P&L are new tiles beside it, per the card's "three line items, never netted silently" rule.
   const cards=[
     stat('Total Trades', tot),
     stat('Win Rate', (p.win_rate!=null?p.win_rate:0)+'%', p.win_rate>=50?UP:C.amber),
-    stat('Total P&L', '₹'+fK(p.total_pnl||0), cx(p.total_pnl||0)),
+    stat('Total P&L (Gross)', '₹'+fK(p.total_pnl||0), cx(p.total_pnl||0)),
+    stat('Brokerage', p.brokerage!=null?'−₹'+fK(p.brokerage):'—', C.mut),
+    stat('Net P&L', p.net_pnl!=null?'₹'+fK(p.net_pnl):'—', p.net_pnl!=null?cx(p.net_pnl):C.mut),
     stat('Avg Win', (p.avg_win_pts!=null?p.avg_win_pts:0)+' pts', UP),
     stat('Avg Loss', (p.avg_loss_pts!=null?p.avg_loss_pts:0)+' pts', DN),
     stat('Profit Factor', pf, p.profit_factor>=1?UP:DN),
     stat('Max Drawdown', (p.max_drawdown_pts!=null?p.max_drawdown_pts:0)+' pts', DN),
   ].join('');
+  // cc#1883 item 5: CAGR is a return ON CAPITAL and v10_trades carries no capital/margin/equity
+  // base anywhere (entry/exit/points/lot_size/pnl only) — there is no denominator to strike a
+  // return from. G2 (founder capital-base gate) is unanswered on the card, so this is an explicit
+  // awaiting-state tile, never a dash (reads as 0%) and never a fabricated denominator (premium
+  // paid / notional / drawdown all considered and rejected — a confident wrong number is worse
+  // than an honest gap, per the card's own instruction).
+  const cagrTile=`<div class="stat"><div class="n" style="color:var(--dim);font-size:12px;font-weight:700">Awaiting capital base</div><div class="l">CAGR</div></div>`;
+  // cc#1883 item 1: ONE derived footer line replaces the two era_block commentary lines, which
+  // never described V10 data at all. era_block does not exist on this endpoint's payload —
+  // v8EraLabel(undefined) was silently returning window.V8_ERA_LABEL, a GLOBAL the V8 panel
+  // elsewhere on this page sets from ITS OWN (correct, for V8) 18-Jul cutover; the second line
+  // read cache.paper.era_block, the V8 paper-book cache — also not V10 data. The headline 62/
+  // Rs 51,645 was always the since-inception (18-Jun) figure; only the caption was borrowed and
+  // wrong. Dates below are MIN/MAX(exit_ts) for these exact served rows — never hardcoded.
+  const fmtD=iso=>{const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}-${MON[+m[2]-1]}-${m[1]}`:'--';};
+  const scopeLine=tot?`${tot} closed option legs - ${fmtD(p.first_exit)} to ${fmtD(p.last_exit)}`:'No closed option legs yet';
   const seg=(obj,title,col1)=>{
     const keys=Object.keys(obj||{});
     if(!keys.length) return '';
     const rows=keys.map(k=>{const v=obj[k]||{};const wr=v.trades?Math.round(100*v.wins/v.trades):0;
+      // cc#1883 item 8: Net P&L column added alongside the existing Gross column — v.net_pnl is
+      // struck server-side the identical Rs100/round-trip-trade way as the card headline
+      // (get_performance, leg=OPT only), so a symbol row's gross/net always foots to the totals
+      // above. — dash, not 0, when a segment predates this fix's rollout (should not occur live).
       return `<tr><td class="td-mono" style="font-weight:700">${esc(k)}</td>
         <td class="td-mono">${v.trades||0}</td><td class="td-mono">${wr}%</td>
-        <td class="td-mono" style="font-weight:800;color:${cx(v.pnl||0)}">₹${fK(v.pnl||0)}</td></tr>`;}).join('');
+        <td class="td-mono" style="font-weight:800;color:${cx(v.pnl||0)}">₹${fK(v.pnl||0)}</td>
+        <td class="td-mono" style="font-weight:800;color:${v.net_pnl!=null?cx(v.net_pnl):'var(--dim)'}">${v.net_pnl!=null?'₹'+fK(v.net_pnl):'—'}</td></tr>`;}).join('');
     /* cc#1168 push 5: the section label takes the pane's eyebrow token — the SAME 8.5px/.14em the
        stat labels and settings keys use — instead of its own 10px/.6px. Three label sizes inside
        one card was the mismatch. The table gets .seg-tbl, so the ref's numbers-right treatment
@@ -6804,12 +6832,20 @@ function rPerf(){
        whose column orders are different and whose pushes own them. */
     return `<div style="flex:1;min-width:240px">
       <div class="eyebrow">${title}<span class="scrollhint">SCROLL →</span></div>
-      <div class="tbl-hold"><div class="tbl-scroll"><table class="seg-tbl"><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
+      <div class="tbl-hold"><div class="tbl-scroll"><table class="seg-tbl"><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L (Gross)</th><th>P&L (Net)</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
   };
+  // cc#1883 item 7: a chart icon opening a cumulative P&L curve was in scope. Grepped
+  // v10_endpoints.py first, per the cc#1873 precedent (consume an existing series endpoint rather
+  // than build a parallel one): /signal, /positions, /trades, /trades/paired, /trades/legs,
+  // /candles, /summary, /performance, /vix, /maxpain, /strike_oi, /buildup, /divergence — nothing
+  // series-shaped for cumulative OPT P&L. v10ChartIcon()/openV10Chart() already exist on this page
+  // but plot FUT-leg entry/exit markers on a spot candlestick chart, a different feature entirely.
+  // No cumulative-series endpoint exists, so per the card's own instruction this is NOT built here
+  // (no parallel client computation) — reported as a follow-up in the task result instead.
   return `<div class="card">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
       <div class="s">Live paper stats from v10_trades · option legs only (36703) · ${tot} closed option trades</div></div></div>
-    <div class="stat-grid">${cards}<div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(p.era_block)} &middot; closed trades by exit date, post&#8209;cutover era only</div><div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${v8EraLabel(cache.paper&&cache.paper.era_block)} &middot; V8 book, post&#8209;cutover era only</div></div>
+    <div class="stat-grid">${cards}${cagrTile}<div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${esc(scopeLine)}</div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
       ${seg(p.by_symbol,'By Symbol','SYMBOL')}   <!-- cc#1597: the BY LEG table is hidden (36703) -->
     </div>
