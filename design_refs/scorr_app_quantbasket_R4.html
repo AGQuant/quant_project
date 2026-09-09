@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quant baskets &#183; Scorr design ref scorr_app_quantbasket_R4</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_app_quantbasket_R4
+   Locks section order and density for the app Quant Basket surface. The Baskets card at the top is the switcher; every section below belongs to the selected basket.
+   LAYOUT LAW (founder, 09-Sep-2026, supersedes the single-rail R1/R2 refs):
+     - The page scrolls VERTICALLY through SECTIONS.
+     - KEY METRICS is ONE tall card pinned at the top. It is never a rail.
+     - Every other section is a label + ONE horizontally swipeable rail of cards.
+     - Cards inside a rail are all the SAME kind of thing. Never mix kinds in a rail.
+   Built to APP_GRID_FRAMEWORK_V2 (session_log 42500): the app carries FULL COVERAGE
+   of every web section as condensed cards. Nothing is web-only. Depth stays lighter.
+   Palette hex is inlined ONLY so this ref renders standalone. The BUILD must use the
+   real GOLD NIGHT tokens from mobile/theme_mobile.css + scorr_themes.css. */
+
+:root{--field:#0a0a0b;--panel:#141416;--hi:#1c1c1f;--edge:#2a2a2e;--ink:#f4f4f2;
+ --muted:#8b8b90;--label:#6a6a70;--brand:#d4af37;--glow:rgba(212,175,55,.28);
+ --win:#2fd48b;--loss:#ff5c6c}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:80px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--edge);
+ position:sticky;top:0;z-index:30;background:var(--field)}
+.wm{font-size:15px;font-weight:800;letter-spacing:.14em;color:var(--ink);text-decoration:none}
+.wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--glow)}
+.pg{flex:1;text-align:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.slot{width:64px;text-align:right;font-size:11px;color:var(--label)}
+.asof{padding:10px 16px 0;font-size:10px;color:var(--label);letter-spacing:.04em}
+.asof b{color:var(--muted);font-weight:600}
+/* ── KEY METRICS: one TALL card at the top of the page, never a rail. ───────── */
+.km{margin:10px 16px 0;background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--brand);
+ border-radius:0 16px 16px 0;padding:15px 16px}
+.km .k{font-size:10px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.1em}
+.km .v{font-size:29px;font-weight:800;line-height:1.03;margin-top:5px}
+.km.up{border-left-color:var(--win)}.km.dn{border-left-color:var(--loss)}
+.kg{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}
+.cell{background:var(--hi);border:1px solid var(--edge);border-radius:11px;padding:9px 11px}
+.cell .k{font-size:9px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.07em}
+.cell .v{font-size:13.5px;font-weight:700;margin-top:3px}
+/* ── SECTION = a label + ONE horizontally swipeable rail. Page scrolls DOWN
+      through sections; each rail scrolls SIDEWAYS. Never one long mixed rail. ── */
+.slab{display:flex;align-items:baseline;justify-content:space-between;padding:20px 16px 8px}
+.slab h2{font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.slab .hint{font-size:10px;color:var(--label)}
+.rail{display:flex;gap:11px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 16px 4px;
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.rail::-webkit-scrollbar{display:none}
+.c{flex:0 0 62vw;max-width:250px;scroll-snap-align:start;background:var(--panel);border:1px solid var(--edge);
+ border-radius:14px;padding:12px 13px;position:relative}
+.c.w{flex:0 0 78vw;max-width:320px}
+.c.n{flex:0 0 46vw;max-width:172px}
+.c.up{border-left:3px solid var(--win);border-radius:0 14px 14px 0}
+.c.dn{border-left:3px solid var(--loss);border-radius:0 14px 14px 0}
+.c.gap{border-style:dashed;border-color:#3a3a40}
+.top{display:flex;align-items:baseline;justify-content:space-between}
+.sy{font-size:13.5px;font-weight:800}
+.pill{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;
+ border-radius:20px;background:var(--hi);border:1px solid var(--edge);color:var(--muted)}
+.big{font-size:19px;font-weight:800;margin-top:7px;line-height:1}
+.mt{font-size:10.5px;color:var(--label);margin-top:4px}
+.ft{margin-top:9px;padding-top:8px;border-top:1px solid var(--edge);font-size:10.5px;color:var(--muted)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+.bar{height:5px;border-radius:3px;background:var(--hi);margin-top:8px}
+.bar i{display:block;height:5px;border-radius:3px;background:var(--brand)}
+.emp{font-size:11.5px;color:var(--label);line-height:1.6;margin-top:7px}
+.emp b{display:block;color:var(--ink);font-size:12.5px;font-weight:700;margin-bottom:5px}
+.note{margin:22px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;
+ font-size:11px;color:var(--label);line-height:1.65}
+.note b{color:var(--muted)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);
+ border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+ font-size:11px;font-weight:600;color:var(--muted);text-decoration:none}
+.bn .i{font-size:17px}.bn.on{color:var(--brand)}
+
+.lst{margin-top:9px}
+.lr{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--hi)}
+.lr:last-child{border-bottom:none}
+.lr .s{font-size:12.5px;font-weight:800}
+.lr .r{display:flex;gap:11px;align-items:baseline}
+.lr .a{font-size:11.5px;color:var(--muted)}
+.lr .b{font-size:12.5px;font-weight:700;min-width:52px;text-align:right}
+.more{font-size:11px;color:var(--label);padding:7px 0 0}
+.link{display:block;margin-top:9px;padding-top:9px;border-top:1px solid var(--edge);
+ font-size:11.5px;font-weight:700;color:var(--brand);text-decoration:none}
+.ch{display:flex;align-items:baseline;justify-content:space-between}
+.ch .t{font-size:11px;font-weight:800;color:var(--label);text-transform:uppercase;letter-spacing:.08em}
+.ch .n{font-size:11px;color:var(--muted)}
+.sb{margin-top:9px}
+.sb .row{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px}
+.sb .row span:last-child{color:var(--muted)}
+
+</style></head><body>
+<div class="hdr"><a class="wm" href="/m/home">SC<i>O</i>RR</a><div class="pg">Quant baskets</div><div class="slot">7</div></div>
+<div class="asof">Marked <b>09 Sep 2026, EOD</b> &#183; 7 baskets &#183; 85 names &#183; showing <b>Small cap</b></div>
+<div class="km up"><div class="k">All baskets &#183; unrealised</div><div class="v up">+&#8377;2,59,138</div><div class="kg"><div class="cell"><div class="k">Market value</div><div class="v ">&#8377;23,39,994</div></div><div class="cell"><div class="k">Baskets</div><div class="v ">7</div></div><div class="cell"><div class="k">Names held</div><div class="v ">85</div></div><div class="cell"><div class="k">Showing</div><div class="v ">Small cap</div></div></div></div>
+<div class="slab"><h2>Baskets</h2><span class="hint">7 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w "><div class="ch"><span class="t">All baskets</span><span class="n">7</span></div><div class="lst"><div class="lr"><span class="s">Small cap</span><div class="r"><span class="a">14 names &#183; &#8377;3,83,454</span><span class="b pos">+21.5%</span></div></div><div class="lr"><span class="s">Mid cap</span><div class="r"><span class="a">20 names</span><span class="b ">&#8212;</span></div></div><div class="lr"><span class="s">Large cap</span><div class="r"><span class="a">15 names</span><span class="b ">&#8212;</span></div></div><div class="lr"><span class="s">Alpha multicap</span><div class="r"><span class="a">15 names</span><span class="b ">&#8212;</span></div></div><div class="lr"><span class="s">Breakout 52w</span><div class="r"><span class="a">10 names</span><span class="b ">&#8212;</span></div></div><div class="lr"><span class="s">Contra value</span><div class="r"><span class="a">4 names</span><span class="b ">&#8212;</span></div></div></div><div class="more">+ 1 more &#8212; Model portfolio, 20 names</div><a class="link" href="#">Tap any basket to load it below &#8250;</a></div>
+</div>
+<div class="slab"><h2>Small cap &#183; holdings</h2><span class="hint">14 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w "><div class="ch"><span class="t">Holdings</span><span class="n">14</span></div><div class="lst"><div class="lr"><span class="s">CARTRADE</span><div class="r"><span class="a">&#8377;39,247</span><span class="b pos">+70.4%</span></div></div><div class="lr"><span class="s">UNIPARTS</span><div class="r"><span class="a">&#8377;34,798</span><span class="b pos">+50.5%</span></div></div><div class="lr"><span class="s">SANSERA</span><div class="r"><span class="a">&#8377;32,880</span><span class="b pos">+46.5%</span></div></div><div class="lr"><span class="s">GLAND</span><div class="r"><span class="a">&#8377;30,198</span><span class="b pos">+31.7%</span></div></div><div class="lr"><span class="s">VENUSREM</span><div class="r"><span class="a">&#8377;27,965</span><span class="b pos">+22.4%</span></div></div><div class="lr"><span class="s">ABCAPITAL</span><div class="r"><span class="a">&#8377;26,706</span><span class="b pos">+13.7%</span></div></div></div><div class="more">+ 8 more</div><a class="link" href="#">All 14 with entry and stop &#8250;</a></div>
+<div class="c w "><div class="ch"><span class="t">Laggards</span><span class="n">2 in the red</span></div><div class="lst"><div class="lr"><span class="s">NIFTYBEES</span><div class="r"><span class="a">&#8377;24,143</span><span class="b neg">&#8722;2.4%</span></div></div><div class="lr"><span class="s">TIPSMUSIC</span><div class="r"><span class="a">&#8377;22,780</span><span class="b neg">&#8722;0.7%</span></div></div></div><div class="more">NIFTYBEES is the cash residual, added 01 Sep.</div></div>
+</div>
+<div class="slab"><h2>Where the money sits</h2><span class="hint">6 sectors &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w"><div class="ch"><span class="t">Sector mix</span><span class="n">6</span></div><div class="sb"><div class="row"><span>Auto and parts</span><span>36.7%</span></div><div class="bar"><i style="width:100%"></i></div></div><div class="sb"><div class="row"><span>Pharma and health</span><span>33.8%</span></div><div class="bar"><i style="width:92%"></i></div></div><div class="sb"><div class="row"><span>Internet</span><span>10.2%</span></div><div class="bar"><i style="width:28%"></i></div></div><div class="sb"><div class="row"><span>Insurance</span><span>7.0%</span></div><div class="bar"><i style="width:19%"></i></div></div><div class="sb"><div class="row"><span>Index ETF</span><span>6.3%</span></div><div class="bar"><i style="width:17%"></i></div></div><div class="sb"><div class="row"><span>Media</span><span>5.9%</span></div><div class="bar"><i style="width:16%"></i></div></div><a class="link" href="#">Full break up &#8250;</a></div>
+<div class="c w gap"><div class="ch"><span class="t">Theme split</span><span class="n">no data</span></div><div class="emp"><b>Not tagged yet</b>The method is thematic, but no theme tag was ever written to any holding. quant_paper_positions has no theme column and the registry theme fields are empty. Filling this would mean inventing it.</div></div>
+</div>
+<div class="slab"><h2>Small cap &#183; the method</h2><span class="hint">2 &#183; swipe &rarr;</span></div>
+<div class="rail">
+<div class="c w"><div class="ch"><span class="t">How it picks</span><span class="n">since 01 Jun</span></div><div class="emp" style="color:var(--ink)">Small, fast growing companies picked top down. We first find themes we think have a long runway, then take only the strongest scoring company in each.</div><div class="ft">Reviewed monthly &#183; 14 names held</div></div>
+<div class="c w "><div class="ch"><span class="t">Rebalance history</span><span class="n">1 change</span></div><div class="lst"><div class="lr"><span class="s">01 Sep 2026</span><div class="r"><span class="a">NIFTYBEES added</span><span class="b ">Cash residual</span></div></div><div class="lr"><span class="s">01 Jun 2026</span><div class="r"><span class="a">13 names bought</span><span class="b ">Inception</span></div></div></div><div class="more">Nothing stored before 01 Jun 2026. Absent, not zero.</div><a class="link" href="#">Full history &#8250;</a></div>
+</div>
+<div class="note"><b>The Baskets card is the switcher.</b> Tap a basket in it and every section below reloads for that basket. Small cap is filled because all 14 rows are real, straight from quant_paper_positions. <b>Seven baskets, not thirteen</b> &#8212; the six finz_ baskets stay off the app, and the filter must read app_visible from the registry, never a hardcoded name list. <b>Theme split is empty and says so</b>, because no theme tag exists on any holding.</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">&#9703;</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">&#9672;</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">&#9678;</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">&#9783;</span>WoT</a>
+  <a class="bn on" href="/m/dash"><span class="i">&#9677;</span>Dash</a>
+</nav></body></html>
