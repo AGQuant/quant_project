@@ -252,6 +252,17 @@ var _full = false;                // cc#779: fullscreen state
           '<button id="scorrChartFull" title="Maximize (Esc to exit)" style="border:none;background:none;font-size:15px;line-height:1;cursor:pointer;margin-left:4px">&#9974;</button>' +
           '<button id="scorrChartClose" style="border:none;background:none;font-size:20px;line-height:1;cursor:pointer;margin-left:4px">&times;</button>' +
         '</div>' +
+        /* cc#1871 item 5 (founder 09-Sep-2026): a C/A/R/D capsule INSIDE the sheet, so a reader can
+           move to Analysis/Result/Detail without closing and reopening from the list. Its OWN row,
+           not squeezed into the already-busy #scorrChartHead (title + H/L + verdict + TF pills +
+           overlay chips + maximize + close) — crowding a 12th control into that single line would
+           trade one legibility problem for another. Rendered via window.ScorrCardStripHtml/Nav
+           (scorr_card_strip.js, cc#789/803/805) — the ONE locked strip every other surface uses,
+           not a second capsule implementation (the exact risk cc#1872's own audit exists to catch;
+           this card intentionally lands on the canonical component first). Feature-detected: if the
+           strip script has not loaded on this page, the row renders empty rather than breaking the
+           chart — the chart itself never depends on scorr_card_strip.js. */
+        '<div id="scorrChartCard4" style="padding:8px 16px 0;display:none"></div>' +
         /* cc#845: CHART | PEERS tab pair at CARD level. Toggle in place — same card, no popup,
            no navigation, because a peer scan is a comparison workflow and navigating away breaks it. */
         '<div id="scorrChartTabs" style="display:flex;gap:4px;padding:8px 16px 0"></div>' +
@@ -1265,6 +1276,21 @@ var _full = false;                // cc#779: fullscreen state
     _positionFx();   // cc#750: re-fit the fib bands + chip strip to the new width (mobile PWA)
   }
 
+  // cc#1871 item 5: the C/A/R/D capsule row. 'C' is always the active letter here — this modal
+  // IS the Chart card, so the strip's own active-state styling (scorr-cs-on) marks it, exactly as
+  // it does on the position card that opened it (session_log 41626 — those buttons are untouched,
+  // this is a second rendering of the SAME strip, not a fork of it). Painted once per open() since
+  // the symbol is fixed for the modal's lifetime; nothing else in this file re-triggers it.
+  function _paintCard4() {
+    var host = document.getElementById("scorrChartCard4");
+    if (!host) return;
+    if (typeof window.ScorrCardStripHtml !== "function" || !_sym) {
+      host.innerHTML = ""; host.style.display = "none"; return;
+    }
+    host.innerHTML = window.ScorrCardStripHtml(_sym, "C");
+    host.style.display = "";
+  }
+
   // ══════════════════════════════════════════════════════════════════════════════════════════
   // cc#845 PEERS TAB — segment peer table inside the same card.
   // Read-only. Every number comes from /api/chart/peers, which LEFT-joins v8_metrics and falls
@@ -1653,18 +1679,29 @@ var _full = false;                // cc#779: fullscreen state
     // cc#1500 item 5: raw-symbol fallback title gets the ^ marker from the SAME
     // futures_universe-backed source as the Peers table — never _futCache (that is 5m-data
     // availability, a different question). A caller-supplied label is left alone. The set
-    // resolves async, so the prefix lands on a stale-guarded second write; textContent keeps
-    // the title plain text (no accent span here — flagged for founder on-glass judgment).
+    // resolves async, so the prefix lands on a stale-guarded second write.
+    // cc#1871 item 7 FIX (founder 09-Sep-2026, screenshot: "^ADANIPORTS" leaking into the title):
+    // this was flagged at the time (cc#1500) as "no accent span here — founder on-glass judgment"
+    // and the founder's screenshot IS that judgment. Confirmed display-layer, not a stored-symbol
+    // fault, before touching it — wantTitle here is _sym (the caller's plain symbol string,
+    // uppercased in this function, never read from a DB column with a caret baked in) and
+    // _futuresUniverse() returns a plain {SYMBOL:true} set with no caret in any key. The marker
+    // itself is legitimate (cc#1500's own reasoning: this IS a futures-tradable indicator, the
+    // same concept _drawerHtml already renders correctly as a STYLED SPAN via _futCaret()); the
+    // bug was textContent gluing a raw "^" character onto plain text instead of using that same
+    // styled marker. Fixed to match _drawerHtml's own established, correct pattern — innerHTML +
+    // _futCaret(p), not a second, plain-text-only caret convention.
     if (!opts.label) {
       var wantTitle = _sym;
       _futuresUniverse().then(function (u) {
         if (_sym !== wantTitle || !u[wantTitle]) return;
         var tEl = document.getElementById("scorrChartTitle");
         var ovEl = document.getElementById("scorrChartOv");
-        if (tEl && ovEl && ovEl.style.display !== "none") tEl.textContent = "^" + wantTitle + " · Price";
+        if (tEl && ovEl && ovEl.style.display !== "none") tEl.innerHTML = _futCaret(_pal()) + wantTitle + " · Price";
       });
     }
     document.getElementById("scorrChartHL").textContent = "";
+    _paintCard4();   // cc#1871 item 5: the C/A/R/D capsule, symbol fixed for this open()
     document.addEventListener("keydown", _esc);
     _tf = "3M";
     _gvmMode = "gvm"; _gvmCache = null; _gvmCacheKey = null;   // cc#1501: every open starts on full GVM
