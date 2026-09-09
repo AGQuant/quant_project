@@ -1259,13 +1259,17 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 .deriv-row .dr-grid .val{color:var(--txt);margin-top:var(--space-2)}
 .deriv-row .dr-foot{display:flex;justify-content:space-between;margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line2);font-size:var(--type-9);color:var(--dim)}
 .deriv-row .dr-foot .stale{color:var(--amber,#F5B94A)}
-/* cc#1888 P4 (APP_GRID_FRAMEWORK_V1): the new DASHBOARD section — four entries in a row-list,
-   same tokens/idiom the .deriv-card/.approved-slider header (eyebrow+rule) and .tool grid tile
-   (panel/border/radius, icon span with the brand glow) already use on this page, scoped under its
-   own class per this file's own convention (each card family gets its own .hdr/.eyebrow/.rule
-   rather than a shared global one — see .approved-slider / .deriv-card above). A row layout, not
-   the 3-col icon grid, because two of the four entries (My Watchlist / My Trades Shortlist) need
-   room for an honest one-line empty-state caption (item 7) that an icon-only tile has no space for. */
+/* cc#1888 P4 (APP_GRID_FRAMEWORK_V1): the new DASHBOARD section — a row-list, same tokens/idiom
+   the .deriv-card/.approved-slider header (eyebrow+rule) and .tool grid tile (panel/border/radius,
+   icon span with the brand glow) already use on this page, scoped under its own class per this
+   file's own convention (each card family gets its own .hdr/.eyebrow/.rule rather than a shared
+   global one — see .approved-slider / .deriv-card above). A row layout, not the 3-col icon grid,
+   because My Watchlist needs room for an honest one-line empty-state caption (item 7) that an
+   icon-only tile has no space for.
+   cc#1894 (APP_CARD_LAYOUT_LAW_V1, session_log 42536, founder 09-Sep 16:51 IST): THREE entries now,
+   not four — My Trades Shortlist is REMOVED from this section (hide, not delete: it never had a
+   route to hide, dashRow(null,...) below was already an honest dead-end, so there is nothing left
+   live anywhere that needs to keep returning 200). Order is My Portfolio, My Watchlist, My Alerts. */
 .dash-section{margin:var(--space-14) 0}
 .dash-section .hdr{display:flex;align-items:center;gap:var(--space-10);margin-bottom:var(--space-6)}
 .dash-section .eyebrow{font-size:var(--type-11);font-weight:700;letter-spacing:var(--track-px16);color:var(--txt);text-transform:uppercase}
@@ -1884,14 +1888,21 @@ function gtile(href, glyph, label){
    REUSE existing real surfaces (P5/P6 — checked first, per the card, rather than building new):
    My Portfolio -> /m/holdings, the cc#1779 MY PORTFOLIO full page (design ref
    scorr_mobile_myportfolio_R1); My Alerts -> /m/alerts, the same page + endpoint the Alerts grid
-   tile already opens. My Watchlist and My Trades Shortlist have NO backing store anywhere in the
-   codebase — grepped every .py file for "watchlist"/"shortlist": every hit is an unrelated engine
-   concept (intraday_watchlist/v14_watchlist are scanner candidate logs the engines write,
-   stock_views_shortlist is a research-views funnel), none is a user-personal saved list. Per item
-   7, these ship as HONEST EMPTY STATES this sprint — visible (never hidden because empty), no
-   href (there is genuinely nowhere to send a tap), a plain one-line caption instead of a fake
-   number or an invented table. Item 8's report (what a real Watchlist/Shortlist would need) is in
-   the task result, not code. */
+   tile already opens. My Watchlist has NO backing store anywhere in the codebase — grepped every
+   .py file for "watchlist": every hit is an unrelated engine concept (intraday_watchlist/
+   v14_watchlist are scanner candidate logs the engines write), none is a user-personal saved
+   list. Per item 7, it ships as an HONEST EMPTY STATE this sprint — visible (never hidden because
+   empty), no href (there is genuinely nowhere to send a tap), a plain one-line caption instead of
+   a fake number or an invented table.
+   cc#1894 (APP_CARD_LAYOUT_LAW_V1, 42536): My Trades Shortlist row REMOVED — three rows now, in
+   this order: My Portfolio, My Watchlist, My Alerts. THE ROUTES THIS CARD LANDS: unchanged for
+   now — My Portfolio and My Alerts stay pointed at their current REAL, working pages (/m/holdings,
+   /m/alerts); no new route is registered here (so V4's "every route added appears in the NAV
+   array" is vacuous — none was added) and nothing that returned 200 before stops returning 200
+   (V5). cc#1895/1896/1897 each build a NEW dedicated section page per the design refs; repointing
+   a row to its new page is that page's own NAV-COMPLETE obligation (rule 8 ties a nav entry to
+   the PAGE landing, not to this grid card) — done as each of those cards ships, not pre-wired to
+   a route that does not exist yet (never a dead link, never placeholder content in the interim). */
 function dashRow(href, glyph, label, sub){
   var empty = !href;
   var tag = empty ? 'div' : 'a';
@@ -1906,7 +1917,6 @@ function dashSectionHtml(){
     + '<div class="hdr"><span class="eyebrow">DASHBOARD</span><div class="rule"></div></div>'
     + dashRow('/m/holdings', '◈', 'My Portfolio', 'Holdings, allocation, unrealised P&L')
     + dashRow(null, '☆', 'My Watchlist', 'Nothing saved yet')
-    + dashRow(null, '☰', 'My Trades Shortlist', 'Nothing saved yet')
     + dashRow('/m/alerts', '◬', 'My Alerts', 'Price triggers you set')
     + '</div>';
 }
