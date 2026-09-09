@@ -452,7 +452,13 @@ PWA_JS = """
     ['/m/myalerts', '\\u25ec', 'My Alerts (mobile)', 'm'],
     ['/m/mywatchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
     ['/m/screeners', '\\u2637', 'Screeners (mobile)', 'm'],
-    ['/m/sector', '\\u2b21', 'Sector Intel (mobile)', 'm']
+    ['/m/sector', '\\u2b21', 'Sector Intel (mobile)', 'm'],
+    // cc#1903: Mutual Funds — a genuinely NEW page, no prior /m/ MF route or Home-grid tile
+    // existed. Wired straight into the NAV array (the mobile More sheet), per the cc#1907 lesson
+    // that a new /m/ page belongs here by default rather than being held back to typed-url
+    // without a specific reason (unlike /m/health, cc#1902, where an existing grid tile pointing
+    // elsewhere under a founder-locked exception WAS that reason).
+    ['/m/mf', '\\u25c9', 'Mutual Funds (mobile)', 'm']
     // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).
   ];
