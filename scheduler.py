@@ -2949,6 +2949,24 @@ def _bg_fo_eod():
         log.error(f"fo_eod: {e}")
 
 
+def _bg_option_iv_daily():
+    """cc#1858 step 1: ~23:05 IST weekdays, 5 min after _bg_fo_eod fetches the same day's F&O
+    bhavcopy — forward-captures today's per-strike option data (close, OI, solved IV) at ATM +-10
+    into option_iv_daily via option_iv_history.run_forward_tick(). Idempotent (a re-run of an
+    already-'done' date is a no-op) and independent of option_iv_history's separate historical
+    backfill — storage keeps accumulating from the day this shipped whether or not the backfill
+    ever runs again. Trading days only."""
+    now = _ist_now()
+    if not _is_trading_day(now.date()):
+        return _Skip.not_trading_day()
+    try:
+        import option_iv_history
+        res = option_iv_history.run_forward_tick()
+        log.info(f"option_iv_daily: {res}")
+    except Exception as e:
+        log.error(f"option_iv_daily: {e}")
+
+
 def _bg_fo_ban_fetch():
     """cc#677: daily F&O ban-list (MWPL) fetch ~08:45 IST so the TC ban ALERT is current. The ban is
     alert-only now (zero-veto), but must reflect today's NSE list — a stale list makes the alert blind.
@@ -4836,6 +4854,8 @@ async def _scheduler_loop():
             _spawn(_bg_fo_ban_fetch)          # cc#677: daily F&O ban-list fetch (keeps the TC ban alert current)
         if now.weekday() < 5 and h == 23 and m == 0:
             _spawn(_bg_fo_eod)                # cc#682: 23:00 NSE F&O bhavcopy EOD OI ingest (permanent OI fallback)
+        if now.weekday() < 5 and h == 23 and m == 5:
+            _spawn(_bg_option_iv_daily)       # cc#1858: 23:05 forward-capture today's option IV history (5 min after fo_eod)
         if h == 9 and m == 0:
             _spawn(_bg_ca_daily_note)         # cc#658 part_4: 09:00 CA/data-integrity morning note
         if h == 9 and m == 5:
