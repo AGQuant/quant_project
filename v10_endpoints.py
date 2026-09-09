@@ -522,6 +522,46 @@ def v10_performance(leg: str = ""):
     return v10_st_ema.get_performance(leg=leg or None)
 
 
+@router.get("/performance/series")
+def v10_performance_series(leg: str = "OPT", symbol: str = "ALL"):
+    """cc#1890 (follow-up to cc#1883 item 7): the cumulative P&L series the V10 Performance
+    card's chart icon needs — ordered exits for the requested scope, one row per exit, each
+    carrying pnl AND the running cumulative sum struck server-side (SUM(pnl) OVER an ordered
+    window) so a client never sums this itself and two views can never disagree
+    (ONE_REGISTRY_ONE_DERIVATION). leg defaults to OPT, matching the Performance card's own
+    scope (V10_DISPLAY_OPTIONS_ONLY_V1, 36703) — FUT is accepted for completeness but the card
+    only ever asks for OPT. symbol=ALL|NIFTY50|BANKNIFTY mirrors The Record's own filter chips
+    exactly, so the chart can respect whichever chip is active without a second filtering
+    convention. Read-only; v10_trades is never written here.
+
+    NOT v10ChartIcon()/openV10Chart() (v8_dashboard.html) — that is a candlestick chart with
+    FUT-leg entry/exit markers on the spot symbol, a different feature this route does not
+    touch or replace."""
+    leg = (leg or "OPT").strip().upper()
+    if leg not in ("OPT", "FUT"):
+        raise HTTPException(400, "leg must be OPT or FUT")
+    symbol = (symbol or "ALL").strip().upper()
+    where = ["COALESCE(NULLIF(UPPER(leg), ''), 'FUT') = %s", "exit_ts IS NOT NULL", "pnl IS NOT NULL"]
+    params = [leg]
+    if symbol != "ALL":
+        if symbol not in ("NIFTY50", "BANKNIFTY"):
+            raise HTTPException(400, "symbol must be ALL, NIFTY50 or BANKNIFTY")
+        where.append("UPPER(symbol) = %s")
+        params.append(symbol)
+    sql = ("SELECT exit_ts, symbol, pnl, "
+           "SUM(pnl) OVER (ORDER BY exit_ts, id) AS cum_pnl "
+           "FROM v10_trades WHERE " + " AND ".join(where) + " ORDER BY exit_ts, id")
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = [{"exit_ts": str(r[0]), "symbol": r[1], "pnl": round(float(r[2]), 2),
+                     "cum_pnl": round(float(r[3]), 2)} for r in cur.fetchall()]
+    except Exception as e:
+        raise HTTPException(500, f"v10_performance_series failed: {e}")
+    return {"leg": leg, "symbol": symbol, "rows": rows, "count": len(rows),
+            "final_cum_pnl": rows[-1]["cum_pnl"] if rows else None}
+
+
 @router.get("/vix")
 def v10_vix():
     """India VIX — live LTP (cmp_prices) + last ~100 5-min bars for the chart (symbol INDIAVIX,

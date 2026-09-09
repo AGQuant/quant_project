@@ -5245,6 +5245,56 @@ function dlDrawChart(d){
         y:{grace:'10%',grid:{color:'rgba(138,148,166,.15)'},
            ticks:{maxTicksLimit:6,color:faint,font:{size:9},callback:v=>inr(v)}}}}});
 }
+// cc#1890 (follow-up to cc#1883 item 7): the V10 Performance card's chart icon opens a
+// cumulative P&L curve for GET /api/v10/performance/series — REUSING the Day Log P&L modal
+// shell above (_dlModal/_dlEnsureChart/_dlTok/_dlZeroPlugin/DL_CHART/_dlChartEsc/dlCloseModal,
+// cc#1579) rather than a third chart popup on this page. Deliberately NOT v10ChartIcon()/
+// openV10Chart() — that is a candlestick chart with FUT-leg entry/exit markers on the spot
+// symbol, a different feature this does not touch. Respects THE RECORD's own ALL/NIFTY/
+// BANKNIFTY filter (REC.sym, defined with rRecord() below) so the curve never disagrees with
+// whichever chip a reader already has active on that section.
+async function v10PerfOpenChart(){
+  const ov=_dlModal(); ov.style.display='flex'; document.addEventListener('keydown',_dlChartEsc);
+  const body=document.getElementById('dlChartBody'), msg=document.getElementById('dlChartMsg');
+  msg.textContent='';
+  const symParam=REC.sym==='NIFTY'?'NIFTY50':(REC.sym==='BANKNIFTY'?'BANKNIFTY':'ALL');
+  const symLabel=symParam==='ALL'?'all symbols':(symParam==='NIFTY50'?'NIFTY':'BANKNIFTY');
+  document.getElementById('dlChartTitle').textContent='V10 cumulative P&L · '+symLabel;
+  document.getElementById('dlChartSub').innerHTML='';
+  body.innerHTML='<div class="loading">Loading P&L series...</div>';
+  try{
+    const [d]=await Promise.all([getJSON('/api/v10/performance/series?leg=OPT&symbol='+symParam),_dlEnsureChart()]);
+    const rows=d.rows||[];
+    document.getElementById('dlChartSub').innerHTML=rows.length?('Cumulative by exit, option legs only · '+rows.length+' closed'):'';
+    body.innerHTML=rows.length?'<canvas id="v10PerfChartCv"></canvas>':'<div class="empty">No closed option legs in this scope.</div>';
+    if(rows.length) v10PerfDrawChart(rows);
+  }catch(e){ body.innerHTML=''; msg.textContent='Chart unavailable - '+(e&&e.message||e); }
+}
+function v10PerfDrawChart(rows){
+  if(!window.Chart)return;
+  const cv=document.getElementById('v10PerfChartCv'); if(!cv)return;
+  if(DL_CHART){try{DL_CHART.destroy();}catch(e){}DL_CHART=null;}
+  const labels=rows.map(r=>fmtTs(r.exit_ts));
+  const cum=rows.map(r=>r.cum_pnl);
+  const lastV=cum.length?cum[cum.length-1]:0;
+  const col=lastV<0?_dlTok('--red'):_dlTok('--grn');
+  const faint=_dlTok('--mut');
+  // same alpha-suffix guard dlDrawChart uses — a var() fallback string draws no fill rather than
+  // an invalid colour.
+  const fillCol=/^#[0-9a-f]{6}$/i.test(col)?col+'1a':'transparent';
+  DL_CHART=new Chart(cv.getContext('2d'),{
+    type:'line',plugins:[_dlZeroPlugin],
+    data:{labels,datasets:[{label:'Cumulative P&L',data:cum,borderColor:col,borderWidth:2.5,
+      backgroundColor:fillCol,fill:true,tension:.2,pointRadius:2,pointHoverRadius:4,
+      pointBackgroundColor:col,spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      interaction:{intersect:false,mode:'index'},
+      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index',
+        callbacks:{title:items=>items.length?labels[items[0].dataIndex]:'',
+          label:c=>'Cum P&L: '+inr(c.parsed.y)}}},
+      scales:{x:{grid:{display:false,drawTicks:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:8,color:faint,font:{size:9}}},
+        y:{grace:'10%',grid:{color:'rgba(138,148,166,.15)'},ticks:{maxTicksLimit:6,color:faint,font:{size:9},callback:v=>inr(v)}}}}});
+}
 // Overall Return (i): the facts behind the box, straight from the series endpoint. Anchored to the
 // box; closes on outside click or Escape by joining the .mk-legpop set the page already closes.
 function dlToggleInfo(ev){
@@ -6845,17 +6895,17 @@ function rPerf(){
       <div class="eyebrow">${title}<span class="scrollhint">SCROLL →</span></div>
       <div class="tbl-hold"><div class="tbl-scroll"><table class="seg-tbl"><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L (Gross)</th><th>P&L (Net)</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
   };
-  // cc#1883 item 7: a chart icon opening a cumulative P&L curve was in scope. Grepped
-  // v10_endpoints.py first, per the cc#1873 precedent (consume an existing series endpoint rather
-  // than build a parallel one): /signal, /positions, /trades, /trades/paired, /trades/legs,
-  // /candles, /summary, /performance, /vix, /maxpain, /strike_oi, /buildup, /divergence — nothing
-  // series-shaped for cumulative OPT P&L. v10ChartIcon()/openV10Chart() already exist on this page
-  // but plot FUT-leg entry/exit markers on a spot candlestick chart, a different feature entirely.
-  // No cumulative-series endpoint exists, so per the card's own instruction this is NOT built here
-  // (no parallel client computation) — reported as a follow-up in the task result instead.
+  // cc#1883 item 7 / cc#1890: a chart icon opening a cumulative P&L curve. cc#1883 grepped
+  // v10_endpoints.py and found nothing series-shaped for cumulative OPT P&L — v10ChartIcon()/
+  // openV10Chart() plot FUT-leg entry/exit markers on a spot candlestick chart, a different
+  // feature — and shipped without one rather than compute it client-side. cc#1890 built the real
+  // fix: GET /api/v10/performance/series (v10_endpoints.py), consumed here through the SAME
+  // Day Log P&L modal shell (_dlModal/_dlEnsureChart/_dlTok/_dlZeroPlugin, cc#1579) rather than a
+  // third chart popup on this page.
   return `<div class="card">
     <div class="card-hd"><div><div class="t">V10 Performance</div>
-      <div class="s">Live paper stats from v10_trades · option legs only (36703) · ${tot} closed option trades</div></div></div>
+      <div class="s">Live paper stats from v10_trades · option legs only (36703) · ${tot} closed option trades</div></div>
+      <span class="info-btn" onclick="v10PerfOpenChart()" title="Cumulative P&L chart" style="cursor:pointer">&#128200;</span></div>
     <div class="stat-grid">${cards}${cagrTile}<div style="font-size:10px;color:var(--dim);margin:-6px 0 10px">${esc(scopeLine)}</div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
       ${seg(p.by_symbol,'By Symbol','SYMBOL')}   <!-- cc#1597: the BY LEG table is hidden (36703) -->
