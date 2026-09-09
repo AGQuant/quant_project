@@ -1137,6 +1137,7 @@ _MOBILE_DESTINATIONS = [
     ("/m/holdings", "My Portfolio"), ("/m/fpc", "FPC Planner"),
     ("/m/myportfolio", "My Portfolio (Dashboard)"),   # cc#1895: Home Dashboard section's own page
     ("/m/myalerts", "My Alerts (Dashboard)"),   # cc#1896: Home Dashboard section's own page
+    ("/m/mywatchlist", "My Watchlist (Dashboard)"),   # cc#1897: Home Dashboard section's own page
     ("/preview", "Previews"),
 ]
 
