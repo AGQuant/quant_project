@@ -10,6 +10,48 @@
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <script src="/scorr_card_common.js"></script>
+<style>
+/* cc#1900 — Sector Intel condensed summary (si-*), inserted ABOVE the existing cc#1623 full
+   filterable list (#secp, untouched below). Same bridge-token + scorr_themes.css scale-token
+   discipline as every other section page this session — no raw hex. */
+.si-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
+.si-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-left:3px solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
+.si-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.si-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
+.si-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
+.si-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
+.si-cell .si-k{font-size:var(--type-9)}
+.si-cell .si-v{font-size:var(--type-14);margin-top:var(--space-3)}
+.si-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
+.si-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.si-slab .hint{font-size:var(--type-10);color:var(--dim)}
+.si-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
+ scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.si-rail::-webkit-scrollbar{display:none}
+.si-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
+ border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
+.si-c.gap{border-style:dashed}
+.si-ch{display:flex;align-items:baseline;justify-content:space-between}
+.si-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.si-ch .n{font-size:var(--type-11);color:var(--mut)}
+.si-lst{margin-top:var(--space-9)}
+.si-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
+.si-lr:last-child{border-bottom:none}
+.si-lr .s{font-size:var(--type-125);font-weight:800}
+.si-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
+.si-lr .a{font-size:var(--type-115);color:var(--mut)}
+.si-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
+.si-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
+.si-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
+ font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none;cursor:pointer}
+.si-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
+.si-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.si-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
+ border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
+.si-note b{color:var(--mut)}
+.si-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+</style>
 </head>
 <body data-theme="goldnight">
 <!-- cc#1645 P3: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap). -->
@@ -23,6 +65,15 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
 <!-- cc#1661 P3: #sc-r (the right-aligned status text) moves into .as-slot; the title/subtitle row
      below gets class="head" so the shared theme_mobile.css rule hides it (it had no class before). -->
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Sectors</span></div><div class="as-slot"><div id="sc-r" style="font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap"></div></div></div>
+<!-- cc#1900 — Sector Intel condensed summary (design_refs/scorr_app_sector_R1.html), ADDITIVE
+     above the existing cc#1623 full filterable list below, not a replacement: that list carries
+     filters, sort, cap segmentation and per-segment detail sheets (brief + top stocks) built
+     under session_log 37158 — genuinely more than this ref's condensed cards, so it stays intact
+     rather than being retired to match a summary view. "All 128 segments" links down to it
+     instead of inventing a second route. Data from /api/mobile/sector_app
+     (sector_app_mobile.py), which reads sector_ratings directly (RAW, not the cc#827 merge). -->
+<div class="si-asof" id="si-asof">Loading…</div>
+<div id="si-body"><div class="si-empty">Loading sector ratings…</div></div>
 <!--
   cc#1623 — APP_SECTOR_PAGE_V1 (session_log 37158; design ref design_refs/scorr_mobile_sector_R1.html).
   ONE source for every number on the list: /api/sector/rotation (cc#827 merge layer, GVM is the
@@ -257,6 +308,94 @@ function load(){
   }).catch(function(e){ SC.err = e.message || 'load failed'; if(!SC.data) render(); });
 }
 render(); load();
+</script>
+<script>
+/* cc#1900 — Sector Intel condensed summary. Deliberately separate closure/prefix (si-*) from the
+   SC.* state above — additive, not touching a line of the existing rotation/filter/sheet code. */
+(function(){
+function esc(s){ return String(s == null ? '' : s)
+  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dmd(ds){ if(!ds) return '—'; var p=String(ds).slice(0,10).split('-');
+  if(p.length!==3) return String(ds); var m=parseInt(p[1],10)-1;
+  return parseInt(p[2],10)+' '+(MON[m]||p[1]); }
+function scrollToFullList(){ var el=document.getElementById('secp'); if(el) el.scrollIntoView({behavior:'smooth'}); }
+window.siScrollToFullList = scrollToFullList;
+
+function kmHtml(k){
+  return '<div class="si-km"><div class="si-k">Segments rated</div><div class="si-v">'+(k.segments_rated!=null?k.segments_rated:'—')+'</div>'
+    + '<div class="si-kg">'
+    + '<div class="si-cell"><div class="si-k">Good</div><div class="si-v">'+(k.good!=null?k.good:'—')+'</div></div>'
+    + '<div class="si-cell"><div class="si-k">Average</div><div class="si-v">'+(k.average!=null?k.average:'—')+'</div></div>'
+    + '<div class="si-cell"><div class="si-k">Weak</div><div class="si-v">'+(k.weak!=null?k.weak:'—')+'</div></div>'
+    + '<div class="si-cell"><div class="si-k">Briefs cached</div><div class="si-v">'+(k.briefs_cached!=null?k.briefs_cached:'—')+'</div></div>'
+    + '</div></div>';
+}
+function verdictCardHtml(d){
+  var vs=d.verdict_split||{}, rows=vs.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="si-lr"><span class="s">'+esc(r.label)+'</span><div class="r">'
+      + (r.note?'<span class="a">'+esc(r.note)+'</span>':'')+'<span class="b">'+r.count+'</span></div></div>';
+  }).join('');
+  return '<div class="si-c"><div class="si-ch"><span class="t">Verdict split</span><span class="n">'+(vs.total!=null?vs.total:'—')+' segments</span></div>'
+    + '<div class="si-lst">'+lst+'</div><div class="si-more">'+esc(vs.message||'')+'</div></div>';
+}
+function strongestCardHtml(d){
+  var s=d.strongest||{}, rows=(s.rows||[]).slice(0,4);
+  var lst = rows.map(function(r){
+    return '<div class="si-lr"><span class="s">'+esc(r.segment)+'</span><div class="r">'
+      + '<span class="a">'+(r.stocks_count!=null?r.stocks_count+' stocks':'')+'</span>'
+      + '<span class="b">'+(r.gvm!=null?r.gvm.toFixed(2):'—')+'</span></div></div>';
+  }).join('');
+  return '<div class="si-c"><div class="si-ch"><span class="t">Strongest</span><span class="n">top '+rows.length+'</span></div>'
+    + '<div class="si-lst">'+lst+'</div>'
+    + '<a class="si-link" onclick="siScrollToFullList()">All '+(s.count!=null?s.count:'')+' segments &#8250;</a></div>';
+}
+function weakestCardHtml(d){
+  var w=d.weakest||{}, rows=w.rows||[];
+  var lst = rows.map(function(r){
+    return '<div class="si-lr"><span class="s">'+esc(r.segment)+'</span><div class="r">'
+      + '<span class="a">'+esc(r.verdict||'')+'</span><span class="b">'+(r.gvm!=null?r.gvm.toFixed(2):'—')+'</span></div></div>';
+  }).join('');
+  if(!rows.length) return '<div class="si-c gap"><div class="si-ch"><span class="t">Bottom of the table</span><span class="n">0</span></div>'
+    + '<div class="si-emp"><b>Nothing weak today</b>No segment scored below the Average band.</div></div>';
+  return '<div class="si-c"><div class="si-ch"><span class="t">Bottom of the table</span><span class="n">'+rows.length+'</span></div>'
+    + '<div class="si-lst">'+lst+'</div><div class="si-more">'+esc(d.weighting_note||'')+'</div></div>';
+}
+function briefsCardHtml(d){
+  var b=d.briefs||{};
+  return '<div class="si-c"><div class="si-ch"><span class="t">Plain-words brief</span><span class="n">'+(b.count!=null?b.count+' cached':'')+'</span></div>'
+    + '<div class="si-emp" style="margin-top:0">'+esc(b.message||'')+'</div>'
+    + (b.footnote?'<div class="si-more">'+esc(b.footnote)+'</div>':'')+'</div>';
+}
+function trendCardHtml(d){
+  var t=d.trend||{};
+  return '<div class="si-c gap"><div class="si-ch"><span class="t">Sector trend</span><span class="n">'+(t.rows!=null?t.rows+' rows':'')+'</span></div>'
+    + '<div class="si-emp"><b>No trend series yet</b>'+esc(t.message||'')+'</div></div>';
+}
+
+function siRender(d){
+  var k=d.key_metrics||{};
+  document.getElementById('si-asof').textContent = 'Scored '+dmd(d.score_date)+' · '+(k.segments_rated!=null?k.segments_rated:'—')+' segments · market-cap weighted GVM';
+  var html = kmHtml(k)
+    + '<div class="si-slab"><h2>The spread</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="si-rail">'+verdictCardHtml(d)+strongestCardHtml(d)+'</div>'
+    + '<div class="si-slab"><h2>Weakest</h2><span class="hint">1 · swipe →</span></div>'
+    + '<div class="si-rail">'+weakestCardHtml(d)+'</div>'
+    + '<div class="si-slab"><h2>Read the sector</h2><span class="hint">2 · swipe →</span></div>'
+    + '<div class="si-rail">'+briefsCardHtml(d)+trendCardHtml(d)+'</div>'
+    + '<div class="si-note"><b>Only '+(k.good!=null?k.good:'—')+' segments of '+(k.segments_rated!=null?k.segments_rated:'—')+' rate Good.</b> That skew is the most useful thing on the page. Scores are market-cap weighted, so one large weak name drags a whole segment. The trend card is empty because sector_ops_trends has zero rows — a trend line drawn from a single day would be a fabrication. The full filterable list with detail sheets, unchanged, is below.</div>';
+  document.getElementById('si-body').innerHTML = html;
+}
+
+(window.fetchWithTimeout || fetch)('/api/mobile/sector_app', {credentials:'same-origin'})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.error){ document.getElementById('si-body').innerHTML = '<div class="si-empty">Could not load: '+esc(d.error)+'</div>'; return; }
+    siRender(d);
+  })
+  .catch(function(e){ document.getElementById('si-body').innerHTML = '<div class="si-empty">Could not load sector summary.</div>'; });
+})();
 </script>
 </body>
 </html>
