@@ -1216,43 +1216,39 @@ html.glitter-ok #heroTrack > .c.glitter-run::after{animation-play-state:running}
    carousel) too, and this card names the Book deck alone, so the selector is ID-scoped rather
    than widening .dots i.on itself, which would have leaked the gradient onto the hero dot. */
 body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var(--brand),var(--wayfind))}
-/* ══ cc#1867: APPROVED TRADES slider — design_refs/scorr_home_approved_cards_R1.html. Token rules
-   carried in: green/red ONLY on .end-sl/.end-tp/.cmp-pnl/.rail-fill (the P&L exemption); chips use
-   tinted, non-P&L tokens; card 12px radius, hairline border, no gradient, no glow. */
-.approved-slider{margin-bottom:var(--space-9)}
-.approved-slider .hdr{display:flex;align-items:center;gap:var(--space-10);margin-bottom:var(--space-6)}
-.approved-slider .eyebrow{font-size:var(--type-11);font-weight:700;letter-spacing:var(--track-px16);color:var(--txt);text-transform:uppercase}
-.approved-slider .rule{flex:1;height:1px;background:var(--line2)}
-.approved-slider .count{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);color:var(--dim)}
-.approved-slider .hint{font-size:var(--type-105);color:var(--dim);margin-bottom:var(--space-6)}
-.tr-track{display:flex;gap:var(--space-9);overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.tr-track .tcard{flex:0 0 88%;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line2);border-radius:var(--radius-12);padding:var(--space-14)}
-.tcard .row-top{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-10)}
-.tcard .sym{font-size:var(--type-14);font-weight:800;color:var(--txt)}
-.tcard .meta{font-size:var(--type-9);color:var(--dim);margin-top:var(--space-2)}
-.tcard .right{text-align:right}
-.tcard .lbl{font-size:var(--type-85);letter-spacing:var(--track-px8);color:var(--dim);text-transform:uppercase}
-.tcard .val{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);color:var(--txt);margin-top:var(--space-2)}
-.tcard .chips{display:flex;gap:var(--space-6);margin-top:var(--space-8)}
-.tcard .chip{font-size:var(--type-85);font-weight:700;letter-spacing:var(--track-px6);text-transform:uppercase;padding:var(--space-2) var(--space-8);border-radius:var(--radius-3)}
-.tcard .chip-basket{background:var(--panel2);color:var(--blu)}
-.tcard .chip-side{background:var(--panel2);color:var(--cyan)}
-.tcard .cmp{display:flex;align-items:baseline;gap:var(--space-8);margin-top:var(--space-10)}
-.tcard .cmp-px{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-18);font-weight:800;color:var(--txt)}
-.tcard .cmp-pnl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);font-weight:700}
-.tcard .cmp-pnl.pos{color:var(--grn)} .tcard .cmp-pnl.neg{color:var(--red)}
-.tcard .rail{position:relative;height:6px;background:var(--panel2);border-radius:var(--radius-3);margin:var(--space-10) 0}
-.tcard .rail-track{position:absolute;inset:0;background:var(--panel2);border-radius:var(--radius-3)}
-.tcard .rail-fill{position:absolute;top:0;bottom:0;border-radius:var(--radius-3)}
-.tcard .rail-fill.pos{background:var(--grn)} .tcard .rail-fill.neg{background:var(--red)}
-.tcard .rail-entry{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--dim);opacity:.6;transform:translateX(-1px)}
-.tcard .rail-dot{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:var(--txt);border:var(--bw-2) solid var(--panel);transform:translateX(-6px);box-shadow:0 1px 4px rgba(0,0,0,.4)}   /* cc#1919: box-shadow has no exact ramp rung, left as-is */
-.tcard .ends{display:flex;justify-content:space-between;margin-top:var(--space-4)}
-.tcard .end-sl,.tcard .end-tp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105);font-weight:700}
-.tcard .end-sl{color:var(--red)} .tcard .end-tp{color:var(--grn)}
-.tcard .foot{display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line2)}
-.tcard .foot-lbl{font-size:var(--type-9);letter-spacing:var(--track-px8);color:var(--dim);text-transform:uppercase}
-.tcard .foot-val{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:700;color:var(--txt)}
+/* ══ cc#1930: APPROVED TRADES card R2 — design_refs/scorr_home_approved_cards_R2.html @ 55fd94f
+   (Fable, 10-Sep-2026; supersedes the cc#1867 R1 card, whose .approved-slider/.tcard rules this block
+   replaces). Every rule from .ap-hdr to .ap-empty is a BYTE-COPY of the ref's <style> — 39 var()
+   tokens, all present in scorr_themes.css (verify V2). The ref's own body{} page-shell rule is the one
+   line not carried: this page has its own shell. The ONE rule added is the wrapper below: .approved-
+   slider pulls itself out of .body's 12px side gutter (mobile_endpoints MOBILE_CSS .body{padding:11px
+   12px 0}) so the ref's own --space-16 paddings on .ap-hdr / .ap-deck / .ap-empty become the real
+   gutters and the deck scrolls edge-to-edge with the next card peeking — exactly how the ref renders
+   against its zero-margin body. Colour rules: .pos/.neg here are the ref's bare selectors (byte-
+   equal); every other pos/neg colour on this page is scoped (.ibk-pnl .v.neg, .brr .br-day.neg,
+   ...) and therefore more specific, so nothing existing changes colour. */
+.approved-slider{margin:0 calc(-1 * var(--space-12)) var(--space-9)}
+.ap-hdr{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-16) var(--space-16) var(--space-6)}
+.ap-hdr .eye{font-size:var(--type-11);font-weight:800;letter-spacing:var(--track-em14);text-transform:uppercase;color:var(--muted)}
+.ap-hdr .rule{flex:1;height:1px;background:var(--edge)}.ap-hdr .cnt{font-size:var(--type-11);font-weight:800;color:var(--brand)}
+.ap-deck{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-8);scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}.ap-deck::-webkit-scrollbar{display:none}
+.ap-card{flex:0 0 78vw;max-width:340px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-11) var(--space-12) var(--space-10);position:relative;overflow:hidden}
+.ap-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--edge)}.ap-card.up::before{background:var(--win)}.ap-card.dn::before{background:var(--loss)}
+.ap-top{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-8)}
+.ap-sym{font-size:var(--type-135);font-weight:800;line-height:1.1}
+.ap-tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-4);vertical-align:middle}
+.ap-tag.b{color:var(--win)}.ap-tag.s{color:var(--loss)}
+.ap-pnl{text-align:right;line-height:1}.ap-pnl .n{font-size:var(--type-16);font-weight:800}.ap-pnl .p{font-size:var(--type-9);font-weight:700;color:var(--muted);margin-top:var(--space-2)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+.ap-meta{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-4);line-height:1.45}.ap-meta b{color:var(--ink);font-weight:700}
+.ap-rail{position:relative;height:6px;border-radius:var(--radius-3);background:var(--hi);margin:var(--space-11) 0 var(--space-4)}
+.ap-rail .fill{position:absolute;top:0;height:6px;border-radius:var(--radius-3);background:var(--win);opacity:.55}.ap-card.dn .ap-rail .fill{background:var(--loss)}
+.ap-rail .tick{position:absolute;top:-3px;width:2px;height:12px;background:var(--muted);margin-left:-1px;border-radius:var(--radius-1)}
+.ap-rail .dot{position:absolute;top:-4px;width:14px;height:14px;border-radius:var(--radius-7);background:var(--brand);border:var(--bw-2) solid var(--panel);margin-left:-7px;box-shadow:0 0 0 var(--bw-1) var(--edge)}
+.ap-ends{display:flex;justify-content:space-between;font-size:var(--type-9);font-weight:700;color:var(--muted)}.ap-ends b{font-size:var(--type-105);font-weight:800;display:block;margin-top:var(--space-1)}.ap-ends .sl b{color:var(--loss)}.ap-ends .tp b{color:var(--win);text-align:right}
+.ap-foot{display:flex;justify-content:space-between;gap:var(--space-6);margin-top:var(--space-8);padding-top:var(--space-7);border-top:var(--bw-1) solid var(--hi);font-size:var(--type-9);color:var(--muted)}.ap-foot b{color:var(--ink);font-weight:800}
+.ap-dots{display:flex;justify-content:center;gap:var(--space-5);padding:0 0 var(--space-8)}.ap-dots i{width:6px;height:6px;border-radius:var(--radius-3);background:var(--edge)}.ap-dots i.on{width:18px;background:var(--brand)}
+.ap-empty{margin:0 var(--space-16);padding:var(--space-12) var(--space-13);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);font-size:var(--type-115);color:var(--muted);line-height:1.6}.ap-empty b{display:block;color:var(--ink);font-weight:700;margin-bottom:var(--space-4)}
 /* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
    Index option chain summary only (option_chain has NIFTY + BANKNIFTY, nothing else); the
    is-index-only line says so on the card itself, not just in a tooltip. Same visual language as
@@ -3281,90 +3277,108 @@ function ibkSetSym(sym){
   IBK.sym = sym;
   renderIbkDeck();
 }
-/* ══ cc#1867: APPROVED TRADES slider — replaces the V8 OPEN BOOK aggregate in this home slot.
-   V8 stays in the bottom nav and its own page (aggregate + 22-position list) is UNCHANGED; this
-   is a NEW read from GET /api/mobile/home/approved-trades, which reuses v8_book_canon's ONE
-   unrealised formula — no money computed client-side.
-   cc#1928 SOURCE FIX: that endpoint now reads trade_alerts.approved_at (founder approvals) joined
-   to the still-OPEN V8 position each approval points at — NOT v8_paper_positions OPEN (that was
-   the whole 22-row paper book, which nobody had approved). Count chip = approved open positions.
-   Zero rows => the empty state below; this page NEVER falls back to the paper book. Each card's
-   meta line prints "Approved 06 Sep, 16:32" from approved_at (falls back to "Opened …" only if
-   the payload has no approved_at). Payload shape is unchanged; approved_at/approved_via are
-   additive fields.
-   Paint-then-fill, same pattern as loadIndexBook()/loadHeroPositions(): the shell paints with
-   #apTr immediately, loadApprovedTrades() fills it after. */
-function apTrBasketLabel(b){
-  return b ? String(b).replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); }) : '';
+/* ══ cc#1930: APPROVED TRADES card R2 — design_refs/scorr_home_approved_cards_R2.html @ 55fd94f.
+   Replaces the cc#1867 R1 card (founder 10-Sep 13:37, "Approved trades card need to be redesign":
+   ~60% of R1 was empty, the rail read as a toggle knob, and the headline P&L was from the ENGINE
+   entry, not the price the founder approved at). This slot still replaces the old V8 OPEN BOOK
+   aggregate; V8's own page and its open book are untouched.
+   SOURCE unchanged from cc#1928: GET /api/mobile/home/approved-trades — trade_alerts.approved_at
+   joined to the still-OPEN V8 position; never the paper book. R2 fields (Fable, aa84418):
+   approved_price, qty, pnl_since_approval (+_pct), risk_left, reward_left, rr_left. Every rupee
+   and every % on the card is the endpoint's own number. The ONLY client-side arithmetic is
+   approved_pct — the approved price's place on the SAME min/max(stop,target) axis the endpoint
+   already uses for entry_pct and marker_pct — because the rail fill runs from the approved price
+   to the live dot (ref lock 4). No cmp => no dot, no fill, headline "—" + "no live price" (lock 7).
+   Count chip = positions.length (lock 8). Empty state text is the ref's, verbatim.
+   Paint-then-fill unchanged: apTrShellHtml() paints, loadApprovedTrades() fills #apTrBody. */
+function apTrBasketLabel(b){            /* ref: "Buy reversal" — sentence case, one capital */
+  if (!b) return '';
+  var s = String(b).replace(/_/g, ' ').toLowerCase();
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 function apTrSideLabel(s){ s = String(s || '').toUpperCase(); return s.charAt(0) + s.slice(1).toLowerCase(); }
-function apTrWhenTxt(label, iso){
-  if (!iso) return '';
+function apTrWhenIst(iso){              /* ref: "10 Sep 13:36" — IST pinned, whatever the device clock says */
+  if (!iso) return '—';
   var d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return label + ' ' + d.toLocaleDateString('en-IN', {day:'2-digit', month:'short'}) + ', '
-    + d.toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:false});
+  if (isNaN(d.getTime())) return '—';
+  var g = {};
+  new Intl.DateTimeFormat('en-GB', {timeZone:'Asia/Kolkata', day:'2-digit', month:'numeric', hour:'2-digit', minute:'2-digit', hourCycle:'h23'})
+    .formatToParts(d).forEach(function(x){ g[x.type] = x.value; });
+  var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return g.day + ' ' + (M[Number(g.month) - 1] || '') + ' ' + g.hour + ':' + g.minute;
 }
-function apTrOpenedTxt(iso){ return apTrWhenTxt('Opened', iso); }
-/* cc#1928: the meta line is the APPROVAL time ("Approved 06 Sep, 16:32"), which is what this
-   slider is about; "Opened …" only if a row somehow arrives without approved_at. */
-function apTrMetaTxt(p){
-  return p.approved_at ? apTrWhenTxt('Approved', p.approved_at) : apTrOpenedTxt(p.opened_at);
+function apTrInr(v){ return (v == null || isNaN(Number(v))) ? '—' : inr(v); }
+function apTrSignedInr(v){ return (v != null && Number(v) > 0 ? '+' : '') + apTrInr(v); }   /* ref: "+₹9,300" / "−₹16,200" */
+function apTrPct(v){                    /* ref: "−2.4%" / "+1.1%" — sign always shown, one decimal */
+  var x = Number(v); if (v == null || isNaN(x)) return '';
+  return (x < 0 ? '−' : '+') + Math.abs(x).toFixed(1) + '%';
+}
+function apTrLot(q){ var x = Number(q); return (q == null || isNaN(x)) ? '—' : Math.round(x).toLocaleString('en-IN'); }
+function apTrRr(v){ var x = Number(v); return (v == null || isNaN(x)) ? '—' : '1 : ' + x.toFixed(1); }
+function apTrAxisPct(px, stop, target){ /* the endpoint's own axis: lower price left, clamped 0-100, 1dp */
+  if (px == null || stop == null || target == null || Number(stop) === Number(target)) return null;
+  var lo = Math.min(Number(stop), Number(target)), hi = Math.max(Number(stop), Number(target));
+  return Math.round(Math.max(0, Math.min(100, (Number(px) - lo) / (hi - lo) * 100)) * 10) / 10;
 }
 function apTrCardHtml(p){
-  var hasCmp = num(p.cmp) && num(p.marker_pct);
-  var pnlCls = cls(p.unrealised);
-  var leftIsTarget = p.rail_left_label === 'target';
-  var leftLbl = leftIsTarget ? 'Target' : 'Stop', rightLbl = leftIsTarget ? 'Stop' : 'Target';
-  var leftVal = leftIsTarget ? p.target : p.stop_loss, rightVal = leftIsTarget ? p.stop_loss : p.target;
-  var leftCls = leftIsTarget ? 'end-tp' : 'end-sl', rightCls = leftIsTarget ? 'end-sl' : 'end-tp';
-  var rail = '<div class="rail"><div class="rail-track"></div>'
-    + ((hasCmp && num(p.entry_pct)) ? '<div class="rail-fill ' + pnlCls + '" style="left:'
-        + Math.min(p.entry_pct, p.marker_pct) + '%;width:' + Math.abs(p.marker_pct - p.entry_pct) + '%"></div>' : '')
-    + (num(p.entry_pct) ? '<div class="rail-entry" style="left:' + p.entry_pct + '%"></div>' : '')
-    + (hasCmp ? '<div class="rail-dot" style="left:' + p.marker_pct + '%"></div>' : '')
+  var hasCmp = (p.cmp != null) && (p.marker_pct != null);
+  var pnl = p.pnl_since_approval;
+  var dir = (!hasCmp || pnl == null) ? '' : (Number(pnl) >= 0 ? 'up' : 'dn');
+  var pnlCls = dir === 'up' ? 'pos' : (dir === 'dn' ? 'neg' : '');
+  var apPct = apTrAxisPct(p.approved_price, p.stop_loss, p.target);
+  var rail = '<div class="ap-rail">'
+    + ((hasCmp && apPct != null) ? '<div class="fill" style="left:' + Math.min(apPct, p.marker_pct) + '%;width:' + (Math.round(Math.abs(p.marker_pct - apPct) * 10) / 10) + '%"></div>' : '')
+    + (p.entry_pct != null ? '<div class="tick" style="left:' + p.entry_pct + '%"></div>' : '')
+    + (hasCmp ? '<div class="dot" style="left:' + p.marker_pct + '%"></div>' : '')
     + '</div>';
-  return '<div class="tcard">'
-    + '<div class="row-top"><div><div class="sym">' + esc(p.symbol) + '</div><div class="meta">' + esc(apTrMetaTxt(p)) + '</div></div>'
-    + '<div class="right"><div class="lbl">Entry</div><div class="val">' + esc(inr(p.entry)) + '</div></div></div>'
-    + '<div class="chips"><span class="chip chip-basket">' + esc(apTrBasketLabel(p.basket)) + '</span><span class="chip chip-side">' + esc(apTrSideLabel(p.side)) + '</span></div>'
-    + '<div class="cmp"><span class="cmp-px">' + (num(p.cmp) ? esc(inr(p.cmp)) : '—') + '</span>'
-    + (num(p.unrealised) ? '<span class="cmp-pnl ' + pnlCls + '">' + esc(inr(p.unrealised)) + '</span>' : '') + '</div>'
+  var sl = '<span class="sl">Stop<b>' + esc(apTrInr(p.stop_loss)) + '</b></span>';
+  var tp = '<span class="tp">Target<b>' + esc(apTrInr(p.target)) + '</b></span>';
+  var head = hasCmp
+    ? '<div class="n ' + pnlCls + '">' + esc(apTrSignedInr(pnl)) + '</div><div class="p">' + esc(apTrPct(p.pnl_since_approval_pct)) + ' since approval</div>'
+    : '<div class="n" style="color:var(--muted)">—</div><div class="p">no live price</div>';
+  return '<div class="ap-card' + (dir ? ' ' + dir : '') + '">'
+    + '<div class="ap-top"><div><div class="ap-sym">' + esc(p.symbol)
+    + '<span class="ap-tag ' + (String(p.side || '').toUpperCase() === 'SHORT' ? 's' : 'b') + '">' + esc(apTrSideLabel(p.side)) + '</span>'
+    + (p.basket ? '<span class="ap-tag">' + esc(apTrBasketLabel(p.basket)) + '</span>' : '') + '</div></div>'
+    + '<div class="ap-pnl">' + head + '</div></div>'
+    + '<div class="ap-meta">Approved <b>' + esc(apTrWhenIst(p.approved_at)) + '</b> at <b>' + esc(apTrInr(p.approved_price)) + '</b> · now <b>' + (hasCmp ? esc(apTrInr(p.cmp)) : '—') + '</b> · 1 lot (' + esc(apTrLot(p.qty)) + ')</div>'
     + rail
-    + '<div class="ends"><div><div class="lbl">' + leftLbl + '</div><div class="' + leftCls + '">' + esc(inr(leftVal)) + '</div></div>'
-    + '<div class="right"><div class="lbl">' + rightLbl + '</div><div class="' + rightCls + '">' + esc(inr(rightVal)) + '</div></div></div>'
-    + (num(p.potential_left) ? '<div class="foot"><span class="foot-lbl">Potential left</span><span class="foot-val">' + esc(inr(p.potential_left)) + '</span></div>' : '')
+    + '<div class="ap-ends">' + (p.rail_left_label === 'target' ? tp + sl : sl + tp) + '</div>'
+    + '<div class="ap-foot"><span>Risk left <b>' + (hasCmp ? esc(apTrInr(p.risk_left)) : '—') + '</b></span><span>Reward left <b>' + (hasCmp ? esc(apTrInr(p.reward_left)) : '—') + '</b></span><span>R:R <b>' + (hasCmp ? esc(apTrRr(p.rr_left)) : '—') + '</b></span></div>'
     + '</div>';
 }
 function apTrShellHtml(){
-  return '<div class="approved-slider"><div class="hdr"><span class="eyebrow">APPROVED TRADES</span><div class="rule"></div><span class="count" id="apTrCount"></span></div>'
-    + '<div class="g-empty" id="apTrBody" style="padding:18px 0">Loading…</div></div>';
+  return '<div class="approved-slider"><div class="ap-hdr"><span class="eye">APPROVED TRADES</span><div class="rule"></div><span class="cnt" id="apTrCount"></span></div>'
+    + '<div class="ap-empty" id="apTrBody">Loading…</div></div>';
 }
 function apTrDots(){
   var tr = document.getElementById('apTrTrack'), dots = document.getElementById('apTrDots');
-  if (!tr || !dots) return;
-  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
+  if (!tr || !dots || !tr.children.length) return;
+  /* R2 cards are 78vw + gap, not one viewport each (R1 was): the page step is the measured
+     card-to-card pitch, so the active dot tracks the card actually in view past card 3. */
+  var step = tr.children.length > 1 ? (tr.children[1].offsetLeft - tr.children[0].offsetLeft) : tr.clientWidth;
+  var i = Math.round(tr.scrollLeft / Math.max(1, step));
   Array.prototype.forEach.call(dots.children, function(el, j){
     el.className = (j === i ? 'on' : '');
-    el.onclick = function(){ tr.scrollTo({ left: j * tr.clientWidth, behavior: 'smooth' }); };
+    el.onclick = function(){ tr.scrollTo({ left: j * step, behavior: 'smooth' }); };
   });
 }
 function loadApprovedTrades(){
   fetch('/api/mobile/home/approved-trades').then(function(r){ return r.json(); }).then(function(x){
     var body = document.getElementById('apTrBody'); if (!body) return;
-    var cnt = document.getElementById('apTrCount'); if (cnt) cnt.textContent = x.count || 0;
     var positions = x.positions || [];
+    var cnt = document.getElementById('apTrCount'); if (cnt) cnt.textContent = positions.length;   /* ref lock 8 */
     if (!positions.length){
-      body.className = 'g-empty'; body.style.padding = '18px 0';
-      body.textContent = 'No approved trades open. Approve from Alerts or V8.'; return;   /* cc#1928 */
+      body.className = 'ap-empty';
+      body.innerHTML = '<b>No approved trades open</b>Approve from the Wall of Trades. Nothing is shown here until you do.';   /* ref, verbatim */
+      return;
     }
-    body.className = ''; body.style.padding = '';
-    body.innerHTML = '<p class="hint">Swipe for more</p>'
-      + '<div class="tr-track" id="apTrTrack" onscroll="apTrDots()">' + positions.map(apTrCardHtml).join('') + '</div>'
-      + (positions.length > 1 ? '<div class="dots" id="apTrDots">' + positions.map(function(_, i){ return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>' : '');
+    body.className = '';
+    body.innerHTML = '<div class="ap-deck" id="apTrTrack" onscroll="apTrDots()">' + positions.map(apTrCardHtml).join('') + '</div>'
+      + (positions.length > 1 ? '<div class="ap-dots" id="apTrDots">' + positions.map(function(_, i){ return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>' : '');
   }).catch(function(){
     var body = document.getElementById('apTrBody');
-    if (body){ body.className = 'g-empty'; body.style.padding = '18px 0'; body.textContent = 'Could not load approved trades right now.'; }
+    if (body){ body.className = 'ap-empty'; body.textContent = 'Could not load approved trades right now.'; }
   });
 }
 /* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
