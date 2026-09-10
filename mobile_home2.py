@@ -455,9 +455,13 @@ def mobile_breadth(request: Request):
     # no market cap cannot be weighted and is counted in `n` but not in `n_weighted`; a segment with
     # nothing weightable is left out rather than shown as 0.
     acc = {}
+    members = {}   # cc#1933: segment -> [symbols], the SAME grouping key the chips are built from
     for r in rows:
         seg = r.get("segment")
-        if not seg or r["day_chg_pct"] is None:
+        if not seg:
+            continue
+        members.setdefault(seg, []).append(r["symbol"])
+        if r["day_chg_pct"] is None:
             continue
         a = acc.setdefault(seg, {"segment": seg, "wsum": 0.0, "msum": 0.0, "n": 0, "n_weighted": 0})
         a["n"] += 1
@@ -469,11 +473,25 @@ def mobile_breadth(request: Request):
     sectors = [{"segment": a["segment"], "day_pct": round(a["wsum"] / a["msum"], 2),
                 "n": a["n"], "n_weighted": a["n_weighted"]}
                for a in acc.values() if a["msum"] > 0]
-    sectors.sort(key=lambda z: (-abs(z["day_pct"]), z["segment"]))   # biggest movers first, either way
+    # cc#1933: (a) every sector row carries `members` -- its symbols from THESE rows, the same
+    # gvm_scores.segment grouping the figure above was built from, so the sheet can filter the table
+    # to a tapped chip without re-deriving membership client-side; (b) a segment whose members are
+    # all unpriced (or none weightable) now still gets a chip, with day_pct None, so the sheet can
+    # show "No prices yet for this sector" instead of the chip silently vanishing; (c) order is
+    # best -> weak by the mcap-weighted day% (was |day%| desc, which interleaved gainers and losers),
+    # unpriced chips last, ties by name.
+    have = {z["segment"] for z in sectors}
+    for seg in members:
+        if seg not in have:
+            sectors.append({"segment": seg, "day_pct": None, "n": 0, "n_weighted": 0})
+    for z in sectors:
+        z["members"] = sorted(members.get(z["segment"], []))
+    sectors.sort(key=lambda z: (z["day_pct"] is None, -(z["day_pct"] or 0.0), z["segment"]))
     return {
         "rows": [{"symbol": r["symbol"],
                   "day_chg_pct": float(r["day_chg_pct"]) if r["day_chg_pct"] is not None else None,
                   "theme": r["theme"],
+                  "segment": r.get("segment"),   # cc#1933: the chip grouping key, on the row too
                   "sector_day_chg_pct": float(r["sector_day_chg_pct"]) if r["sector_day_chg_pct"] is not None else None}
                  for r in rows],
         "advances": advances, "declines": declines, "unchanged": unchanged,
