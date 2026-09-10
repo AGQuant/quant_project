@@ -1,75 +1,91 @@
 <!doctype html>
-<!-- ══ mobile/qb.html — Quant Baskets app section page (cc#1892, APP_CARD_LAYOUT_LAW_V1,
-     session_log 42536). REWRITTEN in place — same /m/qb route (mobile_endpoints.py), same nav
-     slot; the OLD accordion (tap-a-basket-to-expand-inline) is retired, not the route.
-     Design authority: design_refs/scorr_app_quantbasket_R4.html, founder-approved 09-Sep-2026
-     (commit c14cd41, "this is perfect"). Real GOLD NIGHT tokens only.
-     Data from /api/mobile/qb_app?basket=<name> (qb_app_mobile.py) — a thin assembly over
-     qb_endpoints.py's own qb_summary/qb_positions/qb_registry, nothing re-derived. -->
+<!-- ══ mobile/qb.html — Quant Baskets app section. Fable single-mode rewrite 10-Sep-2026
+     (QB_APP_R5_LOCK session_log 42805; design ref design_refs/scorr_app_quantbasket_R5.html @ c774aac;
+     APP_BUILD_FIDELITY_V1 42756). Supersedes the cc#1892 build. ONE page, two views:
+       /m/qb                → EXPLORE: two decks (Curated, Quant) of spine cards, from /api/mobile/qb_app/list
+       /m/qb?basket=<name>  → DETAIL: NAV hero, evidence strip, scorecard, rule, holdings rail, mix bar,
+                              timeline of real changes, from /api/mobile/qb_app?basket=
+     View holdings → /m/qb/holdings?basket= (sortable table, own page).
+     Colours = contract tokens on body[data-theme]; lengths = :root scale tokens. Ref px -> nearest token,
+     larger when no exact step (34px hero return -> --type-34 exists; 96px spark width is layout geometry, kept literal).
+     TOKEN_MAP  #D4AF37 -> --brand · #35E0FF -> --wayfind · #3DD68C -> --win · #FF5C6C -> --loss ·
+     #131316 -> --panel · #1B1B20 -> --hi · #2A2A32 -> --edge · #F5F2EA -> --ink · #8E8A7E -> --muted -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Quant Baskets · Scorr</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<title>Baskets · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <style>
-/* cc#1892 — page-local rules (qa-*). Same discipline as mobile/myportfolio.html's .mp-* block:
-   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex. */
-.qa-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
-.qa-asof b{color:var(--mut);font-weight:600}
-.qa-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-left:var(--bw-3) solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
-.qa-km.up{border-left-color:var(--grn)} .qa-km.dn{border-left-color:var(--red)}
-.qa-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.qa-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.qa-v.up{color:var(--grn)} .qa-v.dn{color:var(--red)}
-.qa-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
-.qa-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
-.qa-cell .qa-k{font-size:var(--type-9)}
-.qa-cell .qa-v{font-size:var(--type-14);margin-top:var(--space-3)}
-.qa-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
-.qa-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.qa-slab .hint{font-size:var(--type-10);color:var(--dim)}
-.qa-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
- scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.qa-rail::-webkit-scrollbar{display:none}
-.qa-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
-.qa-c.gap{border-style:dashed}
-.qa-ch{display:flex;align-items:baseline;justify-content:space-between}
-.qa-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
-.qa-ch .n{font-size:var(--type-11);color:var(--mut)}
-.qa-lst{margin-top:var(--space-9)}
-.qa-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2);
- cursor:pointer;background:none;border-left:0;border-right:0;border-top:0;width:100%;text-align:left;color:inherit;font:inherit}
-.qa-lr:last-child{border-bottom:none}
-.qa-lr .s{font-size:var(--type-125);font-weight:800}
-.qa-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
-.qa-lr .a{font-size:var(--type-115);color:var(--mut)}
-.qa-lr .b{font-size:var(--type-125);font-weight:700;min-width:52px;text-align:right;font-family:'IBM Plex Mono',ui-monospace,monospace}
-.qa-lr .b.up{color:var(--grn)} .qa-lr .b.dn{color:var(--red)}
-.qa-lr.on .s{color:var(--blu)}
-.qa-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
-.qa-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
- font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none;cursor:pointer;background:none;border-left:0;border-right:0;width:100%;text-align:left;font-family:inherit}
-.qa-sb{margin-top:var(--space-9)}
-.qa-sb .row{display:flex;justify-content:space-between;font-size:var(--type-115);margin-bottom:var(--space-3)}
-.qa-sb .row span:last-child{color:var(--mut)}
-.qa-bar{height:5px;border-radius:var(--radius-3);background:var(--panel2);margin-top:var(--space-8);margin-bottom:var(--space-9)}
-.qa-bar i{display:block;height:5px;border-radius:var(--radius-3);background:var(--blu)}
-.qa-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
-.qa-emp.ink{color:var(--txt)}
-.qa-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
-.qa-ft{margin-top:var(--space-9);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line);font-size:var(--type-105);color:var(--mut)}
-.qa-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
- border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
-.qa-note b{color:var(--mut)}
-.qa-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
-.qa-err{margin:var(--space-14)}
+.qb{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.qb-asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}
+.qb-asof b{color:var(--ink);font-weight:600}
+.qb-sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.qb-sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}
+.qb-sec .hint{font-size:var(--type-10);color:var(--muted)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+/* EXPLORE · spine card */
+.sp{display:grid;grid-template-columns:4px 1fr 96px;gap:0 var(--space-12);margin:0 var(--space-16) var(--space-10);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-12) var(--space-12) 0;text-decoration:none;color:inherit;overflow:hidden}
+.sp .rail{background:var(--brand);border-radius:0 var(--radius-3) var(--radius-3) 0}
+.sp .nm{font-size:var(--type-15);font-weight:800;letter-spacing:var(--track-em3)}
+.sp .why{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3);line-height:1.45}
+.sp .row{display:flex;gap:var(--space-14);margin-top:var(--space-8);align-items:baseline}
+.sp .row .v{font-size:var(--type-13);font-weight:800}.sp .row .k{font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em9);display:block}
+.sp .spark{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between}
+.sp .spark svg{width:96px;height:38px}
+.sp .spark .ret{font-size:var(--type-17);font-weight:800;line-height:1}.sp .spark .vs{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);text-align:right}
+/* DETAIL */
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14) var(--space-14) var(--space-10);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .nm{font-size:var(--type-22);font-weight:800;line-height:1.05;margin-top:var(--space-3)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-8)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1;letter-spacing:var(--track-em2)}.hero .big .n{font-size:var(--type-11);color:var(--muted)}
+.hero .big .n b{color:var(--wayfind);font-weight:700}
+svg.nav{width:100%;height:120px;margin-top:var(--space-6);display:block}
+.rng{display:flex;gap:var(--space-6);margin-top:var(--space-6)}
+.rng span{font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid transparent}
+.rng span.on{background:var(--hi);color:var(--brand);border-color:var(--edge)}
+.strip{display:grid;grid-template-columns:repeat(3,1fr);margin:var(--space-10) var(--space-16) 0;border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);overflow:hidden}
+.strip>div{padding:var(--space-10);background:var(--panel);border-right:var(--bw-1) solid var(--edge)}.strip>div:last-child{border-right:none}
+.strip .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em9)}.strip .v{font-size:var(--type-14);font-weight:800;margin-top:var(--space-3)}
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}
+.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.pil{margin-top:var(--space-10)}.pil .r{display:grid;grid-template-columns:22px 1fr 44px;gap:var(--space-10);align-items:center;padding:var(--space-6) 0}
+.pil .l{font-size:var(--type-12);font-weight:800;color:var(--brand)}.pil .bar{height:6px;border-radius:var(--radius-3);background:var(--hi);overflow:hidden}.pil .bar i{display:block;height:6px;background:var(--brand);border-radius:var(--radius-3)}
+.pil .v{font-size:var(--type-125);font-weight:800;text-align:right}.pil .sub{font-size:var(--type-10);color:var(--muted);margin-top:var(--space-4)}
+.rule{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8)}.rule b{color:var(--brand)}
+.kv{display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-16);margin-top:var(--space-10);font-size:var(--type-105);color:var(--muted)}.kv b{color:var(--ink);font-weight:700}
+.rl{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-8) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}.rl::-webkit-scrollbar{display:none}
+.hc{flex:0 0 46vw;max-width:172px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-10) var(--space-11);border-left:var(--bw-3) solid var(--win)}
+.hc.dn{border-left-color:var(--loss)}
+.hc .s{font-size:var(--type-13);font-weight:800}.hc .seg{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hc .p{font-size:var(--type-17);font-weight:800;margin-top:var(--space-6);line-height:1}
+.hc .g{display:flex;justify-content:space-between;font-size:var(--type-95);color:var(--muted);margin-top:var(--space-7);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi)}.hc .g b{color:var(--ink)}
+.mix{margin-top:var(--space-10);height:12px;border-radius:var(--radius-6);overflow:hidden;display:flex;background:var(--hi)}.mix i{display:block;height:12px}
+.mixl{display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-14);margin-top:var(--space-9);font-size:var(--type-105);color:var(--muted)}.mixl b{color:var(--ink);font-weight:700}
+.dot{display:inline-block;width:7px;height:7px;border-radius:var(--radius-4);margin-right:var(--space-5);vertical-align:middle}
+.tog{display:inline-flex;gap:var(--space-4);font-size:var(--type-10)}.tog span{padding:var(--space-3) var(--space-8);border-radius:var(--radius-20);color:var(--muted);border:var(--bw-1) solid transparent}.tog span.on{background:var(--hi);color:var(--brand);border-color:var(--edge)}
+.tl{margin-top:var(--space-10);position:relative;padding-left:var(--space-18)}
+.tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1px;background:var(--edge)}
+.ev{position:relative;padding:0 0 var(--space-14)}.ev:last-child{padding-bottom:0}
+.ev::before{content:"";position:absolute;left:-16px;top:5px;width:7px;height:7px;border-radius:var(--radius-4);background:var(--brand);box-shadow:0 0 0 3px var(--panel)}
+.ev.stop::before{background:var(--loss)}
+.ev .d{font-size:var(--type-125);font-weight:800}.ev .d small{font-size:var(--type-10);color:var(--muted);font-weight:600;margin-left:var(--space-8)}
+.ev .w{font-size:var(--type-11);color:var(--muted);margin-top:var(--space-3);line-height:1.5}.ev .w b{color:var(--ink)}
+.chip{display:inline-block;font-size:var(--type-9);font-weight:800;padding:var(--space-2) var(--space-6);border-radius:var(--radius-6);margin-right:var(--space-4)}
+.chip.in{color:var(--win);background:var(--hi)}.chip.out{color:var(--loss);background:var(--hi)}
+.link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--edge);font-size:var(--type-115);font-weight:700;color:var(--brand);text-decoration:none}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-7) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+.emp{font-size:var(--type-115);color:var(--muted);line-height:1.6;margin-top:var(--space-7)}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -77,130 +93,137 @@
 if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Quant Baskets</span></div><div class="as-slot"></div></div>
-<div class="qa-asof" id="qa-asof">Loading…</div>
-<div id="qa-body"><div class="qa-empty">Loading baskets…</div></div>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t" id="pg-title">Baskets</span></div><div class="as-slot"><a class="back" id="back" href="/m/qb" style="display:none">‹</a></div></div>
+<div class="qb">
+<div class="qb-asof" id="asof">Loading…</div>
+<div id="body"><div class="err">Loading baskets…</div></div>
+</div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
-  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+  <a class="bn on" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
 <script>
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function inr(v){ if (v==null||isNaN(Number(v))) return '—';
-  var x=Number(v); return (x<0?'−':'')+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
-function pct(v){ if (v==null||isNaN(Number(v))) return '—';
-  var x=Number(v); return (x>=0?'+':'−')+Math.abs(x).toFixed(1)+'%'; }
-function cls(v){ return v==null?'':(Number(v)>=0?'up':'dn'); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function pct(v, d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?1:d)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function inr(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return '₹'+Math.round(x).toLocaleString('en-IN'); }
+function inrL(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return x>=100000?'₹'+(x/100000).toFixed(2)+'L':inr(x); }
 var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3 ? (p[2]+' '+MON[Number(p[1])-1]+' '+p[0]) : String(iso); }
-function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s); }
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
+function dmy(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]+' '+p[0]):String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dmy(s)+', '+s.slice(11,16)+' IST'; }
+function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+var C={brand:tok('--brand'), way:tok('--wayfind'), edge:tok('--edge'), muted:tok('--muted')};
 
-var QA = { data: null, basket: null };
+/* ── sparkline: basket (brand) over Nifty (wayfind, faint), shared scale ── */
+function spark(pts){
+  if(!pts||pts.length<2) return '<svg viewBox="0 0 96 38"></svg>';
+  var b=pts.map(function(p){return p.b;}), i=pts.map(function(p){return p.i;});
+  var all=b.concat(i).filter(function(x){return x!=null;}); var lo=Math.min.apply(null,all), hi=Math.max.apply(null,all); if(hi===lo) hi=lo+1;
+  var y=function(v){ return v==null?null:(36-(v-lo)/(hi-lo)*34).toFixed(1); }, n=pts.length;
+  var line=function(arr){ return arr.map(function(v,k){ var yy=y(v); return yy==null?null:((2+k*(92/(n-1))).toFixed(1)+','+yy); }).filter(Boolean).join(' '); };
+  return '<svg viewBox="0 0 96 38" preserveAspectRatio="none"><polyline fill="none" stroke="'+C.way+'" stroke-width="1" opacity=".6" points="'+line(i)+'"/><polyline fill="none" stroke="'+C.brand+'" stroke-width="1.8" points="'+line(b)+'"/></svg>';
+}
+/* ── NAV chart: 320x120, four gridlines, labels from the real min/max ── */
+function navChart(pts){
+  if(!pts||pts.length<2) return '';
+  var b=pts.map(function(p){return p.nav;}), i=pts.map(function(p){return p.bench;});
+  var all=b.concat(i).filter(function(x){return x!=null;}); var lo=Math.floor(Math.min.apply(null,all)), hi=Math.ceil(Math.max.apply(null,all)); if(hi===lo) hi=lo+1;
+  var y=function(v){ return v==null?null:(114-(v-lo)/(hi-lo)*99).toFixed(1); }, n=pts.length;
+  var line=function(arr){ return arr.map(function(v,k){ var yy=y(v); return yy==null?null:((10+k*(300/(n-1))).toFixed(1)+','+yy); }).filter(Boolean).join(' '); };
+  var grid='', labels='';
+  for(var g=0; g<4; g++){ var yy=15+g*33; grid+='<line x1="0" y1="'+yy+'" x2="320" y2="'+yy+'"/>'; var val=hi-(hi-lo)*g/3; labels+='<text x="12" y="'+(yy-3)+'">'+val.toFixed(0)+'</text>'; }
+  var first=pts[0].d, last=pts[n-1].d;
+  return '<svg class="nav" viewBox="0 0 320 120" preserveAspectRatio="none"><g stroke="'+C.edge+'" stroke-dasharray="3 3" stroke-width="1">'+grid+'</g>'
+    + '<polyline fill="none" stroke="'+C.way+'" stroke-width="1.2" opacity=".7" points="'+line(i)+'"/>'
+    + '<polyline fill="none" stroke="'+C.brand+'" stroke-width="2" points="'+line(b)+'"/>'
+    + '<g fill="'+C.muted+'" font-size="8" font-family="Sora">'+labels+'<text x="12" y="119">'+esc(dm(first))+'</text><text x="280" y="119">'+esc(dm(last))+'</text></g></svg>';
+}
+function card(title, n, inner){ return '<div class="card"><div class="ch"><span class="t">'+esc(title)+'</span><span class="n">'+n+'</span></div>'+inner+'</div>'; }
+function emp(t,b){ return '<div class="emp"><b>'+esc(t)+'</b>'+esc(b)+'</div>'; }
 
-function kmHtml(k){
-  var updn = k.total_unrealised>=0 ? 'up' : 'dn';
-  return '<div class="qa-km '+updn+'"><div class="qa-k">All baskets · unrealised</div><div class="qa-v '+updn+'">'+inr(k.total_unrealised)+'</div>'
-    + '<div class="qa-kg">'
-    + '<div class="qa-cell"><div class="qa-k">Market value</div><div class="qa-v">'+inr(k.total_value)+'</div></div>'
-    + '<div class="qa-cell"><div class="qa-k">Baskets</div><div class="qa-v">'+k.baskets+'</div></div>'
-    + '<div class="qa-cell"><div class="qa-k">Names held</div><div class="qa-v">'+k.names_held+'</div></div>'
-    + '<div class="qa-cell"><div class="qa-k">Showing</div><div class="qa-v">'+esc(QA.data.selected_label)+'</div></div>'
-    + '</div></div>';
+/* ═══ EXPLORE ═══ */
+function spine(c){
+  var ret = c.return_pct==null ? '<div class="ret" style="color:var(--muted)">—</div><div class="vs">no history yet</div>'
+    : '<div class="ret '+cls(c.return_pct)+'">'+pct(c.return_pct)+'</div><div class="vs">since '+esc(dm(c.since))+(c.bench_pct!=null?' · Nifty '+pct(c.bench_pct):'')+'</div>';
+  return '<a class="sp" href="/m/qb?basket='+encodeURIComponent(c.basket)+'"><div class="rail"></div>'
+    + '<div><div class="nm">'+esc(c.label)+'</div><div class="why">'+esc(c.why)+'</div>'
+    + '<div class="row"><div><span class="k">Min · one share each</span><span class="v">'+inr(c.min_one_share)+'</span></div>'
+    + '<div><span class="k">Rebalance</span><span class="v">'+esc(c.rebalance)+(c.next_rebalance?' · next '+esc(dm(c.next_rebalance)):'')+'</span></div></div></div>'
+    + '<div class="spark">'+spark(c.spark)+'<div>'+ret+'</div></div></a>';
 }
-function basketsCardHtml(d){
-  var rows=d.baskets.rows;
-  var body = rows.map(function(b){
-    var on = b.basket===d.selected ? ' on' : '';
-    return '<button type="button" class="qa-lr'+on+'" onclick="pickBasket(\''+b.basket+'\')"><span class="s">'+esc(b.label)+'</span><div class="r">'
-      + '<span class="a">'+b.names+' names'+(b.value!=null?' · '+inr(b.value):'')+'</span>'
-      + '<span class="b '+cls(b.return_pct)+'">'+(b.return_pct!=null?pct(b.return_pct):'—')+'</span></div></button>';
-  }).join('');
-  return '<div class="qa-c" style="flex-basis:92vw;max-width:380px"><div class="qa-ch"><span class="t">All baskets</span><span class="n">'+d.baskets.count+'</span></div>'
-    + '<div class="qa-lst">'+body+'</div>'
-    + '<div class="qa-more">Tap any basket to load it below</div></div>';
-}
-function holdingsCardHtml(d){
-  var h=d.holdings, rows=h.rows;
-  if(!rows.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Holdings</span><span class="n">0</span></div><div class="qa-emp"><b>No open positions</b>This basket is not currently holding any names.</div></div>';
-  var body = rows.map(function(r){
-    return '<div class="qa-lr"><span class="s">'+esc(r.symbol)+'</span><div class="r"><span class="a">'+inr(r.value)+'</span><span class="b '+cls(r.pnl_pct)+'">'+pct(r.pnl_pct)+'</span></div></div>';
-  }).join('');
-  var more = h.count>rows.length ? '<div class="qa-more">+ '+(h.count-rows.length)+' more</div>' : '';
-  return '<div class="qa-c"><div class="qa-ch"><span class="t">Holdings</span><span class="n">'+h.count+'</span></div><div class="qa-lst">'+body+'</div>'+more+'</div>';
-}
-function laggardsCardHtml(d){
-  var l=d.laggards, rows=l.rows;
-  if(!rows.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Laggards</span><span class="n">0</span></div><div class="qa-emp"><b>Nothing in the red</b>Every open position in this basket is at or above its entry price.</div></div>';
-  var body = rows.map(function(r){
-    return '<div class="qa-lr"><span class="s">'+esc(r.symbol)+'</span><div class="r"><span class="a">'+inr(r.value)+'</span><span class="b dn">'+pct(r.pnl_pct)+'</span></div></div>';
-  }).join('');
-  var more = l.count>rows.length ? '<div class="qa-more">+ '+(l.count-rows.length)+' more</div>' : '';
-  return '<div class="qa-c"><div class="qa-ch"><span class="t">Laggards</span><span class="n">'+l.count+' in the red</span></div><div class="qa-lst">'+body+'</div>'+more+'</div>';
-}
-function sectorCardHtml(mix){
-  if(!mix||!mix.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Sector mix</span><span class="n">0</span></div><div class="qa-emp"><b>No open positions</b>Nothing to break down by sector today.</div></div>';
-  var rows = mix.map(function(s){
-    return '<div class="qa-sb"><div class="row"><span>'+esc(s.group)+'</span><span>'+s.pct.toFixed(1)+'%</span></div><div class="qa-bar"><i style="width:'+Math.min(100,s.pct)+'%"></i></div></div>';
-  }).join('');
-  return '<div class="qa-c"><div class="qa-ch"><span class="t">Sector mix</span><span class="n">'+mix.length+'</span></div>'+rows+'</div>';
-}
-function themeCardHtml(theme){
-  return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Theme split</span><span class="n">no data</span></div>'
-    + '<div class="qa-emp"><b>Not tagged yet</b>'+esc(theme.note)+'</div></div>';
-}
-function methodCardHtml(m){
-  return '<div class="qa-c"><div class="qa-ch"><span class="t">How it picks</span><span class="n">'+esc(m.cadence||'—')+'</span></div>'
-    + '<div class="qa-emp ink">'+esc(m.text)+'</div>'
-    + '<div class="qa-ft">Reviewed '+esc((m.cadence||'').toLowerCase()||'periodically')+' · '+m.holdings_count+' names held'
-    + (m.next_rebalance?' · next '+dm(m.next_rebalance):'')+'</div></div>';
-}
-function rebalCardHtml(rh){
-  var rows=rh.rows;
-  if(!rows.length) return '<div class="qa-c gap"><div class="qa-ch"><span class="t">Rebalance history</span><span class="n">0</span></div><div class="qa-emp"><b>Nothing stored</b>No entry-date history recorded for this basket yet.</div></div>';
-  var body = rows.map(function(r){
-    return '<div class="qa-lr"><span class="s">'+dm(r.date)+'</span><div class="r"><span class="a">'+r.n_entered+' name'+(r.n_entered===1?'':'s')+' entered · '+esc(r.label)+'</span><span class="b">'+r.n_still_open+' held today</span></div></div>';
-  }).join('');
-  return '<div class="qa-c"><div class="qa-ch"><span class="t">Rebalance history</span><span class="n">'+rh.count+' change'+(rh.count===1?'':'s')+'</span></div>'
-    + '<div class="qa-lst">'+body+'</div>'
-    + '<div class="qa-more">'+esc(rh.note)+'</div></div>';
+function renderList(d){
+  document.getElementById('asof').innerHTML='Marked <b>'+esc(dmt(d.as_of))+'</b> · '+d.count+' baskets · live paper books, nothing backtested';
+  var h='';
+  (d.decks||[]).forEach(function(k){
+    h+='<div class="qb-sec"><h2>'+esc(k.title)+'</h2><span class="hint">'+esc(k.hint)+' · '+k.rows.length+'</span></div>';
+    h+= k.rows.length ? k.rows.map(spine).join('') : '<div class="card">'+emp('Nothing here yet','No basket is marked '+k.title.toLowerCase()+' in the registry.')+'</div>';
+  });
+  document.getElementById('body').innerHTML=h;
 }
 
-function render(){
-  var d = QA.data;
-  var open = d.holdings.count;
-  document.getElementById('qa-asof').innerHTML = 'Marked <b>'+dmt(d.as_of)+'</b> · '+d.key_metrics.baskets+' baskets · '+d.key_metrics.names_held+' names · showing <b>'+esc(d.selected_label)+'</b>';
-  var html = kmHtml(d.key_metrics)
-    + '<div class="qa-slab"><h2>Baskets</h2><span class="hint">'+d.baskets.count+' · swipe →</span></div>'
-    + '<div class="qa-rail">'+basketsCardHtml(d)+'</div>'
-    + '<div class="qa-slab"><h2>'+esc(d.selected_label)+' · holdings</h2><span class="hint">'+open+' · swipe →</span></div>'
-    + '<div class="qa-rail">'+holdingsCardHtml(d)+laggardsCardHtml(d)+'</div>'
-    + '<div class="qa-slab"><h2>Where the money sits</h2><span class="hint">'+(d.sector_mix?d.sector_mix.length:0)+' sectors · swipe →</span></div>'
-    + '<div class="qa-rail">'+sectorCardHtml(d.sector_mix)+themeCardHtml(d.theme)+'</div>'
-    + '<div class="qa-slab"><h2>'+esc(d.selected_label)+' · the method</h2><span class="hint">2 · swipe →</span></div>'
-    + '<div class="qa-rail">'+methodCardHtml(d.method)+rebalCardHtml(d.rebalance_history)+'</div>'
-    + '<div class="qa-note"><b>The Baskets card is the switcher.</b> Tap a basket in it and every section below reloads for that basket. <b>Seven baskets, not thirteen</b> — the six finz_ baskets stay off the app, and the filter reads the registry, never a hardcoded name list. <b>Theme split is empty and says so</b>, because no theme tag exists on any holding.</div>';
-  document.getElementById('qa-body').innerHTML = html;
+/* ═══ DETAIL ═══ */
+var D=null, MIXK='cap';
+function mixHtml(rows){
+  var cols=[C.brand,C.way,C.muted,tok('--gold-lo'),tok('--label'),tok('--win'),tok('--loss'),tok('--accent'),tok('--gold-hi'),tok('--ink')];
+  var bar=rows.map(function(r,i){ return '<i style="width:'+r.pct+'%;background:'+cols[i%cols.length]+'"></i>'; }).join('');
+  var leg=rows.slice(0,6).map(function(r,i){ return '<span><i class="dot" style="background:'+cols[i%cols.length]+'"></i><b>'+r.pct.toFixed(1)+'%</b> '+esc(String(r.name).toLowerCase())+'</span>'; }).join('');
+  var rest=rows.length>6 ? '<div class="more" style="padding-left:0">'+rows.slice(6).map(function(r){return esc(r.name)+' '+r.pct.toFixed(1);}).join(' · ')+'</div>' : '';
+  return '<div class="mix">'+bar+'</div><div class="mixl">'+leg+'</div>'+rest;
 }
-
-function load(basket){
-  var url = '/api/mobile/qb_app' + (basket ? ('?basket=' + encodeURIComponent(basket)) : '');
-  fetch(url, {credentials:'same-origin'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d.error){ document.getElementById('qa-body').innerHTML = '<div class="qa-err qa-empty">Could not load: '+esc(d.error)+'</div>'; return; }
-      QA.data = d; QA.basket = d.selected;
-      render();
-    })
-    .catch(function(e){ document.getElementById('qa-body').innerHTML = '<div class="qa-err qa-empty">Could not load baskets.</div>'; });
+function renderDetail(d){
+  D=d; var nav=d.nav||{}, ev=d.evidence||{}, sc=d.scorecard, ru=d.rule||{}, hs=d.holdings||{}, hi=d.history||{};
+  document.getElementById('pg-title').textContent=d.label; document.getElementById('back').style.display='';
+  document.getElementById('asof').innerHTML='Marked <b>'+esc(dmt(d.as_of))+'</b> · '+esc(d.type==='Discretionary'?'Curated':'Quant')+' basket';
+  var h='<div class="hero"><div class="eye">'+esc(d.type==='Discretionary'?'Curated':'Quant')+' basket · '+esc(d.cap_type||'')+' · '+esc(d.rebalance)+(d.since?' · live since '+esc(dmy(d.since)):'')+'</div><div class="nm">'+esc(d.label)+'</div>';
+  if(nav.points&&nav.points.length>1){
+    var last=nav.points[nav.points.length-1];
+    h+='<div class="big"><div class="r '+cls(nav.basket_return_pct)+'">'+pct(nav.basket_return_pct)+'</div><div class="n">₹100 → ₹'+(last.nav!=null?last.nav.toFixed(2):'—')+'<br>'+esc(nav.benchmark_sym||'Nifty')+' → <b>₹'+(last.bench!=null?last.bench.toFixed(2):'—')+'</b> same days</div></div>'+navChart(nav.points);
+  } else {
+    h+='<div class="big"><div class="r" style="color:var(--muted)">—</div><div class="n">No NAV history yet for this basket.<br>The series starts on its first trading day.</div></div>';
+  }
+  h+='<div class="rng">'+[['MAX','Since start'],['3M','3M'],['1M','1M']].map(function(w){ return '<span data-w="'+w[0]+'"'+(nav.window===w[0]?' class="on"':'')+'>'+w[1]+'</span>'; }).join('')+'</div></div>';
+  h+='<div class="strip"><div><div class="k">Beat Nifty by</div><div class="v '+cls(ev.alpha_pct)+'">'+(ev.alpha_pct==null?'—':pct(ev.alpha_pct).replace('%',' pts'))+'</div></div>'
+    +'<div><div class="k">Hit rate</div><div class="v">'+(ev.of?ev.hit+' of '+ev.of:'—')+'</div></div>'
+    +'<div><div class="k">Worst name</div><div class="v '+(ev.worst?cls(ev.worst.pnl_pct):'')+'">'+(ev.worst?pct(ev.worst.pnl_pct):'—')+'</div></div></div>';
+  if(sc){
+    var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+(v==null?0:Math.min(100,v*10))+'%"></i></div><span class="v">'+(v==null?'—':v.toFixed(1))+'</span></div>'; };
+    h+=card('Scorecard of the book','avg of '+sc.n+' scored names','<div class="pil">'+bar('G',sc.g)+bar('V',sc.v)+bar('M',sc.m)+'<div class="sub">GVM at entry, averaged across the names held. The basket\'s character, not a promise.</div></div>');
+  } else h+=card('Scorecard of the book','—',emp('No scores on record','None of the names held carries a GVM at entry yet.'));
+  h+=card('The rule','plain words','<div class="rule">'+(ru.html||'')+'</div><div class="kv">'+(ru.cap?'<span>Cap <b>'+ru.cap+' names</b></span>':'')+'<span>Now <b>'+(ru.now!=null?ru.now:'—')+'</b></span>'+(d.next_rebalance?'<span>Next <b>'+esc(dm(d.next_rebalance))+'</b></span>':'')+(ru.cash_pct!=null?'<span>Cash <b>'+ru.cash_pct+'% in ETF</b></span>':'')+'</div>');
+  h+='<div class="qb-sec"><h2>Holdings</h2><span class="hint">'+(hs.count||0)+' · by weight · swipe →</span></div>';
+  h+= (hs.rows&&hs.rows.length) ? '<div class="rl">'+hs.rows.map(function(p){
+      return '<div class="hc '+((p.pnl_pct||0)<0?'dn':'')+'"><div class="s">'+esc(p.symbol)+'</div><div class="seg">'+esc((p.sector||'')+(p.cap&&p.cap!=='—'?' · '+p.cap:''))+'</div><div class="p '+cls(p.pnl_pct)+'">'+pct(p.pnl_pct)+'</div><div class="g"><span>'+(p.weight_pct!=null?p.weight_pct+'% wt':'—')+'</span><b>'+(p.gvm!=null?'GVM '+p.gvm.toFixed(2):'no score')+'</b></div></div>';
+    }).join('')+'</div>' : '<div class="card">'+emp('No open holdings','This basket holds nothing right now.')+'</div>';
+  h+='<div class="more">'+(hs.count>hs.rows.length?'+'+(hs.count-hs.rows.length)+' more · ':'')+'<a href="/m/qb/holdings?basket='+encodeURIComponent(d.basket)+'">View holdings ›</a></div>';
+  var mix=d.mix||{};
+  h+='<div class="card"><div class="ch"><span class="t">Where the money sits</span><span class="tog" id="tog"><span data-k="cap" class="on">Cap</span><span data-k="sector">Sector</span></span></div><div id="mixbox">'+mixHtml(mix.cap||[])+'</div></div>';
+  var rows=hi.rows||[];
+  h+=card('What changed, and why', rows.length+' event'+(rows.length===1?'':'s'), rows.length ? '<div class="tl">'+rows.map(function(e){
+      var stops=e.stops||[], sells=e.sells||[], buys=e.buys||[];
+      var w=[]; if(stops.length) w.push('Stops closed <b>'+stops.map(function(s){return esc(s.symbol);}).join(', ')+'</b>.');
+      if(sells.length) w.push('Sold <b>'+sells.map(function(s){return esc(s.symbol)+(s.why?' ('+esc(s.why)+')':'');}).join(', ')+'</b>.');
+      if(buys.length) w.push((e.kind==='inception'?'First book: ':'Bought ')+'<b>'+buys.join(', ')+'</b>.');
+      if(e.state==='AWAITING CONFIRMATION') w.push('New entries awaiting founder confirmation.');
+      if(!w.length) w.push('No change.');
+      return '<div class="ev '+(stops.length?'stop':'')+'"><div class="d">'+esc(dm(e.date))+'<small>'+esc(e.kind)+'</small></div><div class="w">'+(e.n_out?'<span class="chip out">−'+e.n_out+'</span>':'')+(e.n_in?'<span class="chip in">+'+e.n_in+'</span>':'')+w.join(' ')+'</div></div>';
+    }).join('')+'</div>' : emp('No changes yet','Only real rebalances and stop exits are listed. The nightly checks are not events.'));
+  h+='<div class="note"><b>Track record, plainly.</b> '+esc(nav.note||'')+' Min value on the list = one share of each holding. Nothing here is a backtest and nothing is a recommendation.</div>';
+  document.getElementById('body').innerHTML=h;
+  document.getElementById('tog').addEventListener('click', function(e){ var s=e.target.closest('[data-k]'); if(!s) return; MIXK=s.getAttribute('data-k'); this.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); document.getElementById('mixbox').innerHTML=mixHtml((D.mix||{})[MIXK]||[]); });
+  document.querySelector('.rng').addEventListener('click', function(e){ var s=e.target.closest('[data-w]'); if(!s) return; load(D.basket, s.getAttribute('data-w')); });
 }
-function pickBasket(name){
-  if(name===QA.basket) return;
-  load(name);   // cc#1892 P12: page scroll position is untouched by a basket switch — no forced scrollTo anywhere in this file
+function load(basket, win){
+  var url = basket ? '/api/mobile/qb_app?basket='+encodeURIComponent(basket)+'&window='+(win||'MAX') : '/api/mobile/qb_app/list';
+  fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
+    basket ? renderDetail(d) : renderList(d);
+  }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load baskets.</div>'; });
 }
-load();
+var Q=null; try{ Q=new URLSearchParams(location.search).get('basket'); }catch(e){}
+load(Q, 'MAX');
 </script>
 </body></html>

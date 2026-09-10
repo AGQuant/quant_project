@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quant Baskets · Scorr design ref scorr_app_quantbasket_R5</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_app_quantbasket_R5 — Scorr's own shape: evidence first.
+   Explore = TWO DECKS, Curated (Discretionary, Model Portfolio first) then Quant, each a vertical list of SPINE cards (gold rail · live sparkline · one-line why · Min one-share-each · Rebalance).
+   Detail = vertical sections, no tabs: NAV hero → Scorecard (G/V/M of the book) → The rule → Holdings rail →
+   Mix bar → Timeline of real changes → Honesty line. Hex inlined to render standalone; build reads tokens. */
+:root{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;--muted:#8E8A7E;--brand:#D4AF37;--glow:rgba(212,175,55,.35);--win:#3DD68C;--loss:#FF5C6C;--wayfind:#35E0FF}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:80px}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--edge);position:sticky;top:0;background:var(--field);z-index:30}
+.wm{font-size:15px;font-weight:800;letter-spacing:.14em}.wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--glow)}
+.pg{flex:1;text-align:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}.slot{width:64px}
+.asof{padding:10px 16px 0;font-size:10px;color:var(--muted);letter-spacing:.04em}.asof b{color:var(--ink);font-weight:600}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:20px 16px 8px}
+.sec h2{font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}.sec .hint{font-size:10px;color:var(--muted)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+/* ── EXPLORE · SPINE CARD ── */
+.sp{display:grid;grid-template-columns:4px 1fr 96px;gap:0 12px;margin:0 16px 10px;background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:12px 12px 12px 0;text-decoration:none;color:inherit;overflow:hidden}
+.sp .rail{background:var(--brand);border-radius:0 3px 3px 0}
+.sp .nm{font-size:15px;font-weight:800;letter-spacing:-.01em}
+.sp .why{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+.sp .row{display:flex;gap:14px;margin-top:8px;align-items:baseline}
+.sp .row .v{font-size:13px;font-weight:800}.sp .row .k{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:block}
+.sp .spark{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between}
+.sp .spark svg{width:96px;height:38px}
+.sp .spark .ret{font-size:17px;font-weight:800;line-height:1}.sp .spark .vs{font-size:9px;color:var(--muted);margin-top:2px}
+/* ── DETAIL ── */
+.hero{margin:12px 16px 0;background:var(--panel);border:1px solid var(--edge);border-radius:16px;padding:14px 14px 10px;position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.hero .nm{font-size:22px;font-weight:800;line-height:1.05;margin-top:3px}
+.hero .big{display:flex;align-items:baseline;gap:10px;margin-top:8px}
+.hero .big .r{font-size:34px;font-weight:800;line-height:1;letter-spacing:-.02em}.hero .big .n{font-size:11px;color:var(--muted)}
+.hero .big .n b{color:var(--wayfind);font-weight:700}
+svg.nav{width:100%;height:120px;margin-top:6px}
+.rng{display:flex;gap:6px;margin-top:6px}
+.rng span{font-size:10px;font-weight:700;color:var(--muted);padding:4px 9px;border-radius:20px}.rng span.on{background:var(--hi);color:var(--brand);border:1px solid var(--edge)}
+.strip{display:grid;grid-template-columns:repeat(3,1fr);margin:10px 16px 0;border:1px solid var(--edge);border-radius:12px;overflow:hidden}
+.strip div{padding:10px 10px;background:var(--panel);border-right:1px solid var(--edge)}.strip div:last-child{border-right:none}
+.strip .k{font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.strip .v{font-size:14px;font-weight:800;margin-top:3px}
+.card{margin:12px 16px 0;background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:12px 13px}
+.ch{display:flex;align-items:baseline;justify-content:space-between}
+.ch .t{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.ch .n{font-size:11px;color:var(--muted)}
+/* scorecard */
+.pil{margin-top:10px}.pil .r{display:grid;grid-template-columns:22px 1fr 44px;gap:10px;align-items:center;padding:6px 0}
+.pil .l{font-size:12px;font-weight:800;color:var(--brand)}.pil .bar{height:6px;border-radius:3px;background:var(--hi);overflow:hidden}.pil .bar i{display:block;height:6px;background:var(--brand);border-radius:3px}
+.pil .v{font-size:12.5px;font-weight:800;text-align:right}
+.pil .sub{font-size:10px;color:var(--muted);margin-top:4px}
+/* rule */
+.rule{font-size:12.5px;line-height:1.6;margin-top:8px}.rule b{color:var(--brand)}
+.kv{display:flex;gap:16px;margin-top:10px;font-size:10.5px;color:var(--muted)}.kv b{color:var(--ink);font-weight:700}
+/* holdings rail */
+.rl{display:flex;gap:10px;overflow-x:auto;padding:8px 16px 4px;scroll-snap-type:x mandatory;scrollbar-width:none}.rl::-webkit-scrollbar{display:none}
+.hc{flex:0 0 46vw;max-width:172px;scroll-snap-align:start;background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:10px 11px;border-left:3px solid var(--win)}
+.hc.dn{border-left-color:var(--loss)}
+.hc .s{font-size:13px;font-weight:800}.hc .seg{font-size:9.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hc .p{font-size:17px;font-weight:800;margin-top:6px;line-height:1}
+.hc .g{display:flex;justify-content:space-between;font-size:9.5px;color:var(--muted);margin-top:7px;padding-top:6px;border-top:1px solid var(--hi)}.hc .g b{color:var(--ink)}
+/* mix bar */
+.mix{margin-top:10px;height:12px;border-radius:6px;overflow:hidden;display:flex}
+.mix i{display:block;height:12px}
+.mixl{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:9px;font-size:10.5px;color:var(--muted)}.mixl b{color:var(--ink);font-weight:700}.dot{display:inline-block;width:7px;height:7px;border-radius:4px;margin-right:5px;vertical-align:middle}
+.tog{display:inline-flex;gap:4px;font-size:10px}.tog span{padding:3px 8px;border-radius:20px;color:var(--muted)}.tog span.on{background:var(--hi);color:var(--brand);border:1px solid var(--edge)}
+/* timeline */
+.tl{margin-top:10px;position:relative;padding-left:18px}
+.tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1px;background:var(--edge)}
+.ev{position:relative;padding:0 0 14px}.ev:last-child{padding-bottom:0}
+.ev::before{content:"";position:absolute;left:-16px;top:5px;width:7px;height:7px;border-radius:4px;background:var(--brand);box-shadow:0 0 0 3px var(--panel)}
+.ev.stop::before{background:var(--loss)}
+.ev .d{font-size:12.5px;font-weight:800}.ev .d small{font-size:10px;color:var(--muted);font-weight:600;margin-left:8px}
+.ev .w{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5}.ev .w b{color:var(--ink)}
+.chip{display:inline-block;font-size:9px;font-weight:800;padding:2px 6px;border-radius:6px;margin-right:4px}.chip.in{color:var(--win);background:rgba(61,214,140,.12)}.chip.out{color:var(--loss);background:rgba(255,92,108,.12)}
+.link{display:block;margin-top:9px;padding-top:9px;border-top:1px solid var(--edge);font-size:11.5px;font-weight:700;color:var(--brand);text-decoration:none}
+.more{font-size:11px;color:var(--muted);padding:7px 0 0}
+.note{margin:22px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;font-size:11px;color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.div{margin:28px 16px 0;padding:10px;text-align:center;font-size:10px;color:var(--brand);letter-spacing:.14em;text-transform:uppercase;border-top:1px dashed var(--edge);border-bottom:1px dashed var(--edge)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600;color:var(--muted);text-decoration:none}.bn .i{font-size:17px}.bn.on{color:var(--brand)}
+</style></head><body>
+
+<!-- ════ SCREEN A · EXPLORE ════ -->
+<div class="hdr"><span class="wm">SC<i>O</i>RR</span><div class="pg">Baskets</div><div class="slot"></div></div>
+<div class="asof">Marked <b>09 Sep 2026, 15:30 IST</b> · 7 baskets · live paper books, nothing backtested</div>
+<div class="sec"><h2>Curated</h2><span class="hint">picked by hand · 1</span></div>
+<a class="sp" href="#"><div class="rail"></div>
+  <div><div class="nm">Model Portfolio</div><div class="why">Names Arpit picked by hand from the quant shortlist, equal weight. Rebalanced when he decides, not on a schedule.</div>
+    <div class="row"><div><span class="k">Min · one share each</span><span class="v">₹—</span></div><div><span class="k">Rebalance</span><span class="v">Need basis</span></div></div></div>
+  <div class="spark"><svg viewBox="0 0 96 38" preserveAspectRatio="none"><polyline fill="none" stroke="#35E0FF" stroke-width="1" opacity=".6" points="2,20 30,22 60,24 92,28"/><polyline fill="none" stroke="#D4AF37" stroke-width="1.8" points="2,20 30,19 60,18 92,17"/></svg><div><div class="ret pos">+0.5%</div><div class="vs">since 04 Sep · Nifty −1.3%</div></div></div>
+</a>
+
+<div class="sec"><h2>Quant</h2><span class="hint">rule-driven · 6 · ranked by return</span></div>
+<a class="sp" href="#detail"><div class="rail"></div>
+  <div><div class="nm">Alpha Multicap</div><div class="why">Quality and momentum, half and half. Top names equal-weighted.</div>
+    <div class="row"><div><span class="k">Min · one share each</span><span class="v">₹29,006</span></div><div><span class="k">Rebalance</span><span class="v">Monthly · next 06 Oct</span></div></div></div>
+  <div class="spark"><svg viewBox="0 0 96 38" preserveAspectRatio="none"><polyline fill="none" stroke="#35E0FF" stroke-width="1" opacity=".6" points="2,36 8,37 14,32 20,28 26,29 32,26 38,27 44,25 50,29 56,27 62,22 68,23 74,25 80,26 86,26 92,32"/><polyline fill="none" stroke="#D4AF37" stroke-width="1.8" points="2,36 8,33 14,31 20,28 26,29 32,22 38,24 44,20 50,27 56,24 62,20 68,15 74,14 80,13 86,5 92,7"/></svg><div><div class="ret pos">+13.8%</div><div class="vs">since 02 Jun · Nifty +1.9%</div></div></div>
+</a>
+<a class="sp" href="#"><div class="rail"></div>
+  <div><div class="nm">Mid Cap</div><div class="why">Ranked 101–250 by size, screened for quality and momentum.</div>
+    <div class="row"><div><span class="k">Min · one share each</span><span class="v">₹—</span></div><div><span class="k">Rebalance</span><span class="v">Monthly · next 06 Oct</span></div></div></div>
+  <div class="spark"><svg viewBox="0 0 96 38" preserveAspectRatio="none"><polyline fill="none" stroke="#35E0FF" stroke-width="1" opacity=".6" points="2,36 14,32 26,29 38,27 50,29 62,22 74,25 86,26 92,32"/><polyline fill="none" stroke="#D4AF37" stroke-width="1.8" points="2,36 14,30 26,27 38,25 50,22 62,18 74,14 86,9 92,8"/></svg><div><div class="ret pos">+12.9%</div><div class="vs">since 01 Jun · Nifty +1.9%</div></div></div>
+</a>
+<a class="sp" href="#"><div class="rail"></div>
+  <div><div class="nm">Small Cap</div><div class="why">Themes with a long runway, then the strongest name in each.</div>
+    <div class="row"><div><span class="k">Min · one share each</span><span class="v">₹—</span></div><div><span class="k">Rebalance</span><span class="v">Quarterly · next 01 Dec</span></div></div></div>
+  <div class="spark"><svg viewBox="0 0 96 38" preserveAspectRatio="none"><polyline fill="none" stroke="#35E0FF" stroke-width="1" opacity=".6" points="2,36 14,32 26,29 38,27 50,29 62,22 74,25 86,26 92,32"/><polyline fill="none" stroke="#D4AF37" stroke-width="1.8" points="2,36 14,33 26,28 38,24 50,26 62,19 74,16 86,11 92,10"/></svg><div><div class="ret pos">+11.9%</div><div class="vs">since 01 Jun · Nifty +1.9%</div></div></div>
+</a>
+<div class="more" style="padding:0 16px">+3 more · Large Cap · Breakout 52w · Contra Value</div>
+
+<div class="div">▼ tap opens the basket ▼</div>
+
+<!-- ════ SCREEN B · DETAIL ════ -->
+<a id="detail"></a>
+<div class="hdr" style="position:static;margin-top:16px"><span class="wm">‹</span><div class="pg">Alpha Multicap</div><div class="slot"></div></div>
+
+<div class="hero">
+  <div class="eye">Quant basket · Multicap · monthly · live since 02 Jun 2026</div>
+  <div class="nm">Alpha Multicap</div>
+  <div class="big"><div class="r pos">+13.8%</div><div class="n">₹100 → ₹113.80<br>Nifty 50 → <b>₹101.94</b> same days</div></div>
+  <svg class="nav" viewBox="0 0 320 120" preserveAspectRatio="none">
+    <g stroke="#2A2A32" stroke-dasharray="3 3" stroke-width="1"><line x1="0" y1="15" x2="320" y2="15"/><line x1="0" y1="48" x2="320" y2="48"/><line x1="0" y1="81" x2="320" y2="81"/><line x1="0" y1="114" x2="320" y2="114"/></g>
+    <polyline fill="none" stroke="#35E0FF" stroke-width="1.2" opacity=".7" points="10,114 22,116 35,118 47,112 60,103 72,94 85,96 97,100 110,91 122,88 135,98 147,93 160,89 172,102 185,95 197,89 210,76 222,79 235,80 247,86 260,85 272,85 285,86 297,93 310,101"/>
+    <polyline fill="none" stroke="#D4AF37" stroke-width="2" points="10,114 22,108 35,102 47,105 60,99 72,94 85,94 97,80 110,84 122,84 135,83 147,75 160,68 172,89 185,82 197,90 210,76 222,63 235,56 247,55 260,54 272,52 285,44 297,20 310,24"/>
+    <g fill="#8E8A7E" font-size="8" font-family="Sora"><text x="12" y="12">115</text><text x="12" y="45">110</text><text x="12" y="78">105</text><text x="12" y="111">100</text><text x="290" y="119">Sep</text><text x="12" y="119">Jun</text></g>
+  </svg>
+  <div class="rng"><span class="on">Since start</span><span>3M</span><span>1M</span><span>1W</span></div>
+</div>
+
+<div class="strip">
+  <div><div class="k">Beat Nifty by</div><div class="v pos">+11.9 pts</div></div>
+  <div><div class="k">Hit rate</div><div class="v">14 of 16</div></div>
+  <div><div class="k">Worst name</div><div class="v neg">−16.2%</div></div>
+</div>
+
+<div class="card">
+  <div class="ch"><span class="t">Scorecard of the book</span><span class="n">avg of 15 scored names</span></div>
+  <div class="pil">
+    <div class="r"><span class="l">G</span><div class="bar"><i style="width:82%"></i></div><span class="v">8.2</span></div>
+    <div class="r"><span class="l">V</span><div class="bar"><i style="width:71%"></i></div><span class="v">7.1</span></div>
+    <div class="r"><span class="l">M</span><div class="bar"><i style="width:86%"></i></div><span class="v">8.6</span></div>
+    <div class="sub">GVM at entry, averaged. Growth strong, value fair, momentum high — that is the basket's character, not a promise.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="ch"><span class="t">The rule</span><span class="n">plain words</span></div>
+  <div class="rule">Score every stock on <b>quality</b> and <b>momentum</b>, half and half. Hold the top 15, <b>equal weight</b>. Each month, drop any that has slipped well outside the leading ranks and take the next one in. A stop on each name closes it early if it breaks.</div>
+  <div class="kv"><span>Cap <b>15 names</b></span><span>Now <b>16</b></span><span>Next <b>06 Oct</b></span><span>Cash <b>3.6% in NIFTYBEES</b></span></div>
+</div>
+
+<div class="sec"><h2>Holdings</h2><span class="hint">16 · by weight · swipe →</span></div>
+<div class="rl">
+  <div class="hc"><div class="s">ATHERENERG</div><div class="seg">Auto OEM · mid</div><div class="p pos">+64.5%</div><div class="g"><span>9.2% wt</span><b>GVM 7.65</b></div></div>
+  <div class="hc"><div class="s">CHENNPETRO</div><div class="seg">Refineries · small</div><div class="p pos">+40.5%</div><div class="g"><span>8.0% wt</span><b>GVM 7.65</b></div></div>
+  <div class="hc"><div class="s">CGCL</div><div class="seg">MSME finance · small</div><div class="p pos">+37.0%</div><div class="g"><span>7.8% wt</span><b>GVM 7.93</b></div></div>
+  <div class="hc"><div class="s">CAPLIPOINT</div><div class="seg">Pharma · small</div><div class="p pos">+37.0%</div><div class="g"><span>7.4% wt</span><b>GVM 7.62</b></div></div>
+  <div class="hc dn"><div class="s">EXIDEIND</div><div class="seg">Consumer durables · mid</div><div class="p neg">−16.2%</div><div class="g"><span>4.8% wt</span><b>GVM 8.13</b></div></div>
+</div>
+<div class="more" style="padding:0 16px">+11 more · <span style="color:var(--brand);font-weight:700">View holdings ›</span> opens a vertical table: Name · Weight · P&amp;L% · Day% · GVM · Entry · Stop — tap a header to sort.</div>
+
+<div class="card">
+  <div class="ch"><span class="t">Where the money sits</span><span class="tog"><span class="on">Cap</span><span>Sector</span></span></div>
+  <div class="mix"><i style="width:60.2%;background:#D4AF37"></i><i style="width:36.2%;background:#35E0FF"></i><i style="width:3.6%;background:#8E8A7E"></i></div>
+  <div class="mixl"><span><i class="dot" style="background:#D4AF37"></i><b>60.2%</b> small</span><span><i class="dot" style="background:#35E0FF"></i><b>36.2%</b> mid</span><span><i class="dot" style="background:#8E8A7E"></i><b>3.6%</b> index ETF</span></div>
+  <div class="more">Sector: Pharma 19.5 · IT 15.0 · Finance 13.9 · Consumer 11.3 · Auto 9.2 · Energy 8.0 · Pipes 7.4 · Chemicals 6.2 · Internet 6.1</div>
+</div>
+
+<div class="card">
+  <div class="ch"><span class="t">What changed, and why</span><span class="n">3 events</span></div>
+  <div class="tl">
+    <div class="ev stop"><div class="d">07 Aug <small>monthly</small></div><div class="w"><span class="chip out">−3</span><span class="chip in">+3</span> Stops closed <b>KPIL, NLCINDIA, OBEROIRLTY</b>. Three names ranked in to refill to 15.</div></div>
+    <div class="ev stop"><div class="d">07 Jul <small>monthly</small></div><div class="w"><span class="chip out">−3</span><span class="chip in">+4</span> Stops closed <b>HINDCOPPER, OIL, VBL</b>. Four ranked in; book at 15.</div></div>
+    <div class="ev"><div class="d">02 Jun <small>inception</small></div><div class="w"><span class="chip in">+14</span> First book, equal weight, ₹5,00,000 nominal.</div></div>
+  </div>
+  <a class="link" href="#">Every exit with its reason ›</a>
+</div>
+
+<div class="note"><b>What is different from a broker basket page.</b> The score behind the picks (G/V/M of the book), the rule in plain words, every change with its reason, and one honest track-record line: live since 02 Jun, paper book, no backtest. Min value = one share of each holding, stated as such. No risk badge — nothing invented.</div>
+
+<nav class="bnav"><a class="bn" href="#"><span class="i">◧</span>Home</a><a class="bn" href="#"><span class="i">◈</span>GVM</a><a class="bn" href="#"><span class="i">◎</span>Check</a><a class="bn" href="#"><span class="i">☷</span>WoT</a><a class="bn on" href="#"><span class="i">◍</span>Dash</a></nav>
+</body></html>
