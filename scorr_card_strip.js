@@ -51,33 +51,38 @@
     + '.scorr-cs-sm{gap:3px;vertical-align:middle;margin-left:6px}'
     + '.scorr-cs-sm .scorr-cs-b{width:22px;height:22px;border-radius:5px;font-size:10px}'
     /* cc#1941 SINGLE SOURCE for the APP (founder 10-Sep 15:51: "one spec change should reflect all
-       C A R D button consistent everywhere"). body.mcards is the /m/* app shell class
-       (scorr_card_common.js addClass). This block is THE ONE app pill definition -- the cc#1939 look
-       the founder approved on the Home approved-trade card, now the same on every app consumer:
-       Home approved card, A/D sheet rows, V8 position cards, GVM hero, the symbol sheet, the C/A/D
-       card headers. Contract tokens with the legacy-name fallbacks the bridge provides. Consumers
-       may only POSITION the strip (flex/gap/width); the local pill copies that lived in
-       mobile/home.html, mobile_endpoints.py (V8 sheet) and scorr_card_common.js (symbol sheet +
-       cc#964 letter colours) were removed in the same push and point here. Change a pill => change
-       it here. */
-    /* cc#1944 (founder 10-Sep 16:0x): height stays half (28px); width comes down 25% from the
-       equal-quarter stretch -- flex-basis 18.75% (= 75% of a quarter) with the same max-width, so
-       four pills no longer fill the row edge to edge; the row is CENTRED (justify-content below).
-       Consumers no longer set flex:1 on the pill -- this is the one place the pill's share lives. */
-    + 'body.mcards .scorr-cs-b{box-sizing:border-box;flex:0 1 18.75%;max-width:18.75%;height:var(--space-28,28px);width:auto;min-width:var(--space-28,28px);padding:0 var(--space-10,10px);'
-    + 'border-radius:var(--radius-14,14px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
-    + 'color:var(--brand,var(--txt,#d4af37));font-size:var(--type-11,11px);font-weight:800;letter-spacing:var(--track-em8,.08em);box-shadow:none}'
-    + 'body.mcards .scorr-cs-b:active{background:var(--panel,#131316)}'
+       C A R D button consistent everywhere"). This block is THE ONE app pill definition; consumers may
+       only POSITION the strip. Change a pill => change it here.
+       cc#1948 (founder 10-Sep 16:14, third screenshot, "Card box still bigger, keep just bit larger
+       than text to give a boundary") -- TWO things changed here, and the first is the root cause of
+       three invisible fixes:
+       (1) SCOPE. cc#1941/1944 keyed this block on `body.mcards`, a class another file
+           (scorr_card_common.js) adds to <body> at its own time. The founder's live render measured
+           ~90x64 DEVICE px on a 2x phone = 45x32 CSS px, and 32px is exactly this module's DEFAULT
+           `.scorr-cs-b{height:32px}` web rule -- i.e. on his device the app block was not in effect
+           when the strip painted, whatever the served file said. The app rules are now keyed on a
+           class THIS module puts on its own root (`scorr-cs-app`, added by stripHtml when the page
+           path starts with /m/), so they can never wait on another file or another element.
+       (2) SIZE. No more fractions of an earlier box. The pill is CONTENT-SIZED: width auto, height
+           auto, padding --space-6 vertical / --space-8 horizontal around a --type-12 letter with
+           line-height 1, so the box is the letter plus a thin boundary. Row: four pills, --space-6
+           gap, LEFT-aligned, row height = the pill's own height. Fill --hi, edge --edge, letter
+           --brand -- the approved look, unchanged. */
+    + '.scorr-card-strip.scorr-cs-app{display:flex;justify-content:flex-start;align-items:center;gap:var(--space-6,6px)}'
+    + '.scorr-card-strip.scorr-cs-app .scorr-cs-b{box-sizing:border-box;flex:0 0 auto;width:auto;height:auto;min-width:0;max-width:none;'
+    + 'padding:var(--space-6,6px) var(--space-8,8px);line-height:1;font-size:var(--type-12,12px);font-weight:800;letter-spacing:var(--track-em8,.08em);'
+    + 'border-radius:var(--radius-8,8px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
+    + 'color:var(--brand,var(--txt,#d4af37));box-shadow:none}'
+    + '.scorr-card-strip.scorr-cs-app .scorr-cs-b:active{background:var(--panel,#131316)}'
     /* current letter: brand fill, field-coloured glyph -- the same "you are here" the web strip
        shows in blue, in the app's own brand */
-    + 'body.mcards .scorr-cs-on{background:var(--brand,#d4af37);color:var(--field,#0a0a0c);border-color:var(--brand,#d4af37)}'
+    + '.scorr-card-strip.scorr-cs-app .scorr-cs-on{background:var(--brand,#d4af37);color:var(--field,#0a0a0c);border-color:var(--brand,#d4af37)}'
     /* unavailable letter (D on a non-future, R with no result): cc#964's legibility floor kept --
-       muted glyph at .75, not .42, on a dashed unfilled pill, so a disabled control still reads as
-       a control */
-    + 'body.mcards .scorr-cs-off{color:var(--muted,var(--mut,#8e8a7e));background:transparent;border-style:dashed;opacity:.75}'
+       muted glyph at .75 on a dashed unfilled pill, so a disabled control still reads as a control */
+    + '.scorr-card-strip.scorr-cs-app .scorr-cs-off{color:var(--muted,var(--mut,#8e8a7e));background:transparent;border-style:dashed;opacity:.75}'
     /* the compact (table-row) variant keeps its own metrics on the app too */
-    + 'body.mcards .scorr-card-strip{justify-content:center}'
-    + 'body.mcards .scorr-cs-sm .scorr-cs-b{flex:0 0 auto;max-width:none;height:22px;min-width:22px;width:22px;padding:0;border-radius:5px;font-size:10px}';
+    + '.scorr-card-strip.scorr-cs-app.scorr-cs-sm{display:inline-flex;gap:3px}'
+    + '.scorr-card-strip.scorr-cs-app.scorr-cs-sm .scorr-cs-b{height:22px;min-width:22px;width:22px;padding:0;border-radius:5px;font-size:10px}';
   try {
     var st = document.createElement('style');
     st.setAttribute('data-scorr', 'card-strip');
@@ -176,7 +181,9 @@
       return '<button type="button" class="scorr-cs-b" title="' + title + '" '
         + 'onclick="ScorrCardNav(\'' + k + '\',\'' + s + '\')">' + k + '</button>';
     }).join('');
-    return '<span class="scorr-card-strip' + (compact ? ' scorr-cs-sm' : '') + '" data-sym="' + s
+    var app = false;
+    try { app = (typeof location !== 'undefined') && String(location.pathname || '').indexOf('/m/') === 0; } catch (e) {}   // cc#1948: app scope decided HERE
+    return '<span class="scorr-card-strip' + (compact ? ' scorr-cs-sm' : '') + (app ? ' scorr-cs-app' : '') + '" data-sym="' + s
       + '" data-active="' + esc(active || '') + '"' + (compact ? ' data-compact="1"' : '') + '>'
       + btns + '</span>';
   }

@@ -428,7 +428,7 @@ body[data-theme]{
 .brr{cursor:pointer}
 .brr:active{background:var(--panel2)}
 .brcard{display:flex;padding:var(--space-8) var(--space-2) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
-.brcard .scorr-card-strip{display:flex;gap:var(--space-8);width:100%}
+.brcard .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}   /* cc#1948: --space-6 gap per the single spec */
 /* cc#1941/1944: the pill look AND its row share come from the single app spec in scorr_card_strip.js; nothing set here */
 .brcard .sum{color:var(--muted);font-size:var(--type-11)}
 .brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
@@ -1311,7 +1311,7 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
    is the same on every app consumer. Only the equal-quarter stretch and the --space-6 gap remain
    here. Behaviour is the component's — same four popups. */
 .ap-card .cardstrip{margin-top:var(--space-8);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi);display:flex}
-.ap-card .cardstrip .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}
+.ap-card .cardstrip .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}   /* cc#1948: pills are content-sized and left-aligned by the single spec in scorr_card_strip.js; this row only spans the card */
 /* cc#1941: the pill LOOK (size, radius, fill, edge, letter, pressed, disabled) is defined ONCE in
    scorr_card_strip.js (body.mcards block) -- the cc#1939 spec moved there so every app consumer
    matches. This page only stretches the pills across the row. */

@@ -1570,7 +1570,7 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    from scorr_card_strip.js (cc#789 single source), so the mobile strip and the web strip
    cannot drift apart the way two hand-written copies did before that card. */
 .cardstrip{margin-top:var(--space-10);display:flex}
-.cardstrip .scorr-card-strip{display:flex;gap:8px;width:100%}
+.cardstrip .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}   /* cc#1948: --space-6 gap; pill size/alignment come from the single spec in scorr_card_strip.js */
 /* the shared file sizes its buttons 32x32 for the web tables it was written for. On a phone that
    is under the 44px touch minimum the framework (session_log 15913) sets, and that this same
    sheet already applies to .a — so the strip is stretched to the row width and clamped to 44px
@@ -2231,7 +2231,7 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #gvp .g-hfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4) var(--space-12);margin-top:var(--space-12);font-family:var(--mono);font-size:var(--type-10);color:var(--dim)}
 /* C·A·R·D strip on the hero (shared scorr_card_strip.js component; page only positions it) */
 #gvp .g-strip{display:flex;justify-content:center;margin-top:var(--space-12);min-height:32px}
-#gvp .g-strip .scorr-card-strip{gap:var(--space-8)}
+#gvp .g-strip .scorr-card-strip{gap:var(--space-6)}   /* cc#1948: --space-6 gap per the single spec */
 /* GVM 60-day mini trend (R3: one line); tap opens the price chart */
 #gvp .g-trend{margin-top:var(--space-14);padding:var(--space-10) var(--space-10) var(--space-8);cursor:pointer}
 #gvp .g-trend .g-thd{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:var(--type-10);letter-spacing:var(--track-px13);color:var(--mute);margin-bottom:var(--space-6)}
