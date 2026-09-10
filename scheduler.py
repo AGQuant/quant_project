@@ -4758,6 +4758,15 @@ def _bg_tc_scanner_eod():
     idempotent (check_exits only touches OPEN rows), so a restart that resets the guard costs one
     harmless repeat, never a missed day."""
     global _tc_scanner_eod_ran
+    # cc#1945: registry gate, byte-pattern of _bg_tc_screener_v2's. cc#1910 flipped
+    # scheduler_master.active=false for this job and it kept running (10-Sep: last_run 15:57 and
+    # 16:02 IST, status ok, active=false) because nothing here read the flag -- only the once-per-
+    # day guard below, which every deploy restart resets. A retired job stamping fresh 'ok' ticks is
+    # the exact failure _Skip.disabled() exists for (cc#526/cc#1170): the record lied while the
+    # registry said retired. Registry-derived, no name list; the founder can re-enable with an
+    # UPDATE and no deploy.
+    if _job_active("bg_tc_scanner_eod") is not True:
+        return _Skip.disabled()
     today = _ist_now().date()
     if _tc_scanner_eod_ran == today:
         return _Skip.already_ran()
