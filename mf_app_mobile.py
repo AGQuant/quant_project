@@ -166,3 +166,86 @@ def mobile_mf_app(request: Request):
                     key=lambda r: r["coverage_pct"], default=None)),
         },
     }
+
+
+# ═══ V2 — Fable single mode 10-Sep-2026. Additive; the cc#1903 endpoint above stays.
+#   GET /api/mobile/mf_app/list?category=&sort=&q=  → the web V15 screener's own rows + the stats chip
+#   GET /api/mobile/mf_app/fund?code=                → v15_fund (scores, returns vs category, rank, peers,
+#                                                      flags) + mf_fund (look-through holdings with GVM,
+#                                                      sector exposure, NAV series)
+from mf_pipeline import v15_screener, v15_stats, v15_fund, mf_fund, EQUITY_CATEGORY_WHITELIST
+
+
+def _fl(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _short(name):
+    """Shorten an AMFI scheme name for a phone row: drop plan/option suffixes."""
+    n = str(name or "")
+    for cut in (" - Direct Plan", " Direct Plan", "- Direct", " Direct", " - Growth", " Growth Option", " Growth", " - IDCW", " Option"):
+        if cut in n:
+            n = n.split(cut)[0]
+    return n.strip(" -")
+
+
+@router.get("/api/mobile/mf_app/list")
+@_json_safe
+def mobile_mf_list(request: Request, category: str = "", sort: str = "mqs", q: str = ""):
+    g = _guard(request)
+    if g:
+        return g
+    st = v15_stats()
+    cat = q.strip() if q.strip() else category
+    sc = v15_screener(category=cat, sort=sort if sort in ("mqs", "1y", "aum") else "mqs", limit=80)
+    rows = []
+    for r in (sc.get("results") or []) if isinstance(sc, dict) else []:
+        rows.append({"code": str(r.get("scheme_code")), "name": _short(r.get("name")), "amc": r.get("amc"), "category": r.get("category"),
+                     "mqs": _fl(r.get("mqs")), "ret_1y": _fl(r.get("ret_1y")), "ret_3y": _fl(r.get("ret_3y")), "ret_3y_state": r.get("ret_3y_state"),
+                     "aum": _fl(r.get("aum_cr")), "er": _fl(r.get("expense_ratio")), "crisil": r.get("crisil_rank")})
+    return {"scored": st.get("scored"), "universe": st.get("universe"), "categories": list(EQUITY_CATEGORY_WHITELIST),
+            "category": category, "q": q, "sort": sort, "rows": rows, "count": len(rows)}
+
+
+@router.get("/api/mobile/mf_app/fund")
+@_json_safe
+def mobile_mf_fund(request: Request, code: str = ""):
+    g = _guard(request)
+    if g:
+        return g
+    f = v15_fund(code)
+    if not isinstance(f, dict) or f.get("error") or not f.get("fund"):
+        return {"error": (f or {}).get("error", "fund not found")}
+    m = f["fund"]
+    d = mf_fund(code)
+    d = d if isinstance(d, dict) and not d.get("error") else {}
+    hold = []
+    for h in (d.get("holdings") or [])[:15]:
+        hold.append({"name": h.get("company_name"), "symbol": h.get("resolved_nse_symbol"), "weight": _fl(h.get("pct_weight")),
+                     "gvm": _fl(h.get("gvm")), "segment": h.get("segment"), "verdict": h.get("verdict")})
+    nav = d.get("nav") or []
+    step = max(1, len(nav) // 60)
+    spark = nav[::step]
+    if nav and (not spark or spark[-1] is not nav[-1]):
+        spark.append(nav[-1])
+    ca = m.get("category_avgs") or {}
+    return {"code": code, "name": _short(m.get("name")), "full_name": m.get("name"), "amc": m.get("amc"), "category": m.get("category"),
+            "plan": m.get("plan"), "inception": m.get("inception"), "returns_asof": m.get("returns_asof"),
+            "mqs": _fl(m.get("mqs")), "scores": {"q": _fl(m.get("q_score")), "r": _fl(m.get("r_score")), "c": _fl(m.get("c_score")), "s": _fl(m.get("s_score"))},
+            "weights": m.get("mqs_weights"), "rank": m.get("category_rank"), "peers_n": m.get("category_peers"),
+            "returns": {k: _fl(m.get("ret_" + k)) for k in ("1m", "3m", "6m", "1y", "2y", "3y", "5y")},
+            "cat_avgs": {k: _fl(ca.get("ret_" + k)) for k in ("1m", "3m", "6m", "1y", "2y", "3y")},
+            "ret_3y_state": m.get("ret_3y_state"), "ret_5y_state": m.get("ret_5y_state"),
+            "er": _fl(m.get("expense_ratio")), "cat_er": _fl(m.get("category_avg_er")), "aum": _fl(m.get("aum_cr")), "cat_aum": _fl(m.get("category_avg_aum_cr")),
+            "crisil": m.get("crisil_rank"),
+            "portfolio_gvm": _fl(m.get("portfolio_gvm")), "gvm_coverage": _fl(m.get("portfolio_gvm_coverage_pct")), "gvm_state": m.get("portfolio_gvm_state"),
+            "holdings": hold, "holdings_total": len(d.get("holdings") or []), "resolved_pct": _fl(d.get("resolved_pct")),
+            "segments": [{"segment": s.get("segment"), "pct": _fl(s.get("exposure_pct")), "gvm": _fl(s.get("sector_gvm")), "verdict": s.get("sector_verdict")}
+                         for s in (d.get("segments") or [])[:10]],
+            "nav": [{"d": p.get("date"), "v": _fl(p.get("nav"))} for p in spark],
+            "peers": [{"code": str(p.get("scheme_code")), "name": _short(p.get("name")), "mqs": _fl(p.get("mqs")), "ret_1y": _fl(p.get("ret_1y")), "self": bool(p.get("is_self"))}
+                      for p in (m.get("peers") or [])],
+            "flags": m.get("red_flags") or []}

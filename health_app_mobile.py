@@ -46,6 +46,10 @@ for the APP_VS_WEB_AUDIENCE_SPLIT_V1 (session_log 16915) angle: the Home grid's 
 "Portfolio Health" tile deliberately opens the WEB /health page today, a founder-approved named
 exception. This build does NOT repoint that tile — /m/health ships reachable by typed URL only,
 pending a founder/Fable ruling on whether this card is meant to close that named exception.
+
+10-Sep-2026 (Fable V2 below): the founder ruled — Portfolio Health IS an app section, two parts
+(upload, report). The V2 endpoints DO import the /health shelf's own _health_portfolios_inner and
+hr_report.build_report, on purpose: one number on both surfaces.
 """
 import os
 
@@ -140,3 +144,45 @@ def mobile_health_app(request: Request):
             "footnote": "Reports appear on the Adaptive Dashboard once saved.",
         },
     }
+
+
+# ═══ V2 — Fable single mode 10-Sep-2026 (founder: "portfolio health two parts — upload and report;
+# report follows the website format, components more intuitive; PDF later"). Additive.
+#   GET /api/mobile/health_app/list         → saved portfolios with the headline numbers (invested basis),
+#                                              from hr_endpoints._health_portfolios_inner — the /health shelf's own
+#   GET /api/mobile/health_app/report?pid=  → the full report, from hr_report.build_report — the web report's own
+# Upload and save go straight to the web's POST /api/health/upload and /api/health/generate from the page.
+from hr_endpoints import _health_portfolios_inner
+from hr_report import build_report
+
+
+@router.get("/api/mobile/health_app/list")
+@_json_safe
+def mobile_health_list(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    data = _health_portfolios_inner()
+    rows = []
+    for p in (data.get("portfolios") or []) if isinstance(data, dict) else []:
+        rows.append({"id": p.get("id"), "name": p.get("name"), "n": p.get("n_holdings"), "active": p.get("active"),
+                     "invested": p.get("invested"), "current": p.get("current"), "cash": p.get("cash"),
+                     "total": p.get("total_portfolio"), "pnl": p.get("pnl"), "pnl_pct": p.get("pnl_pct"),
+                     "basis": p.get("basis"), "needs_invested": p.get("needs_invested_amount"),
+                     "start": p.get("start_date"), "nifty_pct": p.get("nifty_pct"), "alpha_pct": p.get("alpha_pct"),
+                     "xirr": p.get("xirr"), "created": p.get("created_at"), "category": p.get("category")})
+    rows.sort(key=lambda r: (not r["active"], -(r["total"] or 0)))
+    return {"rows": rows, "count": len(rows), "error": data.get("error") if isinstance(data, dict) else None}
+
+
+@router.get("/api/mobile/health_app/report")
+@_json_safe
+def mobile_health_report(request: Request, pid: int = 0):
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        rep = build_report(cur, pid)
+    if not isinstance(rep, dict) or rep.get("error"):
+        return {"error": (rep or {}).get("error", "report unavailable")}
+    return rep

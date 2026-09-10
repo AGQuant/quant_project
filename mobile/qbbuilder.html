@@ -1,0 +1,225 @@
+<!doctype html>
+<!-- ══ mobile/qbbuilder.html — Basket Builder app page. Fable single-mode build 10-Sep-2026. Data: the web V12 builder endpoints (/api/v12/presets, /universe/preview, /basket, /backtest) called directly,
+     the same functions the /v12 web wizard uses. Route /m/qbbuilder (mobile_scanners.py). Contract tokens only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Basket Builder · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+.pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
+.pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+.seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+.lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
+.row:last-child{border-bottom:none}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
+.row.up::before{background:var(--win)}.row.dn::before{background:var(--loss)}.row.mu::before{background:var(--edge)}
+.row .nm{font-size:var(--type-125);font-weight:800}.row .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.row .nm .tag.b{color:var(--win)}.row .nm .tag.s{color:var(--loss)}.row .nm .tag.g{color:var(--brand)}
+.row .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}.row .sub b{color:var(--ink);font-weight:700}
+.row .v{text-align:right}.row .v .n{font-size:var(--type-15);font-weight:800;line-height:1}.row .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+.emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.rule{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8)}.rule b{color:var(--brand)}.rule.mu{color:var(--muted);font-size:var(--type-115)}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+.chips{display:flex;gap:var(--space-6);overflow-x:auto;padding:var(--space-4) var(--space-16) 0;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel)}.chip.on{color:var(--brand);background:var(--hi)}
+.gates{display:inline-flex;gap:var(--space-2);vertical-align:middle;margin-left:var(--space-4)}.gates i{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--edge)}.gates i.ok{background:var(--win)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.fl{display:block;font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);margin-top:var(--space-10)}
+.fl input{display:block;width:100%;margin-top:var(--space-4);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);color:var(--ink);font:inherit;font-size:var(--type-14);font-weight:600;padding:var(--space-9) var(--space-10);text-transform:none;letter-spacing:0;box-sizing:border-box}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8)}
+.btn,.btn2{display:block;width:100%;text-align:center;margin-top:var(--space-10);padding:var(--space-11);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:800;cursor:pointer;box-sizing:border-box}
+.btn{background:var(--brand);color:var(--field);border:none}.btn2{background:var(--hi);color:var(--brand);border:var(--bw-1) solid var(--edge)}
+.sub2{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-7);line-height:1.5}
+.seg{margin:var(--space-4) 0 0}
+.steps{display:flex;gap:var(--space-6);margin:var(--space-12) var(--space-16) 0}.steps span{flex:1;text-align:center;font-size:var(--type-13);font-weight:800;color:var(--muted);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-8) 0}.steps span small{display:block;font-size:var(--type-8);font-weight:700;text-transform:uppercase;letter-spacing:var(--track-em8);margin-top:var(--space-2)}
+.steps span.on{color:var(--brand);border-color:var(--brand)}.steps span.done{color:var(--win)}
+.navrow{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:var(--space-4) var(--space-16) 0}.navrow .btn,.navrow .btn2{margin-top:var(--space-6)}
+.lr{display:grid;grid-template-columns:1fr 80px;gap:var(--space-8);align-items:center;padding:var(--space-8) var(--space-12);border-bottom:var(--bw-1) solid var(--hi)}.lr:last-child{border-bottom:none}
+.lr .nm{font-size:var(--type-115);font-weight:800}.lr .v{text-align:right;font-size:var(--type-115);font-weight:800}
+.lr.h{background:var(--hi)}.lr.h .nm,.lr.h .v{font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);font-weight:800}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Basket Builder</span></div><div class="as-slot"></div></div>
+<div class="pg">
+<div class="asof" id="asof">Loading…</div>
+<div id="body"><div class="err">Loading…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
+  <a class="bn on" href="/m/dash"><span class="i">◍</span>Dash</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16); }
+function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
+function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+/* ── the basket definition, edited in place across the four steps ── */
+var DEF={ universe_ref:{filters:{mcap_rank:{max:500}, gvm:{min:7}}}, entry:{roc_lookback:'6M', top_x:12, min_stocks:1, max_stocks:12}, exit:{rank_fall_y:25, trailing_peak_pct:20}, rebalance:{freq:'monthly'}, costs:{txn_pct:0.1, slippage_pct:0.1} };
+var STEP=1, NAME='', PREVIEW=null, BT=null, POLL=null;
+function fl(v){ var x=Number(v); return isNaN(x)?null:x; }
+function chipRow(id, opts, cur){ return '<div class="seg" id="'+id+'">'+opts.map(function(o){ return '<span data-v="'+o[0]+'"'+(String(o[0])===String(cur)?' class="on"':'')+'>'+o[1]+'</span>'; }).join('')+'</div>'; }
+function field(label, id, val, hint, extra){ return '<label class="fl">'+label+'<input id="'+id+'" inputmode="decimal" value="'+(val==null?'':val)+'" '+(extra||'')+'></label>'+(hint?'<div class="sub2" style="margin-top:4px">'+hint+'</div>':''); }
+function steps(){ return '<div class="steps">'+[['1','Universe'],['2','Entry'],['3','Exit'],['4','Test & save']].map(function(s,i){ return '<span class="'+(i+1===STEP?'on':(i+1<STEP?'done':''))+'" data-step="'+(i+1)+'">'+s[0]+'<small>'+s[1]+'</small></span>'; }).join('')+'</div>'; }
+function draw(){
+  var f=DEF.universe_ref.filters, e=DEF.entry, x=DEF.exit;
+  var h=steps();
+  if(STEP===1){
+    h+='<div class="card"><div class="ch"><span class="t">Which stocks can enter</span><span class="n">step 1</span></div>'
+     +'<div class="fl" style="margin-top:12px">Size</div>'+chipRow('mcap',[[100,'Top 100'],[250,'Top 250'],[500,'Top 500'],[0,'All']], (f.mcap_rank||{}).max||0)
+     +'<div class="two">'+field('GVM at least','f-gvm',(f.gvm||{}).min)+field('Momentum at least','f-m',(f.m_score||{}).min)+'</div>'
+     +'<div class="two">'+field('Growth at least','f-g',(f.g_score||{}).min)+field('Value at least','f-v',(f.v_score||{}).min)+'</div>'
+     +'<div class="two">'+field('ROCE % at least','f-roce',(f.roce||{}).min)+field('Debt/equity at most','f-de',(f.de||{}).max,'sets this leaves out banks and NBFCs')+'</div>'
+     +'<button class="btn" id="b-prev">Preview the universe</button><div id="prev-out"></div></div>';
+  } else if(STEP===2){
+    h+='<div class="card"><div class="ch"><span class="t">How a stock gets picked</span><span class="n">step 2</span></div>'
+     +'<div class="fl" style="margin-top:12px">Rank by price momentum over</div>'+chipRow('roc',[['1M','1 month'],['3M','3 months'],['6M','6 months'],['12M','1 year']], e.roc_lookback)
+     +'<div class="two">'+field('Hold the top','e-top',e.top_x,'names, equal weight')+'</div>'
+     +'<div class="fl">Rebalance</div>'+chipRow('freq',[['weekly','Weekly'],['monthly','Monthly'],['quarterly','Quarterly']], DEF.rebalance.freq)
+     +'<div class="sub2">On each rebalance the universe is re-ranked and the top names are held. Nothing is bought between rebalances.</div></div>';
+  } else if(STEP===3){
+    h+='<div class="card"><div class="ch"><span class="t">When a stock leaves</span><span class="n">step 3</span></div>'
+     +'<div class="two">'+field('Sell if rank falls below','x-rank',x.rank_fall_y,'must be ≥ the top count')+field('Trailing stop %','x-trail',x.trailing_peak_pct,'from the peak since entry')+'</div>'
+     +'<div class="two">'+field('Cost per trade %','c-txn',DEF.costs.txn_pct)+field('Slippage %','c-slip',DEF.costs.slippage_pct)+'</div>'
+     +'<div class="sub2">The gap between the top count and the rank-fall line stops churn — a name is not sold the moment it slips one place.</div></div>';
+  } else {
+    h+='<div class="card"><div class="ch"><span class="t">Your rule</span><span class="n">step 4</span></div><div class="rule">'+ruleWords()+'</div>'
+     +'<label class="fl">Basket name<input id="nm" value="'+esc(NAME)+'" placeholder="e.g. My momentum 12"></label>'
+     +'<div class="two"><button class="btn2" id="b-bt">Run 5-year backtest</button><button class="btn" id="b-save">Save basket</button></div><div id="bt-out" class="sub2"></div></div>';
+    h+='<div id="bt-res">'+(BT?btHtml(BT):'')+'</div>';
+  }
+  h+='<div class="navrow">'+(STEP>1?'<button class="btn2" id="b-back">‹ Back</button>':'<span></span>')+(STEP<4?'<button class="btn" id="b-next">Next ›</button>':'')+'</div>';
+  h+='<div class="note"><b>What a backtest is.</b> A walk through the last five years applying this rule as written, on today\'s universe. Survivorship inflates the numbers; the ranking of rules is the finding, not the absolute return. Nothing here is a recommendation.</div>';
+  document.getElementById('body').innerHTML=h;
+  document.getElementById('asof').innerHTML='Step <b>'+STEP+' of 4</b>'+(PREVIEW?' · universe '+PREVIEW.total+' names':'');
+  bind();
+}
+function readStep(){
+  var f=DEF.universe_ref.filters;
+  if(STEP===1){
+    var set=function(k,id,side){ var v=fl(document.getElementById(id).value); if(v==null){ delete f[k]; } else { f[k]={}; f[k][side]=v; } };
+    set('gvm','f-gvm','min'); set('m_score','f-m','min'); set('g_score','f-g','min'); set('v_score','f-v','min'); set('roce','f-roce','min'); set('de','f-de','max');
+  } else if(STEP===2){
+    var t=fl(document.getElementById('e-top').value)||12; DEF.entry.top_x=Math.max(1,Math.round(t)); DEF.entry.max_stocks=DEF.entry.top_x; DEF.entry.min_stocks=1;
+  } else if(STEP===3){
+    DEF.exit.rank_fall_y=Math.max(DEF.entry.top_x, Math.round(fl(document.getElementById('x-rank').value)||DEF.entry.top_x));
+    var tr=fl(document.getElementById('x-trail').value); if(tr!=null) DEF.exit.trailing_peak_pct=tr; else delete DEF.exit.trailing_peak_pct;
+    DEF.costs.txn_pct=fl(document.getElementById('c-txn').value)||0; DEF.costs.slippage_pct=fl(document.getElementById('c-slip').value)||0;
+  } else { NAME=document.getElementById('nm').value.trim(); }
+}
+function bind(){
+  document.querySelectorAll('.steps span').forEach(function(s){ s.addEventListener('click', function(){ readStep(); STEP=Number(s.getAttribute('data-step')); draw(); }); });
+  var seg=function(id, fn){ var el=document.getElementById(id); if(!el) return; el.addEventListener('click', function(e){ var s=e.target.closest('[data-v]'); if(!s) return; fn(s.getAttribute('data-v')); el.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); }); };
+  seg('mcap', function(v){ var f=DEF.universe_ref.filters; if(Number(v)>0) f.mcap_rank={max:Number(v)}; else delete f.mcap_rank; PREVIEW=null; });
+  seg('roc', function(v){ DEF.entry.roc_lookback=v; });
+  seg('freq', function(v){ DEF.rebalance.freq=v; });
+  var b=function(id,fn){ var el=document.getElementById(id); if(el) el.addEventListener('click', fn); };
+  b('b-next', function(){ readStep(); STEP++; draw(); }); b('b-back', function(){ readStep(); STEP--; draw(); });
+  b('b-prev', function(){ readStep(); preview(); }); b('b-bt', function(){ readStep(); backtest(); }); b('b-save', function(){ readStep(); save(); });
+}
+function preview(){
+  var out=document.getElementById('prev-out'); out.innerHTML='<div class="sub2">Counting…</div>';
+  fetch('/api/v12/universe/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filters:DEF.universe_ref.filters, limit:12}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ out.innerHTML='<div class="sub2 neg">'+esc(d.error)+'</div>'; return; }
+    PREVIEW=d;
+    out.innerHTML='<div class="sub2"><b style="color:var(--ink)">'+d.total+' names</b> pass'+(d.bfsi_excluded?' · banks and NBFCs left out':'')+'. Top by GVM:</div><div class="lst" style="margin:8px 0 0">'+(d.stocks||[]).slice(0,8).map(function(s){return '<div class="row up"><div><div class="nm">'+esc(s.symbol)+'</div><div class="sub">'+esc(s.segment||'')+' · G '+f1(s.g_score)+' · V '+f1(s.v_score)+' · M '+f1(s.m_score)+'</div></div><div class="v"><div class="n">'+f2(s.gvm_score)+'</div><div class="c">GVM</div></div></div>';}).join('')+'</div>';
+    document.getElementById('asof').innerHTML='Step <b>1 of 4</b> · universe '+d.total+' names';
+  }).catch(function(){ out.innerHTML='<div class="sub2 neg">Could not preview.</div>'; });
+}
+function ruleWords(){
+  var f=DEF.universe_ref.filters, e=DEF.entry, x=DEF.exit, parts=[];
+  if(f.mcap_rank) parts.push('top '+f.mcap_rank.max+' by size'); if(f.gvm) parts.push('GVM ≥ '+f.gvm.min); if(f.g_score) parts.push('G ≥ '+f.g_score.min); if(f.v_score) parts.push('V ≥ '+f.v_score.min); if(f.m_score) parts.push('M ≥ '+f.m_score.min); if(f.roce) parts.push('ROCE ≥ '+f.roce.min+'%'); if(f.de) parts.push('D/E ≤ '+f.de.max);
+  return 'From <b>'+(parts.length?parts.join(' · '):'every scored stock')+'</b>, rank by <b>'+e.roc_lookback+' momentum</b> and hold the <b>top '+e.top_x+'</b>, equal weight, rebalanced <b>'+DEF.rebalance.freq+'</b>. Sell when rank falls below <b>'+x.rank_fall_y+'</b>'+(x.trailing_peak_pct!=null?' or on a <b>'+x.trailing_peak_pct+'%</b> fall from peak':'')+'. Costs '+DEF.costs.txn_pct+'% + '+DEF.costs.slippage_pct+'% slippage.';
+}
+function backtest(){
+  var out=document.getElementById('bt-out'); out.textContent='Running… this takes about a minute.'; BT=null; document.getElementById('bt-res').innerHTML='';
+  fetch('/api/v12/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({definition:DEF, benchmark:'NIFTY50'}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ out.textContent=d.error+(d.errors?' — '+d.errors.join('; '):''); return; }
+    var id=d.backtest_id; if(POLL) clearInterval(POLL);
+    var tick=function(){ fetch('/api/v12/backtest/'+id,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(b){
+      if(b.status==='done'){ clearInterval(POLL); BT=b.result||{}; out.textContent=''; document.getElementById('bt-res').innerHTML=btHtml(BT); }
+      else if(b.status==='error'||b.error){ clearInterval(POLL); out.textContent='Backtest failed: '+(b.error||''); }
+      else out.textContent='Running… '+(b.status||'');
+    }); };
+    if(d.status==='done') tick(); else { POLL=setInterval(tick, 3000); tick(); }
+  }).catch(function(){ out.textContent='Could not start the backtest.'; });
+}
+function curve(eq, bm){
+  if(!eq||eq.length<2) return '';
+  var step=Math.max(1,Math.floor(eq.length/80)), e=eq.filter(function(_,i){return i%step===0;}), b=(bm||[]).filter(function(_,i){return i%step===0;});
+  var all=e.map(function(p){return p.equity;}).concat(b.map(function(p){return p.equity;})); var lo=Math.min.apply(null,all), hi=Math.max.apply(null,all); if(hi===lo) hi=lo+1;
+  var line=function(arr){ var n=arr.length; return arr.map(function(p,k){ return ((6+k*(308/(n-1))).toFixed(1)+','+(108-(p.equity-lo)/(hi-lo)*96).toFixed(1)); }).join(' '); };
+  return '<svg viewBox="0 0 320 120" preserveAspectRatio="none" style="width:100%;height:120px;margin-top:8px"><polyline fill="none" stroke="'+tok('--wayfind')+'" stroke-width="1.2" opacity=".7" points="'+line(b)+'"/><polyline fill="none" stroke="'+tok('--brand')+'" stroke-width="2" points="'+line(e)+'"/><g fill="'+tok('--muted')+'" font-size="8" font-family="Sora"><text x="6" y="118">'+esc(dm(eq[0].date))+'</text><text x="270" y="118">'+esc(dm(eq[eq.length-1].date))+'</text></g></svg>';
+}
+function btHtml(r){
+  var s=r.stats||{};
+  var h='<div class="hero" style="margin-top:12px"><div class="eye">Backtest · '+esc(r.start||'')+' → '+esc(r.end||'')+' · '+esc(r.years||'')+' yrs · '+esc(r.universe_size||'')+' names</div><div class="big"><div class="r '+cls(s.cagr_pct)+'">'+pct(s.cagr_pct,1)+'</div><div class="n">a year, compounded<br>Nifty <b>'+pct(s.benchmark_cagr_pct,1)+'</b> · alpha <b class="'+cls(s.alpha_pct)+'">'+pct(s.alpha_pct,1)+'</b></div></div>'+curve(r.equity_series, r.benchmark_series)
+   +'<div class="kg"><div class="cell"><div class="k">Worst fall</div><div class="v neg">'+pct(s.max_drawdown_pct,1)+'</div></div><div class="cell"><div class="k">Hit rate</div><div class="v">'+(s.accuracy_pct!=null?s.accuracy_pct+'%':'—')+'</div></div><div class="cell"><div class="k">Trades</div><div class="v">'+(s.total_trades||0)+'</div></div></div>'
+   +'<div class="kg"><div class="cell"><div class="k">Sharpe</div><div class="v">'+f2(s.sharpe)+'</div></div><div class="cell"><div class="k">Calmar</div><div class="v">'+f2(s.calmar)+'</div></div><div class="cell"><div class="k">Rebalances</div><div class="v">'+(r.rebalances||0)+'</div></div></div></div>';
+  var yr=r.yearly||[];
+  if(yr.length) h+='<div class="lst" style="margin-top:10px"><div class="lr h"><div class="nm">Year</div><div class="v">Return</div></div>'+yr.map(function(y){return '<div class="lr"><div class="nm">'+esc(y.year)+'</div><div class="v '+cls(y.return_pct)+'">'+pct(y.return_pct,1)+'</div></div>';}).join('')+'</div>';
+  var hon=r.honesty; if(hon){ var lines=Array.isArray(hon)?hon:(typeof hon==='object'?Object.keys(hon).map(function(k){return hon[k];}):[hon]); h+='<div class="emp" style="margin-top:10px"><b>Read this first</b>'+lines.map(function(l){return esc(typeof l==='string'?l:JSON.stringify(l));}).join('<br>')+'</div>'; }
+  return h;
+}
+function save(){
+  var out=document.getElementById('bt-out');
+  if(!NAME){ out.textContent='Give the basket a name first.'; return; }
+  out.textContent='Saving…';
+  fetch('/api/v12/basket',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:NAME, definition:DEF, status:'draft'}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ out.textContent=d.error+(d.errors?' — '+d.errors.join('; '):''); return; }
+    out.textContent='Saved as basket #'+d.id+'. It appears under My baskets.';
+  }).catch(function(){ out.textContent='Could not save.'; });
+}
+function home(){
+  Promise.all([fetch('/api/v12/basket',{credentials:'same-origin'}).then(function(r){return r.json();}), fetch('/api/v12/presets',{credentials:'same-origin'}).then(function(r){return r.json();})]).then(function(rs){
+    var bk=(rs[0].baskets||[]), pr=(rs[1].presets||rs[1]||[]);
+    document.getElementById('asof').innerHTML='<b>'+bk.length+'</b> saved baskets · build a rule, test it, save it';
+    var h='<a class="row up" href="#" id="b-new" style="margin:12px 16px 0;border:1px solid var(--edge);border-radius:14px;background:var(--panel)"><div><div class="nm">Build a new basket</div><div class="sub">Four steps: who can enter, how they are picked, when they leave, then test and save.</div></div><div class="v"><div class="n gd">+</div></div></a>';
+    if(Array.isArray(pr)&&pr.length){ h+='<div class="sec"><h2>Start from a Scorr rule</h2><span class="hint">locked presets</span></div><div class="lst">'+pr.map(function(p){ var pv=p.provenance||{}; return '<a class="row" href="#" data-preset="'+esc(p.id)+'"><div><div class="nm">'+esc(p.name)+'</div><div class="sub">'+esc(p.tagline||'')+(pv.cagr_pct!=null?' · backtested <b>'+pct(pv.cagr_pct,1)+'</b> a year vs Nifty '+pct(pv.benchmark_cagr_pct,1):'')+'</div></div><div class="v"><div class="n gd">›</div></div></a>'; }).join('')+'</div>'; }
+    h+='<div class="sec"><h2>My baskets</h2><span class="hint">'+bk.length+'</span></div>';
+    h+= bk.length ? '<div class="lst">'+bk.map(function(b){ var d=b.definition||{}, e=d.entry||{}; return '<a class="row mu" href="#" data-open="'+b.id+'"><div><div class="nm">'+esc(b.name)+'<span class="tag">'+esc(b.status||'draft')+'</span></div><div class="sub">top '+esc(e.top_x||'—')+' by '+esc(e.roc_lookback||'—')+' momentum · '+esc((d.rebalance||{}).freq||'')+' · '+esc(dm(b.created_at))+'</div></div><div class="v"><div class="n">›</div></div></a>'; }).join('')+'</div>' : '<div class="emp"><b>No basket yet</b>Build one above. A saved basket keeps its rule and its last backtest.</div>';
+    h+='<div class="note"><b>Paper only.</b> A saved basket is a rule and a test, not a live book. Turning it live is a founder step, not a button here.</div>';
+    document.getElementById('body').innerHTML=h;
+    document.getElementById('b-new').addEventListener('click', function(e){ e.preventDefault(); STEP=1; draw(); });
+    document.querySelectorAll('[data-preset]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var p=pr.filter(function(x){return x.id===a.getAttribute('data-preset');})[0]; if(p&&p.definition){ DEF=JSON.parse(JSON.stringify(p.definition)); NAME=p.name+' (mine)'; } STEP=1; draw(); }); });
+    document.querySelectorAll('[data-open]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var b=bk.filter(function(x){return String(x.id)===a.getAttribute('data-open');})[0]; if(b){ DEF=JSON.parse(JSON.stringify(b.definition)); NAME=b.name; STEP=4; BT=null; draw(); } }); });
+  }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load the builder.</div>'; });
+}
+home();
+</script>
+</body></html>
