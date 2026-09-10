@@ -445,6 +445,34 @@ def mobile_breadth(request: Request):
             FROM themed t LEFT JOIN gs ON gs.symbol = t.symbol ORDER BY t.symbol
         """, {"d": anchor_ts.date(), "cut": anchor_ts})
         rows = _rows(cur)
+    # cc#1936: the TC capsule -- BEST OF FOUR (max score100) at each symbol's LATEST tick TODAY, read
+    # ONLY from tc_universe_ticks (TC_CANON_V2_FINAL, session_log 41629: the ONE live scorer; ts is a
+    # real timestamptz, so "today" is the IST calendar day, bounded here as an aware UTC instant).
+    # One query for the whole sheet, never a per-row Trade Check call. A symbol with no tick today
+    # gets no `tc` at all -- the sheet shows nothing, never a 0.
+    tc = {}
+    try:
+        from datetime import datetime as _dt, timezone as _tzu
+        from zoneinfo import ZoneInfo as _ZI
+        _ist = _ZI("Asia/Kolkata")
+        _day0 = _dt.now(_ist).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_tzu.utc)
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH t AS (
+                    SELECT symbol, bucket, score100, ts, MAX(ts) OVER (PARTITION BY symbol) AS last_ts
+                    FROM tc_universe_ticks WHERE ts >= %s
+                )
+                SELECT DISTINCT ON (symbol) symbol, bucket, score100, ts
+                FROM t WHERE ts = last_ts
+                ORDER BY symbol, score100 DESC NULLS LAST, bucket
+            """, (_day0,))
+            for sym, bucket, score, ts in cur.fetchall():
+                if score is None:
+                    continue
+                tc[sym] = {"bucket": bucket, "score100": round(float(score), 1),
+                           "ts": ts.astimezone(_ist).strftime("%Y-%m-%d %H:%M:%S") if ts is not None else None}
+    except Exception as e:
+        log.warning("breadth: tc capsule read failed (%s)", e)
     advances = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] > 0)
     declines = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] < 0)
     unchanged = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] == 0)
@@ -491,8 +519,10 @@ def mobile_breadth(request: Request):
         "rows": [{"symbol": r["symbol"],
                   "day_chg_pct": float(r["day_chg_pct"]) if r["day_chg_pct"] is not None else None,
                   "theme": r["theme"],
-                  "sector_day_chg_pct": float(r["sector_day_chg_pct"]) if r["sector_day_chg_pct"] is not None else None}
+                  "sector_day_chg_pct": float(r["sector_day_chg_pct"]) if r["sector_day_chg_pct"] is not None else None,
+                  "tc": tc.get(r["symbol"])}     # cc#1936: {bucket, score100, ts} or None (no tick today)
                  for r in rows],
+        "tc_basis": "best of four buckets (max score100) at each symbol's latest tc_universe_ticks tick today (IST); bands WATCH 50 / VALID 65 / STRONG 84 per TC_CANON_V2_FINAL",
         "advances": advances, "declines": declines, "unchanged": unchanged,
         "as_of": str(anchor_ts),
         "sectors": sectors,
