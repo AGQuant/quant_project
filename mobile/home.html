@@ -407,19 +407,25 @@ body[data-theme]{
 .brr .br-day.pos{color:var(--grn)}
 .brr .br-day.neg{color:var(--red)}
 /* cc#1936: the TC capsule between SYMBOL and DAY% — "<BUCKET> <score>", best of four at the latest tick
-   today. cc#1947: coloured on a CONTINUOUS red -> green line by score (see breadthTcColor), no bands.
-   No verdict word: the colour is the verdict. cc#1937: the pill does not navigate — the row tap opens the C·A·R·D strip
+   today. cc#1958: coloured by TC BAND (STRONG filled green / VALID green / WATCH muted / FAIL red, see
+   the .tcpill.tc-* rules and breadthTcBand); the band is the verdict, side never enters the colour. cc#1937: the pill does not navigate — the row tap opens the C·A·R·D strip
    in place (below). cc#1946: the capsule column sits at the row centre (symbol and Day% flex:1 each);
    the strip row under a tapped row takes the single app pill spec from scorr_card_strip.js
    (28px, 75% of a quarter, centred) with nothing sized locally. Tokens only. */
 .brr .br-tc,.brh .h-btc{min-width:96px;display:flex;justify-content:center}
-.brr .br-tc .tcpill{display:inline-block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-px5);white-space:nowrap;padding:var(--space-2) var(--space-7);border-radius:var(--radius-10);border:var(--bw-1) solid currentColor;line-height:1.3}
-/* cc#1947 (founder: "colour change high green low red", supersedes cc#1936 item 2's four bands and
-   cc#1946's --brand VALID): the pill's colour is CONTINUOUS by score -- text and border together via
-   currentColor -- set inline by breadthTcColor() as color-mix(in oklch, var(--win) P%, var(--loss)),
-   so it is always a point on the red -> green line between the set's own two tokens, never a third
-   colour. No band classes remain. The "blue border" the founder saw was the VALID band's
-   var(--gold-lo) on the active set (see the log), i.e. a fourth colour that no longer exists here. */
+.brr .br-tc .tcpill{display:inline-block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-px5);white-space:nowrap;padding:var(--space-2) var(--space-7);border-radius:var(--radius-10);border:var(--bw-1) solid currentColor;line-height:1.3;background:transparent}
+/* cc#1958 (founder 10-Sep: "TC score capsule colour could be more green or red for better
+   visibility"; supersedes cc#1947's continuous ramp): COLOUR BY TC BAND ONLY -- TC_CANON_V2_FINAL
+   (session_log 41629) STRONG >= 84, VALID >= 65, WATCH >= 50, below 50 = fail. Four bands, three
+   colours, one shape: STRONG green FILLED (14% win tint, win border+text, 800); VALID green
+   OUTLINED; WATCH neutral (muted outline, so it reads "not there yet", weight 700); FAIL red
+   OUTLINED, no tint. The side / bucket label is NOT a colour input -- BUY-* and SELL-* at the same
+   score render identically. Tokens only: --win / --loss / --muted through currentColor, the tint a
+   color-mix of the same token. Text, ordering, sort and the score are unchanged. */
+.brr .br-tc .tcpill.tc-strong{color:var(--win);background:color-mix(in srgb, var(--win) 14%, transparent);font-weight:800}
+.brr .br-tc .tcpill.tc-valid{color:var(--win)}
+.brr .br-tc .tcpill.tc-watch{color:var(--muted);font-weight:700}
+.brr .br-tc .tcpill.tc-fail{color:var(--loss)}
 /* cc#1937 (corrects cc#1936 item 4): a row tap opens the SHARED C·A·R·D strip in place under that
    row — scorr_card_strip.js, ScorrCardStripHtml, cc#789 single source, the same component as the
    approved-trade card (cc#1934) and the My Portfolio rows (cc#911). No navigation from the table.
@@ -2741,24 +2747,21 @@ function breadthRowTap(sym){
   BREADTH.strip = (BREADTH.strip === sym) ? null : sym;   /* one open at a time; same row again closes */
   renderBreadth();
 }
-/* cc#1947: CONTINUOUS colour by score, a two-point line from the set's var(--loss) (0) to var(--win)
-   (100), mixed in OKLCH (uniform lightness; passes through amber at the middle, so the 40s-60s where
-   most scores cluster stay legible -- sRGB mixing gives a muddy khaki there, HSL a harsh yellow;
-   both tried in the harness, OKLCH kept). The mix runs 0 -> 62 -> 100 as two linear legs with the
-   colour midpoint at 62, the centre of the canon WATCH band, so 48.5 sits visibly on the red side,
-   62 in the middle and 70+ on the green side (the card's own item 4), while 0 is pure loss and 100
-   pure win. Text and border share the colour through currentColor. */
-function breadthTcColor(s){
-  var v = Math.max(0, Math.min(100, Number(s)));
-  var p = v <= 62 ? (v / 62) * 50 : 50 + ((v - 62) / 38) * 50;
-  return 'color-mix(in oklch, var(--win) ' + (Math.round(p * 10) / 10) + '%, var(--loss))';
+/* cc#1958: the capsule's class is the TC BAND of score100 (already the /100 figure on the payload --
+   never re-derived from score10), and NOTHING else: bucket is read only for the text it already
+   shows. Bands per TC_CANON_V2_FINAL (session_log 41629): STRONG >= 84, VALID >= 65, WATCH >= 50,
+   below 50 = fail. Colour and weight live in the four .tcpill.tc-* rules above (tokens only);
+   nothing is set inline. Supersedes cc#1947's breadthTcColor continuous ramp. */
+function breadthTcBand(sc){
+  var v = Number(sc);
+  return v >= 84 ? 'tc-strong' : (v >= 65 ? 'tc-valid' : (v >= 50 ? 'tc-watch' : 'tc-fail'));
 }
 function breadthTcPill(x){
   var t = x.tc;
   if (!t || t.score100 == null || isNaN(Number(t.score100))) return '';   /* no tick today: nothing, never a 0 */
   var sc = Number(t.score100);
   /* cc#1937: no href — the pill is part of the row tap, which opens the C·A·R·D strip in place */
-  return '<span class="tcpill" style="color:' + breadthTcColor(sc) + '" title="best of four at ' + esc(String(t.ts || '').slice(11, 16)) + ' IST">'
+  return '<span class="tcpill ' + breadthTcBand(sc) + '" title="best of four at ' + esc(String(t.ts || '').slice(11, 16)) + ' IST">'
     + esc(String(t.bucket || '')) + ' ' + sc.toFixed(1) + '</span>';
 }
 function renderBreadth(){
