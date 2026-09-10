@@ -398,14 +398,25 @@ body[data-theme]{
 .brr .br-day.neg{color:var(--red)}
 /* cc#1936: the TC capsule between SYMBOL and DAY% — "<BUCKET> <score>", best of four at the latest tick
    today, coloured by the canon band (TC_CANON_V2_FINAL 41629): STRONG >= 84 win, VALID 65-84 gold,
-   WATCH 50-65 muted, FAIL < 50 loss. No verdict word: the colour is the verdict. The pill is the row's
-   only navigation (Trade Check, where the four buckets live). Tokens only. */
+   WATCH 50-65 muted, FAIL < 50 loss. No verdict word: the colour is the verdict. cc#1937: the pill
+   does not navigate — the row tap opens the C·A·R·D strip in place (below). Tokens only. */
 .brr .br-tc,.brh .h-btc{min-width:96px;display:flex;justify-content:center}
-.brr .br-tc a{display:inline-block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-px5);white-space:nowrap;padding:var(--space-2) var(--space-7);border-radius:var(--radius-10);border:var(--bw-1) solid currentColor;text-decoration:none;line-height:1.3}
-.brr .br-tc a.strong{color:var(--win)}
-.brr .br-tc a.valid{color:var(--gold-lo)}
-.brr .br-tc a.watch{color:var(--muted)}
-.brr .br-tc a.fail{color:var(--loss)}
+.brr .br-tc .tcpill{display:inline-block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-px5);white-space:nowrap;padding:var(--space-2) var(--space-7);border-radius:var(--radius-10);border:var(--bw-1) solid currentColor;line-height:1.3}
+.brr .br-tc .tcpill.strong{color:var(--win)}
+.brr .br-tc .tcpill.valid{color:var(--gold-lo)}
+.brr .br-tc .tcpill.watch{color:var(--muted)}
+.brr .br-tc .tcpill.fail{color:var(--loss)}
+/* cc#1937 (corrects cc#1936 item 4): a row tap opens the SHARED C·A·R·D strip in place under that
+   row — scorr_card_strip.js, ScorrCardStripHtml, cc#789 single source, the same component as the
+   approved-trade card (cc#1934) and the My Portfolio rows (cc#911). No navigation from the table.
+   LAYOUT ONLY (the cc#1070 row): buttons style themselves; this stretches them to the row width
+   and clamps them to the 44px touch minimum. */
+.brr{cursor:pointer}
+.brr:active{background:var(--panel2)}
+.brcard{display:flex;padding:var(--space-8) var(--space-2) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
+.brcard .scorr-card-strip{display:flex;gap:var(--space-8);width:100%}
+.brcard .scorr-cs-b{flex:1;text-align:center;min-height:44px}
+.brcard .sum{color:var(--muted);font-size:var(--type-11)}
 .brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
   min-height:38px;position:sticky;top:0;z-index:2;background:var(--bg,#0A0F1E);
   border-bottom:var(--bw-1) solid var(--line)}
@@ -2601,7 +2612,7 @@ function renderTape(){
    and tapeNum()/esc()/px()/pct()/cls() reused directly, not retyped. Paint-then-fill: /api/mobile/
    breadth is a real per-symbol query over the whole ~208-name universe, so it is fetched on the
    tap that opens this table, not folded into the home2 payload every page load already pays for. */
-var BREADTH = { rows: [], view: [], loaded: false, loading: false, sel: null };   /* cc#1933: sel = tapped sector (segment) or null */
+var BREADTH = { rows: [], view: [], loaded: false, loading: false, sel: null, strip: null };   /* cc#1933: sel = tapped sector or null; cc#1937: strip = symbol whose C·A·R·D row is open, or null */
 var BREADTH_SORT = { col: 'day', dir: -1 };   // biggest movers first, same default as Tape's own
 var BREADTH_COLS = [
   { key: 'sym',  label: 'Symbol',     cls: 'h-bsym' },
@@ -2663,11 +2674,31 @@ function breadthRow(x){
   // cc#910's own rule, reused: the row carries its direction as a faint tint; a null change gets
   // neither tint nor colour \u2014 unknown is not flat.
   var sgn = (x.day_chg_pct == null) ? '' : (Number(x.day_chg_pct) >= 0 ? ' up' : ' dn');
-  return '<div class="brr' + sgn + '">'
-    + '<span class="br-sym">' + esc(x.symbol) + '</span>'
+  /* cc#1937: the whole row is the tap target; data-scorr-skip keeps cc#898's universal symbol-tap
+     sheet out of the way, exactly as the My Portfolio rows do (cc#911). The strip row renders as
+     the row's sibling, so a tap on C/A/R/D never bubbles into the row toggle. */
+  var sym = String(x.symbol || '');
+  var open = BREADTH.strip === sym;
+  return '<div class="brr' + sgn + '" data-scorr-skip="1" role="button" tabindex="0" aria-expanded="' + (open ? 'true' : 'false') + '"'
+    + ' onclick="breadthRowTap(' + JSON.stringify(sym).replace(/"/g, '&quot;') + ')"'
+    + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();breadthRowTap(' + JSON.stringify(sym).replace(/"/g, '&quot;') + ');}">'
+    + '<span class="br-sym">' + esc(sym) + '</span>'
     + '<span class="br-tc">' + breadthTcPill(x) + '</span>'
     + '<span class="br-day ' + cls(x.day_chg_pct) + '">' + pct(x.day_chg_pct) + '</span>'
-    + '</div>';
+    + '</div>'
+    + (open ? '<div class="brcard">' + breadthStrip(sym) + '</div>' : '');
+}
+/* cc#1937: consumed, never re-implemented — the full-size shared strip (ScorrCardStripHtml), the same
+   call as the approved-trade card. Graceful degrade: an honest one-liner, never a dead tap. */
+function breadthStrip(sym){
+  try {
+    if (typeof window.ScorrCardStripHtml === 'function') return window.ScorrCardStripHtml(sym, '');
+  } catch (e) { /* fall through */ }
+  return '<span class="sum">Card view unavailable</span>';
+}
+function breadthRowTap(sym){
+  BREADTH.strip = (BREADTH.strip === sym) ? null : sym;   /* one open at a time; same row again closes */
+  renderBreadth();
 }
 /* cc#1936: canon bands, TC_CANON_V2_FINAL (41629): STRONG >= 84 · VALID 65-84 · WATCH 50-65 · FAIL < 50 */
 function breadthTcBand(s){ s = Number(s); return s >= 84 ? 'strong' : (s >= 65 ? 'valid' : (s >= 50 ? 'watch' : 'fail')); }
@@ -2675,8 +2706,9 @@ function breadthTcPill(x){
   var t = x.tc;
   if (!t || t.score100 == null || isNaN(Number(t.score100))) return '';   /* no tick today: nothing, never a 0 */
   var sc = Number(t.score100);
-  return '<a class="' + breadthTcBand(sc) + '" href="/m/check?sym=' + encodeURIComponent(String(x.symbol || '')) + '" title="best of four at ' + esc(String(t.ts || '').slice(11, 16)) + ' IST">'
-    + esc(String(t.bucket || '')) + ' ' + sc.toFixed(1) + '</a>';
+  /* cc#1937: no href — the pill is part of the row tap, which opens the C·A·R·D strip in place */
+  return '<span class="tcpill ' + breadthTcBand(sc) + '" title="best of four at ' + esc(String(t.ts || '').slice(11, 16)) + ' IST">'
+    + esc(String(t.bucket || '')) + ' ' + sc.toFixed(1) + '</span>';
 }
 function renderBreadth(){
   var el = document.getElementById('brbd');
@@ -2767,6 +2799,7 @@ function closeBreadth(){
   /* cc#1935 item 5 (founder 10-Sep 15:41): a tapped theme lives only for one open sheet — closing
      clears it, so the next open shows no bordered chip and the full table. */
   BREADTH.sel = null;
+  BREADTH.strip = null;   /* cc#1937 item 4: an open C·A·R·D row closes with the sheet */
 }
 
 /* cc#910: a tape chart is now a registered CHART, so it scrubs and switches range exactly like
