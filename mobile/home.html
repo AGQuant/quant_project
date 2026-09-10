@@ -6133,10 +6133,13 @@ function renderHome(d, pv){
 
   /* cc#1875 phase 1 (founder 09-Sep-2026): HOME 3rd CARD — DERIVATIVES, additive, right after THE
      BOOK and before MY PORTFOLIO. Nothing above or below this line changes. */
-  /* cc#1918 (founder 10-Sep-2026): DERIVATIVES hidden on Home — founder says it is captured
-     elsewhere. derivShellHtml(), loadDerivatives() and /api/mobile/home/derivatives untouched;
-     cc#1875 phase 2 stays pending, unchanged. */
-  // h += derivShellHtml();
+  /* cc#1981 (founder 10-Sep-2026 19:45, "unhide derivatives and option chain on Home"): the
+     cc#1918 item 2 hide is REVERSED here. THE BOOK (cc#1918 item 1) and MY PORTFOLIO (item 3)
+     stay hidden — this is a partial reversal, not a rollback of cc#1918. The card returns exactly
+     as cc#1875 shipped it: PHASE 1, index-only, expiry named, as-of = max(ts) of option_chain.
+     No new fields. IV percentile (cc#1875 phase 2 / cc#1859) is still blocked on history depth
+     and is NOT part of this card. */
+  h += derivShellHtml();
 
   /* 3 · MY PORTFOLIO — cc#911: rendered by renderPortfolio() into #pfblock, so a row tap can
      redraw just this card instead of the whole page. */
@@ -6154,7 +6157,7 @@ function renderHome(d, pv){
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
   loadIndexBook();    /* cc#1382: #heroCard3Body only exists after this paint, same as the mood letters */
   loadApprovedTrades();  /* cc#1867: #apTrBody only exists after this paint, same reason */
-  // loadDerivatives();  /* cc#1875: #derivBody only exists after this paint — cc#1918: not called while the DERIVATIVES card is hidden */
+  loadDerivatives();  /* cc#1875: #derivBody only exists after this paint — cc#1981: restored with the card */
   loadHeroPositions(); /* cc#1386: #heroPositionsBody, same reason */
   heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
   glitterSync();          /* cc#1378: sets the initial active-face class, same reason */
