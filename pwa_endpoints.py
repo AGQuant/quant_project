@@ -1355,7 +1355,7 @@ body{font-family:var(--mux-font);}
 .dt .tabs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:18px -14px 0;padding:2px 14px 6px;-webkit-mask:linear-gradient(90deg,transparent,#000 18px,#000 calc(100% - 26px),transparent)}
 .dt .tabs::-webkit-scrollbar{display:none}
 .dt .tab{flex-shrink:0;height:38px;padding:0 15px;border-radius:19px;border:1px solid var(--line);background:var(--surface);color:var(--mut);font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:7px;cursor:pointer}
-.dt .tab.on{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 6px 18px rgba(77,124,254,.35)}
+.dt .tab.on{color:var(--blue);background:color-mix(in srgb, var(--blue) 14%, var(--surface));border-color:color-mix(in srgb, var(--blue) 55%, transparent);box-shadow:0 6px 18px rgba(77,124,254,.35)}
 .dt .tab .b{font-family:var(--mono);font-size:10px;font-weight:700;background:rgba(255,255,255,.14);border-radius:8px;padding:2px 6px}
 .dt .tab:not(.on) .b{background:var(--well);color:var(--dim)}
 /* cards + position rows + KPI duo */

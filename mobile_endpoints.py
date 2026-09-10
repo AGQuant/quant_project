@@ -1329,8 +1329,8 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
   font-size:11.5px;font-weight:700;color:var(--mut);white-space:nowrap;
   text-decoration:none;font-family:inherit;cursor:pointer}
 .chip .n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim)}
-.chip.on{color:var(--txt);border-color:color-mix(in srgb, var(--blu) 55%, transparent);background:color-mix(in srgb, var(--blu) 14%, transparent)}
-.chip.on .n{color:var(--blu)}
+.chip.on{color:var(--brand);border-color:color-mix(in srgb, var(--brand) 55%, transparent);background:color-mix(in srgb, var(--brand) 14%, var(--t-panel, var(--panel)))}
+.chip.on .n{color:var(--brand)}
 .body{padding:11px 12px 0}
 .c{position:relative;background:var(--panel);border:1px solid var(--line);
   border-radius:14px;padding:13px 13px 13px 17px;margin-bottom:9px;overflow:hidden}
