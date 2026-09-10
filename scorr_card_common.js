@@ -1023,6 +1023,16 @@ window.scorrAsofStamp = function (asof) {
        BEAT/MISS tags stay at their 10px -- proportionate beside 13.5px text, not resized. */
     + 'body.mcards .rcard-body.rcard-ra{font-size:13.5px;line-height:1.45}'
     + 'body.mcards .rcard-body.rcard-ra .rcard-peer-row{line-height:1.4}'
+    /* cc#1949 (founder 10-Sep 16:15, R popup on ADANIGREEN: "half line space between sales pat
+       margin and pe, too much info makes it clumsy"). Read the stored text first: the four metric
+       lines are separated by single newlines -- there was NO margin between rows to halve. What read
+       as a gap was each row WRAPPING to a second line under pre-wrap, the padded alignment spaces
+       ("Sales    +16.6% YoY   +26.5% QoQ") pushing the wrap early and the continuation starting under
+       the dot. App only, size and line-height untouched (cc#1940): the padded spaces collapse
+       (white-space:normal), the continuation hangs under the text (hanging indent), and the blank
+       line under the title is a half line. Same four lines, same copy, one compact block. */
+    + 'body.mcards .rcard-body.rcard-ra .rcard-ra-row{white-space:normal;margin:0;padding-left:1.45em;text-indent:-1.45em}'
+    + 'body.mcards .rcard-body.rcard-ra .rcard-ra-sep{height:.5em}'
     + 'body.mcards .rcard-l1row, body.mcards .rcard-exp-row, body.mcards .rcard-peer-row{'
     + '  gap:8px}'
     + 'body.mcards .rcard-l1v, body.mcards .rcard-exp-v, body.mcards .rcard-peer-v,'
