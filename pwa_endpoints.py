@@ -489,7 +489,10 @@ PWA_JS = """
     ['/m/aicio', '\\u2299', 'AI CIO (mobile)', 'm'],
     // cc#1905: Planning (FPC) — same pre-existing gap as /m/screeners and /m/sector had before
     // cc#1907. Glyph matches this array's own desktop '/fpc' entry ('\\u25e7', line ~402).
-    ['/m/fpc', '\\u25e7', 'Planning / FPC (mobile)', 'm']
+    ['/m/fpc', '\\u25e7', 'Planning / FPC (mobile)', 'm'],
+    // cc#1961: Learn — the Knowledge Hub (web /news Learn tab) as an app page. Glyph matches its
+    // Home grid tile in home.html (same SVG family as the grid; the More sheet shows this glyph).
+    ['/m/learn', '\\u270e', 'Learn (mobile)', 'm']
     // cc#995 (founder 10-Aug): Models (mobile) REMOVED from the nav. The /m/models route and the
     // ScorrModels overlay stay (de-listed only, reachable by typed URL).
   ];

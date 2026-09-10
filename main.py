@@ -322,6 +322,7 @@ PROTECTED.add("/m/qb/holdings")   # cc#1922: Quant Basket holdings table, reache
 PROTECTED.add("/m/tcscan")   # cc#1923: TC Scanner trades (app page)
 PROTECTED.add("/m/invscan")   # cc#1923: Investment Scanner (app page)
 PROTECTED.add("/m/qbbuilder")   # cc#1925: Basket Builder (app page; route lives in mobile_scanners.py, Fable 757c8a8)
+PROTECTED.add("/m/learn")   # cc#1961: Learn (Knowledge Hub app page; route in mobile_endpoints.py) — same PROTECTED + NAV array + NAV_REGISTRY convention as every /m/ page above; NOT _PWA_INJECT_PATHS (desktop-only, see the cc#1899 note below)
 # cc#1899: /m/screeners was a working route (mobile_ext.py:630) in NONE of PROTECTED/NAV_REGISTRY/
 # NAV array before this card — a real pre-existing gap, not a deliberate omission. Filed here as
 # "grid-tile" (Home grid gtile is its only entry point per home.html/scorr_card_common.js), the
@@ -1530,6 +1531,7 @@ NAV_REGISTRY = {
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
     "/m/aicio":      ("AI CIO (mobile)",         "nav-mobile"),   # cc#1904: new page, wired via the NAV array's More sheet
+    "/m/learn":      ("Learn (mobile) — Knowledge Hub articles (knowledge_endpoints); Home grid tile + More sheet", "nav-mobile"),   # cc#1961
     "/m/fpc":        ("Planning / FPC (mobile)", "nav-mobile"),   # cc#1905: pre-existing route, gap fixed per cc#1907 default
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
