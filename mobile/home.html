@@ -425,7 +425,7 @@ body[data-theme]{
 .brr:active{background:var(--panel2)}
 .brcard{display:flex;padding:var(--space-8) var(--space-2) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
 .brcard .scorr-card-strip{display:flex;gap:var(--space-8);width:100%}
-.brcard .scorr-cs-b{flex:1}   /* cc#1941: look comes from the single app spec in scorr_card_strip.js; layout only here */
+/* cc#1941/1944: the pill look AND its row share come from the single app spec in scorr_card_strip.js; nothing set here */
 .brcard .sum{color:var(--muted);font-size:var(--type-11)}
 .brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
   min-height:38px;position:sticky;top:0;z-index:2;background:var(--bg,#0A0F1E);
@@ -1311,7 +1311,8 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 /* cc#1941: the pill LOOK (size, radius, fill, edge, letter, pressed, disabled) is defined ONCE in
    scorr_card_strip.js (body.mcards block) -- the cc#1939 spec moved there so every app consumer
    matches. This page only stretches the pills across the row. */
-.ap-card .cardstrip .scorr-cs-b{flex:1}
+/* cc#1944: the pill's row share (flex-basis 18.75%, row centred) now lives in the same single spec;
+   nothing about the pill is set here any more. */
 /* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
    Index option chain summary only (option_chain has NIFTY + BANKNIFTY, nothing else); the
    is-index-only line says so on the card itself, not just in a tooltip. Same visual language as
