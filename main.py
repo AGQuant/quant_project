@@ -876,7 +876,7 @@ from option_iv_history import router as option_iv_history_router   # cc#1858 ste
 app.include_router(option_iv_history_router)
 from screener_expectations import router as screener_expectations_router   # cc#1865: append-only screener expectations snapshot (write-on-upload hook lives in gvm_nightly.py) + V-button endpoint
 app.include_router(screener_expectations_router)
-from v8_approved_trades import router as v8_approved_trades_router   # cc#1867: Home APPROVED TRADES slider (v8_paper_positions OPEN rows, v8_book_canon formula, no second compute path)
+from v8_approved_trades import router as v8_approved_trades_router   # cc#1867 Home APPROVED TRADES slider; cc#1928 source = trade_alerts.approved_at joined to the still-OPEN V8 position (v8_book_canon formula, no second compute path)
 app.include_router(v8_approved_trades_router)
 from mobile_home_derivatives import router as mobile_home_derivatives_router   # cc#1875 phase 1: Home 3rd card, DERIVATIVES (index option chain summary), wraps oi_structure.oi_structure() -- no second formula
 app.include_router(mobile_home_derivatives_router)
