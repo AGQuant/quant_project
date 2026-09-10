@@ -1240,7 +1240,6 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 .ap-tag.b{color:var(--win)}.ap-tag.s{color:var(--loss)}
 .ap-pnl{text-align:right;line-height:1}.ap-pnl .n{font-size:var(--type-16);font-weight:800}.ap-pnl .p{font-size:var(--type-9);font-weight:700;color:var(--muted);margin-top:var(--space-2)}
 .pos{color:var(--win)}.neg{color:var(--loss)}
-.ap-meta{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-4);line-height:1.45}.ap-meta b{color:var(--ink);font-weight:700}
 .ap-rail{position:relative;height:6px;border-radius:var(--radius-3);background:var(--hi);margin:var(--space-11) 0 var(--space-4)}
 .ap-rail .fill{position:absolute;top:0;height:6px;border-radius:var(--radius-3);background:var(--win);opacity:.55}.ap-card.dn .ap-rail .fill{background:var(--loss)}
 .ap-rail .tick{position:absolute;top:-3px;width:2px;height:12px;background:var(--muted);margin-left:-1px;border-radius:var(--radius-1)}
@@ -1249,6 +1248,16 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 .ap-foot{display:flex;justify-content:space-between;gap:var(--space-6);margin-top:var(--space-8);padding-top:var(--space-7);border-top:var(--bw-1) solid var(--hi);font-size:var(--type-9);color:var(--muted)}.ap-foot b{color:var(--ink);font-weight:800}
 .ap-dots{display:flex;justify-content:center;gap:var(--space-5);padding:0 0 var(--space-8)}.ap-dots i{width:6px;height:6px;border-radius:var(--radius-3);background:var(--edge)}.ap-dots i.on{width:18px;background:var(--brand)}
 .ap-empty{margin:0 var(--space-16);padding:var(--space-12) var(--space-13);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);font-size:var(--type-115);color:var(--muted);line-height:1.6}.ap-empty b{display:block;color:var(--ink);font-weight:700;margin-bottom:var(--space-4)}
+/* cc#1931: APPROVED TRADES card R3 — founder glass notes on R2 (10-Sep 15:08): no sentence line, no
+   "% since approval" sub-line, entry and live price printed ON the bar, approval date+time kept as
+   one small line under the symbol. R3 supersedes R2 on those four points only; every R2 rule above
+   is untouched except .ap-meta (removed with the line it styled). Tokens only. */
+.ap-when{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.3}
+.ap-card .ap-rail{margin:var(--space-20) 0 var(--space-22)}   /* room for the cmp label above and the entry label below the dot's 18px box */
+.ap-rail .lb{position:absolute;font-size:var(--type-9);font-weight:800;color:var(--ink);white-space:nowrap;line-height:1;transform:translateX(-50%)}
+.ap-rail .lb.cmp{top:calc(-1 * var(--space-16))}
+.ap-rail .lb.ent{top:var(--space-16);font-weight:700;color:var(--muted)}
+.ap-rail .lb.l{transform:none}.ap-rail .lb.r{transform:translateX(-100%)}
 /* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
    Index option chain summary only (option_chain has NIFTY + BANKNIFTY, nothing else); the
    is-index-only line says so on the card itself, not just in a tooltip. Same visual language as
@@ -3278,6 +3287,8 @@ function ibkSetSym(sym){
   renderIbkDeck();
 }
 /* ══ cc#1930: APPROVED TRADES card R2 — design_refs/scorr_home_approved_cards_R2.html @ 55fd94f.
+   cc#1931 R3 on top (founder glass notes, 10-Sep 15:08): sentence line and percent sub-line gone,
+   entry + live price printed on the bar, approval date+time as one small line under the symbol.
    Replaces the cc#1867 R1 card (founder 10-Sep 13:37, "Approved trades card need to be redesign":
    ~60% of R1 was empty, the rail read as a toggle knob, and the headline P&L was from the ENGINE
    entry, not the price the founder approved at). This slot still replaces the old V8 OPEN BOOK
@@ -3320,28 +3331,41 @@ function apTrAxisPct(px, stop, target){ /* the endpoint's own axis: lower price 
   var lo = Math.min(Number(stop), Number(target)), hi = Math.max(Number(stop), Number(target));
   return Math.round(Math.max(0, Math.min(100, (Number(px) - lo) / (hi - lo) * 100)) * 10) / 10;
 }
+function apTrRailLabel(cls, pct, txt){   /* cc#1931: a price printed ON the rail; hugs the edge near either end so it never clips */
+  if (pct == null) return '';
+  var edge = pct < 10 ? ' l' : (pct > 90 ? ' r' : '');
+  return '<div class="lb ' + cls + edge + '" style="left:' + pct + '%">' + esc(txt) + '</div>';
+}
 function apTrCardHtml(p){
   var hasCmp = (p.cmp != null) && (p.marker_pct != null);
   var pnl = p.pnl_since_approval;
   var dir = (!hasCmp || pnl == null) ? '' : (Number(pnl) >= 0 ? 'up' : 'dn');
   var pnlCls = dir === 'up' ? 'pos' : (dir === 'dn' ? 'neg' : '');
+  /* cc#1931 point 4: the tick is the ENTRY the founder took — approved_price on the endpoint's own
+     stop/target axis; the engine entry (entry_pct) only when approved_price is null. The fill runs
+     tick -> live dot, so the bar reads "from my entry to now". */
   var apPct = apTrAxisPct(p.approved_price, p.stop_loss, p.target);
+  var tickPct = apPct != null ? apPct : (p.entry_pct != null ? p.entry_pct : null);
+  var tickPx = p.approved_price != null ? p.approved_price : p.entry;
   var rail = '<div class="ap-rail">'
-    + ((hasCmp && apPct != null) ? '<div class="fill" style="left:' + Math.min(apPct, p.marker_pct) + '%;width:' + (Math.round(Math.abs(p.marker_pct - apPct) * 10) / 10) + '%"></div>' : '')
-    + (p.entry_pct != null ? '<div class="tick" style="left:' + p.entry_pct + '%"></div>' : '')
-    + (hasCmp ? '<div class="dot" style="left:' + p.marker_pct + '%"></div>' : '')
+    + ((hasCmp && tickPct != null) ? '<div class="fill" style="left:' + Math.min(tickPct, p.marker_pct) + '%;width:' + (Math.round(Math.abs(p.marker_pct - tickPct) * 10) / 10) + '%"></div>' : '')
+    + (tickPct != null ? '<div class="tick" style="left:' + tickPct + '%"></div>' + apTrRailLabel('ent', tickPct, apTrInr(tickPx)) : '')
+    + (hasCmp ? '<div class="dot" style="left:' + p.marker_pct + '%"></div>' + apTrRailLabel('cmp', p.marker_pct, apTrInr(p.cmp)) : '')
     + '</div>';
   var sl = '<span class="sl">Stop<b>' + esc(apTrInr(p.stop_loss)) + '</b></span>';
   var tp = '<span class="tp">Target<b>' + esc(apTrInr(p.target)) + '</b></span>';
+  /* cc#1931 point 2: headline only — the percent sub-line is gone. The no-cmp state keeps its
+     "no live price" note (point 5: no-cmp state unchanged from R2). */
   var head = hasCmp
-    ? '<div class="n ' + pnlCls + '">' + esc(apTrSignedInr(pnl)) + '</div><div class="p">' + esc(apTrPct(p.pnl_since_approval_pct)) + ' since approval</div>'
+    ? '<div class="n ' + pnlCls + '">' + esc(apTrSignedInr(pnl)) + '</div>'
     : '<div class="n" style="color:var(--muted)">—</div><div class="p">no live price</div>';
   return '<div class="ap-card' + (dir ? ' ' + dir : '') + '">'
     + '<div class="ap-top"><div><div class="ap-sym">' + esc(p.symbol)
     + '<span class="ap-tag ' + (String(p.side || '').toUpperCase() === 'SHORT' ? 's' : 'b') + '">' + esc(apTrSideLabel(p.side)) + '</span>'
-    + (p.basket ? '<span class="ap-tag">' + esc(apTrBasketLabel(p.basket)) + '</span>' : '') + '</div></div>'
+    + (p.basket ? '<span class="ap-tag">' + esc(apTrBasketLabel(p.basket)) + '</span>' : '') + '</div>'
+    /* cc#1931 point 3: approval date+time · lot — no word "approved" (the eyebrow already says it) */
+    + '<div class="ap-when">' + esc(apTrWhenIst(p.approved_at)) + ' · 1 lot (' + esc(apTrLot(p.qty)) + ')</div></div>'
     + '<div class="ap-pnl">' + head + '</div></div>'
-    + '<div class="ap-meta">Approved <b>' + esc(apTrWhenIst(p.approved_at)) + '</b> at <b>' + esc(apTrInr(p.approved_price)) + '</b> · now <b>' + (hasCmp ? esc(apTrInr(p.cmp)) : '—') + '</b> · 1 lot (' + esc(apTrLot(p.qty)) + ')</div>'
     + rail
     + '<div class="ap-ends">' + (p.rail_left_label === 'target' ? tp + sl : sl + tp) + '</div>'
     + '<div class="ap-foot"><span>Risk left <b>' + (hasCmp ? esc(apTrInr(p.risk_left)) : '—') + '</b></span><span>Reward left <b>' + (hasCmp ? esc(apTrInr(p.reward_left)) : '—') + '</b></span><span>R:R <b>' + (hasCmp ? esc(apTrRr(p.rr_left)) : '—') + '</b></span></div>'
