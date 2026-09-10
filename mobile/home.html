@@ -396,6 +396,16 @@ body[data-theme]{
    green/red at a glance, so this one IS explicitly coloured, scoped to just this cell. */
 .brr .br-day.pos{color:var(--grn)}
 .brr .br-day.neg{color:var(--red)}
+/* cc#1936: the TC capsule between SYMBOL and DAY% — "<BUCKET> <score>", best of four at the latest tick
+   today, coloured by the canon band (TC_CANON_V2_FINAL 41629): STRONG >= 84 win, VALID 65-84 gold,
+   WATCH 50-65 muted, FAIL < 50 loss. No verdict word: the colour is the verdict. The pill is the row's
+   only navigation (Trade Check, where the four buckets live). Tokens only. */
+.brr .br-tc,.brh .h-btc{min-width:96px;display:flex;justify-content:center}
+.brr .br-tc a{display:inline-block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-px5);white-space:nowrap;padding:var(--space-2) var(--space-7);border-radius:var(--radius-10);border:var(--bw-1) solid currentColor;text-decoration:none;line-height:1.3}
+.brr .br-tc a.strong{color:var(--win)}
+.brr .br-tc a.valid{color:var(--gold-lo)}
+.brr .br-tc a.watch{color:var(--muted)}
+.brr .br-tc a.fail{color:var(--loss)}
 .brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
   min-height:38px;position:sticky;top:0;z-index:2;background:var(--bg,#0A0F1E);
   border-bottom:var(--bw-1) solid var(--line)}
@@ -2595,6 +2605,7 @@ var BREADTH = { rows: [], view: [], loaded: false, loading: false, sel: null }; 
 var BREADTH_SORT = { col: 'day', dir: -1 };   // biggest movers first, same default as Tape's own
 var BREADTH_COLS = [
   { key: 'sym',  label: 'Symbol',     cls: 'h-bsym' },
+  { key: 'tc',   label: 'TC',         cls: 'h-btc'  },   /* cc#1936: best-of-four capsule, sortable by score */
   { key: 'day',  label: 'Day %',      cls: 'h-bday' }
 ];
 /* cc#1933: the tapped sector's member set — the endpoint's own `members` list on that sector row (the
@@ -2620,7 +2631,9 @@ function breadthSortView(){
       var cmp = String(ra.symbol || '').localeCompare(String(rb.symbol || ''));
       return cmp * dir || (a - b);
     }
-    var va = tapeNum(ra.day_chg_pct), vb = tapeNum(rb.day_chg_pct);
+    var va, vb;
+    if (col === 'tc'){ va = ra.tc ? tapeNum(ra.tc.score100) : null; vb = rb.tc ? tapeNum(rb.tc.score100) : null; }
+    else { va = tapeNum(ra.day_chg_pct); vb = tapeNum(rb.day_chg_pct); }
     if (va == null && vb == null) return a - b;
     if (va == null) return 1;      // nulls last, whichever way the arrow points
     if (vb == null) return -1;
@@ -2652,8 +2665,18 @@ function breadthRow(x){
   var sgn = (x.day_chg_pct == null) ? '' : (Number(x.day_chg_pct) >= 0 ? ' up' : ' dn');
   return '<div class="brr' + sgn + '">'
     + '<span class="br-sym">' + esc(x.symbol) + '</span>'
+    + '<span class="br-tc">' + breadthTcPill(x) + '</span>'
     + '<span class="br-day ' + cls(x.day_chg_pct) + '">' + pct(x.day_chg_pct) + '</span>'
     + '</div>';
+}
+/* cc#1936: canon bands, TC_CANON_V2_FINAL (41629): STRONG >= 84 · VALID 65-84 · WATCH 50-65 · FAIL < 50 */
+function breadthTcBand(s){ s = Number(s); return s >= 84 ? 'strong' : (s >= 65 ? 'valid' : (s >= 50 ? 'watch' : 'fail')); }
+function breadthTcPill(x){
+  var t = x.tc;
+  if (!t || t.score100 == null || isNaN(Number(t.score100))) return '';   /* no tick today: nothing, never a 0 */
+  var sc = Number(t.score100);
+  return '<a class="' + breadthTcBand(sc) + '" href="/m/check?sym=' + encodeURIComponent(String(x.symbol || '')) + '" title="best of four at ' + esc(String(t.ts || '').slice(11, 16)) + ' IST">'
+    + esc(String(t.bucket || '')) + ' ' + sc.toFixed(1) + '</a>';
 }
 function renderBreadth(){
   var el = document.getElementById('brbd');
