@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Home grid · Scorr design ref scorr_home_grid_R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_home_grid_R1 — grouped, four per row, icon-first, no tile boxes.
+   Hex inlined only to render standalone; the build reads the contract tokens. */
+:root{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;--muted:#8E8A7E;--brand:#D4AF37;--glow:rgba(212,175,55,.35);--win:#3DD68C;--loss:#FF5C6C}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:80px}
+.hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--edge);position:sticky;top:0;background:var(--field);z-index:30}
+.wm{font-size:15px;font-weight:800;letter-spacing:.14em;color:var(--ink)}.wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--glow)}
+.pg{flex:1;text-align:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.slot{width:64px}
+.sec{padding:22px 16px 6px;font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px 4px;padding:0 8px}
+.tile{display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 2px;border-radius:12px;text-decoration:none;color:inherit;position:relative}
+.tile:active{background:var(--hi)}
+.ic{width:46px;height:46px;border-radius:14px;background:var(--panel);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 0 var(--glow)}
+.ic svg{width:26px;height:26px;stroke:var(--brand);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ic svg .f{fill:var(--brand);stroke:none;opacity:.22}
+.lb{font-size:11px;font-weight:600;color:var(--ink);text-align:center;line-height:1.25;max-width:84px}
+.tag{position:absolute;top:4px;right:6px;font-size:8px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 5px;border-radius:8px;background:var(--hi);border:1px solid var(--edge);color:var(--brand)}
+.tag.web{color:var(--muted)}
+.note{margin:26px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;font-size:11px;color:var(--muted);line-height:1.65}
+.note b{color:var(--ink)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600;color:var(--muted);text-decoration:none}
+.bn .i{font-size:17px}.bn.on{color:var(--brand)}
+</style></head><body>
+<div class="hdr"><span class="wm">SC<i>O</i>RR</span><div class="pg">Home</div><div class="slot"></div></div>
+
+<div class="sec">Market</div>
+<div class="grid">
+  <a class="tile" href="/m/intel"><div class="ic"><svg viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="16" rx="2"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/></svg></div><div class="lb">Intel</div></a>
+  <a class="tile" href="/m/sector"><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M12 12l8-4.6M12 12v9M12 12L4 7.4"/></svg></div><div class="lb">Sector Intel</div></a>
+  <a class="tile" href="/m/results"><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 19h16"/><rect class="f" x="6" y="11" width="3" height="8"/><rect x="6" y="11" width="3" height="8"/><rect class="f" x="11" y="7" width="3" height="12"/><rect x="11" y="7" width="3" height="12"/><rect class="f" x="16" y="4" width="3" height="15"/><rect x="16" y="4" width="3" height="15"/></svg></div><div class="lb">Results</div></a>
+  <a class="tile" href="/m/qb"><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M4 9h16l-1.5 10h-13z"/><path d="M4 9h16l-1.5 10h-13z"/><path d="M8 9V6a4 4 0 018 0v3"/></svg></div><div class="lb">Baskets</div></a>
+</div>
+
+<div class="sec">Analytics</div>
+<div class="grid">
+  <a class="tile" href="/m/gvm"><div class="ic"><svg viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div><div class="lb">GVM</div></a>
+  <a class="tile" href="/m/screeners"><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16M6 10h12M8 15h8M10 20h4"/></svg></div><div class="lb">Screeners</div></a>
+  <a class="tile" href="/m/check#scan"><div class="ic"><svg viewBox="0 0 24 24"><circle class="f" cx="11" cy="11" r="6"/><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8 11h6M11 8v6"/></svg></div><div class="lb">TC Scanner</div></a>
+  <a class="tile" href="/inv-scanner"><span class="tag web">web</span><div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 13.5l2-2.5 1.5 1.5 2.5-3"/></svg></div><div class="lb">Investment Scanner</div></a>
+  <a class="tile" href="/m/check"><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div><div class="lb">Trade Check</div></a>
+  <a class="tile" href="/m/v8"><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 17l5-6 4 3 7-8"/><path d="M15 6h5v5"/></svg></div><div class="lb">V8 Signals</div></a>
+  <a class="tile" href="/m/mf"><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M12 3a9 9 0 019 9h-9z"/><path d="M12 3a9 9 0 019 9h-9z"/><path d="M12 3a9 9 0 100 18 9 9 0 007-3.3"/></svg></div><div class="lb">Mutual Funds</div></a>
+  <a class="tile" href="/m/fpc"><div class="ic"><svg viewBox="0 0 24 24"><path d="M7 4h9M7 8h9M9 8c4 0 6 2 6 5s-3 5-7 5l6 6"/></svg></div><div class="lb">Planning</div></a>
+</div>
+
+<div class="sec">My Scorr</div>
+<div class="grid">
+  <a class="tile" href="/m/myportfolio"><div class="ic"><svg viewBox="0 0 24 24"><rect class="f" x="3" y="7" width="18" height="13" rx="2"/><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M3 12h18"/></svg></div><div class="lb">My Portfolio</div></a>
+  <a class="tile" href="/m/myalerts"><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M6 16V11a6 6 0 0112 0v5l2 2H4z"/><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"/><path d="M10 21h4"/></svg></div><div class="lb">My Alerts</div></a>
+  <a class="tile" href="/m/mywatchlist"><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.1-5.5-2.9L6.5 20l1-6.1L3 9.5l6.3-.9z"/><path d="M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.1-5.5-2.9L6.5 20l1-6.1L3 9.5l6.3-.9z"/></svg></div><div class="lb">My Watchlist</div></a>
+  <a class="tile" href="/m/holdings"><div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></div><div class="lb">My Trades</div></a>
+  <a class="tile" href="/trades"><span class="tag web">web</span><div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg></div><div class="lb">Wall of Trades</div></a>
+  <a class="tile" href="/m/alerts#new"><div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg></div><div class="lb">Custom Alert</div></a>
+  <a class="tile" href="/m/health"><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 12h4l2-5 4 10 2-5h4"/></svg></div><div class="lb">Portfolio Health</div></a>
+  <a class="tile" href="/cio"><span class="tag web">web</span><div class="ic"><svg viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg></div><div class="lb">AI CIO</div></a>
+</div>
+
+<div class="note"><b>What changed.</b> Three groups with headings instead of one flat list. Four tiles per row, icon first, label under, no box around the tile. Gold line icons on a small dark disc. A "web" tag marks the tiles that still open the web page. Hidden tiles (Digest, Index Intel, V9, V10, V14) stay hidden. The Dashboard tile is gone here because My Scorr <em>is</em> the dashboard — the four My entries sit in the grid directly; tell me if you want the tile kept as well.</div>
+
+<nav class="bnav">
+  <a class="bn on" href="#"><span class="i">◧</span>Home</a>
+  <a class="bn" href="#"><span class="i">△</span>V8</a>
+  <a class="bn" href="#"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="#"><span class="i">◎</span>Check</a>
+  <a class="bn" href="#"><span class="i">◬</span>Alerts</a>
+</nav>
+</body></html>
