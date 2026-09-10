@@ -42,12 +42,18 @@ DO_NOT_TOUCH honoured: trade_wall_approved.py's builder is imported read-only (i
     untouched.
 """
 import logging
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter
 
-from mobile_endpoints import _conn
+from mobile_endpoints import _conn, _ist_now
 from trade_wall_approved import approved_book   # cc#1957: THE approved-book builder, not a copy
+
+try:
+    from nse_holidays import is_trading_day as _is_trading_day   # cc#1962: prev-close date reconciliation
+except Exception:   # pragma: no cover
+    _is_trading_day = None
 
 log = logging.getLogger("scorr.v8_approved_trades")
 router = APIRouter(tags=["v8-approved-trades"])
@@ -55,6 +61,19 @@ router = APIRouter(tags=["v8-approved-trades"])
 
 def _f(v) -> Optional[float]:
     return None if v is None else float(v)
+
+
+def _prev_session(today: date) -> Optional[date]:
+    """cc#1962: the immediately preceding NSE trading day (weekends + nse_holidays), or None when the
+    holiday module is unavailable -- the flag then reads None, never a guess."""
+    if _is_trading_day is None:
+        return None
+    d = today - timedelta(days=1)
+    for _ in range(10):
+        if _is_trading_day(d):
+            return d
+        d -= timedelta(days=1)
+    return None
 
 
 def _iso_ist(stamp) -> Optional[str]:
@@ -77,6 +96,23 @@ def approved_trades():
         if syms:
             cur.execute("SELECT symbol FROM futures_universe WHERE is_active AND symbol = ANY(%s)", (syms,))
             futs = {x[0] for x in cur.fetchall()}
+        # cc#1962 DAY P&L: previous close per symbol from raw_prices -- the SAME DISTINCT ON shape
+        # mobile_home2.mobile_breadth uses (most recent row BEFORE today), with its DATE exposed so the
+        # sheet can state its own basis: raw_prices coverage is uneven and "most recent earlier close"
+        # is not always yesterday's. A symbol with no prior row keeps None everywhere -- never 0.
+        today = _ist_now().date()
+        prev_session = _prev_session(today)
+        pclose = {}
+        if syms:
+            try:
+                cur.execute("""SELECT DISTINCT ON (symbol) symbol, price_date, close
+                               FROM raw_prices
+                               WHERE symbol = ANY(%s) AND price_date < %s
+                               ORDER BY symbol, price_date DESC""", (syms, today))
+                for sym_, pd_, close_ in cur.fetchall():
+                    pclose[sym_] = {"close": _f(close_), "date": pd_}
+            except Exception as e:
+                log.warning("cc#1962 prev-close lookup failed: %s", e)
         # V8 rows only: basket tag + engine entry for the rail tick, on the approve flow's own key
         # (source_ref = symbol@entry_ts second-precision, cc#1928). SELECT only.
         v8 = {}
@@ -117,6 +153,18 @@ def approved_trades():
         reward_left = round((target - cmp_v) * mult * sign, 2) if (cmp_v is not None and target is not None) else None
         rr_left = round(reward_left / risk_left, 1) if (risk_left and reward_left is not None and risk_left > 0) else None
         potential_left = reward_left
+        # cc#1962: the % beside "value left" = the move still required from the CURRENT price to the
+        # target, sign-aware -- the same basis value-left measures. Stated on the sheet itself.
+        reward_left_pct = (round((target - cmp_v) / cmp_v * 100.0 * sign, 2)
+                           if (cmp_v not in (None, 0) and target is not None) else None)
+        # cc#1962 DAY P&L against the prior close: same mult (position qty, or 1 per share) and sign.
+        pc = pclose.get(sym) or {}
+        prev_close, prev_date = pc.get("close"), pc.get("date")
+        day_pnl = day_pnl_pct = None
+        if cmp_v is not None and prev_close not in (None, 0):
+            day_pnl = round((cmp_v - prev_close) * mult * sign, 2)
+            day_pnl_pct = round((cmp_v - prev_close) / prev_close * 100.0 * sign, 2)
+        prev_is_prior_session = (None if (prev_date is None or prev_session is None) else (prev_date == prev_session))
 
         marker_pct = entry_pct = None
         if stop is not None and target is not None and stop != target:
@@ -129,7 +177,8 @@ def approved_trades():
         out.append({
             "symbol": sym, "side": side, "instrument": instrument,                      # cc#1957
             "engine": r.get("engine"), "basket": (lk or {}).get("basket"),
-            "opened_at": (lk["entry_ts"].isoformat() if (lk and lk.get("entry_ts")) else None),
+            # cc#1962: entry_ts is naive IST -- stamped +05:30 like approved_at so the sheet's IST clock holds on any device
+            "opened_at": ((lk["entry_ts"].replace(microsecond=0).isoformat() + "+05:30") if (lk and lk.get("entry_ts")) else None),
             "approved_at": _iso_ist(r.get("approved_at")), "approved_via": r.get("approved_via"),
             "alert_id": r.get("id"),
             "entry": entry, "entry_pct": entry_pct,
@@ -141,9 +190,22 @@ def approved_trades():
             "qty_basis": r.get("qty_basis"), "per_share": qty is None,                   # cc#1957
             "pnl_since_approval": _f(r.get("pnl")), "pnl_since_approval_pct": _f(r.get("pnl_pct")),   # the builder's own
             "risk_left": risk_left, "reward_left": reward_left, "rr_left": rr_left,
+            "reward_left_pct": reward_left_pct,                                            # cc#1962
+            "day_pnl": day_pnl, "day_pnl_pct": day_pnl_pct,                                # cc#1962: vs prev close
+            "prev_close": prev_close,                                                       # cc#1962
+            "prev_close_date": (prev_date.isoformat() if prev_date else None),             # cc#1962: the basis, stated
+            "prev_close_is_prior_session": prev_is_prior_session,                          # cc#1962: True = the immediately preceding trading day
         })
+    n_prev = sum(1 for p in out if p["prev_close"] is not None)
+    n_prior = sum(1 for p in out if p["prev_close_is_prior_session"] is True)
     return {
         "count": len(out), "positions": out, "counts": counts,
+        "prev_close_basis": {   # cc#1962: how many rows resolve a prev close, and how many of those are the prior session
+            "rows_with_prev_close": n_prev, "rows_prior_session": n_prior,
+            "prior_session": (prev_session.isoformat() if prev_session else None),
+            "rule": "raw_prices DISTINCT ON (symbol) price_date < today ORDER BY price_date DESC (mobile_breadth shape); "
+                    "prev_close_date on each row says which close it is",
+        },
         "approved_alerts_total": int(book.get("count") or 0),   # every approval, open or closed
         "source": ("trade_wall_approved.approved_book() -- every approved alert (all engines), rows whose "
                    "resolved close state is OPEN (cc#1957); never the paper book"),
