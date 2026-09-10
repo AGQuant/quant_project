@@ -309,7 +309,7 @@
       var body=window.ScorrMarkerFlagDetailHtml ? window.ScorrMarkerFlagDetailHtml(fired,null,d.legend||null)
              : '<div class="empty">Marker renderer unavailable</div>';
       var when=d.star_date?('session '+newsEsc(d.star_date)+(d.as_of_is_last_session?' (last session with markers)':'')):'';
-      host.innerHTML='<div id="qaFlagsBox"><div class="qa-flags-hd">V8 markers'+(when?' · '+when:'')+' · same flags as the V8 page</div>'+body+'</div>';
+      host.innerHTML='<div id="qaFlagsBox"><div class="qa-flags-hd">V8 markers'+(when?' · '+when:'')+' · shown for the symbol, not for a position (every family that fired, no side filter) · same flags as the V8 page</div>'+body+'</div>';
     }).catch(function(e){
       if(host.dataset.cur!==key)return;
       host.innerHTML='<div class="empty" style="padding:16px">Could not load markers ('+newsEsc(e&&e.message||e)+').</div>';
