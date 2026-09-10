@@ -1680,6 +1680,10 @@ RESULTS_CARD_JS = """
     + '.rcard-st-u{color:var(--amber, #c98a12);background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45)}'
     + '.rcard-st-t{color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3)}'
     + '.rcard-body{font-size:13px;line-height:1.55;white-space:pre-wrap;margin-top:6px}'
+    /* cc#1949: the Result Analysis header is rendered as rows (see _metricHeader); on the web these
+       rules reproduce the old pre-wrap text exactly -- one line box per row, one per blank line. */
+    + '.rcard-ra-row{white-space:pre-wrap}'
+    + '.rcard-ra-sep{height:1.55em}'
     /* cc#1429: the RESULT ANALYSIS block's +2px lives in scorr_card_common.js's body.mcards scope
        (mobile app only, /m/* — the founder's screenshot), not in this universal block. This shared
        CSS also serves v8_dashboard.html's desktop R-card, and out_of_scope says desktop stays
@@ -2027,7 +2031,14 @@ RESULTS_CARD_JS = """
       if (/^[\\u{1F7E2}\\u{1F534}\\u{1F7E1}]/u.test(L.trim())) metrics++;
       if (metrics >= 4) break;                        // header ends after the 4 metric lines
     }
-    return out.join('\\n');
+    // cc#1949: rows, not one pre-wrap text. Each non-blank line is its own .rcard-ra-row; a blank
+    // line becomes a .rcard-ra-sep. Byte-identical on the web (the row rules below keep pre-wrap and
+    // a one-line separator); the app override in scorr_card_common.js collapses the padded spaces and
+    // hangs the wrapped continuation under the text, which is what makes the four metric rows read as
+    // one compact block instead of four two-line paragraphs. The copy of every line is unchanged.
+    return out.map(function(L){
+      return L.trim() ? '<div class=\"rcard-ra-row\">' + esc(L) + '</div>' : '<div class=\"rcard-ra-sep\"></div>';
+    }).join('');
   }
   function v2Html(v2){
     if (!v2 || !v2.has_analysis || !v2.analysis) return '';
@@ -2311,7 +2322,7 @@ RESULTS_CARD_JS = """
         // cc#788 LEVEL 1: metric header + peer BEAT/MISS rows, exactly as they rendered before.
         // The long-form editorial no longer sits inline — it moved behind the Level-2 button below.
         h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
-          + '<div class=\"rcard-body rcard-ra\">'+esc(_metricHeader(d.result_analysis, d.v2))+'</div>'   // cc#1429: +2px, scoped
+          + '<div class=\"rcard-body rcard-ra\">'+_metricHeader(d.result_analysis, d.v2)+'</div>'   // cc#1429: +2px, scoped; cc#1949: _metricHeader now returns escaped row markup
           + peerHtml(d && d.peer_comparison);   // cc#697: peer line merged INTO the Result Analysis block
       } else {
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
