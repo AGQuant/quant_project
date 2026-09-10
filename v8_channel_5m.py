@@ -217,6 +217,16 @@ def compute_channels(conn, symbols: List[str]) -> Dict[str, Any]:
             return {"window_start": None, "fits": {}, "written": 0}
         bars_by_symbol = _fetch_bars(cur, symbols, window_start)
 
+    # cc#1924 (Fable ruling 5968, option 2): intraday_prices.ts is timestamp WITHOUT time zone --
+    # naive IST wall time -- and window_start is a bare date, but v8_channel_5m.ts / window_start
+    # are TIMESTAMPTZ. Passed through naked, Postgres read the IST wall time as UTC and every row
+    # landed 5h30 late (the 15:35 IST bar stored as 15:35 UTC = 21:05 IST; found on the first
+    # live tick 10-Sep, cc#1893). Localise once, here, at the only write -- the same fix
+    # tc_v4_dual._tc_tick_today() uses for the same table shape. Rows written before this
+    # change were re-stamped once (ts - 5h30) on the card.
+    # IST is a pytz zone: .replace(tzinfo=IST) would attach the +05:53 LMT offset -- localize() is the
+    # correct pytz call and yields +05:30.
+    window_start_tz = IST.localize(datetime.combine(window_start, datetime.min.time()))
     fits: Dict[str, Any] = {}
     rows = []
     for sym in symbols:
@@ -224,8 +234,11 @@ def compute_channels(conn, symbols: List[str]) -> Dict[str, Any]:
         if fit is None:
             continue
         fits[sym] = fit
-        rows.append((sym, fit["latest_ts"], round(fit["upper_today"], 4), round(fit["lower_today"], 4),
-                      round(fit["slope"], 6), fit["n_bars"], window_start))
+        latest_ts = fit["latest_ts"]
+        if latest_ts.tzinfo is None:
+            latest_ts = IST.localize(latest_ts)
+        rows.append((sym, latest_ts, round(fit["upper_today"], 4), round(fit["lower_today"], 4),
+                      round(fit["slope"], 6), fit["n_bars"], window_start_tz))
 
     written = 0
     if rows:
@@ -301,7 +314,9 @@ def evaluate_triangle_markers(conn, fits: Dict[str, Any]) -> Dict[str, Any]:
 
 def _purge_old(conn) -> Optional[int]:
     """DELETE rows older than PURGE_RETENTION_DAYS. Called once per day, on the last tick — same
-    "ship the purge WITH the writer" convention as tc_universe_ticks.run_tick()."""
+    "ship the purge WITH the writer" convention as tc_universe_ticks.run_tick().
+    cc#1924: this NOW() comparison is only right because ts is now written as a real IST instant
+    (see compute_channels); before that fix every row read 5h30 younger than it was."""
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM v8_channel_5m WHERE ts < NOW() - INTERVAL '%s days'" % PURGE_RETENTION_DAYS)
