@@ -31,7 +31,7 @@
 .lst{margin:var(--space-10) var(--space-16) 0}
 .art{display:block;text-decoration:none;color:inherit;cursor:pointer}
 .art .t{font-size:var(--type-125);font-weight:800;line-height:1.35}
-.art .m{display:flex;flex-wrap:wrap;gap:var(--space-5);align-items:center;font-size:var(--type-95);color:var(--muted);margin-top:var(--space-4)}
+.art .meta{display:flex;flex-wrap:wrap;gap:var(--space-5);align-items:center;font-size:var(--type-95);color:var(--muted);margin-top:var(--space-4)}
 .art .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted)}
 .art .tag.d1{color:var(--win)}.art .tag.d2{color:var(--brand)}.art .tag.d3{color:var(--loss)}
 .art .sum{font-size:var(--type-11);color:var(--muted);line-height:1.5;margin-top:var(--space-5)}
@@ -91,7 +91,7 @@ function chipsHtml(){
 function artHtml(a){
   return '<div class="c slab dense art" data-slug="'+esc(a.slug)+'">'
     + '<div class="t">'+esc(a.title)+'</div>'
-    + '<div class="m"><span class="tag">'+esc(a.category)+'</span>'
+    + '<div class="meta"><span class="tag">'+esc(a.category)+'</span>'
     + (a.difficulty ? '<span class="tag '+diffCls(a.difficulty)+'">'+esc(a.difficulty)+'</span>' : '')
     + '<span>'+(a.reading_time_min!=null ? esc(a.reading_time_min)+' min read' : '')+'</span></div>'
     + (a.summary ? '<div class="sum">'+esc(a.summary)+'</div>' : '')
