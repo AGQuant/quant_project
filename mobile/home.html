@@ -338,13 +338,23 @@ body[data-theme]{
   flex-direction:column;overscroll-behavior:contain}
 .tpo.open{display:flex}
 .tpo-hd{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-14) var(--space-14) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
-.tpo-hd h2{font-size:var(--type-17);font-weight:800;flex:1}
+.tpo-hd h2{font-size:var(--type-17);font-weight:800;flex:1;color:var(--txt)}
+/* cc#1943 ROOT CAUSE (founder 10-Sep 15:55, "Global tape design also bit off in light theme"): .tpo IS in the
+   bridge list above, so every rule that NAMES a colour (.s2 date line, .lv, .cg, .tpo-x) resolves to the
+   active set's ink through --txt. The sheet title (.tpo-hd h2) and the symbol name (.tpr .s1) named NO
+   colour, so they INHERITED -- and on /m/* the html element is pinned data-theme="dark" (main.py
+   _MOBILE_APP_DARK), so scorr_theme_r5.css's shell rule `:root:root:not([data-theme="light"]) body{color:
+   var(--r5-chalk)}` paints every inherited text #EAF0FA whatever light SET body[data-theme] carries.
+   Chalk on the pale up/down row tint = the near-white names in the screenshot. Fix = name the colour:
+   var(--txt) is the bridged --t-ink, i.e. the set's own --ink -- dark ink on light sets, #F5F2EA on GOLD
+   NIGHT, so dark-on-dark is unchanged. The same inherited-chalk gap existed on the A/D sheet's symbol
+   cell (.brr .br-sym); fixed the same one-line way below. */
 .tpo-x{min-width:44px;min-height:44px;font-size:var(--type-20);color:var(--txt);background:none;
   border:0;cursor:pointer;font-family:inherit}
 .tpo-bd{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 var(--space-12) var(--space-24)}
 .tpr{display:flex;align-items:center;gap:var(--space-9);padding:var(--space-11) var(--space-2);border-bottom:var(--bw-1) solid var(--line);min-height:52px}
 .tpr .nm2{flex:1;min-width:0}
-.tpr .s1{font-size:var(--type-135);font-weight:800}
+.tpr .s1{font-size:var(--type-135);font-weight:800;color:var(--txt)}   /* cc#1943: was inheriting; see the note on .tpo-hd h2 */
 .tpr .s2{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--txt);margin-top:var(--space-2)}
 .tpr .lv{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:700;text-align:right}
 .tpr .cg{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-12);font-weight:800;
@@ -387,7 +397,7 @@ body[data-theme]{
 .brr{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-10) var(--space-2);
   border-bottom:var(--bw-1) solid var(--line);min-height:46px}
 .brr .br-sym{flex:1;min-width:0;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-11);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  font-size:var(--type-11);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt)}   /* cc#1943: same inherited-chalk gap as the tape's .s1 */
 .brr .br-day{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
   font-weight:700;text-align:right;min-width:54px}
 /* cls()'s own pos/neg classes have no colour rule anywhere else in this file (checked before
