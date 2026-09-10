@@ -1258,10 +1258,14 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 .ap-rail .lb.cmp{top:calc(-1 * var(--space-16))}
 .ap-rail .lb.ent{top:var(--space-16);font-weight:700;color:var(--muted)}
 .ap-rail .lb.l{transform:none}.ap-rail .lb.r{transform:translateX(-100%)}
-/* cc#1932: the whole card is a link to the symbol's Trade Check C·A·R·D (/m/check?sym=SYM); the footer
-   carries a small brand-colour "C·A·R·D ›" chip after R:R so the tap is discoverable. Tokens only. */
-a.ap-card{display:block;color:inherit;text-decoration:none;-webkit-tap-highlight-color:transparent}
-.ap-foot .ap-go{color:var(--brand);font-size:var(--type-9);font-weight:800;white-space:nowrap}
+/* cc#1934 (reverses cc#1932): the card is a plain <div> again — no navigation. Its last row is the
+   SHARED C·A·R·D strip (scorr_card_strip.js, cc#789 single source; already loaded on /m/home via
+   _MOBILE_HEAD, bridge tokens above). LAYOUT ONLY here, the cc#1070 row: the buttons style
+   themselves from the shared file; this page stretches the strip to the row width and clamps the
+   buttons to the 44px touch minimum, exactly as the V8 position card sheet does. */
+.ap-card .cardstrip{margin-top:var(--space-8);padding-top:var(--space-7);border-top:var(--bw-1) solid var(--hi);display:flex}
+.ap-card .cardstrip .scorr-card-strip{display:flex;gap:var(--space-8);width:100%}
+.ap-card .cardstrip .scorr-cs-b{flex:1;text-align:center;min-height:44px}
 /* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
    Index option chain summary only (option_chain has NIFTY + BANKNIFTY, nothing else); the
    is-index-only line says so on the card itself, not just in a tooltip. Same visual language as
@@ -3397,9 +3401,13 @@ function apTrCardHtml(p){
   var head = hasCmp
     ? '<div class="n ' + pnlCls + '">' + esc(apTrSignedInr(pnl)) + '</div>'
     : '<div class="n" style="color:var(--muted)">—</div><div class="p">no live price</div>';
-  /* cc#1932: the card IS the link — the symbol's Trade Check C·A·R·D, Check tab, symbol pre-loaded
-     (check.html boot reads ?sym= and defaults to the tc mode; no hash needed). */
-  return '<a class="ap-card' + (dir ? ' ' + dir : '') + '" href="/m/check?sym=' + encodeURIComponent(String(p.symbol || '')) + '">'
+  /* cc#1934: the C·A·R·D on this card is the shared four-button strip (Chart / Analysis / Result /
+     Derivative Cockpit) — window.ScorrCardStripHtml, cc#789 single source, never re-implemented.
+     D shows only when the symbol is in the futures universe; the component decides that itself.
+     Graceful degrade: no strip function at render time => no strip row, never a dead tap. */
+  var strip = (typeof window.ScorrCardStripHtml === 'function')
+    ? '<div class="cardstrip">' + window.ScorrCardStripHtml(String(p.symbol || ''), '') + '</div>' : '';
+  return '<div class="ap-card' + (dir ? ' ' + dir : '') + '">'
     + '<div class="ap-top"><div><div class="ap-sym">' + esc(p.symbol)
     + '<span class="ap-tag ' + (String(p.side || '').toUpperCase() === 'SHORT' ? 's' : 'b') + '">' + esc(apTrSideLabel(p.side)) + '</span>'
     + (p.basket ? '<span class="ap-tag">' + esc(apTrBasketLabel(p.basket)) + '</span>' : '') + '</div>'
@@ -3408,26 +3416,9 @@ function apTrCardHtml(p){
     + '<div class="ap-pnl">' + head + '</div></div>'
     + rail
     + '<div class="ap-ends">' + (p.rail_left_label === 'target' ? tp + sl : sl + tp) + '</div>'
-    + '<div class="ap-foot"><span>Risk left <b>' + (hasCmp ? esc(apTrInr(p.risk_left)) : '—') + '</b></span><span>Reward left <b>' + (hasCmp ? esc(apTrInr(p.reward_left)) : '—') + '</b></span><span>R:R <b>' + (hasCmp ? esc(apTrRr(p.rr_left)) : '—') + '</b></span><span class="ap-go">C·A·R·D ›</span></div>'
-    + '</a>';
-}
-/* cc#1932: swipe-vs-tap guard. A horizontal swipe across the deck must not open a card. Two checks,
-   either one swallows the click: the deck's scrollLeft moved more than 8px since touchstart, OR the
-   finger travelled more than 8px in X during the touch (catches a short swipe that scroll-snap pulls
-   back to the same card, where the scroll delta ends at 0). */
-var AP_TR_T = { x0: null, sl0: null, swiped: false };
-function apTrTouchStart(deck, e){
-  var t = e && e.touches && e.touches[0];
-  AP_TR_T = { x0: t ? t.clientX : null, sl0: deck.scrollLeft, swiped: false };
-}
-function apTrTouchMove(e){
-  var t = e && e.touches && e.touches[0];
-  if (t && AP_TR_T.x0 != null && Math.abs(t.clientX - AP_TR_T.x0) > 8) AP_TR_T.swiped = true;
-}
-function apTrTap(e, deck){
-  var moved = AP_TR_T.sl0 != null && Math.abs(deck.scrollLeft - AP_TR_T.sl0) > 8;
-  if (AP_TR_T.swiped || moved){ e.preventDefault(); e.stopPropagation(); AP_TR_T.swiped = false; return false; }
-  return true;
+    + '<div class="ap-foot"><span>Risk left <b>' + (hasCmp ? esc(apTrInr(p.risk_left)) : '—') + '</b></span><span>Reward left <b>' + (hasCmp ? esc(apTrInr(p.reward_left)) : '—') + '</b></span><span>R:R <b>' + (hasCmp ? esc(apTrRr(p.rr_left)) : '—') + '</b></span></div>'
+    + strip
+    + '</div>';
 }
 function apTrShellHtml(){
   return '<div class="approved-slider"><div class="ap-hdr"><span class="eye">APPROVED TRADES</span><div class="rule"></div><span class="cnt" id="apTrCount"></span></div>'
@@ -3456,7 +3447,7 @@ function loadApprovedTrades(){
       return;
     }
     body.className = '';
-    body.innerHTML = '<div class="ap-deck" id="apTrTrack" onscroll="apTrDots()" ontouchstart="apTrTouchStart(this, event)" ontouchmove="apTrTouchMove(event)" onclick="return apTrTap(event, this)">' + positions.map(apTrCardHtml).join('') + '</div>'
+    body.innerHTML = '<div class="ap-deck" id="apTrTrack" onscroll="apTrDots()">' + positions.map(apTrCardHtml).join('') + '</div>'
       + (positions.length > 1 ? '<div class="ap-dots" id="apTrDots">' + positions.map(function(_, i){ return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>' : '');
   }).catch(function(){
     var body = document.getElementById('apTrBody');
