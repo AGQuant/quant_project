@@ -114,6 +114,7 @@ from smartgain_daily_m2m import router as smartgain_daily_m2m_router
 from smartgain_app_portfolio import router as smartgain_app_portfolio_router   # cc#1895: My Portfolio section page
 from trade_alerts_app import router as trade_alerts_app_router   # cc#1896: My Alerts section page
 from mobile_watchlist_stub import router as mobile_watchlist_stub_router   # cc#1897: My Watchlist section page (static, no store)
+from mobile_dash_hub import router as mobile_dash_hub_router   # cc#1916: /m/dash app Dashboard hub (Fable page b4ade10 + router ae0b0c3)
 from qb_app_mobile import router as qb_app_mobile_router   # cc#1892: /api/mobile/qb_app — Quant Baskets app section
 from screeners_app_mobile import router as screeners_app_mobile_router   # cc#1899: /api/mobile/screeners_app — Screeners app section
 from sector_app_mobile import router as sector_app_mobile_router   # cc#1900: /api/mobile/sector_app — Sector Intel app section
@@ -312,6 +313,7 @@ PROTECTED.add("/m/holdings")   # cc#1779: My Portfolio full page — PROTECTED-o
 PROTECTED.add("/m/myportfolio")   # cc#1895: Dashboard-section My Portfolio page — same PROTECTED-only convention as /m/holdings
 PROTECTED.add("/m/myalerts")   # cc#1896: Dashboard-section My Alerts page — same PROTECTED-only convention
 PROTECTED.add("/m/mywatchlist")   # cc#1897: Dashboard-section My Watchlist page — same PROTECTED-only convention
+PROTECTED.add("/m/dash")   # cc#1916: app Dashboard hub (My Portfolio / My Alerts / My Watchlist / My Trades)
 # cc#1899: /m/screeners was a working route (mobile_ext.py:630) in NONE of PROTECTED/NAV_REGISTRY/
 # NAV array before this card — a real pre-existing gap, not a deliberate omission. Filed here as
 # "grid-tile" (Home grid gtile is its only entry point per home.html/scorr_card_common.js), the
@@ -915,6 +917,7 @@ app.include_router(mobile_ext_router)
 app.include_router(smartgain_app_portfolio_router)   # cc#1895: /m/myportfolio + /api/mobile/myportfolio
 app.include_router(trade_alerts_app_router)   # cc#1896: /m/myalerts + /api/mobile/myalerts
 app.include_router(mobile_watchlist_stub_router)   # cc#1897: /m/mywatchlist (static, no backing store)
+app.include_router(mobile_dash_hub_router)   # cc#1916: /m/dash — Home grid Dashboard tile now opens the app hub, not the web /dashboard
 app.include_router(qb_app_mobile_router)   # cc#1892: /api/mobile/qb_app (mobile/qb.html's new data source)
 app.include_router(screeners_app_mobile_router)   # cc#1899: /api/mobile/screeners_app (mobile/screeners.html's new data source)
 app.include_router(sector_app_mobile_router)   # cc#1900: /api/mobile/sector_app (mobile/sector.html's new condensed summary, additive)
@@ -1499,6 +1502,7 @@ NAV_REGISTRY = {
     "/m/myportfolio": ("My Portfolio (mobile, Dashboard section)", "nav-mobile"),   # cc#1895, tier fixed cc#1907
     "/m/myalerts":    ("My Alerts (mobile, Dashboard section)",    "nav-mobile"),   # cc#1896, tier fixed cc#1907
     "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "nav-mobile"),   # cc#1897, tier fixed cc#1907
+    "/m/dash":        ("Dashboard hub (mobile) — My Portfolio / My Alerts / My Watchlist / My Trades; Home grid Dashboard tile", "nav-mobile"),   # cc#1916 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)
     "/m/screeners":  ("Screeners (mobile)",     "nav-mobile"),   # cc#1899, tier fixed cc#1907
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
