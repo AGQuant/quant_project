@@ -52,6 +52,11 @@
     + '.qa-tcbtn:hover{border-color:var(--blu,#4d7cfe)}'
     + '.qa-tcbtn.trade.on{background:var(--grn,#0a9e63);color:#fff;border-color:var(--grn,#0a9e63)}'
     + '.qa-tcbtn.invest.on{background:var(--pulse, #7c3aed);color:#fff;border-color:var(--pulse, #7c3aed)}'
+    /* cc#1976: the third footer button. Modifier `.flags`, the same family as .trade/.invest; the
+       active fill is the markers' own neutral blue (the colour ScorrMarkerFlagColor uses when no
+       side-coloured marker leads), so the button reads as the flag family, not as a fourth palette. */
+    + '.qa-tcbtn.flags.on{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)}'
+    + '.qa-flags-hd{font-size:11px;color:var(--mut,#5a6b82);margin:0 0 8px}'
     + '@media(max-width:560px){.qa-tcrow{flex-direction:column}}'
     + '#scorrAnaOv{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:11400;align-items:center;justify-content:center}'
     + '#scorrAnaOv.open{display:flex}'
@@ -251,13 +256,14 @@
       + '<div class="qa-tcrow">'
       +   '<button id="qaTcTrade" class="qa-tcbtn trade" onclick="qaTcEmbed(\''+s+'\',\'trade\')">&#9650; TC Trade Check</button>'
       +   '<button id="qaTcInvest" class="qa-tcbtn invest" onclick="qaTcEmbed(\''+s+'\',\'investment\')">&#9670; Investment Check</button>'
+      +   '<button id="qaTcFlags" class="qa-tcbtn flags" onclick="qaFlagsEmbed(\''+s+'\')">&#9873; Check Flags</button>'   /* cc#1976 */
       + '</div>'
       + '<div id="qaTcHost" style="margin-top:12px"></div>';
   }
   function qaTcEmbed(sym,style){
     var host=document.getElementById('qaTcHost'); if(!host)return;
-    var bt=document.getElementById('qaTcTrade'), bi=document.getElementById('qaTcInvest');
-    if(bt)bt.classList.toggle('on',style==='trade'); if(bi)bi.classList.toggle('on',style==='investment');
+    var bt=document.getElementById('qaTcTrade'), bi=document.getElementById('qaTcInvest'), bf=document.getElementById('qaTcFlags');
+    if(bt)bt.classList.toggle('on',style==='trade'); if(bi)bi.classList.toggle('on',style==='investment'); if(bf)bf.classList.remove('on');   /* cc#1976: one of the three lit at a time */
     var key=sym+'|'+style;
     if(host.dataset.cur===key&&document.getElementById('qaTcFrame'))return;   // cc#671: cache per symbol+style for the modal session
     host.dataset.cur=key;
@@ -273,6 +279,41 @@
     ifr.setAttribute('title','Check — '+sym+' ('+style+')');
     ifr.style.cssText='width:100%;height:440px;border:1px solid var(--line);border-radius:10px;background:var(--panel)';
     host.innerHTML=''; host.appendChild(ifr);
+  }
+
+  /* cc#1976 (founder 10-Sep 17:45: "below Investment Check add one more button — Check Flags — and
+     show the flags as per the V8 website"). RENDER IN PLACE (item 4): the A card is itself a sheet, so
+     the flags expand inside #qaTcHost exactly where the Check iframe goes, never as a second overlay
+     on top. CONSUMED, NEVER RE-IMPLEMENTED (item 2): the rows and their interpretation lines come from
+     window.ScorrMarkerFlagDetailHtml with the endpoint's own legend[] — no flag markup or legend text
+     lives here. SIDE (item 3): the A card is opened for a SYMBOL with no position side in hand, so the
+     fired object is passed UNFILTERED — every family that fired shows (a guessed side would hide a
+     real marker; today no symbol carries both a BUY and a SELL pivot star, so nothing double-renders).
+     The maps are built from the same five lists /m/v8 reads (stars / activity / dma_state / tc_strong
+     / channel_reject), dma given star_color = color exactly as /m/v8 does for the shared reader.
+     EMPTY (item 5): the shared function's own "No marker fired for this row today." line. */
+  function qaFlagsEmbed(sym){
+    var host=document.getElementById('qaTcHost'); if(!host)return;
+    var bt=document.getElementById('qaTcTrade'), bi=document.getElementById('qaTcInvest'), bf=document.getElementById('qaTcFlags');
+    if(bt)bt.classList.remove('on'); if(bi)bi.classList.remove('on'); if(bf)bf.classList.add('on');
+    var key=sym+'|flags';
+    if(host.dataset.cur===key&&document.getElementById('qaFlagsBox'))return;
+    host.dataset.cur=key;
+    host.innerHTML='<div class="empty" style="padding:16px">Loading markers for '+newsEsc(sym)+'…</div>';
+    getJSON('/api/v8/pivot_star').then(function(d){
+      if(host.dataset.cur!==key)return;   // the user moved on to another button meanwhile
+      d=d||{};
+      var pick=function(list){ var hit=null; (list||[]).some(function(x){ if(x&&x.symbol===sym){hit=x;return true;} return false; }); return hit; };
+      var dma=pick(d.dma_state||d.dma_cross);
+      var fired={ stars:pick(d.stars), act:pick(d.activity), dma:(dma?Object.assign({},dma,{star_color:dma.color}):null), tcs:pick(d.tc_strong), chan:pick(d.channel_reject) };
+      var body=window.ScorrMarkerFlagDetailHtml ? window.ScorrMarkerFlagDetailHtml(fired,null,d.legend||null)
+             : '<div class="empty">Marker renderer unavailable</div>';
+      var when=d.star_date?('session '+newsEsc(d.star_date)+(d.as_of_is_last_session?' (last session with markers)':'')):'';
+      host.innerHTML='<div id="qaFlagsBox"><div class="qa-flags-hd">V8 markers'+(when?' · '+when:'')+' · shown for the symbol, not for a position (every family that fired, no side filter) · same flags as the V8 page</div>'+body+'</div>';
+    }).catch(function(e){
+      if(host.dataset.cur!==key)return;
+      host.innerHTML='<div class="empty" style="padding:16px">Could not load markers ('+newsEsc(e&&e.message||e)+').</div>';
+    });
   }
 
   function close() {
@@ -291,7 +332,7 @@
   var G = {
     qaAnalysis: qaAnalysis, _qaModal: _qaModal, _qaSetBody: _qaSetBody,
     trajHtml: trajHtml, heatHtml: heatHtml, _trajValTile: _trajValTile, _trajDeltaTile: _trajDeltaTile,
-    qaTcFooterHtml: qaTcFooterHtml, qaTcEmbed: qaTcEmbed
+    qaTcFooterHtml: qaTcFooterHtml, qaTcEmbed: qaTcEmbed, qaFlagsEmbed: qaFlagsEmbed
   };
   Object.keys(G).forEach(function (k) { if (typeof window[k] !== 'function') window[k] = G[k]; });
 })();
