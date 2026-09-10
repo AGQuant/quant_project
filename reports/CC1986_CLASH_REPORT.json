@@ -121,8 +121,46 @@
  },
  "section_d": {
   "complete": false,
-  "status": "CANDIDATES ONLY - formulas not compared",
-  "candidates": {
+  "status": "1 CONFIRMED (labelling); 1 source-difference candidate; rest not compared",
+  "confirmed": [
+   {
+    "type": "D-label",
+    "file": "scorr_v13.html:238",
+    "status": "CONFIRMED",
+    "claim": "labels fall_from_day_high as 'Fall off the 2-day high %'",
+    "reality": "field is written by v8_signal_writer.py:929 off TODAY's high (fyers_eq day high); sampled v8_qualified values -0.04/-0.93/-0.12/-0.08/-0.02 pct agree with today-only",
+    "real_2day_metric_lives_in": "tc_v4_dual.py:255 (TC rule R10)",
+    "harm": "V13 users filter on a different quantity than the label promises",
+    "fix": "label, checked against R10"
+   }
+  ],
+  "candidates_with_source_difference": [
+   {
+    "metric": "fall_from_day_high",
+    "copies": [
+     "deriv_metrics.py:528 (hi = max high over today's stored intraday bars, rounded 2dp)",
+     "v8_signal_writer.py:929 (day_high = fyers_eq quote high, unrounded)"
+    ],
+    "note": "arithmetic identical, day-high input is a different object; needs same-moment comparison to quantify"
+   }
+  ],
+  "rejected": [
+   {
+    "files": [
+     "v8_filter_killswitch.py",
+     "bt7_harness.py"
+    ],
+    "why": "docstring mentions only, no computation"
+   },
+   {
+    "files": [
+     "v8_dashboard.html",
+     "scorr_filters.html"
+    ],
+    "why": "render the payload field, no reimplementation - cc#1872 risk does not apply here"
+   }
+  ],
+  "not_compared": {
    "rsi": [
     "invest_check_v2.py",
     "tc_v4_endpoints.py",
@@ -135,14 +173,6 @@
     "v8_intra_backtest.py",
     "buy_reversal_simulator.py",
     "v8_paper.py"
-   ],
-   "fall_from_day_high_hourly_pct": [
-    "deriv_metrics.py (canonical)",
-    "v8_signal_writer.py",
-    "bt7_harness.py",
-    "v8_filter_killswitch.py",
-    "v8_dashboard.html",
-    "scorr_v13.html"
    ],
    "pcr": [
     "pcr_endpoints.py",

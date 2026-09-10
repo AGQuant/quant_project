@@ -70,15 +70,37 @@ exactly the repeated tail cc#1979 already ruled is not a clash. Corrected before
   insert path for `polished_news` at all. It confirms the CLAUDE.md rule rather than breaking it. The only
   real writer is `news_tagger.py`, and it only sets `mentioned_symbols` on already-written rows.
 
-## Section D — same number, two formulas. CANDIDATES ONLY, NOT CONFIRMED.
+## Section D — same number, two formulas. ONE CONFIRMED, rest still candidates.
 
-Files defining what looks like the same metric. **The formulas have not been compared yet**, so none of
-these is a confirmed clash and none should be actioned on this list alone:
+**CONFIRMED (labelling): the V13 filter page describes `fall_from_day_high` wrongly.**
+`scorr_v13.html:238` tells the user the field is *"Fall off the **2-day** high %"* and names its source as
+`v8_qualified.metrics (live)`. That field is written by `v8_signal_writer.py:929`, whose own comment is
+explicit: *"(live - today high)/today high * 100 ... today high = fyers_eq day high"* — **today only, not
+two days.** The stored values agree with today-only: sampled `v8_qualified.metrics` rows are -0.04%, -0.93%,
+-0.12%, -0.08%, -0.02%, which are intraday pullbacks, not two-day falls.
+A real 2-day version does exist, but in a different engine — `tc_v4_dual.py:255`, TC rule R10 ("recovery off
+2-day low / fall from 2-day high"). The V13 page has borrowed R10's wording for a field that is not R10.
+Harm: anyone filtering on this in V13 is filtering on a different quantity than the label promises.
+Fix is a label, not a formula — but it must be checked against R10 so the two stay distinguishable.
+
+**Duplicated formula, same maths, different SOURCE for the day high. Candidate, harm unquantified.**
+`deriv_metrics.py:528` computes `(cmp_px - hi)/hi*100` where `hi = max(high) over today's stored intraday bars`.
+`v8_signal_writer.py:929` computes `(live - day_high)/day_high*100` where `day_high = bar["high"]` from the
+fyers_eq quote. The arithmetic is identical (deriv rounds to 2dp, the writer does not), but the two day-high
+inputs are not the same object: an exchange quote high and a max over stored bars can differ when bars are
+gapped or a tick is missed. Same named number, two sources — quantifying it needs a same-moment read of both
+surfaces, which this pass did not do.
+
+**Rejected — not copies at all** (same regex false-positive class caught twice already in Section B):
+`v8_filter_killswitch.py` and `bt7_harness.py` only *mention* `fall_from_day_high` in docstrings about
+policing and policy-skipping; neither computes it. The served pages **render**, they do not recompute:
+`v8_dashboard.html:4786` is `${sign(x.fall_from_day_high)}%` straight from the payload, and `scorr_filters.html`
+passes it through. So the cc#1872 risk (a page carrying its own reimplementation) does **not** apply here.
+
+**Still candidates, formulas NOT compared:**
 - RSI: `invest_check_v2.py`, `tc_v4_endpoints.py`, `v12_backtest.py`
 - Pivots: `invest_check_v2.py`, `trade_check_v34_endpoints.py`, `tc_v4_endpoints.py`, `v8_intra_backtest.py`,
   `buy_reversal_simulator.py`, `v8_paper.py`
-- `fall_from_day_high` / `hourly_pct`: `deriv_metrics.py` (canonical) vs `v8_signal_writer.py`,
-  `bt7_harness.py`, `v8_filter_killswitch.py`, and two served pages (`v8_dashboard.html`, `scorr_v13.html`)
 - PCR: `pcr_endpoints.py`, `pcr_mood.py`
 
 Precedent says this section is where the damage hides: cc#854 (weekly RSI 45 vs 40 killed a basket
