@@ -2602,6 +2602,11 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #brov .ad-sc.na{border-color:var(--line)} #brov .ad-sc.na .ad-n{color:var(--muted)} #brov .ad-sc.na .ad-v{color:var(--muted)}
 #brov .ad-sc.sel{border-color:var(--ink);box-shadow:inset 0 0 0 var(--bw-1) var(--ink)}
 #brov .brr.br-none{justify-content:center;color:var(--muted);font-size:var(--type-11)}
+/* cc#1935: theme chips -- the full theme name on up to two lines with the member count as a small
+   suffix ("PHARMA & HEALTHCARE . 16"), a little wider than the old one-line segment chip. */
+#brov .ad-sc.ad-th{min-width:132px;max-width:160px}
+#brov .ad-sc.ad-th .ad-n{white-space:normal;max-width:none;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
+#brov .ad-sc .ad-cnt{font-weight:400;opacity:.8}
 #brov .ad-foot{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9,9px);color:var(--dim);margin-top:var(--space-8)}
 #brov .ad-dots{display:flex;gap:var(--space-5);align-items:center}
 #brov .ad-dots i{width:7px;height:7px;border-radius:50%;display:inline-block}
