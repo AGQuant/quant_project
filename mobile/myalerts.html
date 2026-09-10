@@ -5,8 +5,9 @@
      width. DESIGN AUTHORITY: design_refs/scorr_app_myalerts_R3.html @ 9622eaa (APP_CARD_LAYOUT_LAW_V1,
      42536). Geometry from the ref; colours = contract tokens on body[data-theme]; lengths = :root
      scale. Ref 29px headline -> --type-30 (nearest larger). Data: /api/mobile/myalerts
-     (trade_alerts_app.py), unchanged. THE SPLIT IS THE WHOLE POINT: price alerts and QB basket
-     notices are two kinds of record; a rebalance_due row never renders as a price alert.
+     (trade_alerts_app.py), unchanged. FOUNDER 10-Sep 07:1x: this page shows CUSTOM ALERTS ONLY for now — the alerts you set
+     yourself and their history. Price alerts (futures/equity) and QB basket notices are OFF this
+     page until built; the endpoint still returns them, the page just does not render them.
      TOKEN_MAP  #d4af37 -> --brand · #2fd48b -> --win · #ff5c6c -> --loss · #141416 -> --panel ·
      #1c1c1f -> --hi · #2a2a2e -> --edge · #f4f4f2 -> --ink · #8b8b90/#6a6a70 -> --muted -->
 <html lang="en">
@@ -106,31 +107,13 @@ function emp(t, b){ return '<div class="ma-emp"><b>'+esc(t)+'</b>'+esc(b)+'</div
 function more(n, shown){ return n>shown ? '<div class="ma-more">+'+(n-shown)+' more</div>' : ''; }
 function nz(v){ return v==null?'—':v; }
 
-function kmHtml(k){
-  return '<div class="ma-km"><div class="k">Alerts in the book</div><div class="v">'+nz(k.total)+'</div>'
+function kmHtml(o){
+  var set=o.custom_count||0, fired=o.history_count||0;
+  return '<div class="ma-km"><div class="k">Your alerts</div><div class="v">'+set+'</div>'
     + '<div class="ma-kg">'
-    + '<div class="ma-cell"><div class="k">Futures</div><div class="v">'+nz(k.futures)+'</div></div>'
-    + '<div class="ma-cell"><div class="k">Equity</div><div class="v">'+nz(k.equity)+'</div></div>'
-    + '<div class="ma-cell"><div class="k">Rebalance due</div><div class="v">'+nz(k.rebalance_due)+'</div></div>'
-    + '<div class="ma-cell"><div class="k">Triggered</div><div class="v">'+nz(k.triggered)+'</div></div>'
+    + '<div class="ma-cell"><div class="k">Set by you</div><div class="v">'+set+'</div></div>'
+    + '<div class="ma-cell"><div class="k">Fired or dismissed</div><div class="v">'+fired+'</div></div>'
     + '</div></div>';
-}
-function priceCard(label, list, n){
-  list=list||[]; n=n||0;
-  if(!n) return card('w gap', label, 0, emp('Nothing here yet', 'No '+label.toLowerCase()+' alert is in the book today. The card stays so you can see the kind exists.'), '', '');
-  var rows = '<div class="ma-lst">'+list.map(function(a){
-    return '<div class="ma-lr"><span class="s">'+esc(a.symbol)+'</span><div class="r"><span class="a">'+esc(a.direction||'')+' · '+esc(a.status||'')+' '+dmt(a.created_at)+'</span><span class="b">'+inr(a.trigger_price)+'</span></div></div>';
-  }).join('')+'</div>';
-  return card('w', label, n, rows+more(n, list.length), 'Manage alerts', '/m/alerts');
-}
-function rebalCard(d){
-  var b=d.basket_notices||{}, rows=b.rows||[], n=b.count||0;
-  if(!n) return card('w gap', 'Rebalance due', 0, emp('Nothing due', 'No basket has a rebalance waiting for review.'), '', '');
-  var body = '<div class="ma-lst">'+rows.map(function(r){
-    return '<div class="ma-lr"><span class="s">'+esc(r.basket)+'</span><div class="r"><span class="a">'+(r.candidate_count!=null?r.candidate_count+' names':'—')+'</span><span class="b">Review</span></div></div>';
-  }).join('')+'</div>';
-  var raised = rows.length ? dmt(rows[0].raised_at) : '—';
-  return card('w', 'Rebalance due', n, body+more(n, rows.length)+'<div class="ma-more">Raised '+raised+'. These carry no trigger price and are not price alerts.</div>', 'Open baskets', '/m/qb');
 }
 function customCard(d){
   var o=d.own_alerts||{}, n=o.custom_count||0, list=o.custom||[];
@@ -150,14 +133,11 @@ function historyCard(d){
 }
 function slab(h2, hint){ return '<div class="ma-slab"><h2>'+h2+'</h2><span class="hint">'+hint+' · swipe →</span></div>'; }
 function render(d){
-  var k=d.key_metrics||{}, p=d.price_alerts||{}, b=d.basket_notices||{}, o=d.own_alerts||{};
-  var pn=(p.futures_count||0)+(p.equity_count||0), on=(o.custom_count||0)+(o.history_count||0);
+  var o=d.own_alerts||{}, on=(o.custom_count||0);
   document.getElementById('ma-asof').innerHTML = 'Read from <b>'+esc(d.as_of_source||'/api/mobile/myalerts')+'</b>'+(d.as_of?' · '+esc(dmy(d.as_of)):'');
-  document.getElementById('ma-body').innerHTML = kmHtml(k)
-    + slab('Price alerts', pn) + '<div class="ma-rail">'+priceCard('Futures', p.futures, p.futures_count)+priceCard('Equity', p.equity, p.equity_count)+'</div>'
-    + slab('Basket notices', b.count||0) + '<div class="ma-rail">'+rebalCard(d)+'</div>'
-    + slab('Your own alerts', on ? on : 'none set') + '<div class="ma-rail">'+customCard(d)+historyCard(d)+'</div>'
-    + '<div class="ma-note"><b>The split is the whole point.</b> trade_alerts holds two kinds of record. Basket notices carry no trigger price and are never rendered as one. Empty cards stay visible so the kinds are legible.</div>';
+  document.getElementById('ma-body').innerHTML = kmHtml(o)
+    + slab('Your own alerts', on ? on+' set' : 'none set') + '<div class="ma-rail">'+customCard(d)+historyCard(d)+'</div>'
+    + '<div class="ma-note"><b>Custom alerts only, for now.</b> This page shows the price triggers you set yourself and what happened to them. Engine price alerts and basket rebalance notices are not shown here yet.</div>';
 }
 fetch('/api/mobile/myalerts', {credentials:'same-origin'})
   .then(function(r){ return r.json(); })
