@@ -94,7 +94,7 @@ body.as-shell{padding-bottom:76px}
    toggle row, then the other 6 collapsed until tapped. .as-more reuses the same button geometry
    as every other row; only the chevron and the muted label colour are new. */
 .as-menu .as-more{color:var(--muted)}
-.as-menu .as-more .as-crt{margin-left:auto;font-size:10px;transition:transform .15s}
+.as-menu .as-more .as-crt{margin-left:auto;font-size:var(--type-10);transition:transform .15s}   /* cc#1920: back to the 29 baseline */
 .as-menu .as-more.open .as-crt{transform:rotate(180deg)}
 .as-more-wrap{display:none}
 .as-more-wrap.open{display:block}

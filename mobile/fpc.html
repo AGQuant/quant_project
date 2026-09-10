@@ -64,7 +64,7 @@
 /* sheet (bottom modal) — one generic shell, four calculator bodies swapped into it */
 .fp-sheet{position:fixed;inset:0;z-index:98;display:none}
 .fp-sheet.open{display:block}
-.fp-sheet .bk{position:fixed;inset:0;background:rgba(0,0,0,.6)}
+.fp-sheet .bk{position:fixed;inset:0;background:var(--veil-sheet)}   /* cc#1920: the role token every app sheet backdrop uses */
 .fp-sheet .box{position:fixed;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:var(--panel);
  border:var(--bw-15) solid var(--line);border-bottom:none;border-radius:var(--radius-18) var(--radius-18) 0 0;
  padding:var(--space-12) var(--space-16) calc(var(--space-18) + env(safe-area-inset-bottom))}
