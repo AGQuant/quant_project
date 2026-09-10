@@ -122,26 +122,47 @@ def _expected_cols(cur):
     return _EXPECTED_COLS
 
 
-def _expectations(cur, sym, actual_sales=None, actual_profit=None):
+def _q_key(label):
+    """cc#1952: 'Q1 FY27' / 'Q1FY27' / ' q1 fy27 ' -> 'Q1FY27'; None when unparseable. One normaliser
+    for both sides of the quarter check, so a space or case difference can never read as a mismatch."""
+    import re
+    m = re.match(r"\s*Q\s*([1-4])\s*FY\s*(\d{2})\s*$", str(label or "").upper())
+    return f"Q{m.group(1)}FY{m.group(2)}" if m else None
+
+
+def _expectations(cur, sym, actual_sales=None, actual_profit=None, card_quarter=None):
     """cc#796: {sales:{expected,actual,dev_pct,tag}, profit:{...}} for whichever side is derivable.
     Returns None when nothing is — the caller omits the line rather than rendering an empty state.
 
     Bands are founder-set: BEAT > +2%, IN-LINE within +/-2%, MISS < -2%. Deviation is reported
     alongside the tag, never the tag alone, because a 2.1% beat and a 60% beat are not the same
-    statement and the binary hides that."""
+    statement and the binary hides that.
+
+    cc#1952 QUARTER GUARD. screener_raw.last_result_quarter is Screener's OWN label for the quarter
+    its expected_* figures belong to (per-company: 1,805 rows Q1FY27 / 74 Q4FY26 / 2 Q3FY26 on the
+    08-Sep upload). When the caller passes the quarter the popup is displaying (card_quarter, the
+    same 'Qn FYyy' label the rest of the card uses) and Screener's label is present and DIFFERENT,
+    the whole vs-estimate block is omitted -- never a number labelled for another quarter than the
+    one on screen. Per symbol, not table-wide: companies roll forward one by one as Screener
+    re-scrapes them. When either label is missing there is nothing to compare and the line renders
+    as before (the founder-visible basis label still says what the estimate is)."""
     cols = _expected_cols(cur)
     if not cols:
         return None
     try:
         sel = ", ".join(f'"{c}"' for c in sorted(cols))
-        cur.execute(f"SELECT {sel} FROM screener_raw WHERE UPPER(nse_code)=UPPER(%s)", (sym,))
+        cur.execute(f"SELECT {sel}, last_result_quarter FROM screener_raw WHERE UPPER(nse_code)=UPPER(%s)", (sym,))
         r = cur.fetchone()
     except Exception as e:
         log.warning(f"_expectations {sym}: {e}")
         return None
     if not r:
         return None
-    got = dict(zip(sorted(cols), r))
+    got = dict(zip(sorted(cols), r[:-1]))
+    est_q, card_q = _q_key(r[-1]), _q_key(card_quarter)
+    if est_q and card_q and est_q != card_q:
+        log.info(f"cc#1952 vs-est omitted for {sym}: estimate is {est_q}, card shows {card_q}")
+        return None
 
     def side(exp, act):
         exp, act = _f(exp), _f(act)
@@ -1123,7 +1144,7 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
                     _act_pat = _f(_cr[1])
             except Exception as e:
                 log.warning(f"cc#1427 CSV actuals fallback {sym}: {e}")
-        expectations = _expectations(cur, sym, _act_sales, _act_pat)
+        expectations = _expectations(cur, sym, _act_sales, _act_pat, card_q)   # cc#1952: omitted when Screener's quarter label != the card's
         l1 = _l1_quarter(cur, sym, segment)              # cc#797 block 1; cc#1311: segment for industry PE
         auto_verdict = _auto_verdict(l1, expectations)  # cc#797 deterministic verdict line
         # cc#1268 RESULT_DOT_RULE_V3: own-estimate dot, struck against the SAME actuals block
