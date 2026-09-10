@@ -1014,6 +1014,59 @@ def _log_buildup_error(e):
         pass
 
 
+@router.get("/tc_screen")
+def v10_tc_screen():
+    """cc#1881 (Custom Screen Builder TC/100 column, follow-up to CUSTOM_SCREEN_BUILDER_V1
+    session_log 40520): per-symbol, per-bucket TC score at the LATEST tick TODAY, read ONLY from
+    tc_universe_ticks — the ONE canon scorer per TC_LIVE_INTRADAY_CANON_V1 (session_log 42648,
+    cc#1909). FORBIDDEN as a source, by that same ruling: tc_screener_cache, tc_cache,
+    v8_tc_score_daily, tc_position_stars / tc_position_stars_v2, v8_tc_score_ticks — none of them
+    are read here. A symbol/bucket pair absent from the result has no tick today; the caller must
+    render that as a dash, never fall back to a stale table or a live recompute.
+
+    Bucket selection (BUY-MOM/BUY-REV vs SELL-MOM/SELL-REV vs all four) is a property of the ROW
+    the Custom Screen Builder is already drawing (its own Bullish/Bearish/Any classification), not
+    of this endpoint — so this returns every bucket's score for every symbol and lets the caller
+    pick the side-scoped max, the same way csbPool() already picks basis/vol_r off other payloads.
+    """
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from datetime import timezone as _tz
+        ist = ZoneInfo("Asia/Kolkata")
+        now_ist = datetime.now(ist)
+        start_utc = now_ist.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_tz.utc)
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (symbol, bucket) symbol, bucket, score100, ts
+                FROM tc_universe_ticks
+                WHERE ts >= %s
+                ORDER BY symbol, bucket, ts DESC
+            """, (start_utc,))
+            rows = cur.fetchall()
+        scores = {}
+        max_ts = None
+        for symbol, bucket, score100, ts in rows:
+            scores.setdefault(symbol, {})[bucket] = {
+                "score100": float(score100) if score100 is not None else None,
+            }
+            if ts is not None and (max_ts is None or ts > max_ts):
+                max_ts = ts
+        # as_of rendered as a NAIVE IST string (the convention this codebase's own asof stamping
+        # helper — window.scorrAsofStamp, scorr_card_common.js — expects, and the same conversion
+        # tc_v4_dual.py's tick_ts_ist already does for the Check tabs): tc_universe_ticks.ts is a
+        # real TIMESTAMPTZ, so this converts once here rather than asking every caller to.
+        as_of_ist = None
+        if max_ts is not None:
+            try:
+                as_of_ist = max_ts.astimezone(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                as_of_ist = None
+        return {"status": "ok", "scores": scores, "as_of": as_of_ist}
+    except Exception as e:
+        raise HTTPException(500, f"v10_tc_screen failed: {e}")
+
+
 @router.get("/divergence")
 def v10_divergence(threshold: float = 1.0):
     """cc#124: Futures-vs-Equity divergence scanner across the full F&O universe.
