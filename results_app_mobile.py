@@ -125,3 +125,124 @@ def mobile_results_app(request: Request):
             "count": calendar_rows,
         },
     }
+
+
+# ═══ V2 — Fable single mode 10-Sep-2026 (RESULTS_APP_R2, founder: read the web APIs, build intuitively).
+# Additive; the cc#1901 endpoint above stays. All numbers come from the web Result Corner's own
+# result_corner_v2() and the Results page's own result_analysis_v2 / _list — nothing re-derived.
+#   GET /api/mobile/results_app/season           → season summary, PAT split, movers, sector ladder,
+#                                                   written-up list, next-10-day calendar
+#   GET /api/mobile/results_app/companies        → every reporter this season (sortable table feed)
+#   GET /api/mobile/results_app/analysis?symbol= → one written analysis, full text + sections
+from datetime import date, timedelta
+from result_corner import result_corner_v2
+from results_endpoints import result_analysis_v2, result_analysis_v2_list
+
+
+def _fl(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _rc():
+    rc = result_corner_v2()
+    if not isinstance(rc, dict):
+        try:
+            import json as _j
+            rc = _j.loads(rc.body)
+        except Exception:
+            rc = {}
+    return rc
+
+
+def _written_set(cur, quarter):
+    cur.execute("SELECT UPPER(symbol) FROM result_analysis_v2 WHERE quarter=%s", (quarter,))
+    return {r[0] for r in cur.fetchall()}
+
+
+def _co_row(c, written):
+    return {"symbol": c.get("symbol"), "company": c.get("company"), "segment": c.get("segment"), "tier": c.get("tier"),
+            "gvm": _fl(c.get("gvm")), "verdict": c.get("verdict"), "reported": c.get("reported_date"),
+            "sales_yoy": _fl(c.get("sales_yoy")), "pat_yoy": _fl(c.get("pat_yoy")),
+            "sales_qoq": _fl(c.get("sales_qoq")), "pat_qoq": _fl(c.get("pat_qoq")),
+            "sales": _fl(c.get("sales")), "pat": _fl(c.get("pat")), "opm": _fl(c.get("opm")), "opm_ly": _fl(c.get("opm_ly")),
+            "pe": _fl(c.get("pe")), "seg_pe": _fl(c.get("segment_pe")), "basis": c.get("basis"),
+            "written": (c.get("symbol") or "").upper() in written}
+
+
+@router.get("/api/mobile/results_app/season")
+@_json_safe
+def mobile_results_season(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    rc = _rc()
+    season = rc.get("season") or {}
+    summ = rc.get("summary") or {}
+    quarter = season.get("quarter")
+    with _conn() as conn, conn.cursor() as cur:
+        written = _written_set(cur, quarter) if quarter else set()
+        cur.execute("""SELECT ticker, company_name, ex_date, status FROM earnings_calendar
+                       WHERE ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 10 AND verified <> 'false'
+                       ORDER BY ex_date, ticker LIMIT 40""")
+        upcoming = [{"symbol": r[0], "company": r[1], "date": str(r[2]), "status": r[3]} for r in cur.fetchall()]
+        cur.execute("SELECT MAX(polished_at) FROM result_analysis_v2")
+        last_written = cur.fetchone()[0]
+    companies = [_co_row(c, written) for c in (rc.get("companies") or [])]
+    reported = [c for c in companies if c["pat_yoy"] is not None or c["sales_yoy"] is not None]
+    movers_up = sorted([c for c in reported if c["pat_yoy"] is not None and c["pat_yoy"] > 0], key=lambda c: -c["pat_yoy"])[:6]
+    movers_dn = sorted([c for c in reported if c["pat_yoy"] is not None and c["pat_yoy"] < 0], key=lambda c: c["pat_yoy"])[:6]
+    sectors = []
+    for s in rc.get("sectors") or []:
+        sectors.append({"sector": s.get("sector"), "reported": s.get("reported"), "total": s.get("total"),
+                        "sales_yoy": _fl(s.get("sales_yoy")), "pat_yoy": _fl(s.get("pat_yoy")),
+                        "pct_positive": s.get("pct_positive"), "gvm": _fl(s.get("gvm")), "verdict": s.get("gvm_verdict"),
+                        "tiny": bool(s.get("tiny_base")), "avg_mcap": _fl(s.get("avg_mcap")), "n_used": s.get("n_used")})
+    wl = result_analysis_v2_list(limit=12, quarter=quarter or "")
+    written_rows = [{"symbol": r.get("symbol"), "company": r.get("company"), "quarter": r.get("quarter"),
+                     "polished_at": r.get("polished_at"), "teaser": r.get("teaser"), "result_date": r.get("result_date")}
+                    for r in (wl.get("results") or [])] if isinstance(wl, dict) else []
+    return {"season": {"quarter": quarter, "quarter_end": season.get("quarter_end")},
+            "summary": {"reported": summ.get("reported"), "total": summ.get("total"), "pct": summ.get("pct"),
+                        "growing": summ.get("pat_growing"), "flat": summ.get("pat_flat"), "declining": summ.get("pat_declining"),
+                        "beats_sector": summ.get("beats_sector"),
+                        "median_sales_yoy": _fl(summ.get("median_sales_yoy")), "median_pat_yoy": _fl(summ.get("median_pat_yoy")),
+                        "pat_n": summ.get("pat_n_detailed"), "tiers": summ.get("tiers"), "basis": summ.get("basis_split")},
+            "movers": {"up": movers_up, "down": movers_dn},
+            "sectors": sectors,
+            "written": {"rows": written_rows, "total": (wl.get("total_polished") if isinstance(wl, dict) else None),
+                        "last": last_written.isoformat() if last_written else None},
+            "upcoming": upcoming,
+            "note": "Season numbers cover only companies that have filed this quarter. A dash means not filed yet, never zero."}
+
+
+@router.get("/api/mobile/results_app/companies")
+@_json_safe
+def mobile_results_companies(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    rc = _rc()
+    quarter = (rc.get("season") or {}).get("quarter")
+    with _conn() as conn, conn.cursor() as cur:
+        written = _written_set(cur, quarter) if quarter else set()
+    rows = [_co_row(c, written) for c in (rc.get("companies") or [])]
+    return {"quarter": quarter, "rows": rows, "count": len(rows)}
+
+
+@router.get("/api/mobile/results_app/analysis")
+@_json_safe
+def mobile_results_analysis(request: Request, symbol: str = ""):
+    g = _guard(request)
+    if g:
+        return g
+    a = result_analysis_v2(symbol)
+    if not isinstance(a, dict):
+        return {"error": "analysis unavailable"}
+    rc = _rc()
+    row = next((c for c in (rc.get("companies") or []) if (c.get("symbol") or "").upper() == symbol.upper()), None)
+    return {"symbol": symbol.upper(), "has_analysis": bool(a.get("has_analysis")), "quarter": a.get("quarter"),
+            "analysis": a.get("analysis"), "sections": a.get("sections"), "polished_at": a.get("polished_at"),
+            "basis": a.get("basis"), "numbers": _co_row(row, {symbol.upper()} if a.get("has_analysis") else set()) if row else None}
