@@ -116,6 +116,8 @@ from trade_alerts_app import router as trade_alerts_app_router   # cc#1896: My A
 from mobile_watchlist_stub import router as mobile_watchlist_stub_router   # cc#1897: My Watchlist section page (static, no store)
 from mobile_dash_hub import router as mobile_dash_hub_router   # cc#1916: /m/dash app Dashboard hub (Fable page b4ade10 + router ae0b0c3)
 from mobile_qb_holdings import router as mobile_qb_holdings_router   # cc#1922: /m/qb/holdings View-holdings table (Fable page be3142c + router bd68379, QB_APP_R5_LOCK 42805)
+from mobile_scanners import router as mobile_scanners_router   # cc#1923: /m/tcscan + /m/invscan pages (Fable 84b7578 / 85471cf, router 0e18327)
+from scanners_app_mobile import router as scanners_app_mobile_router   # cc#1923: /api/mobile/tcscan + /api/mobile/invscan (Fable 2c214a1)
 from qb_app_mobile import router as qb_app_mobile_router   # cc#1892: /api/mobile/qb_app — Quant Baskets app section
 from screeners_app_mobile import router as screeners_app_mobile_router   # cc#1899: /api/mobile/screeners_app — Screeners app section
 from sector_app_mobile import router as sector_app_mobile_router   # cc#1900: /api/mobile/sector_app — Sector Intel app section
@@ -316,6 +318,8 @@ PROTECTED.add("/m/myalerts")   # cc#1896: Dashboard-section My Alerts page — s
 PROTECTED.add("/m/mywatchlist")   # cc#1897: Dashboard-section My Watchlist page — same PROTECTED-only convention
 PROTECTED.add("/m/dash")   # cc#1916: app Dashboard hub (My Portfolio / My Alerts / My Watchlist / My Trades)
 PROTECTED.add("/m/qb/holdings")   # cc#1922: Quant Basket holdings table, reached from /m/qb?basket= only
+PROTECTED.add("/m/tcscan")   # cc#1923: TC Scanner trades (app page)
+PROTECTED.add("/m/invscan")   # cc#1923: Investment Scanner (app page)
 # cc#1899: /m/screeners was a working route (mobile_ext.py:630) in NONE of PROTECTED/NAV_REGISTRY/
 # NAV array before this card — a real pre-existing gap, not a deliberate omission. Filed here as
 # "grid-tile" (Home grid gtile is its only entry point per home.html/scorr_card_common.js), the
@@ -921,6 +925,8 @@ app.include_router(trade_alerts_app_router)   # cc#1896: /m/myalerts + /api/mobi
 app.include_router(mobile_watchlist_stub_router)   # cc#1897: /m/mywatchlist (static, no backing store)
 app.include_router(mobile_dash_hub_router)   # cc#1916: /m/dash — Home grid Dashboard tile now opens the app hub, not the web /dashboard
 app.include_router(mobile_qb_holdings_router)   # cc#1922: /m/qb/holdings?basket= — reached from the /m/qb basket detail page
+app.include_router(mobile_scanners_router)   # cc#1923: /m/tcscan, /m/invscan — the two Analytics scanner tiles (HOME_GRID_R1_LOCK 42796 rule 2)
+app.include_router(scanners_app_mobile_router)   # cc#1923: their data endpoints
 app.include_router(qb_app_mobile_router)   # cc#1892: /api/mobile/qb_app (mobile/qb.html's new data source)
 app.include_router(screeners_app_mobile_router)   # cc#1899: /api/mobile/screeners_app (mobile/screeners.html's new data source)
 app.include_router(sector_app_mobile_router)   # cc#1900: /api/mobile/sector_app (mobile/sector.html's new condensed summary, additive)
@@ -1507,6 +1513,8 @@ NAV_REGISTRY = {
     "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "nav-mobile"),   # cc#1897, tier fixed cc#1907
     "/m/dash":        ("Dashboard hub (mobile) — My Portfolio / My Alerts / My Watchlist / My Trades; Home grid Dashboard tile", "nav-mobile"),   # cc#1916 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)
     "/m/qb/holdings": ("Quant Basket holdings table (mobile) — reached from /m/qb?basket= detail page", "grid-tile"),   # cc#1922: not in the NAV array by design (detail-page link only), so grid-tile is the right tier here
+    "/m/tcscan":      ("TC Scanner trades (mobile) — open/closed book, record; Home grid tile", "nav-mobile"),   # cc#1923 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)
+    "/m/invscan":     ("Investment Scanner (mobile) — board, positions, rule; Home grid tile", "nav-mobile"),   # cc#1923 (same tier note)
     "/m/screeners":  ("Screeners (mobile)",     "nav-mobile"),   # cc#1899, tier fixed cc#1907
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902

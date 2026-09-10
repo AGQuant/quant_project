@@ -452,6 +452,8 @@ PWA_JS = """
     ['/m/myalerts', '\\u25ec', 'My Alerts (mobile)', 'm'],
     ['/m/mywatchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
     ['/m/dash', '\\u26a1', 'Dashboard (mobile)', 'm'],   // cc#1916: app Dashboard hub
+    ['/m/tcscan', '\\u25ce', 'TC Scanner (mobile)', 'm'],   // cc#1923
+    ['/m/invscan', '\\u2316', 'Investment Scanner (mobile)', 'm'],   // cc#1923
     ['/m/screeners', '\\u2637', 'Screeners (mobile)', 'm'],
     ['/m/sector', '\\u2b21', 'Sector Intel (mobile)', 'm'],
     // cc#1903: Mutual Funds — a genuinely NEW page, no prior /m/ MF route or Home-grid tile
