@@ -1715,6 +1715,8 @@ RESULTS_CARD_JS = """
     + '.rcard-exp-l{font-weight:700;min-width:42px}'
     + '.rcard-exp-v{font-variant-numeric:tabular-nums;font-weight:700}'
     + '.rcard-exp-e{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums}'
+    /* cc#1950: the qualifier under a noisy-base row -- its own line, muted, never in the way of the tag */
+    + '.rcard-exp-q{flex-basis:100%;font-size:11px;line-height:1.35;color:var(--dim,#8892a6)}'
     + '.rcard-exp-d{font-weight:800;font-variant-numeric:tabular-nums;margin-left:auto}'
     /* cc#802 — category tags on the merged news stream. AI Editorial is the long-form worth expanding;
        Stock Views is a distinct editorial product. Domestic shorts carry no tag (they are the default). */
@@ -2162,6 +2164,7 @@ RESULTS_CARD_JS = """
   // the same statement, and the binary hides that. Bands are founder-set: BEAT > +2, IN-LINE +/-2,
   // MISS < -2. No expected value (about 5% of the top 500, ~14% of the full CSV) => the whole line is
   // omitted, never an empty state.
+  var EXP_NOISY_DEV = 300;   // cc#1950: |deviation| beyond this % gets the plain-language qualifier (founder-tunable)
   function expHtml(e){
     if (!e || (!e.sales && !e.profit)) return '';
     function row(lbl, o){
@@ -2175,11 +2178,20 @@ RESULTS_CARD_JS = """
       // cc#1705 stat table: 'Rs 23,165 cr' / 'vs est. Rs 23,816 cr' — money through the shared
       // formatter; a negative actual reads '-Rs 1,234 cr' in the card's red; absent is an em dash.
       var F = _F(), _a = F ? F.moneyCr(o.actual) : String(o.actual), _e = F ? F.moneyCr(o.expected) : String(o.expected);
-      return '<div class=\"rcard-exp-row\"><span class=\"rcard-exp-l\">'+lbl+'</span>'
+      // cc#1950 (founder 10-Sep 16:16, ADANIGREEN "+2267% BEAT" beside "PAT +19.3% MISS vs peers"):
+      // beyond EXP_NOISY_DEV the deviation is a fact about the ESTIMATE, not the company -- the
+      // trend projection sat near zero (Adani Green: est. Rs 42 cr vs Rs 983 cr reported), so any
+      // normal quarter reads as a four-digit beat. Nothing is hidden or re-computed: the number,
+      // the tag and the direction stay; a plain-language line under the row says what the number
+      // means. Same check on Sales and PAT (this row() serves both).
+      var noisy = o.dev_pct != null && Math.abs(Number(o.dev_pct)) > EXP_NOISY_DEV;
+      return '<div class=\"rcard-exp-row'+(noisy?' rcard-exp-noisy':'')+'\"><span class=\"rcard-exp-l\">'+lbl+'</span>'
         + '<span class=\"rcard-exp-v\"'+(F && F.isNeg(o.actual)?' style=\"color:#d0433b\"':'')+'>'+esc(_a)+'</span>'
         + '<span class=\"rcard-exp-e\">vs est. '+esc(_e)+'</span>'
         + '<span class=\"rcard-exp-d\" style=\"color:'+col+'\">'+dev+'</span>'
-        + '<span class=\"'+cls+'\">'+esc(o.tag)+'</span></div>';
+        + '<span class=\"'+cls+'\">'+esc(o.tag)+'</span>'
+        + (noisy ? '<span class=\"rcard-exp-q\">Estimate near zero \u2014 treat the '+(o.tag==='MISS'?'miss':'beat')+' as directional only, not a measure of size</span>' : '')
+        + '</div>';
     }
     var body = row('Sales', e.sales) + row('PAT', e.profit);
     if (!body) return '';
