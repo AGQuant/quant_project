@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Screeners · Scorr design ref scorr_app_screeners_R2</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* DESIGN REF scorr_app_screeners_R2 — quant screens only (presets with real filters; finz lists excluded by
+   the same rule). Three groups by what the screen hunts. Tall cards, three per row, gold icon on a dark disc,
+   name, live count, and — the Scorr part — the rule in one plain line under the fold. Hex inlined for preview. */
+:root{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A32;--ink:#F5F2EA;--muted:#8E8A7E;--brand:#D4AF37;--glow:rgba(212,175,55,.35);--win:#3DD68C;--loss:#FF5C6C;--wayfind:#35E0FF}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif;padding-bottom:80px}
+.hdr{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--edge);position:sticky;top:0;background:var(--field);z-index:30}
+.wm{font-size:15px;font-weight:800;letter-spacing:.14em}.wm i{font-style:normal;color:var(--brand);text-shadow:0 0 10px var(--glow)}
+.pg{flex:1;text-align:center;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}.slot{width:64px}
+.asof{padding:10px 16px 0;font-size:10px;color:var(--muted);letter-spacing:.04em}.asof b{color:var(--ink);font-weight:600}
+.km{margin:10px 16px 0;background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--brand);border-radius:0 16px 16px 0;padding:13px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.km .k{font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}.km .v{font-size:16px;font-weight:800;margin-top:3px}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:20px 16px 8px}
+.sec h2{font-size:11.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}.sec .hint{font-size:10px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px}
+.sc{background:var(--panel);border:1px solid var(--edge);border-radius:16px;padding:12px 8px 10px;text-decoration:none;color:inherit;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;overflow:hidden;min-height:150px}
+.sc::before{content:"";position:absolute;inset:0;background:radial-gradient(90% 60% at 50% 0%,rgba(212,175,55,.09),transparent 65%);pointer-events:none}
+.sc .ic{width:48px;height:48px;border-radius:15px;background:var(--hi);border:1px solid var(--edge);display:flex;align-items:center;justify-content:center;margin-top:2px}
+.sc .ic svg{width:26px;height:26px;stroke:var(--brand);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.sc svg .f{fill:var(--brand);stroke:none;opacity:.22}
+.sc .nm{font-size:12px;font-weight:800;line-height:1.2;margin-top:9px;min-height:29px}
+.sc .n{font-size:10.5px;color:var(--muted);margin-top:4px}.sc .n b{color:var(--ink);font-weight:800}
+.sc .rule{font-size:9px;color:var(--muted);line-height:1.4;margin-top:6px;padding-top:6px;border-top:1px solid var(--hi);width:100%}
+.sc .dot{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:3px;background:var(--win)}
+.sc .dot.st{background:var(--loss)}
+.wide{grid-column:span 3;flex-direction:row;text-align:left;align-items:center;gap:12px;min-height:0;padding:12px}
+.wide .ic{flex:none;margin:0}.wide .nm{margin:0;min-height:0}.wide .n{margin-top:2px}.wide .rule{border-top:none;padding-top:0;margin-top:2px;width:auto}
+.wide .go{margin-left:auto;color:var(--brand);font-weight:800;font-size:16px}
+.note{margin:22px 16px 8px;padding:12px 14px;border:1px dashed var(--edge);border-radius:12px;font-size:11px;color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.bnav{position:fixed;left:0;right:0;bottom:0;display:flex;height:62px;background:var(--panel);border-top:1px solid var(--edge);z-index:40}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600;color:var(--muted);text-decoration:none}.bn .i{font-size:17px}.bn.on{color:var(--brand)}
+</style></head><body>
+<div class="hdr"><span class="wm">SC<i>O</i>RR</span><div class="pg">Screeners</div><div class="slot"></div></div>
+<div class="asof">Last run <b>09 Sep 2026</b> · 7 quant screens · 151 names in total</div>
+<div class="km"><div><div class="k">Screens</div><div class="v">7</div></div><div><div class="k">Names today</div><div class="v">151</div></div><div><div class="k">Stale</div><div class="v">0</div></div></div>
+
+<div class="sec"><h2>Momentum &amp; breakouts</h2><span class="hint">what is moving now</span></div>
+<div class="grid">
+  <a class="sc" href="#"><span class="dot"></span><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M4 17l5-6 4 3 7-8v11H4z"/><path d="M4 17l5-6 4 3 7-8"/><path d="M15 6h5v5"/></svg></div><div class="nm">Momentum Kings</div><div class="n"><b>23</b> names</div><div class="rule">M ≥ 8 · GVM ≥ 7.5 · near 52-wk high · volume 1.2×</div></a>
+  <a class="sc" href="#"><span class="dot"></span><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M12 3l3 7h6l-5 4 2 7-6-4-6 4 2-7-5-4h6z"/><path d="M12 3l3 7h6l-5 4 2 7-6-4-6 4 2-7-5-4h6z"/></svg></div><div class="nm">52-Week Breakout</div><div class="n"><b>23</b> names</div><div class="rule">New 1-yr high · GVM ≥ 7.5 · mcap ≥ ₹1,000 Cr · volume up</div></a>
+  <a class="sc" href="#"><span class="dot"></span><div class="ic"><svg viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div><div class="nm">Future Giants</div><div class="n"><b>1</b> name</div><div class="rule">₹30k–1L Cr · G ≥ 7.5 · GVM ≥ 7.5 · rising on month and year</div></a>
+</div>
+
+<div class="sec"><h2>Quality &amp; growth</h2><span class="hint">built to compound</span></div>
+<div class="grid">
+  <a class="sc" href="#"><span class="dot"></span><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div><div class="nm">Quality Compounders</div><div class="n"><b>36</b> names</div><div class="rule">ROCE ≥ 18 · G ≥ 8 · GVM ≥ 7.5 · 3-yr return ≥ 15%</div></a>
+  <a class="sc" href="#"><span class="dot"></span><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 19h16"/><rect class="f" x="6" y="11" width="3" height="8"/><rect x="6" y="11" width="3" height="8"/><rect class="f" x="11" y="7" width="3" height="12"/><rect x="11" y="7" width="3" height="12"/><rect class="f" x="16" y="4" width="3" height="15"/><rect x="16" y="4" width="3" height="15"/></svg></div><div class="nm">Market Leaders</div><div class="n"><b>12</b> names</div><div class="rule">mcap ≥ ₹1L Cr · V ≥ 7 · GVM ≥ 7.2 · positive year</div></a>
+  <a class="sc" href="#" style="visibility:hidden"></a>
+</div>
+
+<div class="sec"><h2>Value</h2><span class="hint">priced below their quality</span></div>
+<div class="grid">
+  <a class="sc" href="#"><span class="dot"></span><div class="ic"><svg viewBox="0 0 24 24"><path class="f" d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg></div><div class="nm">Hidden Value</div><div class="n"><b>19</b> names</div><div class="rule">V ≥ 7.5 · G ≥ 7 · M between 3 and 6 · mcap ≤ ₹1L Cr</div></a>
+  <a class="sc" href="#"><span class="dot"></span><div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 13.5l2-2.5 1.5 1.5 2.5-3"/></svg></div><div class="nm">Multibagger Hunt</div><div class="n"><b>37</b> names</div><div class="rule">GVM ≥ 8 · V ≥ 7.5 · above 50-DMA · 1-yr ≥ 10% · month ≥ 2%</div></a>
+  <a class="sc" href="#" style="visibility:hidden"></a>
+</div>
+
+<div class="sec"><h2>Build your own</h2><span class="hint">V13 custom screen</span></div>
+<div class="grid">
+  <a class="sc wide" href="#"><div class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16M6 10h12M8 15h8M10 20h4"/></svg></div><div><div class="nm">Custom screen</div><div class="n">Pick your own GVM, size and momentum cuts.</div><div class="rule">Saved screens: none yet.</div></div><span class="go">›</span></a>
+</div>
+
+<div class="note"><b>Scorr's version of this page.</b> Every screen shows its rule in plain words on the card — the reader knows what the list is before opening it. The green dot means it ran on the latest date; red means stale, with the date shown. Only quant screens (presets with real filters) appear; the eight Finkhoz client lists are excluded by that rule, not by name. Tap opens the screen's names: symbol, GVM, sector, day %, sortable.</div>
+
+<nav class="bnav"><a class="bn" href="#"><span class="i">◧</span>Home</a><a class="bn" href="#"><span class="i">◈</span>GVM</a><a class="bn" href="#"><span class="i">◎</span>Check</a><a class="bn" href="#"><span class="i">☷</span>WoT</a><a class="bn on" href="#"><span class="i">◍</span>Dash</a></nav>
+</body></html>
