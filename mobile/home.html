@@ -81,7 +81,7 @@ body[data-theme]{
   clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)}
 .tswitch button{width:34px;height:30px;border:0;background:transparent;cursor:pointer;font-size:var(--type-13);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:800;color:var(--txt,#E9EEFB);line-height:1}
-.tswitch button.on{background:var(--panel2);color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+.tswitch button.on{background:var(--panel2);color:var(--t-brand);text-shadow:var(--glow-10) var(--brandglow)}   /* cc#1921 ratchet offset */
 
 /* ══ APP_QA_R5 P2 · GOLD NIGHT RAISED SCALE ═══════════════════════════════════════════════════
    Ref: design_refs/scorr_sprint2_goldnight_R1.html @ cd75e2c. Founder: "font size below also
@@ -119,11 +119,27 @@ body[data-theme]{
 .pfrow .v,.pfrow .pv{font-size:var(--type-125);font-weight:700}
 /* TOOLS — 12px labels, 19px gold-glow icons */
 .tool{font-size:var(--type-12);padding:var(--space-14) var(--space-6)}
-.tool span{font-size:var(--type-19);text-shadow:0 0 10px var(--brandglow)}
+.tool span{font-size:var(--type-19);text-shadow:var(--glow-10) var(--brandglow)}   /* cc#1921 ratchet offset: value unchanged, --glow-10 is exactly 0 0 10px */
+
+/* cc#1921 HOME_GRID_R1_LOCK (session_log 42796), founder-locked 10-Sep-2026: the grouped Home grid,
+   design_refs/scorr_home_grid_R1.html @ d215acd. Every ref value goes through the card's TOKEN_MAP;
+   the g- prefix keeps these clear of the shared sheets. Raw px stays ONLY where the ref value has no
+   ramp rung — the 46px icon disc, the 26px icon, the 84px label width — named on the card. The old
+   .tools/.tool rules above are kept, not deleted (the flat list is no longer appended, cc#1921). */
+.gsec{padding:var(--space-22) var(--space-16) var(--space-6);font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14)}
+.ggrid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-6) var(--space-4);padding:0 var(--space-8)}
+.gtile{display:flex;flex-direction:column;align-items:center;gap:var(--space-7);padding:var(--space-10) var(--space-2);border-radius:var(--radius-12);text-decoration:none;color:inherit;position:relative}
+.gtile:active{background:var(--hi)}
+.gic{width:46px;height:46px;border-radius:var(--radius-14);background:var(--panel);border:var(--bw-1) solid var(--edge);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 0 var(--brandglow)}
+.gic svg{width:26px;height:26px;stroke:var(--brand);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.gic svg .f{fill:var(--brand);stroke:none;opacity:.22}
+.glb{font-size:var(--type-11);font-weight:600;color:var(--ink);text-align:center;line-height:1.25;max-width:84px}
+.gtag{position:absolute;top:var(--space-4);right:var(--space-6);font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em9);text-transform:uppercase;padding:var(--space-2) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--brand)}
+.gtag.web{color:var(--muted)}
 /* BOTTOM NAV — 11px labels, gold active */
 .bnav .bn{font-size:var(--type-11)}
 .bnav .bn .i{font-size:var(--type-16)}
-.bnav .bn.on{color:var(--t-brand);text-shadow:0 0 10px var(--brandglow)}
+.bnav .bn.on{color:var(--t-brand);text-shadow:var(--glow-10) var(--brandglow)}   /* cc#1921 ratchet offset */
 /* APP_QA_R5 P3 · VIX chip chrome — FLAT, identical to a sibling chip, colour in text only.
    The boxed treatment (tinted background + coloured border) is what made a green chip read as a
    badge of approval. Removed for this chip in both states; the red state keeps its red TEXT. */
@@ -507,7 +523,7 @@ body[data-theme]{
 .v10c .rsn2.bad{background:color-mix(in srgb, var(--red) 16%, transparent);color:var(--heat, #FF5C6C)}
 .v10c .rsn2.good{background:color-mix(in srgb, var(--grn) 16%, transparent);color:var(--volt, #2FD48B)}
 /* cc#1743: direction capsule on the option-leg card — muted tint + caret, never the P&L pair */
-.v10c .dircap{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;font:600 9px var(--f-m,ui-monospace,monospace);letter-spacing:.06em;color:var(--muted,#94A6D2);background:var(--hi,rgba(255,255,255,.06));border:1px solid var(--line,#1E2A44);line-height:14px;vertical-align:1px}
+.v10c .dircap{display:inline-block;margin-left:var(--space-6);padding:var(--space-1) var(--space-7);border-radius:var(--radius-9);font:600 var(--type-9) var(--f-m,ui-monospace,monospace);letter-spacing:var(--track-em9);color:var(--muted,#94A6D2);background:var(--hi,rgba(255,255,255,.06));border:var(--bw-1) solid var(--line,#1E2A44);line-height:14px;vertical-align:1px}   /* cc#1921 ratchet offset: exact rungs, values unchanged */
 .v10c .dircap.up{border-color:var(--accent,#7C5CFF)}
 .v10c .dircap.dn{border-color:var(--label,#FF9F45)}
 .v10c .rsn2.open{background:color-mix(in srgb, var(--blu) 16%, transparent);color:var(--pulse, #4D7CFE)}
@@ -1562,7 +1578,7 @@ body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
    not inherit .body's own 12px horizontal padding (mobile_endpoints.MOBILE_CSS) -- matched here
    directly rather than adding padding to .screen itself, which every OTHER child already
    assumes is absent. Empty when nothing is showing, so :empty collapses it to zero height. */
-#buildupBanner:not(:empty){padding:11px 12px 0}
+#buildupBanner:not(:empty){padding:var(--space-11) var(--space-12) 0}   /* cc#1921 ratchet offset */
 .legwrap{margin-top:var(--space-12)}
 .leghd{display:flex;justify-content:space-between;align-items:center}
 .leghd .nm{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-11);
@@ -1882,6 +1898,72 @@ var HIDDEN_GRID_TILES = ['/m/digest', '/m/v10', '/dashboard#index', '/v9', '/int
 function gtile(href, glyph, label){
   if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
   return '<a class="tool slab dense" href="' + href + '"><span>' + glyph + '</span>' + esc(label) + '</a>';
+}
+/* cc#1921 HOME_GRID_R1_LOCK (session_log 42796, founder-locked 10-Sep-2026): the grouped grid.
+   Three groups, four per row, icon first, label under, no tile box — design_refs/scorr_home_grid_R1
+   .html @ d215acd. Every SVG below is a byte-copy of the ref's (verify V2), never redrawn. The
+   Dashboard tile is gone (rule 3: My Scorr IS the dashboard) — /m/dash, its PROTECTED, NAV_REGISTRY
+   and NAV array entries from cc#1916 all stay. HIDDEN_GRID_TILES still applies. Two refs-vs-build
+   notes for the record, built as the ref says: AI CIO opens the WEB /cio (tagged web) although
+   /m/aicio exists (cc#1904); Investment Scanner and Wall of Trades are web too, tagged. */
+var G_GROUPS = [
+  { name: 'Market', tiles: [
+    { href: '/m/intel', label: 'Intel', web: false,
+      svg: '<svg viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="16" rx="2"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/></svg>' },
+    { href: '/m/sector', label: 'Sector Intel', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M12 12l8-4.6M12 12v9M12 12L4 7.4"/></svg>' },
+    { href: '/m/results', label: 'Results', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path d="M4 19h16"/><rect class="f" x="6" y="11" width="3" height="8"/><rect x="6" y="11" width="3" height="8"/><rect class="f" x="11" y="7" width="3" height="12"/><rect x="11" y="7" width="3" height="12"/><rect class="f" x="16" y="4" width="3" height="15"/><rect x="16" y="4" width="3" height="15"/></svg>' },
+    { href: '/m/qb', label: 'Baskets', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M4 9h16l-1.5 10h-13z"/><path d="M4 9h16l-1.5 10h-13z"/><path d="M8 9V6a4 4 0 018 0v3"/></svg>' },
+  ] },
+  { name: 'Analytics', tiles: [
+    { href: '/m/gvm', label: 'GVM', web: false,
+      svg: '<svg viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>' },
+    { href: '/m/screeners', label: 'Screeners', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path d="M4 5h16M6 10h12M8 15h8M10 20h4"/></svg>' },
+    { href: '/m/check#scan', label: 'TC Scanner', web: false,
+      svg: '<svg viewBox="0 0 24 24"><circle class="f" cx="11" cy="11" r="6"/><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8 11h6M11 8v6"/></svg>' },
+    { href: '/inv-scanner', label: 'Investment Scanner', web: true,
+      svg: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 13.5l2-2.5 1.5 1.5 2.5-3"/></svg>' },
+    { href: '/m/check', label: 'Trade Check', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
+    { href: '/m/v8', label: 'V8 Signals', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path d="M4 17l5-6 4 3 7-8"/><path d="M15 6h5v5"/></svg>' },
+    { href: '/m/mf', label: 'Mutual Funds', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M12 3a9 9 0 019 9h-9z"/><path d="M12 3a9 9 0 019 9h-9z"/><path d="M12 3a9 9 0 100 18 9 9 0 007-3.3"/></svg>' },
+    { href: '/m/fpc', label: 'Planning', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path d="M7 4h9M7 8h9M9 8c4 0 6 2 6 5s-3 5-7 5l6 6"/></svg>' },
+  ] },
+  { name: 'My Scorr', tiles: [
+    { href: '/m/myportfolio', label: 'My Portfolio', web: false,
+      svg: '<svg viewBox="0 0 24 24"><rect class="f" x="3" y="7" width="18" height="13" rx="2"/><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M3 12h18"/></svg>' },
+    { href: '/m/myalerts', label: 'My Alerts', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M6 16V11a6 6 0 0112 0v5l2 2H4z"/><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z"/><path d="M10 21h4"/></svg>' },
+    { href: '/m/mywatchlist', label: 'My Watchlist', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.1-5.5-2.9L6.5 20l1-6.1L3 9.5l6.3-.9z"/><path d="M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.1-5.5-2.9L6.5 20l1-6.1L3 9.5l6.3-.9z"/></svg>' },
+    { href: '/m/holdings', label: 'My Trades', web: false,
+      svg: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>' },
+    { href: '/trades', label: 'Wall of Trades', web: true,
+      svg: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/></svg>' },
+    { href: '/m/alerts#new', label: 'Custom Alert', web: false,
+      svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>' },
+    { href: '/m/health', label: 'Portfolio Health', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path d="M4 12h4l2-5 4 10 2-5h4"/></svg>' },
+    { href: '/cio', label: 'AI CIO', web: true,
+      svg: '<svg viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>' },
+  ] },
+];
+function gtileR1(href, svg, label, web){
+  if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
+  return '<a class="gtile" href="' + href + '">' + (web ? '<span class="gtag web">web</span>' : '')
+    + '<div class="gic">' + svg + '</div><div class="glb">' + esc(label) + '</div></a>';
+}
+function homeGridR1Html(){
+  return G_GROUPS.map(function(g){
+    return '<div class="gsec">' + esc(g.name) + '</div><div class="ggrid">'
+      + g.tiles.map(function(t){ return gtileR1(t.href, t.svg, t.label, t.web); }).join('') + '</div>';
+  }).join('');
 }
 
 /* cc#1888 P4-P7 (APP_GRID_FRAMEWORK_V1): the new DASHBOARD section. My Portfolio and My Alerts
@@ -5756,7 +5838,15 @@ function renderHome(d, pv){
     + gtile('/intraday', '\u25f4', 'V14 Intraday')
     // cc#991 appended Wall of Trades as tile 15; cc#1526 moved it to tile 1 (top of this list).
     ;
-  document.getElementById('body').appendChild(tools);
+  /* cc#1921 (founder-locked 10-Sep-2026, HOME_GRID_R1_LOCK 42796): the flat `tools` list above is
+     built but NO LONGER APPENDED — hidden, not deleted, so every tile note above keeps its history.
+     The grouped grid (homeGridR1Html, three .gsec + .ggrid blocks) renders in its place. The
+     Dashboard gtile('/m/dash') line above is therefore inert; rule 3 removes that tile. */
+  // document.getElementById('body').appendChild(tools);
+  var ggroups = document.createElement('div');
+  ggroups.className = 'ggroups';
+  ggroups.innerHTML = homeGridR1Html();
+  document.getElementById('body').appendChild(ggroups);
   // cc#1916: HIDDEN, not deleted — the four entries now live behind the /m/dash tile; the row-list
   // under the grid would be a duplicate. dashSectionHtml() stays defined above.
   // document.getElementById('body').insertAdjacentHTML('beforeend', dashSectionHtml());   // cc#1888 P4
