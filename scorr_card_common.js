@@ -1013,7 +1013,16 @@ window.scorrAsofStamp = function (asof) {
        marks that one rcard-body instance — see pwa_endpoints.py) — +2px on the base .rcard-body's
        13px, mobile only. do_not_touch: l1Html/auto_verdict (.rcard-l1*), peerHtml, v2Html are
        untouched; this selector matches none of them. */
-    + 'body.mcards .rcard-body.rcard-ra{font-size:15px}'
+    /* cc#1940 (founder 10-Sep 15:50, R popup on NATIONALUM: "Text should be smaller and line spacing
+       to look cleaner"): the +2px cc#1429 gave this block made its four bullet lines read larger than
+       the header/date/pill rows above it, and the base 1.55 line-height read loose at that size.
+       13.5px (a half-step over the 13px body, not the old 15) and line-height 1.45 for the bullet
+       block; the Sales/PAT "MISS vs peers" rows directly below it keep their 12px but take the same
+       1.4 line-height so the two blocks read as one. Scoped to .rcard-ra on the app only: the web R
+       card, the C/A/D popups and the C·A·R·D pills are outside this selector. Status dots and the
+       BEAT/MISS tags stay at their 10px -- proportionate beside 13.5px text, not resized. */
+    + 'body.mcards .rcard-body.rcard-ra{font-size:13.5px;line-height:1.45}'
+    + 'body.mcards .rcard-body.rcard-ra .rcard-peer-row{line-height:1.4}'
     + 'body.mcards .rcard-l1row, body.mcards .rcard-exp-row, body.mcards .rcard-peer-row{'
     + '  gap:8px}'
     + 'body.mcards .rcard-l1v, body.mcards .rcard-exp-v, body.mcards .rcard-peer-v,'
