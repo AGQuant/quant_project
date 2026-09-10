@@ -71,7 +71,7 @@ def approved_trades():
         # ONLY while that position is still OPEN. v8_paper_positions.entry_ts is a naive IST
         # timestamp, exactly what the flow's to_char() wrote into source_ref -- no tz shift here.
         cur.execute("""SELECT p.symbol, p.side, p.basket, p.qty, p.entry_price, p.target, p.stop_loss,
-                              p.entry_ts, a.id AS alert_id, a.approved_at, a.approved_via
+                              p.entry_ts, a.id AS alert_id, a.approved_at, a.approved_via, a.approved_price
                        FROM trade_alerts a
                        JOIN v8_paper_positions p
                          ON p.status = 'OPEN'
@@ -98,6 +98,17 @@ def approved_trades():
         qty, side = _f(p["qty"]), str(p["side"] or "").upper()
 
         unrealised = v8_book_canon.unrealised_rupees(entry, cmp_v, side, qty)   # None if cmp missing
+        # R2 (Fable 10-Sep, founder "approved trades card needs redesign"): the card's headline is
+        # P&L SINCE THE APPROVAL PRICE -- the founder's own entry -- not the engine's entry. Same canon
+        # formula, approved_price in place of entry. Engine-entry P&L stays as `unrealised`.
+        approved_px = _f(p["approved_price"])
+        pnl_since = v8_book_canon.unrealised_rupees(approved_px, cmp_v, side, qty) if approved_px is not None else None
+        pnl_since_pct = (round((cmp_v - approved_px) / approved_px * 100.0 * (-1.0 if side == "SHORT" else 1.0), 2)
+                         if (approved_px and cmp_v is not None) else None)
+        sign = -1.0 if side == "SHORT" else 1.0
+        risk_left = round((cmp_v - stop) * qty * sign, 2) if (cmp_v is not None and stop is not None and qty is not None) else None
+        reward_left = round((target - cmp_v) * qty * sign, 2) if (cmp_v is not None and target is not None and qty is not None) else None
+        rr_left = round(reward_left / risk_left, 1) if (risk_left and reward_left is not None and risk_left > 0) else None
 
         potential_left = None
         if cmp_v is not None and target is not None and qty is not None:
@@ -125,6 +136,10 @@ def approved_trades():
             "rail_left_label": "target" if (target is not None and stop is not None and target <= stop) else "stop",
             "unrealised": unrealised, "potential_left": potential_left,
             "marker_pct": marker_pct,
+            # R2 fields
+            "approved_price": approved_px, "qty": qty,
+            "pnl_since_approval": pnl_since, "pnl_since_approval_pct": pnl_since_pct,
+            "risk_left": risk_left, "reward_left": reward_left, "rr_left": rr_left,
         })
     return {
         "count": len(out), "positions": out,
