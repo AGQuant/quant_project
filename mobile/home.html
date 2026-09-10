@@ -2695,18 +2695,23 @@ function breadthSectors(){
   if (!secs.length) return '';
   var up = 0, flat = 0, dn = 0;
   /* cc#1933: chips are buttons that filter the table below (breadthPick), no longer links to the web
-     sector page; the rail arrives from the endpoint already ordered best -> weak, unpriced last. An
-     unpriced sector (day_pct null) is band "na" — a dash, counted in none of the three dots. */
+     sector page; the rail arrives from the endpoint already ordered best -> weak, unpriced last.
+     cc#1935: the chips are the 22 V8 THEMES (futures_universe.theme via v8_theme_sectors(), the one
+     grouping truth, cc#338/1042) -- equal-weight day figure, full name on up to two lines, member
+     count as a suffix; a theme under the min-members guard (day_pct null) is band "na" — an em-dash,
+     never dropped, counted in none of the three dots. */
   var chips = secs.map(function(x){
     var b = (x.day_pct == null) ? 'na' : adBand(x.day_pct);
     if (b === 'up1' || b === 'up2') up++; else if (b === 'am') flat++; else if (b !== 'na') dn++;
     var sel = BREADTH.sel === x.segment;
-    return '<button type="button" class="ad-sc ' + b + (sel ? ' sel' : '') + '" aria-pressed="' + (sel ? 'true' : 'false')
+    var cnt = (x.members_total != null) ? x.members_total : ((x.members || []).length || null);
+    return '<button type="button" class="ad-sc ad-th ' + b + (sel ? ' sel' : '') + '" aria-pressed="' + (sel ? 'true' : 'false')
       + '" onclick="breadthPick(' + JSON.stringify(String(x.segment)).replace(/"/g, '&quot;') + ')">'
-      + '<span class="ad-n" title="' + esc(x.segment) + '">' + esc(String(x.segment).toUpperCase()) + '</span>'
+      + '<span class="ad-n" title="' + esc(x.segment) + '">' + esc(String(x.segment).toUpperCase())
+      + (cnt != null ? '<span class="ad-cnt"> \u00b7 ' + cnt + '</span>' : '') + '</span>'
       + '<span class="ad-v">' + (x.day_pct == null ? '\u2014' : pct(x.day_pct)) + '</span></button>';
   }).join('');
-  return '<div class="ad-wrap"><div class="ad-hd"><span>Sectors · Day %</span><span class="ad-r">mcap-weighted · best \u2192 weak</span></div>'
+  return '<div class="ad-wrap"><div class="ad-hd"><span>Sectors · Day %</span><span class="ad-r">equal-weight · best \u2192 weak</span></div>'
     + '<div class="ad-row">' + chips + '</div>'
     + '<div class="ad-foot"><div class="ad-dots"><i class="ad-u"></i><span>' + up + ' up</span><i class="ad-a"></i><span>' + flat + ' flat</span><i class="ad-d"></i><span>' + dn + ' down</span></div>'
     + '<span>as of ' + adAsOf(BREADTH.as_of) + '</span></div></div>';
@@ -2736,6 +2741,9 @@ function closeBreadth(){
   var ov = document.getElementById('brov');
   if (ov) ov.classList.remove('open');
   document.body.style.overflow = '';
+  /* cc#1935 item 5 (founder 10-Sep 15:41): a tapped theme lives only for one open sheet — closing
+     clears it, so the next open shows no bordered chip and the full table. */
+  BREADTH.sel = null;
 }
 
 /* cc#910: a tape chart is now a registered CHART, so it scrubs and switches range exactly like

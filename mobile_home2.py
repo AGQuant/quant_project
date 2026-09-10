@@ -448,59 +448,58 @@ def mobile_breadth(request: Request):
     advances = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] > 0)
     declines = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] < 0)
     unchanged = sum(1 for r in rows if r["day_chg_pct"] is not None and r["day_chg_pct"] == 0)
-    # cc#1592 (ADV_DECL_SECTOR_CAPS_V1, session_log 36539): MCAP-WEIGHTED day% per gvm_scores.segment
-    # — SUM(mcap * day_pct) / SUM(mcap) — the same formula tc_v4_scan._segment_day_map uses (cc#455),
-    # applied to THIS payload's own rows so the chips and the table below them are one snapshot.
-    # Never a simple average: one giant stock must not be outvoted by nine small ones. A member with
-    # no market cap cannot be weighted and is counted in `n` but not in `n_weighted`; a segment with
-    # nothing weightable is left out rather than shown as 0.
-    acc = {}
-    members = {}   # cc#1933: segment -> [symbols], the SAME grouping key the chips are built from
-    for r in rows:
-        seg = r.get("segment")
-        if not seg:
-            continue
-        members.setdefault(seg, []).append(r["symbol"])
-        if r["day_chg_pct"] is None:
-            continue
-        a = acc.setdefault(seg, {"segment": seg, "wsum": 0.0, "msum": 0.0, "n": 0, "n_weighted": 0})
-        a["n"] += 1
-        mc = r.get("market_cap")
-        if mc is not None and float(mc) > 0:
-            a["wsum"] += float(r["day_chg_pct"]) * float(mc)
-            a["msum"] += float(mc)
-            a["n_weighted"] += 1
-    sectors = [{"segment": a["segment"], "day_pct": round(a["wsum"] / a["msum"], 2),
-                "n": a["n"], "n_weighted": a["n_weighted"]}
-               for a in acc.values() if a["msum"] > 0]
-    # cc#1933: (a) every sector row carries `members` -- its symbols from THESE rows, the same
-    # gvm_scores.segment grouping the figure above was built from, so the sheet can filter the table
-    # to a tapped chip without re-deriving membership client-side; (b) a segment whose members are
-    # all unpriced (or none weightable) now still gets a chip, with day_pct None, so the sheet can
-    # show "No prices yet for this sector" instead of the chip silently vanishing; (c) order is
-    # best -> weak by the mcap-weighted day% (was |day%| desc, which interleaved gainers and losers),
-    # unpriced chips last, ties by name.
-    have = {z["segment"] for z in sectors}
-    for seg in members:
-        if seg not in have:
-            sectors.append({"segment": seg, "day_pct": None, "n": 0, "n_weighted": 0})
-    for z in sectors:
-        z["members"] = sorted(members.get(z["segment"], []))
-    sectors.sort(key=lambda z: (z["day_pct"] is None, -(z["day_pct"] or 0.0), z["segment"]))
+    # cc#1935: THE ONE GROUPING TRUTH -- v8_endpoints.v8_theme_sectors() (cc#338 / cc#1042), the same
+    # function the web "All Futures" tab and the app Segments panel read: the 22 curated themes on
+    # futures_universe.theme, EQUAL-WEIGHT AVG(v8_metrics.day_1d) per theme (deliberately NOT
+    # mcap-weighted -- cc#1042 "do not fix the AVG into a weighted mean"), a theme under
+    # THEME_MIN_MEMBERS priced members carries NULL and renders an em-dash, NEW ENTRANTS last and
+    # only when non-empty. Called in-process (the mobile_ext pattern), never re-derived here. The
+    # gvm_scores.segment grouping this sheet used until cc#1933 is GONE from it: 55 groups, 18 of
+    # them single-stock ("PHARMA - BULK & API . 1") -- the exact failure cc#1042 removed from the
+    # app Segments panel. Members come from one SELECT on futures_universe with the function's own
+    # index exclusion, so a tapped chip filters the table to exactly that theme's active names.
+    # Note on bases: the chip figure is the theme's equal-weight v8_metrics day_1d; the table's
+    # per-symbol Day% below it is this payload's own prev-close read anchored to adr_intraday.
+    # Both are stated in the payload; neither is recomputed from the other.
+    sectors, sectors_basis, sectors_min = [], None, None
+    try:
+        from v8_endpoints import v8_theme_sectors, _INDEX_EXCLUDE_SQL
+        _ts = v8_theme_sectors()
+        members = {}
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(f"""SELECT COALESCE(fu.theme, 'NEW ENTRANTS') AS theme, fu.symbol
+                            FROM futures_universe fu
+                            WHERE fu.is_active = TRUE AND {_INDEX_EXCLUDE_SQL}
+                            ORDER BY fu.symbol""", ())
+            for theme, sym in cur.fetchall():
+                members.setdefault(theme, []).append(sym)
+        for t in (_ts.get("sectors") or []):
+            theme = t["segment"]
+            if theme == "NEW ENTRANTS" and not members.get(theme):
+                continue                                   # spec item 1: only when non-empty
+            sectors.append({"segment": theme, "day_pct": t.get("avg_day_1d"),
+                            "n": t.get("members_priced"), "members_total": t.get("members_total"),
+                            "suppressed": t.get("suppressed"), "members": members.get(theme, [])})
+        # the function already orders avg day desc with thin (NULL) themes last; NEW ENTRANTS is
+        # pinned after everything, and a null figure sorts after every number.
+        sectors.sort(key=lambda z: (z["segment"] == "NEW ENTRANTS", z["day_pct"] is None,
+                                    -(z["day_pct"] or 0.0), z["segment"]))
+        sectors_basis, sectors_min = _ts.get("basis"), _ts.get("min_members")
+    except Exception as e:
+        log.warning("breadth: theme_sectors unavailable (%s)", e)
     return {
         "rows": [{"symbol": r["symbol"],
                   "day_chg_pct": float(r["day_chg_pct"]) if r["day_chg_pct"] is not None else None,
                   "theme": r["theme"],
-                  "segment": r.get("segment"),   # cc#1933: the chip grouping key, on the row too
                   "sector_day_chg_pct": float(r["sector_day_chg_pct"]) if r["sector_day_chg_pct"] is not None else None}
                  for r in rows],
         "advances": advances, "declines": declines, "unchanged": unchanged,
         "as_of": str(anchor_ts),
         "sectors": sectors,
-        "sectors_basis": ("mcap-weighted: SUM(market_cap x day_pct) / SUM(market_cap) per gvm_scores.segment, "
-                          "over these same rows (prev-close basis, anchored to the same adr_intraday ts)"),
-        "sectors_unweighted_rows": sum(1 for r in rows if r.get("segment") and r["day_chg_pct"] is not None
-                                       and not (r.get("market_cap") is not None and float(r["market_cap"]) > 0)),
+        "sectors_taxonomy": "futures_universe.theme via v8_endpoints.v8_theme_sectors() (cc#1935; cc#338/1042 one grouping truth)",
+        "sectors_basis": sectors_basis,
+        "sectors_min_members": sectors_min,
+        "rows_basis": "per-symbol prev-close day% (intraday_prices vs raw_prices) anchored to the adr_intraday ts above",
     }
 
 
