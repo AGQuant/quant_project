@@ -1,401 +1,196 @@
 <!doctype html>
+<!-- ══ mobile/sector.html — Sector Intel app section. Fable single-mode build 10-Sep-2026 (founder: "read the
+     website APIs once for the universe, then build intuitively"). Supersedes the cc#1900 build. ONE page, three views:
+       /m/sector             → LADDER: key card, size toggle, strongest segments ranked by mcap-weighted GVM with
+                               G·V·M, change since first score and the top name; cold segments; emerging themes rail
+       /m/sector?view=all    → every segment, sortable table
+       /m/sector?seg=<name>  → one segment: scorecard, evidence strip, the brief in plain words, members table
+     Data: /api/mobile/sector_app/list and /segment?name= (sector_app_mobile.py V2), which read the web tab's own
+     sector_rotation / sector_brief / sector_themes. Contract tokens only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sectors</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<title>Sector Intel · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<script src="/scorr_card_common.js"></script>
 <style>
-/* cc#1900 — Sector Intel condensed summary (si-*), inserted ABOVE the existing cc#1623 full
-   filterable list (#secp, untouched below). Same bridge-token + scorr_themes.css scale-token
-   discipline as every other section page this session — no raw hex. */
-.si-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
-.si-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-left:var(--bw-3) solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
-.si-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.si-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.si-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
-.si-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
-.si-cell .si-k{font-size:var(--type-9)}
-.si-cell .si-v{font-size:var(--type-14);margin-top:var(--space-3)}
-.si-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
-.si-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.si-slab .hint{font-size:var(--type-10);color:var(--dim)}
-.si-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
- scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.si-rail::-webkit-scrollbar{display:none}
-.si-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
-.si-c.gap{border-style:dashed}
-.si-ch{display:flex;align-items:baseline;justify-content:space-between}
-.si-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
-.si-ch .n{font-size:var(--type-11);color:var(--mut)}
-.si-lst{margin-top:var(--space-9)}
-.si-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
-.si-lr:last-child{border-bottom:none}
-.si-lr .s{font-size:var(--type-125);font-weight:800}
-.si-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
-.si-lr .a{font-size:var(--type-115);color:var(--mut)}
-.si-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
-.si-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
-.si-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
- font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none;cursor:pointer}
-.si-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
-.si-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
-.si-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
- border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
-.si-note b{color:var(--mut)}
-.si-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.si{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.si-asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}
+.si-asof b{color:var(--ink);font-weight:600}
+.km{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-left:var(--bw-3) solid var(--brand);border-radius:0 var(--radius-16) var(--radius-16) 0;padding:var(--space-13) var(--space-16);display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:var(--space-8)}
+.km .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}.km .v{font-size:var(--type-16);font-weight:800;margin-top:var(--space-3)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+.seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+/* ladder row */
+.lad{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.lr{display:grid;grid-template-columns:22px 1fr 58px;gap:var(--space-10);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit;position:relative}
+.lr:last-child{border-bottom:none}
+.lr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
+.lr.cold::before{background:var(--loss)}.lr.good::before{background:var(--win)}
+.lr .rk{font-size:var(--type-10);font-weight:800;color:var(--muted);text-align:center}
+.lr .nm{font-size:var(--type-125);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lr .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lr .sub b{color:var(--ink);font-weight:700}
+.lr .gv{text-align:right}.lr .gv .n{font-size:var(--type-17);font-weight:800;line-height:1}.lr .gv .c{font-size:var(--type-9);margin-top:var(--space-2);font-weight:700}
+.pill{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.pill.g{color:var(--win)}.pill.w{color:var(--loss)}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+/* themes rail */
+.rl{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}.rl::-webkit-scrollbar{display:none}
+.tc{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.tc .rk{font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em10)}
+.tc .nm{font-size:var(--type-14);font-weight:800;margin-top:var(--space-3)}.tc .tg{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3);line-height:1.45}
+.tc .lst{margin-top:var(--space-9);border-top:var(--bw-1) solid var(--hi);padding-top:var(--space-6)}
+.tc .r{display:flex;justify-content:space-between;font-size:var(--type-115);padding:var(--space-4) 0}.tc .r b{font-weight:800}.tc .r span{color:var(--muted)}
+/* detail */
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .nm{font-size:var(--type-22);font-weight:800;line-height:1.05;margin-top:var(--space-3)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-8)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted)}.hero .big .n b{color:var(--ink)}
+.pil{margin-top:var(--space-10)}.pil .r{display:grid;grid-template-columns:22px 1fr 44px;gap:var(--space-10);align-items:center;padding:var(--space-5) 0}
+.pil .l{font-size:var(--type-12);font-weight:800;color:var(--brand)}.pil .bar{height:6px;border-radius:var(--radius-3);background:var(--hi);overflow:hidden}.pil .bar i{display:block;height:6px;background:var(--brand);border-radius:var(--radius-3)}
+.pil .v{font-size:var(--type-125);font-weight:800;text-align:right}
+.strip{display:grid;grid-template-columns:repeat(4,1fr);margin:var(--space-10) var(--space-16) 0;border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);overflow:hidden}
+.strip>div{padding:var(--space-9) var(--space-8);background:var(--panel);border-right:var(--bw-1) solid var(--edge)}.strip>div:last-child{border-right:none}
+.strip .k{font-size:var(--type-8);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.strip .v{font-size:var(--type-13);font-weight:800;margin-top:var(--space-3)}
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}
+.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.p{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8);color:var(--ink)}.p.mu{color:var(--muted)}
+.emp{font-size:var(--type-115);color:var(--muted);line-height:1.6;margin-top:var(--space-7)}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+/* table */
+.wrap{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;min-width:100%;font-size:var(--type-115)}
+th{position:sticky;top:0;background:var(--hi);font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em9);text-align:right;padding:var(--space-9) var(--space-8);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap;cursor:pointer;user-select:none}
+th.on{color:var(--brand)}th.on::after{content:" ▾";font-size:var(--type-9)}th.on.asc::after{content:" ▴"}
+th:first-child,td:first-child{text-align:left;padding-left:var(--space-12);position:sticky;left:0;background:var(--panel)}th:first-child{background:var(--hi)}
+td{padding:var(--space-8) var(--space-8);border-bottom:var(--bw-1) solid var(--hi);text-align:right;font-weight:600;white-space:nowrap}
+td:first-child{font-weight:800;max-width:150px;overflow:hidden;text-overflow:ellipsis}td:first-child small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600}
+td a{color:inherit;text-decoration:none}
+tr:last-child td{border-bottom:none}.gd{color:var(--brand)}
+.foot{padding:var(--space-9) var(--space-12);font-size:var(--type-10);color:var(--muted);border-top:var(--bw-1) solid var(--edge)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800}
 </style>
 </head>
 <body data-theme="goldnight">
-<!-- cc#1645 P3: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap). -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
-     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
-     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
-<!-- cc#1645 P3: shared appshell header (VARIANT B). Existing #secp content below is untouched. -->
-<!-- cc#1661 P3: #sc-r (the right-aligned status text) moves into .as-slot; the title/subtitle row
-     below gets class="head" so the shared theme_mobile.css rule hides it (it had no class before). -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Sectors</span></div><div class="as-slot"><div id="sc-r" style="font-family:var(--mono);font-size:10px;color:var(--mute);text-align:right;line-height:1.5;white-space:nowrap"></div></div></div>
-<!-- cc#1900 — Sector Intel condensed summary (design_refs/scorr_app_sector_R1.html), ADDITIVE
-     above the existing cc#1623 full filterable list below, not a replacement: that list carries
-     filters, sort, cap segmentation and per-segment detail sheets (brief + top stocks) built
-     under session_log 37158 — genuinely more than this ref's condensed cards, so it stays intact
-     rather than being retired to match a summary view. "All 128 segments" links down to it
-     instead of inventing a second route. Data from /api/mobile/sector_app
-     (sector_app_mobile.py), which reads sector_ratings directly (RAW, not the cc#827 merge). -->
-<div class="si-asof" id="si-asof">Loading…</div>
-<div id="si-body"><div class="si-empty">Loading sector ratings…</div></div>
-<!--
-  cc#1623 — APP_SECTOR_PAGE_V1 (session_log 37158; design ref design_refs/scorr_mobile_sector_R1.html).
-  ONE source for every number on the list: /api/sector/rotation (cc#827 merge layer, GVM is the
-  rating and the order). The old page read /api/sectors, whose rows carry mcap_weighted_gvm, and
-  looked for gvm / gvm_score / score — so every row printed "--". This page binds to the rotation
-  keys only. The detail sheet reads /api/mobile/sector/detail (stocks by GVM + brief). GOLD NIGHT
-  tokens via the shared sheets; all sizing inline (this file sits at 0 on the theme ratchet).
--->
-<div class="screen" id="secp">
-  <div class="head as-hide" style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:16px 14px 10px">
-    <div><div style="font-family:var(--display,inherit);font-size:24px;font-weight:800;line-height:1;color:var(--chalk,var(--txt))">Sectors</div><div id="sc-sub" style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--gold);margin-top:6px;text-transform:uppercase">loading…</div></div>
-  </div>
-  <div class="body">
-    <div id="sc-rot"></div>
-    <div id="sc-filters"></div>
-    <div id="sc-sort"></div>
-    <div id="sc-list"><div class="loading">Loading sectors…</div></div>
-    <div id="sc-more"></div>
-    <div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--dim);margin:10px 0 14px;line-height:1.5">Bar = G + V + M stacked to the GVM total. Ticks at 6 · 7 · 8. Tap a sector for its stocks and brief.</div>
-  </div>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t" id="pg-title">Sector Intel</span></div><div class="as-slot"><a class="back" id="back" href="/m/sector" style="display:none">‹</a></div></div>
+<div class="si">
+<div class="si-asof" id="asof">Loading…</div>
+<div id="body"><div class="err">Loading sectors…</div></div>
 </div>
 <nav class="bnav">
-  <a class="bn on" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
-  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+  <a class="bn on" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
 <script>
-var SC = { data:null, err:null, filter:'all', sort:'gvm', all:false, sheet:null, detail:{}, cap:'all', caps:null };
-var SHOW_N = 20;
-function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function num(v){ return typeof v === 'number' && isFinite(v); }
-function nv(v){ return v == null ? null : (isFinite(Number(v)) ? Number(v) : null); }
-function f2(v){ v = nv(v); return v == null ? '—' : v.toFixed(2); }
-function f1(v){ v = nv(v); return v == null ? '—' : v.toFixed(1); }
-function pctS(v, d){ v = nv(v); if(v == null) return '—'; return (v > 0 ? '+' : (v < 0 ? '−' : '')) + Math.abs(v).toFixed(d == null ? 1 : d) + '%'; }
-function sgn(v){ v = nv(v); return v == null ? 'mu' : (v > 0 ? 'up' : (v < 0 ? 'dn' : 'mu')); }
-function crS(v){ v = nv(v); if(v == null) return '—'; if(v >= 100000) return '₹' + (v/100000).toFixed(1) + 'L Cr'; if(v >= 1000) return '₹' + (v/1000).toFixed(v >= 10000 ? 0 : 1) + 'k Cr'; return '₹' + Math.round(v) + ' Cr'; }
-function dmy(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m ? (+m[3]) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1] : String(iso||''); }
-function istNow(){ var n = new Date(); return new Date(n.getTime() + (330 + n.getTimezoneOffset())*60000); }
-function hhmm(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
-function verdictOf(r){ var g = nv(r.gvm); return r.verdict || (g == null ? '—' : g >= 8 ? 'Excellent' : g >= 7 ? 'Good' : g >= 6 ? 'Average' : 'Weak'); }
-function vCol(r){ var g = nv(r.gvm); return g == null ? 'var(--mute)' : g >= 7 ? 'var(--gold)' : g >= 6 ? 'var(--chalk,var(--txt))' : 'var(--down)'; }
-function nameOf(r){ return r.display_segment || r.segment || '—'; }
-/* cc#1624 bug: --up is declared only inside the #gvp / #v8p blocks of mobile_app.css and not at all in
-   scorr_themes.css, so on this page var(--up) resolved to nothing and the G segment painted
-   transparent. Every tone now falls back through the global name to the token's own value. */
-var TONE = { g:'var(--up, var(--grn, #2FD48B))', v:'var(--amber, #FF9F45)', m:'var(--aqua, var(--blu, #35E0FF))' };
-
-/* ── header + rotation strip ─────────────────────────────────────────────────────────── */
-function renderTop(){
-  var d = SC.data;
-  if(!d){ $('sc-sub').textContent = SC.err ? 'could not load' : 'loading…'; $('sc-r').innerHTML = ''; return; }
-  $('sc-sub').textContent = (d.raw_segments || 0) + ' segments · ' + (d.total_segments || 0) + ' shown';
-  $('sc-r').innerHTML = 'mcap-weighted GVM<br>scores ' + esc(dmy(d.score_date)) + ' · prices ' + esc(hhmm(SC.fetchedAt || istNow()));
-}
-/* cc#1624 · cap class per sector = bucket of avg mcap (total_mcap / stocks_count) on the platform
-   cuts served by /api/mobile/sector/caps (investment_check.get_cap_category, the GVM page chip rule) */
-function avgMcap(r){ var t = nv(r.total_mcap), n = nv(r.stocks_count); return (t != null && n) ? t / n : null; }
-function capOf(r){ var c = SC.caps; if(!c) return null; var a = avgMcap(r); if(a == null) return null; return a >= c.large_min ? 'large' : a >= c.mid_min ? 'mid' : 'small'; }
-function capTag(r){ var k = capOf(r); return k ? '<span style="font-family:var(--mono);font-size:8.5px;font-weight:800;padding:0 4px;border:1px solid var(--line);color:var(--mute)" title="' + k + ' cap by average mcap">' + k[0].toUpperCase() + '</span>' : ''; }
-function capRows(rows){ return SC.cap === 'all' || !SC.caps ? rows : rows.filter(function(r){ return capOf(r) === SC.cap; }); }
-function crWords(v){ v = nv(v); return v == null ? '—' : (v >= 100000 ? (v/100000).toFixed(v % 100000 ? 1 : 0) + 'L' : v >= 1000 ? Math.round(v/1000) + 'k' : String(Math.round(v))) + ' Cr'; }
-function capSeg(){
-  if(!SC.caps) return '';
-  var all = rowsAll();
-  return '<div style="display:flex;gap:2px;padding:2px;background:var(--well);border:1px solid var(--line);border-radius:8px;margin-bottom:10px">' + [['all','ALL'],['large','LARGE'],['mid','MID'],['small','SMALL']].map(function(t){
-    var n = t[0] === 'all' ? all.length : all.filter(function(r){ return capOf(r) === t[0]; }).length, on = SC.cap === t[0];
-    return '<button type="button" data-cap="' + t[0] + '" style="flex:1;border:0;border-radius:6px;min-height:30px;font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:1px;cursor:pointer;' + (on ? 'background:var(--gold);color:var(--well)' : 'background:transparent;color:var(--mute)') + '">' + t[1] + ' ' + n + '</button>';
-  }).join('') + '</div>';
-}
-function laneRow(r, cls){ return '<div data-open="' + esc(nameOf(r)) + '" role="button" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.25;cursor:pointer"><span style="color:var(--chalk,var(--txt));min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(nameOf(r)) + '</span><b class="' + cls + '" style="font-family:var(--mono);font-weight:800;font-size:12.5px;flex:none">' + f2(r.gvm) + '</b></div>'; }
-function renderRot(){
-  var d = SC.data; if(!d){ $('sc-rot').innerHTML = ''; return; }
-  var pool = capRows(rowsAll());   /* rowsAll is GVM-ordered; HOT / COLD recompute inside the chosen cap */
-  var hot = SC.cap === 'all' ? (d.top5 || []).slice(0, 5) : pool.slice(0, 5);
-  var cold = SC.cap === 'all' ? (d.bottom5 || []).slice(0, 5) : pool.filter(function(r){ return nv(r.gvm) != null && r.gvm < 6; }).reverse().slice(0, 5);
-  var capWord = SC.cap === 'all' ? '' : ' · ' + SC.cap.toUpperCase();
-  var cuts = SC.caps ? 'Large > ' + crWords(SC.caps.large_min) + ' avg · Mid ' + crWords(SC.caps.mid_min) + '–' + crWords(SC.caps.large_min) + ' · Small < ' + crWords(SC.caps.mid_min) : '';
-  $('sc-rot').innerHTML = '<section class="pressed" style="padding:12px 14px">'
-    + '<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;letter-spacing:1.6px;color:var(--mute);margin-bottom:8px"><span>ROTATION</span><span style="letter-spacing:.3px">GVM is the rating and the order</span></div>'
-    + capSeg()
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--up);margin-bottom:2px">▲ HOT · TOP ' + hot.length + ' OF ' + pool.length + esc(capWord) + '</div>' + (hot.length ? hot.map(function(r){ return laneRow(r, 'up'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">none today</div>') + '</div>'
-    + '<div style="min-width:0"><div style="font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--down);margin-bottom:2px">▼ COLD · WEAK ' + cold.length + esc(capWord) + '</div>' + (cold.length ? cold.map(function(r){ return laneRow(r, 'dn'); }).join('') : '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);padding:6px 0">no weak sector today</div>') + '</div>'
-    + '</div>'
-    + '<div style="font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 10px"><span>Excellent 8+ · Good 7+ · Average 6+ · Weak</span>' + (cuts ? '<span>' + esc(cuts) + '</span>' : '') + '<span>' + (num(d.merged_away) ? d.merged_away + ' one-stock segments merged into families' : '') + '</span></div>'
-    + '</section>';
-}
-
-/* ── filters + sort (in-memory) ──────────────────────────────────────────────────────── */
-var FILTERS = [ {k:'all', l:'All', f:function(){ return true; }}, {k:'good', l:'Good+', f:function(r){ return nv(r.gvm) != null && r.gvm >= 7; }}, {k:'avg', l:'Average', f:function(r){ return nv(r.gvm) != null && r.gvm >= 6 && r.gvm < 7; }}, {k:'weak', l:'Weak', f:function(r){ return nv(r.gvm) != null && r.gvm < 6; }}, {k:'rising', l:'Rising', f:function(r){ return nv(r.gvm_change) != null && r.gvm_change > 0; }}, {k:'falling', l:'Falling', f:function(r){ return nv(r.gvm_change) != null && r.gvm_change < 0; }} ];
-var SORTS = [ {k:'gvm', l:'GVM', v:function(r){ return nv(r.gvm); }}, {k:'delta', l:'Δ 30d', v:function(r){ return nv(r.gvm_change); }}, {k:'inst', l:'Inst', v:function(r){ return nv(r.inst_change); }}, {k:'qoq', l:'QoQ profit', v:function(r){ return nv(r.qoq_profit); }}, {k:'mcap', l:'Mcap', v:function(r){ return nv(r.total_mcap); }} ];
-function rowsAll(){ return (SC.data && SC.data.all) || []; }
-function rankMap(){ var m = {}; rowsAll().forEach(function(r, i){ m[nameOf(r)] = i + 1; }); return m; }
-function visible(){
-  var f = FILTERS.filter(function(x){ return x.k === SC.filter; })[0] || FILTERS[0], s = SORTS.filter(function(x){ return x.k === SC.sort; })[0] || SORTS[0];
-  var rows = capRows(rowsAll()).filter(f.f);   /* cc#1624: cap AND the chip */
-  rows.sort(function(a, b){ var x = s.v(a), y = s.v(b); if(x == null && y == null) return 0; if(x == null) return 1; if(y == null) return -1; return y - x; });
-  return rows;
-}
-function renderFilters(){
-  var all = capRows(rowsAll());
-  $('sc-filters').innerHTML = '<div style="display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:12px 0 8px">' + FILTERS.map(function(x){
-    var n = all.filter(x.f).length, on = SC.filter === x.k;
-    return '<button type="button" data-f="' + x.k + '" style="flex:none;min-height:34px;font-family:var(--mono);font-size:11px;font-weight:700;padding:6px 11px;border:1px solid ' + (on ? 'var(--gold)' : 'var(--line)') + ';background:' + (on ? 'var(--gold-d, var(--well))' : 'var(--well)') + ';color:' + (on ? 'var(--gold)' : 'var(--mute)') + ';clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);cursor:pointer">' + x.l + ' ' + n + '</button>';
-  }).join('') + '</div>';
-  $('sc-sort').innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;color:var(--mute);margin-bottom:8px"><span style="flex:none;letter-spacing:1.4px">SORT</span><div style="display:flex;gap:5px;overflow-x:auto;scrollbar-width:none">' + SORTS.map(function(x){
-    var on = SC.sort === x.k;
-    return '<button type="button" data-s="' + x.k + '" style="flex:none;min-height:28px;padding:3px 8px;border:1px solid ' + (on ? 'var(--gold)' : 'var(--line)') + ';background:transparent;color:' + (on ? 'var(--gold)' : 'var(--dim)') + ';font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">' + x.l + '</button>';
-  }).join('') + '</div></div>';
-}
-
-/* ── rows: stacked G + V + M bar scaled so the total width = gvm / 10 ─────────────────── */
-function stackBar(r){
-  var g = nv(r.g_score) || 0, v = nv(r.v_score) || 0, m = nv(r.m_score) || 0, gvm = nv(r.gvm) || 0, sum = g + v + m;
-  var tot = Math.max(0, Math.min(100, gvm * 10)), wg = sum ? tot * g / sum : 0, wv = sum ? tot * v / sum : 0, wm = sum ? tot * m / sum : 0;
-  return '<div style="grid-column:2/span 2;height:6px;margin-top:6px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(3px 0,100% 0,100% 100%,0 100%,0 3px)">'
-    + '<i style="position:absolute;left:0;top:0;bottom:0;width:' + wg.toFixed(1) + '%;background:' + TONE.g + '"></i>'
-    + '<i style="position:absolute;left:' + wg.toFixed(1) + '%;top:0;bottom:0;width:' + wv.toFixed(1) + '%;background:' + TONE.v + '"></i>'
-    + '<i style="position:absolute;left:' + (wg + wv).toFixed(1) + '%;top:0;bottom:0;width:' + wm.toFixed(1) + '%;background:' + TONE.m + '"></i>'
-    + [60, 70, 80].map(function(t){ return '<i style="position:absolute;top:-2px;left:' + t + '%;width:1px;height:10px;background:var(--dim)"></i>'; }).join('') + '</div>';
-}
-function rowHtml(r, rank){
-  var pick = (r.top_stocks && r.top_stocks[0]) || (r.top_stock ? {symbol:r.top_stock, gvm:r.top_stock_gvm} : null);
-  var dl = nv(r.gvm_change);
-  return '<article class="slab" data-open="' + esc(nameOf(r)) + '" role="button" style="display:grid;grid-template-columns:22px 1fr auto;gap:4px 10px;align-items:center;padding:11px 13px;margin-bottom:8px;cursor:pointer">'
-    + '<span style="font-family:var(--mono);font-size:10px;color:var(--dim);grid-row:1/span 2">' + rank + '</span>'
-    + '<div style="font-weight:700;font-size:14px;line-height:1.2;color:var(--chalk,var(--txt))">' + esc(nameOf(r)) + '</div>'
-    + '<div style="grid-column:3;grid-row:1/span 2;text-align:right"><b style="font-family:var(--mono);font-size:19px;font-weight:800;letter-spacing:-.3px;display:block;line-height:1;color:' + vCol(r) + '">' + f2(r.gvm) + '</b><small style="font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--mute)">' + esc(String(verdictOf(r)).toUpperCase()) + '</small></div>'
-    + stackBar(r)
-    + '<div style="grid-column:2/span 2;display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:4px"><span style="color:' + TONE.g + '">G <b>' + f1(r.g_score) + '</b></span><span style="color:' + TONE.v + '">V <b>' + f1(r.v_score) + '</b></span><span style="color:' + TONE.m + '">M <b>' + f1(r.m_score) + '</b></span><span style="color:var(--mute)">· ' + (num(r.stocks_count) ? r.stocks_count + ' stocks ' : '') + capTag(r) + (nv(r.total_mcap) != null ? ' · ' + crS(r.total_mcap) : '') + '</span></div>'
-    + '<div style="grid-column:2/span 2;font-family:var(--mono);font-size:10px;color:var(--mute);display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:3px">'
-    + '<span class="' + sgn(dl) + '" style="font-weight:700">' + (dl == null ? '— · 30d' : (dl > 0 ? '▲ +' : dl < 0 ? '▼ −' : '') + Math.abs(dl).toFixed(2) + ' · 30d') + '</span>'
-    + (pick ? '<span style="display:inline-flex;gap:5px;align-items:center;padding:1px 6px;border:1px solid var(--line);background:var(--well)">top <b style="color:var(--chalk,var(--txt))">' + esc(pick.symbol) + '</b> ' + f2(pick.gvm) + (nv(pick.day_ret) != null ? ' <span class="' + sgn(pick.day_ret) + '">' + pctS(pick.day_ret) + '</span>' : '') + '</span>' : '')
-    + '</div>'
-    + (r.absorbed && r.absorbed.length > 1 ? '<div style="grid-column:2/span 2;font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">includes ' + esc(r.absorbed.filter(function(a){ return a !== nameOf(r); }).join(', ')) + '</div>' : '')
-    + '</article>';
-}
-function renderList(){
-  var d = SC.data;
-  if(!d){
-    $('sc-list').innerHTML = SC.err ? '<div class="empty"><b>Could not load sectors</b>' + esc(SC.err) + '<div style="margin-top:12px"><button class="chip" onclick="load()">Retry</button></div></div>' : '<div class="loading">Loading sectors…</div>';
-    $('sc-more').innerHTML = ''; return;
-  }
-  var rows = visible(), rk = rankMap();
-  if(!rows.length){ $('sc-list').innerHTML = '<div class="empty"><b>Nothing under this filter</b>Try another chip.</div>'; $('sc-more').innerHTML = ''; return; }
-  var show = SC.all ? rows : rows.slice(0, SHOW_N);
-  $('sc-list').innerHTML = show.map(function(r){ return rowHtml(r, rk[nameOf(r)] || '—'); }).join('');
-  $('sc-more').innerHTML = rows.length > SHOW_N ? '<div style="display:flex;justify-content:center;margin-top:4px"><button type="button" class="chip" data-more="1" style="padding:8px 14px">' + (SC.all ? 'Fewer ▴' : 'Show all ' + rows.length + ' ▾') + '</button></div>' : '';
-}
-function render(){ renderTop(); renderRot(); renderFilters(); renderList(); }
-
-/* ── detail sheet ────────────────────────────────────────────────────────────────────── */
-function sheetClose(){ var w = $('sc-sheet'); if(w) w.remove(); document.body.style.overflow = ''; SC.sheet = null; }
-function pill(k, v, col){ var w = Math.max(0, Math.min(100, (nv(v) || 0) * 10)); return '<div style="padding:9px 10px;background:var(--well);border-radius:7px;border:1px solid var(--line)"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.4px;color:var(--mute)">' + k + '</div><div style="font-family:var(--mono);font-size:17px;font-weight:800;margin-top:2px;color:' + col + '">' + f1(v) + '</div><div style="height:5px;margin-top:6px;background:var(--panel);border:1px solid var(--line)"><i style="display:block;height:100%;width:' + w.toFixed(0) + '%;background:' + col + '"></i></div></div>'; }
-function kv(k, v, cls){ return '<div style="padding:8px 10px;background:var(--well);border:1px solid var(--line);border-radius:7px"><div style="font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--mute)">' + k + '</div><div class="' + (cls||'') + '" style="font-family:var(--mono);font-size:14px;font-weight:800;margin-top:1px">' + v + '</div></div>'; }
-function sectHd(t){ return '<div style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;font-family:var(--display,inherit);font-size:11px;font-weight:800;letter-spacing:2.4px;text-transform:uppercase;color:var(--gold)">' + t + '<span style="flex:1;height:1px;background:var(--line)"></span></div>'; }
-function plain(t){ /* first two sentences of the brief, as served (no lookbehind: older WebKit) */ var s = String(t||'').replace(/\s+/g,' ').trim(); var out = [], rest = s; while(rest && out.length < 2){ var m = /^(.*?[.!?])(\s+|$)/.exec(rest); if(!m){ out.push(rest); break; } out.push(m[1]); rest = rest.slice(m[0].length); } return out.join(' '); }
-function stockRow(x){ return '<a href="/m/gvm?sym=' + encodeURIComponent(x.symbol) + '" style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px;text-decoration:none;color:var(--chalk,var(--txt))"><span><b style="font-weight:800">' + esc(x.symbol) + '</b><span style="display:block;font-size:10.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">' + esc(x.company_name || '') + '</span></span><span style="font-family:var(--mono);font-weight:800;color:var(--gold)">' + f2(x.gvm) + '</span><span class="' + sgn(x.day_ret) + '" style="font-family:var(--mono);font-size:12px;min-width:56px;text-align:right">' + pctS(x.day_ret) + '</span></a>'; }
-function sheetBody(r, rank, det){
-  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-right:36px"><div><div style="font-family:var(--display,inherit);font-size:19px;font-weight:800;line-height:1.05;color:var(--chalk,var(--txt))">' + esc(nameOf(r)) + '</div><div style="font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:1.2px;margin-top:4px">' + (num(r.stocks_count) ? r.stocks_count + ' STOCKS' : '') + (nv(r.total_mcap) != null ? ' · ' + crS(r.total_mcap).toUpperCase() : '') + ' · RANK ' + rank + ' OF ' + rowsAll().length + '</div></div>'
-    + '<div style="text-align:right"><b style="font-family:var(--mono);font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1;color:' + vCol(r) + '">' + f2(r.gvm) + '</b><small style="display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;color:var(--mute)">' + esc(String(verdictOf(r)).toUpperCase()) + ' · 30D ' + (nv(r.gvm_change) == null ? '—' : (r.gvm_change > 0 ? '+' : '') + r.gvm_change.toFixed(2)) + '</small></div></div>';
-  h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0">' + pill('GROWTH', r.g_score, TONE.g) + pill('VALUE', r.v_score, TONE.v) + pill('MOMENTUM', r.m_score, TONE.m) + '</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">' + kv('INSTITUTIONS · QTR', pctS(r.inst_change, 2), sgn(r.inst_change)) + kv('YOY PROFIT · MEDIAN', pctS(r.qoq_profit, 1), sgn(r.qoq_profit)) + kv('UPSIDE TO OWN PE', pctS(r.annual_upside, 0), sgn(r.annual_upside)) + kv('30-DAY GVM', nv(r.gvm_change) == null ? '—' : (r.gvm_change > 0 ? '+' : '') + r.gvm_change.toFixed(2), sgn(r.gvm_change)) + '</div>';
-  h += '<div style="font-family:var(--mono);font-size:9px;color:var(--dim)">scores as of ' + esc(dmy(r.score_date || (SC.data && SC.data.score_date))) + (r.absorbed && r.absorbed.length > 1 ? ' · includes ' + esc(r.absorbed.join(', ')) : '') + '</div>';
-  h += sectHd('Top stocks');
-  if(det === undefined) h += '<div class="loading" style="padding:10px 0">Loading stocks…</div>';
-  else if(!det || det.error) h += '<div class="empty" style="padding:10px 0">Stocks for this sector are not available right now.</div>';
-  else {
-    var st = det.stocks || [], top = SC.sheet.allStocks ? st : st.slice(0, 4);
-    h += (st.length ? top.map(stockRow).join('') : '<div class="empty" style="padding:8px 0">No scored stocks in this sector.</div>');
-    if(st.length > 4) h += '<div style="margin-top:8px;display:flex;justify-content:center"><button type="button" class="chip" data-allstocks="1" style="padding:6px 12px">' + (SC.sheet.allStocks ? 'Top 4 ▴' : 'All ' + st.length + ' stocks ▾') + '</button></div>';
-    h += '<div style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:6px">day % = last tick vs the close before it' + (det.prices_as_of ? ' · prices ' + esc(String(det.prices_as_of).slice(11, 16)) : '') + ' · scores ' + esc(dmy(det.score_date)) + '</div>';
-    var b = det.brief;
-    if(b){
-      h += sectHd('What this sector is') + '<div style="font-size:13px;line-height:1.5;color:var(--chalk,var(--txt))">' + esc(plain(b.what_is_it)) + '</div>';
-      if(b.growth_drivers && b.growth_drivers.length) h += sectHd('Why it can grow') + b.growth_drivers.map(function(x){ return '<div style="display:flex;gap:8px;padding:4px 0;font-size:13px;line-height:1.45;color:var(--mute)"><span style="color:var(--gold)">·</span><span>' + esc(x) + '</span></div>'; }).join('');
-      if(b.key_risks && b.key_risks.length) h += sectHd('What can go wrong') + b.key_risks.map(function(x){ return '<div style="display:flex;gap:8px;padding:4px 0;font-size:13px;line-height:1.45;color:var(--mute)"><span style="color:var(--gold)">·</span><span>' + esc(x) + '</span></div>'; }).join('');
-      if(b.application_type) h += '<div style="font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:8px">' + esc(String(b.application_type).replace(/\s*\/\s*/g, ' · ')) + (det.brief_for && det.brief_for !== nameOf(r) ? ' · brief for ' + esc(det.brief_for) : '') + '</div>';
-    } else h += sectHd('Brief') + '<div class="empty" style="padding:8px 0">No brief written for this sector yet.</div>';
-    var topSym = st.length ? st[0].symbol : null;
-    h += '<div style="display:flex;gap:8px;margin-top:14px">' + (topSym ? '<a href="/m/gvm?sym=' + encodeURIComponent(topSym) + '" style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;font-weight:800;letter-spacing:.8px;padding:12px 6px;border-radius:9px;text-decoration:none;background:var(--gold);color:var(--well)">Open ' + esc(topSym) + ' →</a>' : '') + '<button type="button" data-close="1" style="flex:1;font-family:var(--mono);font-size:11px;font-weight:800;letter-spacing:.8px;padding:12px 6px;border-radius:9px;background:var(--well);color:var(--mute);border:1px solid var(--line);cursor:pointer">Close</button></div>';
-  }
-  return h;
-}
-function sheetOpen(name){
-  var r = rowsAll().filter(function(x){ return nameOf(x) === name; })[0]; if(!r) return;
-  var rank = rankMap()[name] || '—';
-  SC.sheet = { name:name, allStocks:false };
-  var el = $('sc-sheet');
-  if(!el){
-    el = document.createElement('div'); el.id = 'sc-sheet';
-    el.innerHTML = '<div data-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:98"></div><div id="sc-sheet-box" role="dialog" aria-modal="true" style="position:fixed;left:0;right:0;bottom:0;z-index:99;background:var(--panel);border:1.5px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;max-height:88vh;overflow:auto;padding:12px 16px max(18px,env(safe-area-inset-bottom))"><div style="width:44px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px"></div><button type="button" data-close="1" aria-label="Close" style="position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--well);color:var(--mute);cursor:pointer">✕</button><div id="sc-sheet-body"></div></div>';
-    el.addEventListener('click', function(e){
-      if(e.target.closest('[data-close]')){ sheetClose(); return; }
-      if(e.target.closest('[data-allstocks]')){ SC.sheet.allStocks = !SC.sheet.allStocks; paintSheet(); return; }
-    });
-    document.body.appendChild(el);
-  }
-  document.body.style.overflow = 'hidden';
-  paintSheet();
-  if(SC.detail[name] === undefined){
-    SC.detail[name] = null;
-    var q = '/api/mobile/sector/detail?segment=' + encodeURIComponent(name) + '&absorbed=' + encodeURIComponent((r.absorbed || []).join('|'));
-    fetchWithTimeout(q).then(function(x){ return x.json(); }).then(function(j){ SC.detail[name] = j || false; paintSheet(); }).catch(function(){ SC.detail[name] = false; paintSheet(); });
-  }
-}
-function paintSheet(){
-  if(!SC.sheet) return;
-  var name = SC.sheet.name, r = rowsAll().filter(function(x){ return nameOf(x) === name; })[0], box = $('sc-sheet-body'); if(!r || !box) return;
-  var det = SC.detail[name]; if(det === null) det = undefined;
-  box.innerHTML = sheetBody(r, rankMap()[name] || '—', det);
-}
-
-/* ── events + load ───────────────────────────────────────────────────────────────────── */
-$('secp').addEventListener('click', function(e){
-  var c = e.target.closest('[data-cap]'); if(c){ SC.cap = c.getAttribute('data-cap'); SC.all = false; render(); return; }   /* cc#1624 */
-  var f = e.target.closest('[data-f]'); if(f){ SC.filter = f.getAttribute('data-f'); SC.all = false; renderFilters(); renderList(); return; }
-  var s = e.target.closest('[data-s]'); if(s){ SC.sort = s.getAttribute('data-s'); SC.all = false; renderFilters(); renderList(); return; }
-  if(e.target.closest('[data-more]')){ SC.all = !SC.all; renderList(); return; }
-  var o = e.target.closest('[data-open]'); if(o){ sheetOpen(o.getAttribute('data-open')); return; }
-});
-document.addEventListener('keydown', function(e){ if(e.key === 'Escape') sheetClose(); });
-function load(){
-  fetchWithTimeout('/api/mobile/sector/caps').then(function(r){ return r.json(); }).then(function(c){ if(c && nv(c.large_min) != null && nv(c.mid_min) != null){ SC.caps = {large_min:Number(c.large_min), mid_min:Number(c.mid_min)}; if(SC.data) render(); } }).catch(function(){});
-  fetchWithTimeout('/api/sector/rotation').then(function(r){ return r.json(); }).then(function(d){
-    if(!d || d.error) throw new Error((d && d.error) || 'empty reply');
-    SC.data = d; SC.err = null; SC.fetchedAt = istNow(); render();
-  }).catch(function(e){ SC.err = e.message || 'load failed'; if(!SC.data) render(); });
-}
-render(); load();
-</script>
-<script>
-/* cc#1900 — Sector Intel condensed summary. Deliberately separate closure/prefix (si-*) from the
-   SC.* state above — additive, not touching a line of the existing rotation/filter/sheet code. */
-(function(){
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function dmd(ds){ if(!ds) return '—'; var p=String(ds).slice(0,10).split('-');
-  if(p.length!==3) return String(ds); var m=parseInt(p[1],10)-1;
-  return parseInt(p[2],10)+' '+(MON[m]||p[1]); }
-function scrollToFullList(){ var el=document.getElementById('secp'); if(el) el.scrollIntoView({behavior:'smooth'}); }
-window.siScrollToFullList = scrollToFullList;
-
-function kmHtml(k){
-  return '<div class="si-km"><div class="si-k">Segments rated</div><div class="si-v">'+(k.segments_rated!=null?k.segments_rated:'—')+'</div>'
-    + '<div class="si-kg">'
-    + '<div class="si-cell"><div class="si-k">Good</div><div class="si-v">'+(k.good!=null?k.good:'—')+'</div></div>'
-    + '<div class="si-cell"><div class="si-k">Average</div><div class="si-v">'+(k.average!=null?k.average:'—')+'</div></div>'
-    + '<div class="si-cell"><div class="si-k">Weak</div><div class="si-v">'+(k.weak!=null?k.weak:'—')+'</div></div>'
-    + '<div class="si-cell"><div class="si-k">Briefs cached</div><div class="si-v">'+(k.briefs_cached!=null?k.briefs_cached:'—')+'</div></div>'
-    + '</div></div>';
+function dmy(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]+' '+p[0]):String(iso); }
+function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+function pct(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(1)+'%'; }
+function sg(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(2); }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function cr(v){ if(v==null) return '—'; v=Number(v); return v>=100000?'₹'+(v/100000).toFixed(1)+'L Cr':v>=1000?'₹'+(v/1000).toFixed(0)+'k Cr':'₹'+Math.round(v)+' Cr'; }
+function vcls(v){ return v==='Good'||v==='Excellent'?'g':(v==='Weak'?'w':''); }
+var D=null, SIZE='ALL';
+function ladderRow(r,i,cold){
+  var top=(r.top||[])[0];
+  return '<a class="lr '+(cold?'cold':(vcls(r.verdict)==='g'?'good':''))+'" href="/m/sector?seg='+encodeURIComponent(r.segment)+'"><span class="rk">'+(i+1)+'</span>'
+    +'<div><div class="nm">'+esc(r.segment)+'<span class="pill '+vcls(r.verdict)+'">'+esc(r.verdict||'—')+'</span></div>'
+    +'<div class="sub">G '+f1(r.g)+' · V '+f1(r.v)+' · M '+f1(r.m)+' · '+r.names+' names'+(top?' · <b>'+esc(top.symbol)+'</b> '+(top.day!=null?'<span class="'+cls(top.day)+'">'+pct(top.day)+'</span>':''):'')+'</div></div>'
+    +'<div class="gv"><div class="n">'+f2(r.gvm)+'</div><div class="c '+cls(r.change)+'">'+(r.change==null?'—':sg(r.change))+'</div></div></a>';
 }
-function verdictCardHtml(d){
-  var vs=d.verdict_split||{}, rows=vs.rows||[];
-  var lst = rows.map(function(r){
-    return '<div class="si-lr"><span class="s">'+esc(r.label)+'</span><div class="r">'
-      + (r.note?'<span class="a">'+esc(r.note)+'</span>':'')+'<span class="b">'+r.count+'</span></div></div>';
-  }).join('');
-  return '<div class="si-c"><div class="si-ch"><span class="t">Verdict split</span><span class="n">'+(vs.total!=null?vs.total:'—')+' segments</span></div>'
-    + '<div class="si-lst">'+lst+'</div><div class="si-more">'+esc(vs.message||'')+'</div></div>';
+function renderList(d){
+  D=d;
+  var rows=d.rows||[];
+  var vs=d.verdicts||{}; var good=(vs.Good||0)+(vs.Excellent||0), weak=vs.Weak||0;
+  document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+rows.length+' segments · mcap-weighted GVM';
+  var h='<div class="km"><div><div class="k">Segments</div><div class="v">'+rows.length+'</div></div><div><div class="k">Good</div><div class="v pos">'+good+'</div></div><div><div class="k">Average</div><div class="v">'+(vs.Average||0)+'</div></div><div><div class="k">Weak</div><div class="v neg">'+weak+'</div></div></div>';
+  h+='<div class="sec"><h2>Strongest segments</h2><span class="hint">by GVM · Δ since first score</span></div>';
+  h+='<div class="seg" id="sz">'+['ALL','LARGE','MID','SMALL'].map(function(s){return '<span data-s="'+s+'"'+(s===SIZE?' class="on"':'')+'>'+(s==='ALL'?'All':s.charAt(0)+s.slice(1).toLowerCase())+'</span>';}).join('')+'</div>';
+  h+='<div class="lad" id="ladder"></div><div class="more" id="lmore"></div>';
+  var cold=rows.filter(function(r){return r.gvm!=null&&r.gvm<6;}).sort(function(a,b){return (a.gvm||0)-(b.gvm||0);}).slice(0,5);
+  h+='<div class="sec"><h2>Cold segments</h2><span class="hint">GVM under 6 · '+cold.length+'</span></div>';
+  h+= cold.length ? '<div class="lad">'+cold.map(function(r,i){return ladderRow(r,i,true);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>No cold segment today</b>Nothing rates under 6.</div></div>';
+  var th=d.themes||[];
+  h+='<div class="sec"><h2>Emerging themes</h2><span class="hint">'+th.length+' · swipe →</span></div>';
+  h+= th.length ? '<div class="rl">'+th.map(function(t){
+      return '<div class="tc"><div class="rk">Theme '+t.rank+'</div><div class="nm">'+esc(t.name)+'</div><div class="tg">'+esc(t.tagline||'')+'</div><div class="lst">'+(t.top||[]).map(function(c){return '<div class="r"><b>'+esc(c.symbol)+'</b><span>GVM '+f2(c.gvm)+'</span></div>';}).join('')+'</div></div>';
+    }).join('')+'</div>' : '<div class="card"><div class="emp"><b>No themes on record</b>The theme pass has not written any rows yet.</div></div>';
+  h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Tap a segment for its brief, the numbers behind the score and every member.</div>';
+  document.getElementById('body').innerHTML=h;
+  drawLadder();
+  document.getElementById('sz').addEventListener('click', function(e){ var s=e.target.closest('[data-s]'); if(!s) return; SIZE=s.getAttribute('data-s'); this.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); drawLadder(); });
 }
-function strongestCardHtml(d){
-  var s=d.strongest||{}, rows=(s.rows||[]).slice(0,4);
-  var lst = rows.map(function(r){
-    return '<div class="si-lr"><span class="s">'+esc(r.segment)+'</span><div class="r">'
-      + '<span class="a">'+(r.stocks_count!=null?r.stocks_count+' stocks':'')+'</span>'
-      + '<span class="b">'+(r.gvm!=null?r.gvm.toFixed(2):'—')+'</span></div></div>';
-  }).join('');
-  return '<div class="si-c"><div class="si-ch"><span class="t">Strongest</span><span class="n">top '+rows.length+'</span></div>'
-    + '<div class="si-lst">'+lst+'</div>'
-    + '<a class="si-link" onclick="siScrollToFullList()">All '+(s.count!=null?s.count:'')+' segments &#8250;</a></div>';
+function drawLadder(){
+  var rows=(D.rows||[]).filter(function(r){ return SIZE==='ALL' || r.size===SIZE; }).sort(function(a,b){ return (b.gvm||0)-(a.gvm||0); });
+  var top=rows.slice(0,10);
+  document.getElementById('ladder').innerHTML= top.length ? top.map(function(r,i){return ladderRow(r,i,false);}).join('') : '<div class="emp" style="padding:12px">No segment in this size band.</div>';
+  document.getElementById('lmore').innerHTML=(rows.length>10?'+'+(rows.length-10)+' more · ':'')+'<a href="/m/sector?view=all">All '+(D.rows||[]).length+' segments, sortable ›</a>';
 }
-function weakestCardHtml(d){
-  var w=d.weakest||{}, rows=w.rows||[];
-  var lst = rows.map(function(r){
-    return '<div class="si-lr"><span class="s">'+esc(r.segment)+'</span><div class="r">'
-      + '<span class="a">'+esc(r.verdict||'')+'</span><span class="b">'+(r.gvm!=null?r.gvm.toFixed(2):'—')+'</span></div></div>';
-  }).join('');
-  if(!rows.length) return '<div class="si-c gap"><div class="si-ch"><span class="t">Bottom of the table</span><span class="n">0</span></div>'
-    + '<div class="si-emp"><b>Nothing weak today</b>No segment scored below the Average band.</div></div>';
-  return '<div class="si-c"><div class="si-ch"><span class="t">Bottom of the table</span><span class="n">'+rows.length+'</span></div>'
-    + '<div class="si-lst">'+lst+'</div><div class="si-more">'+esc(d.weighting_note||'')+'</div></div>';
+var ROWS=[], KEY='gvm', ASC=false, COLS=[];
+function tbl(){
+  var rows=ROWS.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
+  var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
+  var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; }).join('');
+  document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' rows · tap a header to sort</div>';
+  document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='segment'||k==='symbol'); } tbl(); });
 }
-function briefsCardHtml(d){
-  var b=d.briefs||{};
-  return '<div class="si-c"><div class="si-ch"><span class="t">Plain-words brief</span><span class="n">'+(b.count!=null?b.count+' cached':'')+'</span></div>'
-    + '<div class="si-emp" style="margin-top:0">'+esc(b.message||'')+'</div>'
-    + (b.footnote?'<div class="si-more">'+esc(b.footnote)+'</div>':'')+'</div>';
+function renderAll(d){
+  document.getElementById('pg-title').textContent='All segments'; document.getElementById('back').style.display='';
+  document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(d.rows||[]).length+' segments';
+  document.getElementById('body').innerHTML='<div class="wrap" id="tb"></div>';
+  ROWS=d.rows||[]; KEY='gvm'; ASC=false;
+  COLS=[['segment','Segment',function(v,r){return '<a href="/m/sector?seg='+encodeURIComponent(v)+'">'+esc(v)+'<small>'+esc(r.verdict||'')+(r.size?' · '+r.size.toLowerCase():'')+'</small></a>';}],
+        ['gvm','GVM',function(v){return '<span class="'+((v||0)>=7?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],
+        ['change','Δ',function(v){return '<span class="'+cls(v)+'">'+sg(v)+'</span>';}],['names','Names'],['mcap','Mcap',cr]];
+  tbl();
 }
-function trendCardHtml(d){
-  var t=d.trend||{};
-  return '<div class="si-c gap"><div class="si-ch"><span class="t">Sector trend</span><span class="n">'+(t.rows!=null?t.rows+' rows':'')+'</span></div>'
-    + '<div class="si-emp"><b>No trend series yet</b>'+esc(t.message||'')+'</div></div>';
+function renderSeg(d){
+  var s=d.scorecard||{}, e=d.evidence||{}, b=d.brief||{};
+  document.getElementById('pg-title').textContent=d.segment; document.getElementById('back').style.display='';
+  document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(s.size?s.size.toLowerCase()+' segment · ':'')+e.names+' names';
+  var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+(v==null?0:Math.min(100,v*10))+'%"></i></div><span class="v">'+f1(v)+'</span></div>'; };
+  var h='<div class="hero"><div class="eye">Segment · '+esc(s.verdict||'—')+(d.absorbed&&d.absorbed.length>1?' · covers '+d.absorbed.length+' sub-segments':'')+'</div><div class="nm">'+esc(d.segment)+'</div>'
+    +'<div class="big"><div class="r">'+f2(s.gvm)+'</div><div class="n">mcap-weighted GVM<br>Δ since first score <b class="'+cls(s.change)+'">'+sg(s.change)+'</b></div></div>'
+    +'<div class="pil">'+bar('G',s.g)+bar('V',s.v)+bar('M',s.m)+'</div></div>';
+  h+='<div class="strip"><div><div class="k">Names</div><div class="v">'+e.names+'</div></div><div><div class="k">Mcap</div><div class="v">'+cr(e.mcap)+'</div></div><div><div class="k">Inst. flow</div><div class="v '+cls(e.inst)+'">'+(e.inst==null?'—':pct(e.inst))+'</div></div><div><div class="k">QoQ profit</div><div class="v '+cls(e.qoq)+'">'+(e.qoq==null?'—':pct(e.qoq))+'</div></div></div>';
+  if(b.what||b.drivers||b.risks){
+    h+='<div class="card"><div class="ch"><span class="t">What it is</span><span class="n">brief</span></div><div class="p">'+esc(b.what||'')+'</div>'+(b.model?'<div class="p mu">'+esc(b.model)+'</div>':'')+'</div>';
+    if(b.drivers) h+='<div class="card"><div class="ch"><span class="t">What drives it</span></div><div class="p">'+esc(b.drivers)+'</div></div>';
+    if(b.risks) h+='<div class="card"><div class="ch"><span class="t">What can go wrong</span></div><div class="p">'+esc(b.risks)+'</div></div>';
+  } else h+='<div class="card"><div class="emp"><b>No brief yet</b>This segment has no written brief on record. The numbers above still stand.</div></div>';
+  h+='<div class="sec"><h2>Members</h2><span class="hint">'+(d.members||{}).count+' · by GVM</span></div><div class="wrap" id="tb"></div>';
+  h+='<div class="note"><b>One weak giant can sink a segment.</b> The score is weighted by market cap, so read the members table before trusting the headline.</div>';
+  document.getElementById('body').innerHTML=h;
+  ROWS=(d.members||{}).rows||[]; KEY='gvm'; ASC=false;
+  COLS=[['symbol','Name',function(v,r){return esc(v)+'<small>'+esc(r.name||'')+'</small>';}],['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],['pe','P/E',f1],['mcap','Mcap',cr]];
+  tbl();
 }
-
-function siRender(d){
-  var k=d.key_metrics||{};
-  document.getElementById('si-asof').textContent = 'Scored '+dmd(d.score_date)+' · '+(k.segments_rated!=null?k.segments_rated:'—')+' segments · market-cap weighted GVM';
-  var html = kmHtml(k)
-    + '<div class="si-slab"><h2>The spread</h2><span class="hint">2 · swipe →</span></div>'
-    + '<div class="si-rail">'+verdictCardHtml(d)+strongestCardHtml(d)+'</div>'
-    + '<div class="si-slab"><h2>Weakest</h2><span class="hint">1 · swipe →</span></div>'
-    + '<div class="si-rail">'+weakestCardHtml(d)+'</div>'
-    + '<div class="si-slab"><h2>Read the sector</h2><span class="hint">2 · swipe →</span></div>'
-    + '<div class="si-rail">'+briefsCardHtml(d)+trendCardHtml(d)+'</div>'
-    + '<div class="si-note"><b>Only '+(k.good!=null?k.good:'—')+' segments of '+(k.segments_rated!=null?k.segments_rated:'—')+' rate Good.</b> That skew is the most useful thing on the page. Scores are market-cap weighted, so one large weak name drags a whole segment. The trend card is empty because sector_ops_trends has zero rows — a trend line drawn from a single day would be a fabrication. The full filterable list with detail sheets, unchanged, is below.</div>';
-  document.getElementById('si-body').innerHTML = html;
-}
-
-(window.fetchWithTimeout || fetch)('/api/mobile/sector_app', {credentials:'same-origin'})
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    if(d.error){ document.getElementById('si-body').innerHTML = '<div class="si-empty">Could not load: '+esc(d.error)+'</div>'; return; }
-    siRender(d);
-  })
-  .catch(function(e){ document.getElementById('si-body').innerHTML = '<div class="si-empty">Could not load sector summary.</div>'; });
-})();
+var Q={}; try{ var u=new URLSearchParams(location.search); Q.seg=u.get('seg'); Q.view=u.get('view'); }catch(e){}
+var url = Q.seg ? '/api/mobile/sector_app/segment?name='+encodeURIComponent(Q.seg) : '/api/mobile/sector_app/list';
+fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+  if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
+  Q.seg ? renderSeg(d) : (Q.view==='all' ? renderAll(d) : renderList(d));
+}).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load sectors.</div>'; });
 </script>
-</body>
-</html>
+</body></html>

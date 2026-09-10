@@ -124,3 +124,103 @@ def mobile_sector_app(request: Request):
         "weighting_note": "Scored on market-cap weighted GVM, so a big weak name pulls its "
                           "whole segment down.",
     }
+
+
+# ═══ V2 — Fable single mode 10-Sep-2026 (SECTOR_APP_R2, founder: "read the web APIs once, build
+# intuitively"). Two additive endpoints on the web tab's own functions; the cc#1900 endpoint stays.
+#   GET /api/mobile/sector_app/list           → the rotation ladder + themes, from sector_rotation()
+#   GET /api/mobile/sector_app/segment?name=  → one segment: brief + scorecard + evidence + members
+# sector_rotation() is the MERGED display view (cc#827) — the same names and numbers the web
+# Sector page shows. Nothing re-derived here.
+import asyncio
+from sector_endpoints import sector_rotation
+from sector_brief_endpoints import sector_brief, sector_themes
+
+
+def _fl(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/api/mobile/sector_app/list")
+@_json_safe
+def mobile_sector_list(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    rot = sector_rotation()
+    if not isinstance(rot, dict) or rot.get("error"):
+        return {"error": (rot or {}).get("error", "rotation unavailable")}
+    rows = []
+    for r in rot.get("all") or []:
+        rows.append({"segment": r.get("display_segment") or r.get("segment"), "gvm": _fl(r.get("gvm")),
+                     "g": _fl(r.get("g_score")), "v": _fl(r.get("v_score")), "m": _fl(r.get("m_score")),
+                     "change": _fl(r.get("gvm_change")), "names": int(r.get("stocks_count") or 0),
+                     "mcap": _fl(r.get("total_mcap")), "size": r.get("size_class"), "verdict": r.get("verdict"),
+                     "inst": _fl(r.get("inst_change")), "qoq": _fl(r.get("qoq_profit")), "upside": _fl(r.get("annual_upside")),
+                     "top": [{"symbol": p.get("symbol"), "gvm": _fl(p.get("gvm")), "day": _fl(p.get("day_ret"))}
+                             for p in (r.get("top_stocks") or [])[:2]]})
+    verdicts = {}
+    for r in rows:
+        verdicts[r["verdict"] or "—"] = verdicts.get(r["verdict"] or "—", 0) + 1
+    th = sector_themes()
+    themes = []
+    for t in (th.get("themes") or []) if isinstance(th, dict) else []:
+        themes.append({"rank": t.get("rank"), "name": t.get("theme_name"), "tagline": t.get("tagline"),
+                       "segments": t.get("related_segments") or [],
+                       "top": [{"symbol": c.get("symbol"), "gvm": _fl(c.get("gvm_score")), "segment": c.get("segment")}
+                               for c in (t.get("companies") or [])[:3]]})
+    return {"score_date": rot.get("score_date"), "segments": len(rows), "raw_segments": rot.get("raw_segments"),
+            "verdicts": verdicts, "rows": rows, "themes": themes,
+            "note": "Mcap-weighted GVM per segment — one big weak name pulls its whole segment down. Change = move since the first scored day on record."}
+
+
+@router.get("/api/mobile/sector_app/segment")
+@_json_safe
+async def mobile_sector_segment(request: Request, name: str = ""):
+    g = _guard(request)
+    if g:
+        return g
+    rot = sector_rotation()
+    row = None
+    for r in (rot.get("all") or []) if isinstance(rot, dict) else []:
+        if (r.get("display_segment") or r.get("segment")) == name:
+            row = r
+            break
+    if row is None:
+        return {"error": "no such segment"}
+    # a merged display segment's brief lives under its own raw name when it absorbed nothing; when
+    # it absorbed others, the first absorbed raw name carries the brief (cc#827 merge keeps briefs raw)
+    brief_name = name if not row.get("absorbed") else (row.get("absorbed") or [name])[0]
+    try:
+        b = await sector_brief(brief_name)
+    except Exception as e:
+        b = {"error": str(e)}
+    if not isinstance(b, dict) or b.get("error"):
+        b = {}
+    # members = every raw segment the display row covers (absorbed list, else its own name)
+    raw_names = row.get("absorbed") or [name]
+    members = []
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2), g.verdict,
+                   ROUND(g.g_score::numeric,2), ROUND(g.v_score::numeric,2), ROUND(g.m_score::numeric,2),
+                   ROUND(g.market_cap::numeric,0), ROUND(s.pe::numeric,1)
+            FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+            WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+        """, (raw_names,))
+        for sym, cn, gvm, vd, gg, vv, mm, mc, pe in cur.fetchall():
+            members.append({"symbol": sym, "name": cn, "gvm": _fl(gvm), "verdict": vd, "g": _fl(gg), "v": _fl(vv), "m": _fl(mm),
+                            "mcap": _fl(mc), "pe": _fl(pe)})
+    members.sort(key=lambda x: -(x["gvm"] or 0))
+    return {"segment": name, "score_date": row.get("score_date"),
+            "scorecard": {"gvm": _fl(row.get("gvm")), "g": _fl(row.get("g_score")), "v": _fl(row.get("v_score")), "m": _fl(row.get("m_score")),
+                          "verdict": row.get("verdict"), "change": _fl(row.get("gvm_change")), "size": row.get("size_class")},
+            "evidence": {"names": int(row.get("stocks_count") or 0), "mcap": _fl(row.get("total_mcap")),
+                         "inst": _fl(row.get("inst_change")), "qoq": _fl(row.get("qoq_profit")), "upside": _fl(row.get("annual_upside"))},
+            "absorbed": row.get("absorbed") or [],
+            "brief": {"what": b.get("what_is_it"), "drivers": b.get("growth_drivers"), "model": b.get("business_model"),
+                      "risks": b.get("key_risks"), "application": b.get("application_type"), "generated_at": b.get("generated_at")},
+            "members": {"rows": members, "count": len(members)}}

@@ -1,240 +1,186 @@
 <!doctype html>
+<!-- ══ mobile/results.html — Results app section. Fable single-mode build 10-Sep-2026 (founder: read the web
+     APIs, build intuitively). Supersedes the cc#1901 build and the older calendar-first page. ONE page, three views:
+       /m/results                → THE SEASON: who has filed, PAT growing/flat/declining bar, medians, biggest movers,
+                                   sector ladder, written-up analyses, next 10 days
+       /m/results?view=companies → every reporter this season, sortable
+       /m/results?sym=<symbol>   → one company's numbers + the written analysis
+     Data: /api/mobile/results_app/season · /companies · /analysis?symbol= (results_app_mobile.py V2), which read
+     the web Result Corner's own result_corner_v2 and the Results page's own analysis feed. Contract tokens only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Results · Scorr</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<script src="/scorr_card_common.js"></script>
 <style>
-/* cc#1901 — Results condensed summary (re-*), inserted ABOVE the existing cc#1090/1645 forward
-   earnings calendar (untouched below). Same bridge-token + scorr_themes.css scale-token
-   discipline as every other section page this session — no raw hex. */
-.re-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
-.re-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-left:var(--bw-3) solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
-.re-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.re-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.re-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
-.re-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
-.re-cell .re-k{font-size:var(--type-9)}
-.re-cell .re-v{font-size:var(--type-14);margin-top:var(--space-3)}
-.re-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
-.re-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.re-slab .hint{font-size:var(--type-10);color:var(--dim)}
-.re-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
- scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.re-rail::-webkit-scrollbar{display:none}
-.re-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
-.re-c.gap{border-style:dashed}
-.re-ch{display:flex;align-items:baseline;justify-content:space-between}
-.re-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
-.re-ch .n{font-size:var(--type-11);color:var(--mut)}
-.re-lst{margin-top:var(--space-9)}
-.re-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
-.re-lr:last-child{border-bottom:none}
-.re-lr .s{font-size:var(--type-125);font-weight:800}
-.re-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
-.re-lr .a{font-size:var(--type-115);color:var(--mut)}
-.re-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
-.re-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
-.re-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--line);
- font-size:var(--type-115);font-weight:700;color:var(--blu);text-decoration:none;cursor:pointer}
-.re-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
-.re-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
-.re-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
- border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
-.re-note b{color:var(--mut)}
-.re-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
+.rs{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.rs-asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}
+.rs-asof b{color:var(--ink);font-weight:600}
+.pos{color:var(--win)}.neg{color:var(--loss)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+/* season hero */
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
+.split{margin-top:var(--space-12);height:10px;border-radius:var(--radius-5);overflow:hidden;display:flex;background:var(--hi)}.split i{display:block;height:10px}
+.legend{display:flex;justify-content:space-between;margin-top:var(--space-7);font-size:var(--type-105);color:var(--muted)}.legend b{color:var(--ink);font-weight:800}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+/* movers rail */
+.rl{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}.rl::-webkit-scrollbar{display:none}
+.mc{flex:0 0 46vw;max-width:172px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-10) var(--space-11);border-left:var(--bw-3) solid var(--win);text-decoration:none;color:inherit;display:block}
+.mc.dn{border-left-color:var(--loss)}
+.mc .s{font-size:var(--type-13);font-weight:800}.mc .seg{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc .p{font-size:var(--type-17);font-weight:800;margin-top:var(--space-6);line-height:1}.mc .pl{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2)}
+.mc .g{display:flex;justify-content:space-between;font-size:var(--type-95);color:var(--muted);margin-top:var(--space-7);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi)}.mc .g b{color:var(--ink)}
+.mc .rd{color:var(--brand);font-weight:800}
+/* sector ladder */
+.lad{margin:0 var(--space-16);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.lr{display:grid;grid-template-columns:1fr 62px 62px;gap:var(--space-8);align-items:center;padding:var(--space-9) var(--space-12);border-bottom:var(--bw-1) solid var(--hi)}
+.lr:last-child{border-bottom:none}
+.lr .nm{font-size:var(--type-12);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lr .sub{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2)}
+.lr .v{text-align:right;font-size:var(--type-125);font-weight:800}.lr .v small{display:block;font-size:var(--type-8);color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:var(--track-em8)}
+.lr.h{background:var(--hi)}.lr.h .v{font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+/* written list */
+.wl{margin:0 var(--space-16);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.wr{display:block;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit}
+.wr:last-child{border-bottom:none}
+.wr .t{display:flex;justify-content:space-between;align-items:baseline}.wr .s{font-size:var(--type-125);font-weight:800}.wr .d{font-size:var(--type-9);color:var(--muted)}
+.wr .co{font-size:var(--type-95);color:var(--muted)}.wr .tz{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-4);line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* calendar */
+.cal{margin:0 var(--space-16);display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-8)}
+.cd{background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-9) var(--space-10)}
+.cd .d{font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em8)}.cd .s{font-size:var(--type-115);font-weight:800;margin-top:var(--space-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* analysis */
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.p{font-size:var(--type-125);line-height:1.65;margin-top:var(--space-8);white-space:pre-wrap}
+.strip{display:grid;grid-template-columns:repeat(4,1fr);margin:var(--space-10) var(--space-16) 0;border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);overflow:hidden}
+.strip>div{padding:var(--space-9) var(--space-8);background:var(--panel);border-right:var(--bw-1) solid var(--edge)}.strip>div:last-child{border-right:none}
+.strip .k{font-size:var(--type-8);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.strip .v{font-size:var(--type-13);font-weight:800;margin-top:var(--space-3)}
+.emp{font-size:var(--type-115);color:var(--muted);line-height:1.6;margin-top:var(--space-7)}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+/* table */
+.wrap{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;min-width:100%;font-size:var(--type-115)}
+th{position:sticky;top:0;background:var(--hi);font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em9);text-align:right;padding:var(--space-9) var(--space-8);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap;cursor:pointer;user-select:none}
+th.on{color:var(--brand)}th.on::after{content:" ▾";font-size:var(--type-9)}th.on.asc::after{content:" ▴"}
+th:first-child,td:first-child{text-align:left;padding-left:var(--space-12);position:sticky;left:0;background:var(--panel)}th:first-child{background:var(--hi)}
+td{padding:var(--space-8) var(--space-8);border-bottom:var(--bw-1) solid var(--hi);text-align:right;font-weight:600;white-space:nowrap}
+td:first-child{font-weight:800;max-width:140px;overflow:hidden;text-overflow:ellipsis}td:first-child small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600}
+td a{color:inherit;text-decoration:none}tr:last-child td{border-bottom:none}.gd{color:var(--brand)}
+.foot{padding:var(--space-9) var(--space-12);font-size:var(--type-10);color:var(--muted);border-top:var(--bw-1) solid var(--edge)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800}
 </style>
 </head>
 <body data-theme="goldnight">
-<!-- cc#1645 P4: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap).
-     results.html previously had no scorr_themes.css link at all. -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
-     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
-     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
-<!-- cc#1645 P4: shared appshell header (VARIANT B). Existing .head strip below is untouched. -->
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Results</span></div><div class="as-slot"></div></div>
-<!-- cc#1901 — Results condensed summary (design_refs/scorr_app_results_R1.html), ADDITIVE above
-     the existing cc#1090/1645 forward calendar below, not a replacement: that view is a
-     next-10-days earnings calendar with tap-to-read analysis — different in kind from this ref's
-     backward-looking "what's been written this season" summary. "See the calendar ›" scrolls
-     down to it instead of inventing a second route. Data from /api/mobile/results_app
-     (results_app_mobile.py). -->
-<div class="re-asof" id="re-asof">Loading…</div>
-<div id="re-body"><div class="re-empty">Loading results summary…</div></div>
-<div class="screen" id="results-corner">
-  <div class="head as-hide"><h1>Results Corner</h1><div class="s" id="sub">loading…</div></div>
-  <div class="body" id="body"><div class="loading">Loading calendar…</div></div>
-  <div class="cover" id="cover"></div>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t" id="pg-title">Results</span></div><div class="as-slot"><a class="back" id="back" href="/m/results" style="display:none">‹</a></div></div>
+<div class="rs">
+<div class="rs-asof" id="asof">Loading…</div>
+<div id="body"><div class="err">Loading the season…</div></div>
 </div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
-  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+  <a class="bn on" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
 <script>
-var HAS = {};   /* symbol -> true when analysis exists */
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function railHtml(r){ if(!r) return '';
-  var s=(r.state||'CLOSED').toLowerCase();
-  return '<span class="rail rail-'+s+'" title="'+esc(r.why||'')+'"><i></i>'+esc(r.state)+'</span>'; }
-function rid(sym){ return 'an-'+sym.replace(/[^A-Za-z0-9]/g,''); }
-function row(c){
-  var has = !!HAS[c.symbol];
-  return '<div class="rrow'+(has?' hasan" onclick="tapAn(\''+esc(c.symbol)+'\')"':'"')+'>'
-    + '<span class="sy">'+esc(c.symbol)+'</span>'
-    + (c.in_v8?'<span class="tag bull">V8</span>':'')
-    + (has?'<span class="tag edt">READ</span>':'')
-    + (c.event?'<span class="tag cat">'+esc(String(c.event).toUpperCase())+'</span>':'')
-    + '<span class="nm">'+esc(c.name||'')+'</span></div>'
-    + (has?'<div id="'+rid(c.symbol)+'"></div>':'');
-}
-function tapAn(sym){
-  var host=document.getElementById(rid(sym));
-  if (!host) return;
-  if (host.innerHTML){ host.innerHTML=''; return; }
-  host.innerHTML='<div class="an"><div class="loading" style="padding:2px">Loading analysis…</div></div>';
-  fetchWithTimeout('/api/mobile/result_analysis?symbol='+encodeURIComponent(sym))
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if (d.error||!d.found){ host.innerHTML='<div class="an"><div class="src">No analysis available.</div></div>'; return; }
-      host.innerHTML='<div class="an"><div class="read">'
-        + String(d.text||'').split(/\n{2,}/).map(function(p){return '<p>'+esc(p.trim())+'</p>';}).join('')
-        + '</div><div class="src">'+esc(d.quarter||'')+(d.polished_at?' · '+esc(d.polished_at):'')+'</div></div>';
-    })
-    .catch(function(e){ host.innerHTML='<div class="an"><div class="src">Could not load: '+esc(e.message)+'</div></div>'; });
-}
-function dayCard(d){
-  var v8n = d.companies.filter(function(c){return c.in_v8;}).length;
-  var sorted = d.companies.slice().sort(function(a,b){ return (b.in_v8?1:0)-(a.in_v8?1:0); });
-  /* cc#1090 P7 dense sweep: the page asks for days=10, so ten day cards. The .rrow company
-     rows INSIDE this card stay flat — slab-in-slab is the violation P8 greps for. */
-  return '<div class="c ref slab dense"><div class="meta"><span class="dy">'+esc(d.label).toUpperCase()+'</span>'
-    + '<span class="tag cat">'+d.n+' companies</span>'
-    + (v8n?'<span class="tag bull">'+v8n+' in V8</span>':'')
-    + '</div>' + sorted.map(row).join('') + '</div>';
-}
-Promise.all([
-  fetchWithTimeout('/api/mobile/results?days=10&limit=120').then(function(r){return r.json();}),
-  fetchWithTimeout('/api/mobile/result_analysis_index').then(function(r){return r.json();}).catch(function(){return null;})
-]).then(function(res){
-  var d=res[0], ix=res[1];
-  if (d.error) throw new Error(d.error);
-  if (ix && ix.symbols) ix.symbols.forEach(function(s){ HAS[s]=true; });
-  document.getElementById('sub').innerHTML =
-    d.total_in_window+' results in the next '+d.window_days+' days '+railHtml(d.rail);
-  document.getElementById('body').innerHTML = (d.days||[]).length
-    ? d.days.map(dayCard).join('')
-    : '<div class="empty"><b>Quiet window</b>No results scheduled in the next '+d.window_days+' days.</div>';
-  document.getElementById('cover').textContent = d.coverage||'';
-}).catch(function(e){
-  document.getElementById('body').innerHTML =
-    '<div class="empty"><b>Could not load</b>'+esc(e.message)
-    + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-  document.getElementById('sub').textContent='failed to load';
-});
-</script>
-<script>
-/* cc#1901 — Results condensed summary. Deliberately separate closure/prefix (re-*) — additive,
-   zero lines of the existing calendar script above touched. */
-(function(){
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function dmd(ds){ if(!ds) return '—'; var p=String(ds).slice(0,10).split('-');
-  if(p.length!==3) return String(ds); var m=parseInt(p[1],10)-1;
-  return parseInt(p[2],10)+' '+(MON[m]||p[1]); }
-function scrollToCalendar(){ var el=document.getElementById('results-corner'); if(el) el.scrollIntoView({behavior:'smooth'}); }
-window.reScrollToCalendar = scrollToCalendar;
-
-function kmHtml(k){
-  return '<div class="re-km"><div class="re-k">Results written</div><div class="re-v">'+(k.results_written!=null?k.results_written:'—')+'</div>'
-    + '<div class="re-kg">'
-    + '<div class="re-cell"><div class="re-k">Q1FY27</div><div class="re-v">'+(k.q1fy27!=null?k.q1fy27:'—')+'</div></div>'
-    + '<div class="re-cell"><div class="re-k">Not yet written</div><div class="re-v">'+(k.not_yet_written!=null?k.not_yet_written:'—')+'</div></div>'
-    + '<div class="re-cell"><div class="re-k">Skipped</div><div class="re-v">'+(k.skipped!=null?k.skipped:'—')+'</div></div>'
-    + '<div class="re-cell"><div class="re-k">Last written</div><div class="re-v">'+dmd(k.last_written)+'</div></div>'
-    + '</div></div>';
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
+function dmy(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]+' '+p[0]):String(iso); }
+function pct(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(1)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+function cr(v){ if(v==null) return '—'; v=Number(v); return v>=1000?'₹'+(v/1000).toFixed(1)+'k Cr':'₹'+Math.round(v)+' Cr'; }
+function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+function mover(c,dn){
+  return '<a class="mc '+(dn?'dn':'')+'" href="/m/results?sym='+encodeURIComponent(c.symbol)+'"><div class="s">'+esc(c.symbol)+'</div><div class="seg">'+esc(c.segment||'')+(c.tier?' · '+c.tier.toLowerCase():'')+'</div>'
+    +'<div class="p '+cls(c.pat_yoy)+'">'+pct(c.pat_yoy)+'</div><div class="pl">profit vs last year · sales '+pct(c.sales_yoy)+'</div>'
+    +'<div class="g"><span>GVM <b>'+f2(c.gvm)+'</b></span>'+(c.written?'<span class="rd">Read ›</span>':'<span>no write-up</span>')+'</div></a>';
 }
-function writtenUpCardHtml(d){
-  var w=d.written_up||{}, rows=w.rows||[];
-  var lst = rows.map(function(r){
-    return '<div class="re-lr"><span class="s">'+esc(r.label)+'</span><div class="r"><span class="a">'+esc(r.note||'')+'</span><span class="b">'+r.count+'</span></div></div>';
-  }).join('');
-  return '<div class="re-c"><div class="re-ch"><span class="t">Written up</span><span class="n">'+(w.total!=null?w.total:'—')+' total</span></div>'
-    + '<div class="re-lst">'+lst+'</div>'
-    + (w.message?'<div class="re-more">'+esc(w.message)+'</div>':'')
-    + '<a class="re-link" onclick="reScrollToCalendar()">Browse all &#8250;</a></div>';
+function renderSeason(d){
+  var s=d.summary||{}, q=(d.season||{}).quarter||'—';
+  document.getElementById('asof').innerHTML='Season <b>'+esc(q)+'</b> · '+(s.reported||0)+' of '+(s.total||0)+' filed · '+(s.pct||0)+'%';
+  var tot=(s.growing||0)+(s.flat||0)+(s.declining||0)||1;
+  var h='<div class="hero"><div class="eye">Result season · '+esc(q)+'</div><div class="big"><div class="r">'+(s.reported||0)+'</div><div class="n">of <b>'+(s.total||0)+'</b> companies have filed<br>'+(s.beats_sector!=null?'<b>'+s.beats_sector+'</b> beat their sector median':'')+'</div></div>'
+    +'<div class="split"><i style="width:'+((s.growing||0)/tot*100)+'%;background:'+tok('--win')+'"></i><i style="width:'+((s.flat||0)/tot*100)+'%;background:'+tok('--muted')+'"></i><i style="width:'+((s.declining||0)/tot*100)+'%;background:'+tok('--loss')+'"></i></div>'
+    +'<div class="legend"><span><b class="pos">'+(s.growing||0)+'</b> profit up</span><span><b>'+(s.flat||0)+'</b> flat</span><span><b class="neg">'+(s.declining||0)+'</b> profit down</span></div>'
+    +'<div class="kg"><div class="cell"><div class="k">Median sales YoY</div><div class="v '+cls(s.median_sales_yoy)+'">'+pct(s.median_sales_yoy)+'</div></div><div class="cell"><div class="k">Median profit YoY</div><div class="v '+cls(s.median_pat_yoy)+'">'+pct(s.median_pat_yoy)+'</div></div><div class="cell"><div class="k">On '+(s.pat_n||0)+' filings</div><div class="v">'+((s.basis||{}).detailed||0)+' full · '+((s.basis||{}).basic||0)+' basic</div></div></div></div>';
+  var mv=d.movers||{};
+  h+='<div class="sec"><h2>Biggest profit jumps</h2><span class="hint">vs last year · swipe →</span></div>';
+  h+= (mv.up||[]).length ? '<div class="rl">'+mv.up.map(function(c){return mover(c,false);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing yet</b>No filing this season shows profit growth on record.</div></div>';
+  h+='<div class="sec"><h2>Biggest profit falls</h2><span class="hint">vs last year · swipe →</span></div>';
+  h+= (mv.down||[]).length ? '<div class="rl">'+mv.down.map(function(c){return mover(c,true);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing yet</b>No filing this season shows a profit fall on record.</div></div>';
+  var sec=(d.sectors||[]).filter(function(x){return x.reported;});
+  h+='<div class="sec"><h2>Sector by sector</h2><span class="hint">heaviest first · median moves</span></div>';
+  h+='<div class="lad"><div class="lr h"><div class="nm" style="font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)">Sector · filed</div><div class="v">Sales</div><div class="v">Profit</div></div>'
+    + sec.slice(0,10).map(function(x){ return '<div class="lr"><div><div class="nm">'+esc(x.sector)+'</div><div class="sub">'+x.reported+' of '+x.total+' filed'+(x.pct_positive!=null?' · '+x.pct_positive+'% up':'')+(x.tiny?' · thin base':'')+(x.gvm!=null?' · GVM '+f1(x.gvm):'')+'</div></div><div class="v '+cls(x.sales_yoy)+'">'+pct(x.sales_yoy)+'</div><div class="v '+cls(x.pat_yoy)+'">'+pct(x.pat_yoy)+'</div></div>'; }).join('')+'</div>';
+  h+='<div class="more">'+(sec.length>10?'+'+(sec.length-10)+' more sectors · ':'')+'<a href="/m/results?view=companies">Every company that filed, sortable ›</a></div>';
+  var w=d.written||{}, wr=w.rows||[];
+  h+='<div class="sec"><h2>Written up</h2><span class="hint">'+(w.total||0)+' analyses · last '+esc(dm(w.last))+'</span></div>';
+  h+= wr.length ? '<div class="wl">'+wr.slice(0,8).map(function(r){ return '<a class="wr" href="/m/results?sym='+encodeURIComponent(r.symbol)+'"><div class="t"><span class="s">'+esc(r.symbol)+'</span><span class="d">'+esc(dm(r.result_date||r.polished_at))+'</span></div><div class="co">'+esc(r.company||'')+'</div><div class="tz">'+esc(r.teaser||'')+'</div></a>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing written yet</b>No result analysis on record for this quarter.</div></div>';
+  var up=d.upcoming||[];
+  h+='<div class="sec"><h2>Next 10 days</h2><span class="hint">'+up.length+' on the calendar</span></div>';
+  h+= up.length ? '<div class="cal">'+up.slice(0,12).map(function(u){ return '<div class="cd"><div class="d">'+esc(dm(u.date))+'</div><div class="s">'+esc(u.symbol)+'</div></div>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Quiet calendar</b>No result dates in the next ten days.</div></div>';
+  h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Write-ups are Scorr editorial from filings and calls, never a recommendation.</div>';
+  document.getElementById('body').innerHTML=h;
 }
-function latestWrittenCardHtml(d){
-  var lw=d.latest_written||{}, rows=lw.rows||[];
-  var lst = rows.map(function(r){
-    return '<div class="re-lr"><span class="s">'+esc(r.symbol)+'</span><div class="r"><span class="a">'+esc(r.quarter||'')+'</span><span class="b">'+dmd(lw.as_of)+'</span></div></div>';
-  }).join('');
-  var more = lw.more>0 ? '<div class="re-more">+'+lw.more+' more</div>' : '';
-  return '<div class="re-c"><div class="re-ch"><span class="t">Latest written</span><span class="n">'+dmd(lw.as_of)+'</span></div>'
-    + '<div class="re-lst">'+lst+'</div>'+more
-    + (lw.message?'<div class="re-more">'+esc(lw.message)+'</div>':'')+'</div>';
+var ROWS=[], KEY='pat_yoy', ASC=false, COLS=[];
+function tbl(){
+  var rows=ROWS.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
+  var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
+  var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c){ var v=r[c[0]]; return '<td>'+(c[2]?c[2](v,r):esc(v==null?'—':v))+'</td>'; }).join('')+'</tr>'; }).join('');
+  document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' companies · tap a header to sort · dash = not filed yet</div>';
+  document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='symbol'); } tbl(); });
 }
-function gapsCardHtml(d){
-  var g=d.coverage_gaps||{}, rows=g.rows||[];
-  var lst = rows.map(function(r){
-    return '<div class="re-lr"><span class="s">'+esc(r.label)+'</span><div class="r"><span class="a">'+esc(r.note||'')+'</span><span class="b">'+r.count+'</span></div></div>';
-  }).join('');
-  return '<div class="re-c"><div class="re-ch"><span class="t">Coverage gaps</span><span class="n">'+(rows[0]?rows[0].count:'—')+'</span></div>'
-    + '<div class="re-lst">'+lst+'</div>'
-    + (g.message?'<div class="re-more">'+esc(g.message)+'</div>':'')+'</div>';
+function renderCompanies(d){
+  document.getElementById('pg-title').textContent='All filings'; document.getElementById('back').style.display='';
+  document.getElementById('asof').innerHTML='Season <b>'+esc(d.quarter||'—')+'</b> · '+d.count+' companies';
+  document.getElementById('body').innerHTML='<div class="wrap" id="tb"></div>';
+  ROWS=d.rows||[];
+  var pc=function(v){return '<span class="'+cls(v)+'">'+pct(v)+'</span>';};
+  COLS=[['symbol','Name',function(v,r){return '<a href="/m/results?sym='+encodeURIComponent(v)+'">'+esc(v)+(r.written?' <span class="gd">•</span>':'')+'<small>'+esc(r.segment||'')+'</small></a>';}],['pat_yoy','Profit YoY',pc],['sales_yoy','Sales YoY',pc],['pat_qoq','Profit QoQ',pc],['gvm','GVM',f2],['pe','P/E',f1],['reported','Filed',function(v){return esc(dm(v));}]];
+  tbl();
 }
-function whySkippedCardHtml(d){
-  var ws=d.why_skipped||{};
-  return '<div class="re-c"><div class="re-ch"><span class="t">Why a company is skipped</span><span class="n">'+(ws.count!=null?ws.count:'—')+'</span></div>'
-    + '<div class="re-emp" style="margin-top:0">'+esc(ws.message||'')+'</div></div>';
+function renderAnalysis(d){
+  var n=d.numbers||{};
+  document.getElementById('pg-title').textContent=d.symbol; document.getElementById('back').style.display='';
+  document.getElementById('asof').innerHTML=(n.company?'<b>'+esc(n.company)+'</b> · ':'')+esc(n.segment||'')+(d.quarter?' · '+esc(d.quarter):'');
+  var h='<div class="strip"><div><div class="k">Profit YoY</div><div class="v '+cls(n.pat_yoy)+'">'+pct(n.pat_yoy)+'</div></div><div><div class="k">Sales YoY</div><div class="v '+cls(n.sales_yoy)+'">'+pct(n.sales_yoy)+'</div></div><div><div class="k">Profit QoQ</div><div class="v '+cls(n.pat_qoq)+'">'+pct(n.pat_qoq)+'</div></div><div><div class="k">GVM</div><div class="v">'+f2(n.gvm)+'</div></div></div>';
+  if(n.pat!=null||n.sales!=null) h+='<div class="strip"><div><div class="k">Sales</div><div class="v">'+cr(n.sales)+'</div></div><div><div class="k">Profit</div><div class="v">'+cr(n.pat)+'</div></div><div><div class="k">OPM</div><div class="v">'+(n.opm==null?'—':f1(n.opm)+'%')+'</div></div><div><div class="k">P/E · sector</div><div class="v">'+f1(n.pe)+' · '+f1(n.seg_pe)+'</div></div></div>';
+  if(d.has_analysis){
+    var secs=d.sections;
+    if(secs&&typeof secs==='object'&&!Array.isArray(secs)&&Object.keys(secs).length){
+      Object.keys(secs).forEach(function(k){ h+='<div class="card"><div class="ch"><span class="t">'+esc(k.replace(/_/g,' '))+'</span></div><div class="p">'+esc(secs[k])+'</div></div>'; });
+    } else h+='<div class="card"><div class="ch"><span class="t">Result analysis</span><span class="n">'+esc(dm(d.polished_at))+'</span></div><div class="p">'+esc(d.analysis||'')+'</div></div>';
+    h+='<div class="note"><b>'+esc(d.basis||'Scorr editorial')+'.</b> Written from the filing and the call. Not a recommendation.</div>';
+  } else h+='<div class="card"><div class="emp"><b>No write-up for this one</b>'+(n.symbol?'The numbers above are from the filing. Nothing has been written about it yet.':'This symbol has not filed this season, or is outside the tracked universe.')+'</div></div>';
+  document.getElementById('body').innerHTML=h;
 }
-function calendarCardHtml(d){
-  var c=d.calendar||{}, rows=c.rows||[];
-  var lst = rows.map(function(r){
-    return '<div class="re-lr"><span class="s">'+esc(r.label)+'</span><div class="r"><span class="a">'+esc(r.note||'')+'</span><span class="b">'+(r.count!=null?r.count:esc(r.value||''))+'</span></div></div>';
-  }).join('');
-  return '<div class="re-c"><div class="re-ch"><span class="t">Upcoming</span><span class="n">'+(c.count!=null?c.count+' dated':'')+'</span></div>'
-    + '<div class="re-lst">'+lst+'</div>'
-    + '<a class="re-link" onclick="reScrollToCalendar()">See the calendar &#8250;</a></div>';
-}
-
-function reRender(d){
-  var k=d.key_metrics||{};
-  document.getElementById('re-asof').textContent = 'Latest write-up '+dmd(k.last_written)+' · '+(k.results_written!=null?k.results_written:'—')+' stored · Q1FY27 season';
-  var html = kmHtml(k)
-    + '<div class="re-slab"><h2>This season</h2><span class="hint">2 · swipe →</span></div>'
-    + '<div class="re-rail">'+writtenUpCardHtml(d)+latestWrittenCardHtml(d)+'</div>'
-    + '<div class="re-slab"><h2>What is missing</h2><span class="hint">2 · swipe →</span></div>'
-    + '<div class="re-rail">'+gapsCardHtml(d)+whySkippedCardHtml(d)+'</div>'
-    + '<div class="re-slab"><h2>Calendar</h2><span class="hint">1 · swipe →</span></div>'
-    + '<div class="re-rail">'+calendarCardHtml(d)+'</div>'
-    + '<div class="re-note"><b>Nothing has been written since '+dmd(k.last_written)+'.</b> The as-of strip and the latest card both say so, because a results page that looks current while being stale is worse than one that admits the gap. '+(k.not_yet_written!=null?k.not_yet_written:'—')+' companies have results and no write-up yet; '+(k.skipped!=null?k.skipped:'—')+' were skipped deliberately because the filing had nothing worth saying. The full forward calendar, unchanged, is below.</div>';
-  document.getElementById('re-body').innerHTML = html;
-}
-
-(window.fetchWithTimeout || fetch)('/api/mobile/results_app', {credentials:'same-origin'})
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    if(d.error){ document.getElementById('re-body').innerHTML = '<div class="re-empty">Could not load: '+esc(d.error)+'</div>'; return; }
-    reRender(d);
-  })
-  .catch(function(e){ document.getElementById('re-body').innerHTML = '<div class="re-empty">Could not load results summary.</div>'; });
-})();
+var Q={}; try{ var u=new URLSearchParams(location.search); Q.sym=u.get('sym'); Q.view=u.get('view'); }catch(e){}
+var url = Q.sym ? '/api/mobile/results_app/analysis?symbol='+encodeURIComponent(Q.sym) : (Q.view==='companies' ? '/api/mobile/results_app/companies' : '/api/mobile/results_app/season');
+fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+  if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
+  Q.sym ? renderAnalysis(d) : (Q.view==='companies' ? renderCompanies(d) : renderSeason(d));
+}).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load results.</div>'; });
 </script>
-</body>
-</html>
+</body></html>

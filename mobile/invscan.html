@@ -1,0 +1,120 @@
+<!doctype html>
+<!-- ══ mobile/invscan.html — Investment Scanner app page. Fable single-mode build 10-Sep-2026. Data: /api/mobile/invscan (scanners_app_mobile.py),
+     which reads the web tab's own functions. Contract tokens only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Investment Scanner · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+.pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
+.pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+.seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+.lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
+.row:last-child{border-bottom:none}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
+.row.up::before{background:var(--win)}.row.dn::before{background:var(--loss)}.row.mu::before{background:var(--edge)}
+.row .nm{font-size:var(--type-125);font-weight:800}.row .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.row .nm .tag.b{color:var(--win)}.row .nm .tag.s{color:var(--loss)}.row .nm .tag.g{color:var(--brand)}
+.row .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}.row .sub b{color:var(--ink);font-weight:700}
+.row .v{text-align:right}.row .v .n{font-size:var(--type-15);font-weight:800;line-height:1}.row .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+.emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.rule{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8)}.rule b{color:var(--brand)}.rule.mu{color:var(--muted);font-size:var(--type-115)}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+.chips{display:flex;gap:var(--space-6);overflow-x:auto;padding:var(--space-4) var(--space-16) 0;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel)}.chip.on{color:var(--brand);background:var(--hi)}
+.gates{display:inline-flex;gap:var(--space-2);vertical-align:middle;margin-left:var(--space-4)}.gates i{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--edge)}.gates i.ok{background:var(--win)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Investment Scanner</span></div><div class="as-slot"></div></div>
+<div class="pg">
+<div class="asof" id="asof">Loading…</div>
+<div id="body"><div class="err">Loading…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn on" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
+  <a class="bn" href="/m/dash"><span class="i">◍</span>Dash</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16); }
+function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
+function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+var D=null, TRACK='momentum';
+function band(b){ return b==='STRONG_BUY'?'Strong buy':(b==='ACCUMULATE'?'Accumulate':(b==='WATCH'?'Watch':(b||'—'))); }
+function gatesHtml(r){ var g=r.gates||{}; return '<span class="gates">'+Object.keys(g).map(function(k){return '<i class="'+(g[k].pass?'ok':'')+'"></i>';}).join('')+'</span>'; }
+function brow(r){
+  var st=r.state||'', tag = st==='ENTERED'?'<span class="tag g">held</span>':(st==='ENTERS'?'<span class="tag b">enters</span>':(st==='GATED'?'<span class="tag">gated</span>':''));
+  return '<a class="row '+(st==='ENTERS'||st==='ENTERED'?'up':(st==='GATED'?'':'mu'))+'" href="/m/check?sym='+encodeURIComponent(r.symbol)+'#ic"><div><div class="nm">'+esc(r.symbol)+tag+'</div><div class="sub">'+esc(band(r.band))+' · GVM <b>'+f2(r.gvm)+'</b> · gates '+(r.gates_n!=null?r.gates_n+'/4':'—')+gatesHtml(r)+(r.month_return!=null?' · month '+pct(r.month_return,1):'')+'</div></div>'
+    +'<div class="v"><div class="n">'+(r.score!=null?Math.round(r.score):'—')+'</div><div class="c">'+(TRACK==='momentum'?'rev '+(r.rev!=null?Math.round(r.rev):'—'):'mom '+(r.mom!=null?Math.round(r.mom):'—'))+'</div></div></a>';
+}
+function prow(p, closed){
+  var sub = 'in '+f2(p.entry)+(closed?' → out '+f2(p.exit)+' · '+esc(p.exit_reason||'')+' · '+esc(dm(p.exited)):(p.cmp!=null?' → now <b>'+f2(p.cmp)+'</b>':' · no price')+' · '+esc(p.track||'')+' '+(p.entry_score!=null?Math.round(p.entry_score):'')+' · since '+esc(dm(p.entered)));
+  return '<a class="row '+ud(p.net_pct)+'" href="/m/check?sym='+encodeURIComponent(p.symbol)+'#ic"><div><div class="nm">'+esc(p.symbol)+'</div><div class="sub">'+sub+'</div></div><div class="v"><div class="n '+cls(p.net_pct)+'">'+pct(p.net_pct)+'</div><div class="c">'+(closed?'net':(p.day_pct!=null?'day '+pct(p.day_pct,1):''))+'</div></div></a>';
+}
+function draw(){
+  var d=D, ps=d.positions||{}, rec=d.record||{}, ru=d.rule||{};
+  var open=ps.open||[], closed=ps.closed||[], enters=(d.enters||[]).filter(function(r){return r.state==='ENTERS';}), board=d.board||[];
+  var h='<div class="hero"><div class="eye">Investment scanner · run '+esc(dm(d.run_date))+' · '+esc(d.track)+' track</div><div class="big"><div class="r">'+open.length+'</div><div class="n">positions open · avg <b class="'+cls(ps.open_avg_net_pct)+'">'+pct(ps.open_avg_net_pct)+'</b> since entry<br>'+enters.length+' would enter on the next run</div></div>'
+    +'<div class="kg"><div class="cell"><div class="k">Closed</div><div class="v">'+(rec.closed||0)+'</div></div><div class="cell"><div class="k">Win rate</div><div class="v">'+(rec.wr_pct!=null?rec.wr_pct+'%':'—')+'</div></div><div class="cell"><div class="k">Avg net</div><div class="v '+cls(rec.avg_net_pct)+'">'+pct(rec.avg_net_pct)+'</div></div></div></div>';
+  h+='<div class="sec"><h2>Track</h2><span class="hint">scored 0–100</span></div>';
+  h+='<div class="seg" id="tr"><span data-t="momentum"'+(TRACK==='momentum'?' class="on"':'')+'>Momentum</span><span data-t="reversal"'+(TRACK==='reversal'?' class="on"':'')+'>Reversal</span></div>';
+  h+='<div class="sec"><h2>Enters next run</h2><span class="hint">score over the bar · 4 of 4 gates</span></div>';
+  h+= enters.length ? '<div class="lst">'+enters.map(brow).join('')+'</div>' : '<div class="emp"><b>Nothing clears both</b>No name has the score and all four gates today. The board below shows who is close.</div>';
+  h+='<div class="sec"><h2>Board</h2><span class="hint">top 20 of '+board.length+' · dots = gates</span></div>';
+  h+= board.length ? '<div class="lst">'+board.slice(0,20).map(brow).join('')+'</div>' : '<div class="emp"><b>No board</b>The scanner has not scored this track yet.</div>';
+  h+='<div class="sec"><h2>Open positions</h2><span class="hint">'+open.length+' · long only</span></div>';
+  h+= open.length ? '<div class="lst">'+open.slice().sort(function(a,b){return (b.net_pct||0)-(a.net_pct||0);}).map(function(p){return prow(p,false);}).join('')+'</div>' : '<div class="emp"><b>Nothing open</b>The scanner holds no position right now.</div>';
+  h+='<div class="sec"><h2>Closed</h2><span class="hint">'+(ps.closed_total||0)+' · newest first</span></div>';
+  h+= closed.length ? '<div class="lst">'+closed.map(function(p){return prow(p,true);}).join('')+'</div>' : '<div class="emp"><b>Nothing closed yet</b>No position has exited.</div>';
+  h+='<div class="card"><div class="ch"><span class="t">The rule</span><span class="n">from the engine</span></div><div class="rule">'+esc(ru.what||'')+'</div><div class="rule"><b>Enter:</b> '+esc(ru.entry||'')+'</div><div class="rule mu">Gates: '+esc((ru.gates||[]).join(' · '))+'</div><div class="rule"><b>Exit:</b> '+esc(ru.exit||'')+'</div><div class="rule mu">'+esc(ru.bands||'')+'</div></div>';
+  h+='<div class="note"><b>Research only.</b> '+esc(ru.honesty||'')+'</div>';
+  document.getElementById('asof').innerHTML='Run <b>'+esc(dm(d.run_date))+'</b> · '+board.length+' scored on '+esc(d.track)+' · '+open.length+' open';
+  document.getElementById('body').innerHTML=h;
+  document.getElementById('tr').addEventListener('click', function(e){ var s=e.target.closest('[data-t]'); if(!s) return; load(s.getAttribute('data-t')); });
+}
+function load(t){
+  TRACK=t||'momentum';
+  fetch('/api/mobile/invscan?track='+TRACK,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
+    D=d; draw();
+  }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load the scanner.</div>'; });
+}
+load('momentum');
+</script>
+</body></html>
