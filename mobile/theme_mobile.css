@@ -153,15 +153,49 @@ body[data-theme]{
  * --surface2 alone resolved from mobile_app.css's :root literal (navy tiles on white). Same fix,
  * same place: #dcOv joins the list. #scorrChartOv (C) is added alongside for the same reason --
  * it is the third body-appended card shell and reads the same names.
+ *
+ * cc#1970 (founder GO 10-Sep 17:25, Fable variant B on log 6223): the hand-maintained id list
+ * above ENDS here. STEP TWO now declares at body[data-theme] scope, so every body-appended sheet
+ * -- #scorrAnaOv, #alWrap, #dcOv, #scorrChartOv and every future one -- inherits the family
+ * without being named. The list had grown by one id per incident since cc#1828; that is the class
+ * this removes, not just the latest instance (cc#1965's filter sheet).
+ *
+ * WHY --panel IS NOT IN THE BODY RULE, and must never be moved into it. --panel is in BOTH
+ * families: it is a CONTRACT name the theme sets declare directly on body (scorr_themes.css:184,
+ * body[data-theme="goldnight"] declares --panel directly), AND it is a STEP TWO name. STEP ONE above
+ * already declares --t-panel:var(--panel) on body. Putting --panel:var(--t-panel) on that same
+ * element makes the two reference each other, and per CSS custom-property cycle rules BOTH become
+ * invalid at computed-value time -- measured as a white Analysis box on goldnight. So --panel
+ * stays on .screen,.bnav only. The body-appended sheets do NOT lose it: they are children of
+ * <body>, so they inherit the theme's OWN --panel contract value, which is the correct colour.
+ * Do not "simplify" this into one selector.
+ *
+ * CASCADE CHECK (cc#1970 item 3, stated with numbers). body[data-theme] is (0,1,1). The rival
+ * literals for this family live in pwa_endpoints.py's served app CSS on :root (0,1,0) and
+ * :root[data-theme="light"] (0,2,0). Specificity never decides between them: :root is <html> and
+ * this rule is <body>, a different element, so for every descendant of body the body declaration
+ * is simply NEARER in the inheritance chain and wins regardless of the html rule's specificity.
+ * No !important is needed and none was added.
+ *
+ * WHY .screen,.bnav STAYS IN THE SELECTOR (this is required, not decorative). mobile_endpoints.py
+ * :1307 declares this exact older family as hardcoded DARK LITERAL hex values on `.screen,.bnav`
+ * (--bg/--panel/--panel2/--line/--line2/--txt/--mut/--dim/--grn/--red/--blu/--cyan/--amber -- the
+ * values are in that file, deliberately not copied here), and its own cc#963/964 comment says so:
+ * "The app palette is declared on .screen,.bnav -- not on :root and not on body." For any element INSIDE .screen that rule is
+ * NEARER than body, so a body-only rule would lose to those literals on every app page. Keeping
+ * .screen,.bnav here holds the same specificity (0,1,0) and the same source-order relationship the
+ * pre-cc#1970 rule already had, so behaviour inside .screen is unchanged; the body[data-theme]
+ * addition is purely additive, reaching the body-appended siblings that used to fall through.
  */
-.screen,.bnav,#scorrAnaOv,#alWrap,#dcOv,#scorrChartOv{
-  --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
+body[data-theme],.screen,.bnav{
+  --bg:var(--t-field); --panel2:var(--t-hi);
   --surface2:var(--t-hi);   /* cc#1778: the C·A·R·D tile fill; a :root literal in mobile_app.css until now */
   --line:var(--t-edge); --line2:var(--t-edge);
   --txt:var(--t-ink); --mut:var(--t-muted); --dim:var(--t-muted);
   --grn:var(--t-win); --red:var(--t-loss);
   --blu:var(--t-accent); --cyan:var(--t-brand);
 }
+.screen,.bnav{ --panel:var(--t-panel); }
 #gvp,#ckp,#v8p,.c-sheet,.c-scrim{
   /* cc#1854: .c-sheet/.c-scrim (mobile/check.html:49-50) are static siblings of #ckp, not
      descendants -- added here so this file's own #ckp bridge (mirrors mobile_endpoints.py's,
