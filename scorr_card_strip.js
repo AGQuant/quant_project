@@ -67,12 +67,21 @@
            auto, padding --space-6 vertical / --space-8 horizontal around a --type-12 letter with
            line-height 1, so the box is the letter plus a thin boundary. Row: four pills, --space-6
            gap, LEFT-aligned, row height = the pill's own height. Fill --hi, edge --edge, letter
-           --brand -- the approved look, unchanged. */
+           --brand -- the approved look, unchanged.
+       cc#1956 (founder 10-Sep 16:5x, after cc#1948 landed: "Card button height reduce 25%, make it
+           square"). Measured cc#1948 render in Chromium at 390px: 26px tall, 27.4-28.6px wide (the
+           letter decided the width). 75% of 26 = 19.5px; the ramp has no 19.5 token, so the pill
+           is --space-20 (20px, 23% shorter) SQUARE: width = height = --space-20, padding 0, the
+           letter centred with inline-flex, --type-10 (the readability floor the card set; 12 x .75
+           = 9 would be under it), letter-spacing 0 (a tracked single glyph is off-centre), radius
+           --radius-6 (8 x .75). Row unchanged: --space-6 gap, left-aligned, row height = 20px.
+           The compact (table-row) variant used to be 22px -- bigger than the new standard pill --
+           so it now inherits the same square instead of carrying its own size. */
     + '.scorr-card-strip.scorr-cs-app{display:flex;justify-content:flex-start;align-items:center;gap:var(--space-6,6px)}'
-    + '.scorr-card-strip.scorr-cs-app .scorr-cs-b{box-sizing:border-box;flex:0 0 auto;width:auto;height:auto;min-width:0;max-width:none;'
-    + 'padding:var(--space-6,6px) var(--space-8,8px);line-height:1;font-size:var(--type-12,12px);font-weight:800;letter-spacing:var(--track-em8,.08em);'
-    + 'border-radius:var(--radius-8,8px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
-    + 'color:var(--brand,var(--txt,#d4af37));box-shadow:none}'
+    + '.scorr-card-strip.scorr-cs-app .scorr-cs-b{box-sizing:border-box;flex:0 0 auto;width:var(--space-20,20px);height:var(--space-20,20px);min-width:0;max-width:none;'
+    + 'padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;font-size:var(--type-10,10px);font-weight:800;letter-spacing:0;'
+    + 'border-radius:var(--radius-6,6px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
+    + 'color:var(--brand,var(--txt,#d4af37));box-shadow:none}'   /* cc#1956: 20px square */
     + '.scorr-card-strip.scorr-cs-app .scorr-cs-b:active{background:var(--panel,#131316)}'
     /* current letter: brand fill, field-coloured glyph -- the same "you are here" the web strip
        shows in blue, in the app's own brand */
@@ -80,9 +89,8 @@
     /* unavailable letter (D on a non-future, R with no result): cc#964's legibility floor kept --
        muted glyph at .75 on a dashed unfilled pill, so a disabled control still reads as a control */
     + '.scorr-card-strip.scorr-cs-app .scorr-cs-off{color:var(--muted,var(--mut,#8e8a7e));background:transparent;border-style:dashed;opacity:.75}'
-    /* the compact (table-row) variant keeps its own metrics on the app too */
-    + '.scorr-card-strip.scorr-cs-app.scorr-cs-sm{display:inline-flex;gap:3px}'
-    + '.scorr-card-strip.scorr-cs-app.scorr-cs-sm .scorr-cs-b{height:22px;min-width:22px;width:22px;padding:0;border-radius:5px;font-size:10px}';
+    /* the compact (table-row) variant: same 20px square as every other app pill (cc#1956), tighter gap */
+    + '.scorr-card-strip.scorr-cs-app.scorr-cs-sm{display:inline-flex;gap:3px}';
   try {
     var st = document.createElement('style');
     st.setAttribute('data-scorr', 'card-strip');
