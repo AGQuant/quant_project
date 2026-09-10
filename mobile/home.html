@@ -415,7 +415,7 @@ body[data-theme]{
 .brr:active{background:var(--panel2)}
 .brcard{display:flex;padding:var(--space-8) var(--space-2) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
 .brcard .scorr-card-strip{display:flex;gap:var(--space-8);width:100%}
-.brcard .scorr-cs-b{flex:1;text-align:center;min-height:44px}
+.brcard .scorr-cs-b{flex:1}   /* cc#1941: look comes from the single app spec in scorr_card_strip.js; layout only here */
 .brcard .sum{color:var(--muted);font-size:var(--type-11)}
 .brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
   min-height:38px;position:sticky;top:0;z-index:2;background:var(--bg,#0A0F1E);
@@ -1282,18 +1282,17 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 /* cc#1934 (reverses cc#1932): the card is a plain <div> again — no navigation. Its last row is the
    SHARED C·A·R·D strip (scorr_card_strip.js, cc#789 single source; already loaded on /m/home via
    _MOBILE_HEAD, bridge tokens above). The cc#1070 row layout: the strip stretched to the row width.
-   cc#1939 (founder 10-Sep 15:49, "Card boxes should be 50% of current size and cute"): on THIS
-   surface only, the four buttons are slim pills — height --space-28 (half the 44px clamp cc#1934
-   used), equal quarters minus a --space-6 gap, radius --radius-14, --hi fill, --edge hairline,
-   --brand letter at --type-11 / 800 / --track-em8, --panel when pressed, no shadow. Scoped to
-   .ap-card .cardstrip, so the V8 position cards and the GVM hero keep the shared file's own size.
-   The component's disabled letter (D on a non-future) stays muted and unfilled. Behaviour is the
-   component's — same four popups. */
+   cc#1939 (founder 10-Sep 15:49, "Card boxes should be 50% of current size and cute") gave the
+   pills their slim look here; cc#1941 (founder 10-Sep 15:51, "one spec change should reflect all
+   C A R D button") moved that look into scorr_card_strip.js as the ONE app pill definition, so it
+   is the same on every app consumer. Only the equal-quarter stretch and the --space-6 gap remain
+   here. Behaviour is the component's — same four popups. */
 .ap-card .cardstrip{margin-top:var(--space-8);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi);display:flex}
 .ap-card .cardstrip .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}
-.ap-card .cardstrip .scorr-cs-b{flex:1;width:auto;min-height:0;height:var(--space-28);text-align:center;border-radius:var(--radius-14);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--brand);font-size:var(--type-11);font-weight:800;letter-spacing:var(--track-em8);box-shadow:none}
-.ap-card .cardstrip .scorr-cs-b:active{background:var(--panel)}
-.ap-card .cardstrip .scorr-cs-off{color:var(--muted);background:transparent}
+/* cc#1941: the pill LOOK (size, radius, fill, edge, letter, pressed, disabled) is defined ONCE in
+   scorr_card_strip.js (body.mcards block) -- the cc#1939 spec moved there so every app consumer
+   matches. This page only stretches the pills across the row. */
+.ap-card .cardstrip .scorr-cs-b{flex:1}
 /* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
    Index option chain summary only (option_chain has NIFTY + BANKNIFTY, nothing else); the
    is-index-only line says so on the card itself, not just in a tooltip. Same visual language as
