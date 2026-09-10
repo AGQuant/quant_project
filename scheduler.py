@@ -1579,6 +1579,25 @@ def _bg_stale_claim_release():
     return {"released": len(released), "ids": [r["id"] for r in released]}
 
 
+def _bg_findings_alert():
+    """cc#1971 — DIAG_FINDINGS_SURFACE_V1 (session_log 43650): every Fable Room FINDING row pings
+    the founder's Telegram. Polls cc_task_logs (task_id 1199, level 'finding') for rows with no
+    sent marker, sends each once through the ONE existing sender (v10_st_ema.telegram_alert, the
+    same client the V10 alerts and the feed watchdogs use) and records the marker in the
+    cc_finding_alerts sidecar. Registry-gated on the name the recorder writes (cc#1189 lesson).
+    Every 5 minutes, all days, all hours — findings do not keep market hours. Returns _SKIPPED on
+    a tick with nothing to send so an idle channel never reads as a run (cc#526)."""
+    if _job_active("bg_findings_alert") is not True:
+        return _Skip.disabled()
+    import cc_findings_alert
+    res = cc_findings_alert.send_unsent_findings()
+    if not res:
+        return _SKIPPED
+    log.info("findings_alert: sent %d, failed %d (%s)", res["sent"], res["failed"],
+             ", ".join("log %s" % i for i in res["ids"]))
+    return res
+
+
 def _bg_qsr_exits():
     """cc#1175 — the QSR exit sweep.
 
@@ -4977,6 +4996,10 @@ async def _scheduler_loop():
             # created at 09:00 on a weekday and found at 06:00 on a Saturday. Gated inside on the
             # registry, so it is switched off by UPDATE and never by a deploy.
             _spawn(_bg_stale_claim_release)
+        if m % 5 == 0:
+            # cc#1971: Fable Room FINDING rows -> founder's Telegram. All days, all hours, every
+            # 5 minutes; gated inside on the registry (bg_findings_alert), off by UPDATE never deploy.
+            _spawn(_bg_findings_alert)
         # cc#442: V14 intraday engine 5-min cycle (paper) — app-side, trading days only, market hours.
         # Read-only on V8/V10; does NOT touch worker/** (Phase A safe).
         if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
