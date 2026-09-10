@@ -1,89 +1,78 @@
 <!doctype html>
-<!-- ══ mobile/fpc.html — Planning (FPC) section page (cc#1905, APP_CARD_LAYOUT_LAW_V1,
-     session_log 42536). Full rewrite in place — same /m/fpc route (mobile_ext.py:742,
-     unchanged). Design authority: design_refs/scorr_app_fpc_R1.html, founder-approved
-     09-Sep-2026 (commit a6275e1). Real GOLD NIGHT tokens only.
-     NO BACKING STORE EXISTS (information_schema swept for plan/fpc/goal/sip tables — zero
-     rows, re-confirmed before writing this file). Every number on this page is either a FIXED
-     structural fact (4 calculators by design, 0 saved plans) or a live client-side computation
-     — no API call anywhere in this file, same discipline as cc#1897's mywatchlist.html.
-     FOUR SEPARATE CALCULATORS (item 2), each opened from the summary card as a bottom sheet:
-     Monthly SIP (forward), Lump sum growth (forward), Retirement corpus (perpetuity + SIP
-     needed), Goal planner (reverse). All reuse the OLD page's exact compounding formulas
-     (fvSip/fvLump/sipForTarget below), split into single-purpose calculators instead of one
-     combined form — no formula re-derived except calculator 3's perpetuity corpus, which is
-     standard and states its own assumption on its face. Every rate is a plain, editable
-     <input>, never hidden in code (V1). -->
+<!-- ══ mobile/fpc.html — Planning app page. Fable single-mode build 10-Sep-2026. Data: POST /api/mobile/fpc/calc (fpc_app_mobile.py — the concept note v0.1 maths, server-side).
+     Founder 10-Sep: most items optional or slider. Step 1 shows 5 sliders + 1 tap; 'What you have' folds behind one tap with sensible defaults;
+     the goal is optional; step 2 (risk comfort) can be skipped — comfort is then assumed Medium and the page says so. Contract tokens only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Planning · Scorr</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <style>
-/* cc#1905 — page-local rules (fp-*). Same discipline as every other section page this session:
-   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex or raw px. */
-.fp-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
-.fp-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-left:var(--bw-3) solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
-.fp-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.fp-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.fp-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
-.fp-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
-.fp-cell .fp-k{font-size:var(--type-9)}
-.fp-cell .fp-v{font-size:var(--type-14);margin-top:var(--space-3)}
-.fp-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
-.fp-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.fp-slab .hint{font-size:var(--type-10);color:var(--dim)}
-.fp-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
- scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.fp-rail::-webkit-scrollbar{display:none}
-.fp-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
-.fp-c.gap{border-style:dashed}
-.fp-ch{display:flex;align-items:baseline;justify-content:space-between}
-.fp-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
-.fp-ch .n{font-size:var(--type-11);color:var(--mut)}
-.fp-lst{margin-top:var(--space-9)}
-.fp-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2);cursor:pointer}
-.fp-lr:last-child{border-bottom:none}
-.fp-lr .s{font-size:var(--type-125);font-weight:800}
-.fp-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
-.fp-lr .a{font-size:var(--type-115);color:var(--mut)}
-.fp-lr .b{font-size:var(--type-125);font-weight:700;color:var(--blu)}
-.fp-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
-.fp-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
-.fp-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
-.fp-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
- border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
-.fp-note b{color:var(--mut)}
-/* sheet (bottom modal) — one generic shell, four calculator bodies swapped into it */
-.fp-sheet{position:fixed;inset:0;z-index:98;display:none}
-.fp-sheet.open{display:block}
-.fp-sheet .bk{position:fixed;inset:0;background:var(--veil-sheet)}   /* cc#1920: the role token every app sheet backdrop uses */
-.fp-sheet .box{position:fixed;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:var(--panel);
- border:var(--bw-15) solid var(--line);border-bottom:none;border-radius:var(--radius-18) var(--radius-18) 0 0;
- padding:var(--space-12) var(--space-16) calc(var(--space-18) + env(safe-area-inset-bottom))}
-.fp-sheet .grab{width:44px;height:var(--space-4);border-radius:var(--radius-2);background:var(--line);margin:0 auto var(--space-10)}
-.fp-sheet .x{position:absolute;top:var(--space-12);right:var(--space-14);width:30px;height:30px;border-radius:50%;
- border:var(--bw-1) solid var(--line);background:var(--panel2);color:var(--mut);cursor:pointer}
-.fp-sheet h3{font-size:var(--type-18);font-weight:800;padding-right:var(--space-28)}
-.fp-fld{margin-top:var(--space-12)}
-.fp-fld label{display:block;font-size:var(--type-105);font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em8);margin-bottom:var(--space-5)}
-.fp-fld input{width:100%;box-sizing:border-box;padding:var(--space-9) var(--space-11);font-size:var(--type-14);
- border:var(--bw-1) solid var(--line);border-radius:var(--radius-9);background:var(--panel2);color:var(--txt);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.fp-res{margin-top:var(--space-14);padding:var(--space-12) var(--space-13);background:var(--panel2);border:var(--bw-1) solid var(--line);
- border-left:var(--bw-3) solid var(--grn);border-radius:0 var(--radius-12) var(--radius-12) 0}
-.fp-res .k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
-.fp-res .v{font-size:var(--type-22);font-weight:800;margin-top:var(--space-3);font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--grn)}
-.fp-res .split{display:flex;gap:var(--space-14);margin-top:var(--space-9)}
-.fp-res .sp .k{font-size:var(--type-9)}
-.fp-res .sp .v{font-size:var(--type-14);color:var(--txt)}
-.fp-assume{margin-top:var(--space-10);font-size:var(--type-105);color:var(--dim);line-height:1.5}
+.pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
+.pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+.seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+.lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
+.row:last-child{border-bottom:none}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
+.row.up::before{background:var(--win)}.row.dn::before{background:var(--loss)}.row.mu::before{background:var(--edge)}
+.row .nm{font-size:var(--type-125);font-weight:800}.row .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.row .nm .tag.b{color:var(--win)}.row .nm .tag.s{color:var(--loss)}.row .nm .tag.g{color:var(--brand)}
+.row .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}.row .sub b{color:var(--ink);font-weight:700}
+.row .v{text-align:right}.row .v .n{font-size:var(--type-15);font-weight:800;line-height:1}.row .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+.emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.rule{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8)}.rule b{color:var(--brand)}.rule.mu{color:var(--muted);font-size:var(--type-115)}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+.chips{display:flex;gap:var(--space-6);overflow-x:auto;padding:var(--space-4) var(--space-16) 0;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel)}.chip.on{color:var(--brand);background:var(--hi)}
+.gates{display:inline-flex;gap:var(--space-2);vertical-align:middle;margin-left:var(--space-4)}.gates i{display:inline-block;width:6px;height:6px;border-radius:var(--radius-3);background:var(--edge)}.gates i.ok{background:var(--win)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.sl{padding:var(--space-10) 0 var(--space-4);border-bottom:var(--bw-1) solid var(--hi)}.sl:last-child{border-bottom:none}
+.sl-h{display:flex;justify-content:space-between;align-items:baseline}.sl-l{font-size:var(--type-11);font-weight:700;color:var(--muted)}.sl-v{font-size:var(--type-16);font-weight:800}
+.sl-w{font-size:var(--type-9);color:var(--muted);text-align:right;margin-top:var(--space-1)}
+.sl-r{display:flex;align-items:center;gap:var(--space-8);margin-top:var(--space-6)}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:var(--radius-3);background:var(--hi);outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:var(--radius-13);background:var(--brand);border:var(--bw-2) solid var(--field);box-shadow:0 0 0 var(--bw-1) var(--edge)}
+input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:var(--radius-13);background:var(--brand);border:var(--bw-2) solid var(--field)}
+.pm{flex:none;width:34px;height:34px;border-radius:var(--radius-10);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--brand);font:inherit;font-size:var(--type-18);font-weight:800;cursor:pointer}
+.seg{margin:var(--space-6) 0 0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8)}
+.btn,.btn2{display:block;width:100%;text-align:center;margin-top:var(--space-10);padding:var(--space-11);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:800;cursor:pointer;box-sizing:border-box}
+.btn{background:var(--brand);color:var(--field);border:none}.btn2{background:var(--hi);color:var(--brand);border:var(--bw-1) solid var(--edge)}
+.navrow{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:var(--space-4) var(--space-16) 0}.navrow .btn,.navrow .btn2{margin-top:var(--space-6)}
+.sub2{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-7);line-height:1.5}
+.qq{padding:var(--space-10) 0 var(--space-4);border-bottom:var(--bw-1) solid var(--hi)}.qq:last-of-type{border-bottom:none}.qt{font-size:var(--type-125);font-weight:700;line-height:1.4}
+.qo{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6);margin-top:var(--space-8)}.qo span{font-size:var(--type-105);font-weight:700;color:var(--muted);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-9);text-align:center;line-height:1.3}.qo span.on{color:var(--brand);border-color:var(--brand)}
+.auto{margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) dashed var(--edge)}.ar{display:flex;justify-content:space-between;font-size:var(--type-105);color:var(--muted);padding:var(--space-4) 0}.ar b{color:var(--ink)}
+.pil{margin-top:var(--space-10)}.pil .r{display:grid;grid-template-columns:70px 1fr 34px;gap:var(--space-10);align-items:center;padding:var(--space-5) 0}
+.pil .l{font-size:var(--type-11);font-weight:800;color:var(--muted)}.pil .bar{height:6px;border-radius:var(--radius-3);background:var(--hi);overflow:hidden}.pil .bar i{display:block;height:6px;border-radius:var(--radius-3)}.pil .v{font-size:var(--type-125);font-weight:800;text-align:right}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin-top:var(--space-10)}.kv div{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-10)}.kv span{display:block;font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.kv b{display:block;font-size:var(--type-135);font-weight:800;margin-top:var(--space-3)}
+.line{display:flex;justify-content:space-between;align-items:baseline;font-size:var(--type-115);color:var(--muted);padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--hi)}.line b{color:var(--ink);font-size:var(--type-14)}
+.verdict{font-size:var(--type-17);font-weight:800;margin-top:var(--space-10)}
+.card.ok{border-color:var(--win)}.card.warn{border-color:var(--loss)}
+.alt{font-size:var(--type-115);padding:var(--space-8) var(--space-10);margin-top:var(--space-6);background:var(--hi);border-radius:var(--radius-10);border-left:var(--bw-3) solid var(--brand)}
+.hl{margin:var(--space-8) 0 0;padding-left:var(--space-18);font-size:var(--type-11);line-height:1.6;color:var(--muted)}.hl li{margin-bottom:var(--space-3)}
+.cell .v small{font-size:var(--type-9);color:var(--muted);font-weight:700}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -92,157 +81,113 @@ if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Planning</span></div><div class="as-slot"></div></div>
-<div class="fp-asof">Calculators only · no plan is stored</div>
-<div id="fp-body"></div>
-<div class="fp-note"><b>Nothing is saved.</b> No table stores a user plan, so the Saved plans card is an honest gap rather than an empty list waiting to fill. <b>Assumptions are shown next to every answer</b> — a planning number without its assumed return rate is a promise, and we do not make promises.</div>
+<div class="pg">
+<div class="asof" id="asof">Loading…</div>
+<div id="body"><div class="err">Loading…</div></div>
+</div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
-  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+  <a class="bn on" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
-<div class="fp-sheet" id="fp-sheet">
-  <div class="bk" onclick="fpClose()"></div>
-  <div class="box" role="dialog" aria-modal="true">
-    <div class="grab"></div>
-    <button type="button" class="x" onclick="fpClose()" aria-label="Close">✕</button>
-    <div id="fp-sheet-body"></div>
-  </div>
-</div>
 <script>
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function inr(v){ if(v==null||isNaN(v)||!isFinite(v)) return '—'; return '₹'+Math.round(v).toLocaleString('en-IN'); }
-
-/* ── shared compounding math — the OLD combined mobile/fpc.html's exact formulas, split apart ── */
-function fvLump(lump,n,i){ return lump*Math.pow(1+i,n); }
-function fvSip(sip,n,i){ return i>0 ? sip*((Math.pow(1+i,n)-1)/i)*(1+i) : sip*n; }
-function sipForTarget(target,n,i){ if(n<=0) return 0; var per=i>0?((Math.pow(1+i,n)-1)/i)*(1+i):n; return per>0?target/per:0; }
-
-var CALCS = {
-  sip: { title:'Monthly SIP', inputs:[
-      {id:'amt',label:'Monthly SIP (₹)',val:25000},
-      {id:'yrs',label:'Years',val:10},
-      {id:'ret',label:'Expected return % per year',val:12}],
-    run:function(v){
-      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
-      var fv=fvSip(v.amt,n,i), invested=v.amt*n, growth=fv-invested;
-      return { headline:'Value after '+v.yrs+' years', value:inr(fv),
-        split:[['You invest',inr(invested)],['Growth',inr(growth)]],
-        assume:'Assumes '+v.ret+'% return a year, compounding monthly, for '+v.yrs+' years.' };
-    }},
-  lump: { title:'Lump sum growth', inputs:[
-      {id:'amt',label:'One-time amount (₹)',val:500000},
-      {id:'yrs',label:'Years',val:10},
-      {id:'ret',label:'Expected return % per year',val:12}],
-    run:function(v){
-      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
-      var fv=fvLump(v.amt,n,i), growth=fv-v.amt;
-      return { headline:'Value after '+v.yrs+' years', value:inr(fv),
-        split:[['You invest',inr(v.amt)],['Growth',inr(growth)]],
-        assume:'Assumes '+v.ret+'% return a year, compounding monthly, for '+v.yrs+' years.' };
-    }},
-  retire: { title:'Retirement corpus', inputs:[
-      {id:'exp',label:'Monthly expense in retirement (₹)',val:80000},
-      {id:'yrs',label:'Years to retirement',val:20},
-      {id:'ret',label:'Expected return % per year',val:10}],
-    run:function(v){
-      var corpus = v.ret>0 ? (v.exp*12)/(v.ret/100) : null;
-      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
-      var sipNeeded = corpus!=null ? sipForTarget(corpus,n,i) : null;
-      return { headline:'Corpus needed', value:corpus!=null?inr(corpus):'—',
-        split:[['Monthly SIP to get there',sipNeeded!=null?inr(sipNeeded):'—']],
-        assume:'Assumes the corpus, once built, is drawn down at '+v.ret+'% a year forever without touching the principal — a simple perpetuity, not inflation-adjusted. SIP assumes the same '+v.ret+'% growth for '+v.yrs+' years.' };
-    }},
-  goal: { title:'Goal planner', inputs:[
-      {id:'target',label:'Target amount (₹)',val:10000000},
-      {id:'yrs',label:'Years',val:10},
-      {id:'ret',label:'Expected return % per year',val:12}],
-    run:function(v){
-      var n=Math.max(0,Math.round(v.yrs*12)), i=(v.ret/100)/12;
-      var need=sipForTarget(v.target,n,i);
-      return { headline:'Monthly SIP needed', value:inr(need), split:[],
-        assume:'Assumes '+v.ret+'% return a year, compounding monthly, for '+v.yrs+' years, to reach '+inr(v.target)+'.' };
-    }}
-};
-var CALC_ORDER=['sip','lump','retire','goal'];
-
-function fpKmHtml(){
-  return '<div class="fp-km"><div class="fp-k">Calculators</div><div class="fp-v">4</div>'
-    + '<div class="fp-kg">'
-    + '<div class="fp-cell"><div class="fp-k">Saved plans</div><div class="fp-v">0</div></div>'
-    + '<div class="fp-cell"><div class="fp-k">Store</div><div class="fp-v">Does not exist</div></div>'
-    + '<div class="fp-cell"><div class="fp-k">Inputs</div><div class="fp-v">3 to 4 each</div></div>'
-    + '<div class="fp-cell"><div class="fp-k">Assumptions</div><div class="fp-v">Shown on face</div></div>'
-    + '</div></div>';
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16); }
+function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
+function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+function inrL(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v), a=Math.abs(x); var t=a>=1e7?(a/1e7).toFixed(2)+' Cr':(a>=1e5?(a/1e5).toFixed(a>=1e6?1:2)+' L':Math.round(a).toLocaleString('en-IN')); return (x<0?'−':'')+'₹'+t; }
+function words(v){ v=Math.round(v); if(v>=1e7) return (v/1e7).toFixed(2).replace(/\.?0+$/,'')+' crore'; if(v>=1e5) return (v/1e5).toFixed(2).replace(/\.?0+$/,'')+' lakh'; if(v>=1000) return (v/1000).toFixed(1).replace(/\.0$/,'')+' thousand'; return String(v); }
+/* ── state ── */
+var I={age:35, retire_at:60, dependants:1, take_home:100000, spending:50000, emis:0, cash:500000, investments:1000000, life_cover:0, sip:20000, goal:null, goal_cost:2500000, goal_years:10};
+var R={a1:3, a4:3, b1:2, b2:2, b3:2, b4:2, b5:2};
+var SCREEN=1, OUT=null, OPEN=false, SKIPPED=false;
+/* money sliders: widening steps — ₹1k under 1L, ₹10k under 10L, ₹1L above (concept note §2) */
+function stepFor(v){ return v<100000?1000:(v<1000000?10000:100000); }
+function snap(v){ var s=stepFor(v); return Math.round(v/s)*s; }
+/* a money slider maps 0..1000 onto min..max on a log-ish curve so the low end is usable */
+function toPos(v,min,max){ var a=Math.log(min+1), b=Math.log(max+1); return Math.round((Math.log(v+1)-a)/(b-a)*1000); }
+function fromPos(p,min,max){ var a=Math.log(min+1), b=Math.log(max+1); return snap(Math.exp(a+(b-a)*p/1000)-1); }
+var MONEY=[['take_home','Monthly take-home',25000,1000000],['spending','Monthly spending',10000,800000],['emis','Monthly EMIs',0,500000],['cash','Cash & FD',0,10000000],['investments','Investments — MF, shares, EPF, NPS',0,50000000],['life_cover','Life cover you own',0,50000000],['sip','Monthly SIP today',0,500000]];
+function moneyRow(k,label,min,max){ var v=I[k]; return '<div class="sl"><div class="sl-h"><span class="sl-l">'+label+'</span><span class="sl-v" id="v-'+k+'">'+inrL(v)+'</span></div><div class="sl-w" id="w-'+k+'">'+words(v)+'</div><div class="sl-r"><button class="pm" data-k="'+k+'" data-d="-1">−</button><input type="range" min="0" max="1000" value="'+toPos(v,min,max)+'" data-k="'+k+'" data-min="'+min+'" data-max="'+max+'" class="money"><button class="pm" data-k="'+k+'" data-d="1">+</button></div></div>'; }
+function plainRow(k,label,min,max,unit){ var v=I[k]; return '<div class="sl"><div class="sl-h"><span class="sl-l">'+label+'</span><span class="sl-v" id="v-'+k+'">'+v+(unit||'')+'</span></div><div class="sl-r"><input type="range" min="'+min+'" max="'+max+'" value="'+v+'" data-k="'+k+'" class="plain" data-unit="'+(unit||'')+'"></div></div>'; }
+function tapRow(k,label,opts,cur){ return '<div class="sl"><div class="sl-h"><span class="sl-l">'+label+'</span></div><div class="seg" id="t-'+k+'">'+opts.map(function(o){return '<span data-v="'+o[0]+'"'+(String(o[0])===String(cur)?' class="on"':'')+'>'+o[1]+'</span>';}).join('')+'</div></div>'; }
+function s1(){
+  var h='<div class="hero"><div class="eye">Will my money last?</div><div class="big"><div class="n" style="font-size:var(--type-125);color:var(--ink)">Slide and tap. No typing. Under two minutes.</div></div></div>';
+  h+='<div class="card"><div class="ch"><span class="t">You</span></div>'+plainRow('age','Your age',22,60)+plainRow('retire_at','Retire at',45,70)+tapRow('dependants','People depending on you',[[0,'0'],[1,'1'],[2,'2'],[3,'3+']],I.dependants)+'</div>';
+  h+='<div class="card"><div class="ch"><span class="t">Each month</span></div>'+MONEY.slice(0,3).map(function(m){return moneyRow.apply(null,m);}).join('')+'</div>';
+  h+='<div class="card"><div class="ch"><span class="t">What you have</span><span class="n" id="wyh-tog" style="color:var(--brand);font-weight:800;cursor:pointer">'+(OPEN?'Done':'Adjust ›')+'</span></div>'
+   +'<div id="wyh-sum" class="sub2"'+(OPEN?' style="display:none"':'')+'>Cash '+inrL(I.cash)+' · investments '+inrL(I.investments)+' · SIP '+inrL(I.sip)+' a month · life cover '+(I.life_cover?inrL(I.life_cover):'none')+'. Tap Adjust if these are not you.</div>'
+   +'<div id="wyh-box"'+(OPEN?'':' style="display:none"')+'>'+MONEY.slice(3).map(function(m){return moneyRow.apply(null,m);}).join('')+'</div></div>';
+  h+='<div class="card"><div class="ch"><span class="t">A goal</span><span class="n">optional</span></div>'+tapRow('goal','Saving for something?',[['','Skip'],['education','Education'],['marriage','Marriage'],['home','Home']],I.goal||'')+'<div id="goalbox"'+(I.goal?'':' style="display:none"')+'>'+moneyRow('goal_cost','Cost today',100000,20000000)+plainRow('goal_years','Years away',1,25,' yrs')+'</div></div>';
+  h+='<div class="navrow"><span></span><button class="btn" id="b-next">Next · your risk ›</button></div>';
+  h+='<div class="note"><b>What we assume.</b> Inflation 6%, return after retirement 7%, SIP stepping up 10% a year, plan checked to age 85. All of it is shown on the result.</div>';
+  document.getElementById('body').innerHTML=h; document.getElementById('asof').innerHTML='Step <b>1 of 3</b> · five sliders, one tap · the rest is optional';
+  bindSliders();
+  document.getElementById('b-next').addEventListener('click', function(){ SCREEN=2; s2(); });
+  document.getElementById('wyh-tog').addEventListener('click', function(){ OPEN=!OPEN; s1(); window.scrollTo(0, document.getElementById('wyh-tog').getBoundingClientRect().top+window.scrollY-120); });
 }
-function fpListCardHtml(){
-  var rows = CALC_ORDER.map(function(k){
-    var c=CALCS[k];
-    return '<div class="fp-lr" onclick="fpOpen(\''+k+'\')"><span class="s">'+esc(c.title)+'</span><div class="r"><span class="b">Open</span></div></div>';
-  }).join('');
-  return '<div class="fp-c"><div class="fp-ch"><span class="t">What you can work out</span><span class="n">4</span></div>'
-    + '<div class="fp-lst">'+rows+'</div>'
-    + '<div class="fp-more">Each one asks for three or four inputs, no more.</div></div>';
+function bindSliders(){
+  document.querySelectorAll('input.money').forEach(function(r){ r.addEventListener('input', function(){ var k=r.getAttribute('data-k'); I[k]=fromPos(Number(r.value),Number(r.getAttribute('data-min')),Number(r.getAttribute('data-max'))); document.getElementById('v-'+k).textContent=inrL(I[k]); document.getElementById('w-'+k).textContent=words(I[k]); }); });
+  document.querySelectorAll('input.plain').forEach(function(r){ r.addEventListener('input', function(){ var k=r.getAttribute('data-k'); I[k]=Number(r.value); document.getElementById('v-'+k).textContent=I[k]+(r.getAttribute('data-unit')||''); }); });
+  document.querySelectorAll('.pm').forEach(function(b){ b.addEventListener('click', function(){ var k=b.getAttribute('data-k'), d=Number(b.getAttribute('data-d')); var r=document.querySelector('input.money[data-k="'+k+'"]'); var min=Number(r.getAttribute('data-min')), max=Number(r.getAttribute('data-max')); var st=stepFor(I[k]-(d<0?1:0)); I[k]=Math.min(max,Math.max(min,snap(I[k]+d*st))); r.value=toPos(I[k],min,max); document.getElementById('v-'+k).textContent=inrL(I[k]); document.getElementById('w-'+k).textContent=words(I[k]); }); });
+  var seg=function(id,fn){ var el=document.getElementById(id); if(!el) return; el.addEventListener('click', function(e){ var s=e.target.closest('[data-v]'); if(!s) return; fn(s.getAttribute('data-v')); el.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); }); };
+  seg('t-dependants', function(v){ I.dependants=Number(v); });
+  seg('t-goal', function(v){ I.goal=v||null; document.getElementById('goalbox').style.display=v?'':'none'; });
 }
-function fpReadCardHtml(){
-  return '<div class="fp-c"><div class="fp-ch"><span class="t">How to read the answer</span><span class="n">plain</span></div>'
-    + '<div class="fp-emp" style="margin-top:0">Every result shows the assumption it used — the return rate, the years, the inflation figure. Change the assumption and the answer changes in front of you.</div></div>';
+var QA=[['a1','When will you need this money?',['In under 3 years','3 to 7 years','7 to 15 years','After 15 years']],['a4','How steady is your income?',['Changes a lot','Some months vary','Mostly steady','Fixed salary']]];
+var QB=[['b1','Where is your money kept today?',['All in FD and savings','Mostly FD, some funds','Mostly funds','Mostly shares']],['b2','How long have you invested in shares or funds?',['Never','Under 2 years','2 to 5 years','More than 5 years']],['b3','The last time the market fell badly, you…',['Was not invested','Sold','Did nothing','Bought more']],['b4','Your ₹1,00,000 becomes ₹85,000 in a month. You…',['Sell everything','Sell some','Wait it out','Invest more']],['b5','Which would you pick?',['7%, never falls','10%, small falls','12%, can fall 15%','16%, can fall 40%']]];
+function q(kq){ var k=kq[0]; return '<div class="qq"><div class="qt">'+kq[1]+'</div><div class="qo" id="q-'+k+'">'+kq[2].map(function(o,i){return '<span data-v="'+(i+1)+'"'+(R[k]===i+1?' class="on"':'')+'>'+o+'</span>';}).join('')+'</div></div>'; }
+function s2(){
+  var burn=I.spending+I.emis, months=burn>0?I.cash/burn:12, emi=I.take_home>0?I.emis/I.take_home:0;
+  var auto=[['Months you could manage if income stopped', months<=0?'None':(months<3?'Under 3':(months<=6?'3 to 6':'More than 6'))],['Share of pay going to EMIs', emi>0.5?'More than half':(emi>=0.3?'30 to 50%':(emi>=0.1?'10 to 30%':'Almost nothing'))],['People depending on you', I.dependants>=3?'3 or more':String(I.dependants)]];
+  var h='<div class="card"><div class="ch"><span class="t">Your situation</span><span class="n">what you can afford to risk</span></div>'+QA.map(q).join('')+'<div class="auto">'+auto.map(function(a){return '<div class="ar"><span>'+a[0]+'</span><b>'+a[1]+'</b></div>';}).join('')+'<div class="sub2">These three come from your sliders — no need to answer twice.</div></div></div>';
+  h+='<div class="card"><div class="ch"><span class="t">Your comfort</span><span class="n">what you are happy to risk</span></div>'+QB.map(q).join('')+'</div>';
+  h+='<div class="navrow"><button class="btn2" id="b-back">‹ Back</button><button class="btn" id="b-go">See my plan ›</button></div>';
+  h+='<div class="more" style="text-align:center"><a href="#" id="b-skip">Skip the comfort questions — use my situation only ›</a></div>';
+  h+='<div class="note"><b>Why two parts.</b> Comfort can never lift you above what your situation can carry. The final profile is the lower of the two.</div>';
+  document.getElementById('body').innerHTML=h; document.getElementById('asof').innerHTML='Step <b>2 of 3</b> · seven taps, or skip';
+  document.querySelectorAll('.qo').forEach(function(el){ el.addEventListener('click', function(e){ var s=e.target.closest('[data-v]'); if(!s) return; R[el.id.slice(2)]=Number(s.getAttribute('data-v')); el.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); }); });
+  document.getElementById('b-back').addEventListener('click', function(){ SCREEN=1; s1(); });
+  document.getElementById('b-go').addEventListener('click', function(){ SKIPPED=false; calc(); });
+  document.getElementById('b-skip').addEventListener('click', function(e){ e.preventDefault(); SKIPPED=true; R.b1=2; R.b2=2; R.b3=2; R.b4=2; R.b5=2; calc(); });
 }
-function fpSavedCardHtml(){
-  return '<div class="fp-c gap"><div class="fp-ch"><span class="t">Saved plans</span><span class="n">0</span></div>'
-    + '<div class="fp-emp"><b>Nothing saved yet</b>There is no table storing a user&#39;s plans. Anything you work out here is lost when you leave the page. Named as a gap so it becomes a work item.</div></div>';
+function calc(){
+  document.getElementById('body').innerHTML='<div class="err">Working it out…</div>';
+  var body={inputs:JSON.parse(JSON.stringify(I)), risk:R}; if(!body.inputs.goal){ body.inputs.goal=null; body.inputs.goal_cost=null; body.inputs.goal_years=null; }
+  fetch('/api/mobile/fpc/calc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){ if(d.error){ document.getElementById('body').innerHTML='<div class="err">'+esc(d.error)+'</div>'; return; } OUT=d; SCREEN=3; s3(d); }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not calculate.</div>'; });
 }
-function fpAssumeCardHtml(){
-  return '<div class="fp-c"><div class="fp-ch"><span class="t">Nothing is hidden</span><span class="n">stated on face</span></div>'
-    + '<div class="fp-emp" style="margin-top:0">The calculators do not use a secret expected return. Whatever rate is applied is shown next to the answer and can be changed.</div></div>';
+function s3(d){
+  var p=d.profile||{}, f=d.fitness||{}, pl=f.pillars||{}, r=d.retirement||{}, s=d.sip||{}, bk=d.baskets||{};
+  var ok=d.lasts_to>=d.plan_to;
+  var h='<div class="hero"><div class="eye">Your plan · checked to '+d.plan_to+'</div><div class="big"><div class="r '+(ok?'pos':'neg')+'">'+d.lasts_to+(ok?'+':'')+'</div><div class="n" style="font-size:var(--type-125);color:var(--ink)">'+esc(d.headline)+'</div></div>'
+   +'<div class="kg"><div class="cell"><div class="k">Fitness</div><div class="v">'+f.score+'<small>/100</small></div></div><div class="cell"><div class="k">You need</div><div class="v">'+inrL(r.required)+'</div></div><div class="cell"><div class="k">On track for</div><div class="v">'+inrL(r.projected)+'</div></div></div></div>';
+  var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+v+'%;background:'+(v>=80?tok('--win'):(v>=50?tok('--brand'):tok('--loss')))+'"></i></div><span class="v">'+v+'</span></div>'; };
+  h+='<div class="card"><div class="ch"><span class="t">Financial fitness</span><span class="n">four pillars, 25 each</span></div><div class="pil">'+bar('Emergency',pl.emergency)+bar('Debt',pl.debt)+bar('Savings',pl.savings)+bar('Cover',pl.protection)+'</div><div class="sub2">Emergency target '+inrL(f.emergency_target)+' · saving '+f.save_rate_pct+'% of take-home · life cover target '+inrL(f.cover_target)+'.</div></div>';
+  h+='<div class="card"><div class="ch"><span class="t">Retirement</span><span class="n">'+r.years_to+' yrs to go · '+r.years_in+' yrs after</span></div><div class="kv"><div><span>Spending then</span><b>'+inrL(r.spend_at_ret_monthly)+' /mo</b></div><div><span>Corpus needed</span><b>'+inrL(r.required)+'</b></div><div><span>What you will have</span><b>'+inrL(r.projected)+'</b></div><div><span>'+(r.gap>0?'Gap':'Surplus')+'</span><b class="'+(r.gap>0?'neg':'pos')+'">'+inrL(Math.abs(r.gap))+'</b></div></div><div class="sub2">From what you hold '+inrL(r.from_assets)+' · from your SIP '+inrL(r.from_sip)+'. Only cash above the emergency buffer ('+inrL(r.cash_counted)+') is counted.</div></div>';
+  h+='<div class="card '+(s.affordable?'ok':'warn')+'"><div class="ch"><span class="t">What it takes</span><span class="n">with the same 10% step-up</span></div>'
+   +'<div class="line"><span>Invest more each month</span><b>'+(s.extra>0?inrL(s.extra):'nothing')+'</b></div><div class="line"><span>Spare after spending, EMIs, your SIP'+(s.goal_sip?', goal':'')+'</span><b>'+inrL(s.spare)+'</b></div>'
+   +'<div class="verdict '+(s.affordable?'pos':'neg')+'">'+(s.extra<=0?'You are already there.':(s.affordable?'You can do this.':'Short by '+inrL(s.short_by)+' a month.'))+'</div>'
+   +((s.alternatives||[]).length?'<div class="sub2" style="margin-top:8px">Two ways that fit:</div>'+s.alternatives.map(function(a){return '<div class="alt">'+esc(a.text)+'</div>';}).join(''):'')+'</div>';
+  if(d.goal){ h+='<div class="card"><div class="ch"><span class="t">Your goal · '+esc(d.goal.name)+'</span><span class="n">'+d.goal.years+' yrs</span></div><div class="kv"><div><span>Costs today</span><b>'+inrL(d.goal.cost_today)+'</b></div><div><span>Will cost then</span><b>'+inrL(d.goal.cost_then)+'</b></div><div><span>Monthly SIP for it</span><b>'+inrL(d.goal.sip)+'</b></div></div></div>'; }
+  if(SKIPPED) h+='<div class="sub2" style="padding:0 16px">Comfort questions skipped — comfort assumed Medium, so the profile is your situation or Balanced, whichever is lower.</div>';
+  h+='<div class="card"><div class="ch"><span class="t">Your profile</span><span class="n">'+esc(p.name)+' · '+Math.round(p.return_pre*100)+'% assumed</span></div><div class="kv"><div><span>Situation</span><b>'+p.part_a+' / 20 · '+esc(p.band_a)+'</b></div><div><span>Comfort</span><b>'+p.part_b+' / 20 · '+esc(p.band_b)+'</b></div></div><div class="sub2">'+esc(p.why)+'</div></div>';
+  h+='<div class="sec"><h2>Where to put it</h2><span class="hint">'+esc(bk.profile)+' baskets</span></div>';
+  h+= (bk.rows||[]).length ? '<div class="lst">'+bk.rows.map(function(b){return '<a class="row '+(b.live?'up':'mu')+'" href="/m/qb?basket='+encodeURIComponent(b.basket)+'"><div><div class="nm">'+esc(b.label)+'</div><div class="sub">'+(b.holdings!=null?b.holdings+' holdings':'')+(b.rebalance?' · '+esc(b.rebalance):'')+(b.live?'':' · not live')+'</div></div><div class="v"><div class="n gd">›</div></div></a>';}).join('')+'</div><div class="more">'+esc(bk.note||'')+'</div>' : '<div class="emp">No basket is mapped to this profile yet.</div>';
+  h+='<div class="card"><div class="ch"><span class="t">What we assumed</span></div><ul class="hl">'+(d.assumptions||[]).map(function(a){return '<li>'+esc(a)+'</li>';}).join('')+'</ul></div>';
+  h+='<div class="navrow"><button class="btn2" id="b-edit">‹ Change inputs</button><button class="btn2" id="b-risk">Change risk answers</button></div>';
+  h+='<div class="note"><b>Research, not advice.</b> A plan built on sliders and stated assumptions. Finkhoz Roboadvisory · SEBI RA INH000022297.</div>';
+  document.getElementById('body').innerHTML=h; document.getElementById('asof').innerHTML='Step <b>3 of 3</b> · your plan';
+  document.getElementById('b-edit').addEventListener('click', function(){ SCREEN=1; s1(); }); document.getElementById('b-risk').addEventListener('click', function(){ SCREEN=2; s2(); });
+  window.scrollTo(0,0);
 }
-
-function render(){
-  var html = fpKmHtml()
-    + '<div class="fp-slab"><h2>Calculators</h2><span class="hint">2 · swipe →</span></div>'
-    + '<div class="fp-rail">'+fpListCardHtml()+fpReadCardHtml()+'</div>'
-    + '<div class="fp-slab"><h2>Your plans</h2><span class="hint">1 · swipe →</span></div>'
-    + '<div class="fp-rail">'+fpSavedCardHtml()+'</div>'
-    + '<div class="fp-slab"><h2>Assumptions</h2><span class="hint">1 · swipe →</span></div>'
-    + '<div class="fp-rail">'+fpAssumeCardHtml()+'</div>';
-  document.getElementById('fp-body').innerHTML = html;
-}
-render();
-
-/* ── sheet: one calculator at a time, live-recomputed on every input change ── */
-var FP_CUR=null;
-function fpValues(key){
-  var c=CALCS[key], v={};
-  c.inputs.forEach(function(f){ v[f.id]=Number(document.getElementById('fp-in-'+f.id).value)||0; });
-  return v;
-}
-function fpPaint(key){
-  var c=CALCS[key], v=fpValues(key), r=c.run(v);
-  var split = (r.split||[]).map(function(p){ return '<div class="sp"><div class="k">'+esc(p[0])+'</div><div class="v">'+p[1]+'</div></div>'; }).join('');
-  document.getElementById('fp-res-'+key).innerHTML =
-    '<div class="k">'+esc(r.headline)+'</div><div class="v">'+r.value+'</div>'
-    + (split?'<div class="split">'+split+'</div>':'')
-    + '<div class="fp-assume">'+esc(r.assume)+'</div>';
-}
-function fpOpen(key){
-  FP_CUR=key;
-  var c=CALCS[key];
-  var fields = c.inputs.map(function(f){
-    return '<div class="fp-fld"><label>'+esc(f.label)+'</label><input id="fp-in-'+f.id+'" type="number" inputmode="decimal" value="'+f.val+'" oninput="fpPaint(\''+key+'\')"></div>';
-  }).join('');
-  document.getElementById('fp-sheet-body').innerHTML =
-    '<h3>'+esc(c.title)+'</h3>'+fields+'<div class="fp-res" id="fp-res-'+key+'"></div>';
-  document.getElementById('fp-sheet').classList.add('open');
-  document.body.style.overflow='hidden';
-  fpPaint(key);
-}
-function fpClose(){
-  document.getElementById('fp-sheet').classList.remove('open');
-  document.body.style.overflow='';
-  FP_CUR=null;
-}
-document.addEventListener('keydown', function(e){ if(e.key==='Escape') fpClose(); });
+s1();
 </script>
 </body></html>
