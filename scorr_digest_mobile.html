@@ -869,9 +869,11 @@ function ladder(ix){
     const x=xOf(di.pos);
     const short=r.label==='DAY HIGH'?'H':'L';
     const anchor=(x<PAD+14)?'start':(x>W-PAD-14?'end':'middle');
-    svg+=`<line class="pdaystem" x1="${x}" y1="12" x2="${x}" y2="${TRK_Y-5}"/>`
-      + `<circle class="pdaydot" cx="${x}" cy="14" r="1.6"/>`
-      + `<text class="pdaylbl" x="${x}" y="10" text-anchor="${anchor}">${short} ${esc(num(r.value))}</text>`;
+    /* cc#1966: data-day ties label, dot and stem together so fitDayLabels() can lift ONE of them as a
+       unit when the two labels collide (narrow day range). Baseline y=10 is the single-line layout. */
+    svg+=`<line class="pdaystem" data-day="${short}" x1="${x}" y1="12" x2="${x}" y2="${TRK_Y-5}"/>`
+      + `<circle class="pdaydot" data-day="${short}" cx="${x}" cy="14" r="1.6"/>`
+      + `<text class="pdaylbl" data-day="${short}" x="${x}" y="10" text-anchor="${anchor}">${short} ${esc(num(r.value))}</text>`;
   });
   /* cc#1186 SESSION-HONEST STATE. ix.tier printed LIVE at 16:56 with the market an hour closed
      (founder screenshot 21-Aug) — the payload tier is a feed property, not a clock. The clause
@@ -2424,10 +2426,50 @@ function loadInternals(){
    Equal tracks are tried FIRST and scrollmode is entered only when a value genuinely does not
    fit, so a normal phone still gets five clean columns and nothing to swipe. */
 function fitLadders(){
-  /* cc#1187: NO-OP by design, kept so the cc#1161 font hooks and boot() call sites stay valid.
-     Vertical rows have nothing to measure — a row cannot overflow sideways — and deleting the
-     hooks would be a wider diff for zero behaviour. If the ladder ever goes horizontal again
-     (it should not), the hooks are already wired. */
+  /* cc#1187: was a NO-OP kept so the cc#1161 font hooks and boot() call sites stay valid.
+     cc#1966: it now does one measured job — separate the Day Low / Day High labels on every
+     pivot-ladder SVG when they collide (see fitDayLabels). The hooks (resize, orientation, font
+     load, window load, boot) all funnel through here, so the check re-runs after every render. */
+  fitDayLabels(document);
+}
+/* cc#1966 (founder 10-Sep 17:17: "the low and high labels overlap — they should be stacked").
+   THE COLLISION RULE IS THE SHARED ONE: window.ScorrRailLabels.meets (cc#1739, scorr_card_common.js)
+   decides whether two label boxes meet or sit closer than the gap — the same predicate the web
+   Index Intel rail and the mobile V8 position rail use. ScorrRailLabels.separate() itself does NOT
+   fit this markup and is deliberately not called: the ladder is an inline SVG (cc#1314), its labels
+   are <text> nodes positioned by x/y in viewBox units — they have no style.left, the helper's leader
+   is an HTML <div> appended into the rail (inert inside an SVG), and its CSS translateX(-50%) clamp
+   is not defined for SVG text. So the LIFT is done here in SVG terms: the MOVABLE label moves to its
+   own line ABOVE (y 10 -> -1, viewBox opened by one label line, stem and dot follow), anchored at
+   its own x — never slid sideways — and the dashed stem it already carries IS the leader to its true
+   x. FIXED vs MOVABLE by geometry, same rule on every card: the label further RIGHT lifts (its stem
+   is the longer one to draw, and the left label keeps the reading order L … H on one line when they
+   do not touch). No collision -> nothing moves, viewBox stays 0 0 340 94 (single-line layout kept).
+   Idempotent: every run resets its own marks first, then measures. */
+function fitDayLabels(root){
+  var R=window.ScorrRailLabels; if(!R||typeof R.meets!=='function')return;   /* deferred shared file not in yet: the window 'load' hook re-runs this */
+  var W=340,H=94,LIFT=11;   /* LIFT = one label line in viewBox units (the label glyph height plus air) */
+  Array.prototype.forEach.call((root||document).querySelectorAll('.lad-ix svg.pline'),function(svg){
+    var labs=svg.querySelectorAll('.pdaylbl');
+    /* reset to the single-line layout before measuring */
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    Array.prototype.forEach.call(labs,function(t){ t.setAttribute('y','10'); t.classList.remove('lifted'); });
+    Array.prototype.forEach.call(svg.querySelectorAll('.pdaystem'),function(l){ l.setAttribute('y1','12'); });
+    Array.prototype.forEach.call(svg.querySelectorAll('.pdaydot'),function(c){ c.setAttribute('cy','14'); });
+    svg.removeAttribute('data-collided');
+    if(labs.length<2)return;
+    var a=labs[0].getBoundingClientRect(), b=labs[1].getBoundingClientRect();
+    if(!a.width||!b.width)return;                       /* not laid out (hidden) — nothing to measure */
+    if(!R.meets(a,b,6))return;                          /* wide day range: single line is right, leave it */
+    var mov = (Number(labs[0].getAttribute('x'))>Number(labs[1].getAttribute('x')))?labs[0]:labs[1];
+    var key = mov.getAttribute('data-day');
+    svg.setAttribute('viewBox','0 -'+LIFT+' '+W+' '+(H+LIFT));   /* one label line of headroom: the card grows by that line only now */
+    mov.setAttribute('y', String(10-LIFT)); mov.classList.add('lifted');
+    var stem=svg.querySelector('.pdaystem[data-day="'+key+'"]'), dot=svg.querySelector('.pdaydot[data-day="'+key+'"]');
+    if(stem) stem.setAttribute('y1', String(12-LIFT));
+    if(dot) dot.setAttribute('cy', String(14-LIFT));
+    svg.setAttribute('data-collided','1');
+  });
 }
 /* Re-measure when the box changes under the content. One debounced listener for both events —
    an orientation change is a resize the layout has to survive, and a rotation into portrait is
