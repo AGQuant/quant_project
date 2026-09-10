@@ -1265,7 +1265,6 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 .ap-rail .fill{position:absolute;top:0;height:6px;border-radius:var(--radius-3);background:var(--win);opacity:.55}.ap-card.dn .ap-rail .fill{background:var(--loss)}
 .ap-rail .tick{position:absolute;top:-3px;width:2px;height:12px;background:var(--muted);margin-left:-1px;border-radius:var(--radius-1)}
 .ap-rail .dot{position:absolute;top:-4px;width:14px;height:14px;border-radius:var(--radius-7);background:var(--brand);border:var(--bw-2) solid var(--panel);margin-left:-7px;box-shadow:0 0 0 var(--bw-1) var(--edge)}
-.ap-ends{display:flex;justify-content:space-between;font-size:var(--type-9);font-weight:700;color:var(--muted)}.ap-ends b{font-size:var(--type-105);font-weight:800;display:block;margin-top:var(--space-1)}.ap-ends .sl b{color:var(--loss)}.ap-ends .tp b{color:var(--win);text-align:right}
 .ap-foot{display:flex;justify-content:space-between;gap:var(--space-6);margin-top:var(--space-8);padding-top:var(--space-7);border-top:var(--bw-1) solid var(--hi);font-size:var(--type-9);color:var(--muted)}.ap-foot b{color:var(--ink);font-weight:800}
 .ap-dots{display:flex;justify-content:center;gap:var(--space-5);padding:0 0 var(--space-8)}.ap-dots i{width:6px;height:6px;border-radius:var(--radius-3);background:var(--edge)}.ap-dots i.on{width:18px;background:var(--brand)}
 .ap-empty{margin:0 var(--space-16);padding:var(--space-12) var(--space-13);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);font-size:var(--type-115);color:var(--muted);line-height:1.6}.ap-empty b{display:block;color:var(--ink);font-weight:700;margin-bottom:var(--space-4)}
@@ -1274,11 +1273,21 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
    one small line under the symbol. R3 supersedes R2 on those four points only; every R2 rule above
    is untouched except .ap-meta (removed with the line it styled). Tokens only. */
 .ap-when{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.3}
-.ap-card .ap-rail{margin:var(--space-20) 0 var(--space-22)}   /* room for the cmp label above and the entry label below the dot's 18px box */
+.ap-card .ap-rail{margin:var(--space-40) 0 var(--space-22)}   /* cc#1942: --space-40 above = the cmp label's 16px offset + a clear ~two-line gap (24px) under the date line (the ramp has no 36 rung); --space-22 below holds one label row under the dot's 18px box */
+.ap-card .ap-rail.stagger{margin-bottom:var(--space-40)}          /* cc#1942: when the entry label would touch an end label it drops to a second row (top 28px + 9px) and the rail reserves 40px for it */
 .ap-rail .lb{position:absolute;font-size:var(--type-9);font-weight:800;color:var(--ink);white-space:nowrap;line-height:1;transform:translateX(-50%)}
 .ap-rail .lb.cmp{top:calc(-1 * var(--space-16))}
 .ap-rail .lb.ent{top:var(--space-16);font-weight:700;color:var(--muted)}
 .ap-rail .lb.l{transform:none}.ap-rail .lb.r{transform:translateX(-100%)}
+/* cc#1942 (founder 10-Sep 15:54, "stop and target level also placed in bar in line with entry and cmp"):
+   the rail is the ONE place all four prices live. Stop and Target sit at the rail ENDS, below the
+   rail like the entry label, coloured loss / win so no word is needed; position on the rail says
+   which end is which (rail_left_label decides, so a short's target sits left). The separate
+   Stop / Target row (.ap-ends) is gone. .ent.dodge = the entry label on a second row when its tick
+   is within 18% of an end, so it never collides with an end label. */
+.ap-rail .lb.end{top:var(--space-16);font-weight:800}
+.ap-rail .lb.end.sl{color:var(--loss)}.ap-rail .lb.end.tp{color:var(--win)}
+.ap-rail .lb.ent.dodge{top:var(--space-28)}
 /* cc#1934 (reverses cc#1932): the card is a plain <div> again — no navigation. Its last row is the
    SHARED C·A·R·D strip (scorr_card_strip.js, cc#789 single source; already loaded on /m/home via
    _MOBILE_HEAD, bridge tokens above). The cc#1070 row layout: the strip stretched to the row width.
@@ -3459,13 +3468,24 @@ function apTrCardHtml(p){
   var apPct = apTrAxisPct(p.approved_price, p.stop_loss, p.target);
   var tickPct = apPct != null ? apPct : (p.entry_pct != null ? p.entry_pct : null);
   var tickPx = p.approved_price != null ? p.approved_price : p.entry;
-  var rail = '<div class="ap-rail">'
+  /* cc#1942 R4: stop and target live ON the rail ends (below it, coloured), the entry label drops
+     to a second row when its tick is within 18% of either end so nothing overlaps. */
+  var leftIsTarget = p.rail_left_label === 'target';
+  /* collision estimate in px on a ~304px rail (78vw card at 390px), ~5.6px per glyph at --type-9:
+     the entry label drops a row only when it would actually touch the end label on its side. */
+  var W = 304, CH = 5.6, PAD = 6;
+  var entTxt = apTrInr(tickPx), lTxt = apTrInr(leftIsTarget ? p.target : p.stop_loss), rTxt = apTrInr(leftIsTarget ? p.stop_loss : p.target);
+  var entW = entTxt.length * CH, entX = tickPct == null ? 0 : tickPct / 100 * W;
+  var entL = tickPct != null && tickPct < 10 ? entX : (tickPct != null && tickPct > 90 ? entX - entW : entX - entW / 2);
+  var dodge = tickPct != null && ((entL < lTxt.length * CH + PAD) || (entL + entW > W - rTxt.length * CH - PAD));
+  var ends = '<div class="lb end l ' + (leftIsTarget ? 'tp' : 'sl') + '" style="left:0%">' + esc(apTrInr(leftIsTarget ? p.target : p.stop_loss)) + '</div>'
+    + '<div class="lb end r ' + (leftIsTarget ? 'sl' : 'tp') + '" style="left:100%">' + esc(apTrInr(leftIsTarget ? p.stop_loss : p.target)) + '</div>';
+  var rail = '<div class="ap-rail' + (dodge ? ' stagger' : '') + '">'
     + ((hasCmp && tickPct != null) ? '<div class="fill" style="left:' + Math.min(tickPct, p.marker_pct) + '%;width:' + (Math.round(Math.abs(p.marker_pct - tickPct) * 10) / 10) + '%"></div>' : '')
-    + (tickPct != null ? '<div class="tick" style="left:' + tickPct + '%"></div>' + apTrRailLabel('ent', tickPct, apTrInr(tickPx)) : '')
+    + (tickPct != null ? '<div class="tick" style="left:' + tickPct + '%"></div>' + apTrRailLabel(dodge ? 'ent dodge' : 'ent', tickPct, apTrInr(tickPx)) : '')
     + (hasCmp ? '<div class="dot" style="left:' + p.marker_pct + '%"></div>' + apTrRailLabel('cmp', p.marker_pct, apTrInr(p.cmp)) : '')
+    + ends
     + '</div>';
-  var sl = '<span class="sl">Stop<b>' + esc(apTrInr(p.stop_loss)) + '</b></span>';
-  var tp = '<span class="tp">Target<b>' + esc(apTrInr(p.target)) + '</b></span>';
   /* cc#1931 point 2: headline only — the percent sub-line is gone. The no-cmp state keeps its
      "no live price" note (point 5: no-cmp state unchanged from R2). */
   var head = hasCmp
@@ -3485,7 +3505,6 @@ function apTrCardHtml(p){
     + '<div class="ap-when">' + esc(apTrWhenIst(p.approved_at)) + ' · 1 lot (' + esc(apTrLot(p.qty)) + ')</div></div>'
     + '<div class="ap-pnl">' + head + '</div></div>'
     + rail
-    + '<div class="ap-ends">' + (p.rail_left_label === 'target' ? tp + sl : sl + tp) + '</div>'
     + '<div class="ap-foot"><span>Risk left <b>' + (hasCmp ? esc(apTrInr(p.risk_left)) : '—') + '</b></span><span>Reward left <b>' + (hasCmp ? esc(apTrInr(p.reward_left)) : '—') + '</b></span><span>R:R <b>' + (hasCmp ? esc(apTrRr(p.rr_left)) : '—') + '</b></span></div>'
     + strip
     + '</div>';
