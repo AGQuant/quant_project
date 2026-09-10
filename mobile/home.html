@@ -1997,6 +1997,13 @@ var G_GROUPS = [
       svg: '<svg viewBox="0 0 24 24"><path d="M4 19h16"/><rect class="f" x="6" y="11" width="3" height="8"/><rect x="6" y="11" width="3" height="8"/><rect class="f" x="11" y="7" width="3" height="12"/><rect x="11" y="7" width="3" height="12"/><rect class="f" x="16" y="4" width="3" height="15"/><rect x="16" y="4" width="3" height="15"/></svg>' },
     { href: '/m/qb', label: 'Baskets', web: false,
       svg: '<svg viewBox="0 0 24 24"><path class="f" d="M4 9h16l-1.5 10h-13z"/><path d="M4 9h16l-1.5 10h-13z"/><path d="M8 9V6a4 4 0 018 0v3"/></svg>' },
+    // cc#1961 (founder 10-Sep: "in grid 2 more options display — V8 and Learn"): LEARN = the Knowledge
+    // Hub (the web /news Learn tab) as an app page, /m/learn, appended LAST in Market the way cc#1925
+    // appended QB Builder last in Analytics. Open-book glyph in the same 1.7-stroke family — not in the
+    // R1 ref (d215acd). V8 is NOT added a second time: it is already on this grid as "V8 Signals" in
+    // Analytics (below), on top of its bottom-nav slot — the grid is the index of every section (V2).
+    { href: '/m/learn', label: 'Learn', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M3 5h7a2 2 0 012 2v13a2 2 0 00-2-2H3z"/><path d="M3 5h7a2 2 0 012 2v13a2 2 0 00-2-2H3zM21 5h-7a2 2 0 00-2 2v13a2 2 0 012-2h7z"/></svg>' },
   ] },
   { name: 'Analytics', tiles: [
     { href: '/m/gvm', label: 'GVM', web: false,

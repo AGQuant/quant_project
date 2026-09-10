@@ -965,6 +965,13 @@ def m_home():
     return _page("home")
 
 
+@router.get("/m/learn", response_class=HTMLResponse)
+def m_learn():
+    """cc#1961: LEARN — the Knowledge Hub as an app section (APP_GRID_FRAMEWORK_V2). The page reads
+    knowledge_endpoints.py's two routes directly; nothing here but the template."""
+    return _page("learn")
+
+
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 # DIGEST — 16916: "morning brief, daily habit". Reuses digest_v3.build_digest so the app and the
 # web /digest render the SAME brief (DISPLAY_PARITY 16202). No second builder.
