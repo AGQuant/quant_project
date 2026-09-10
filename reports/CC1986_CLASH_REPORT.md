@@ -107,6 +107,27 @@ Precedent says this section is where the damage hides: cc#854 (weekly RSI 45 vs 
 silently) and cc#1872 (a whole second A/D implementation in `scorr_result_corner.html`).
 
 
+
+### Section D — pivots: REJECTED, the family is healthy
+
+Six files matched a pivot grep. **Three do not compute a pivot at all** — the same false-positive
+class caught twice already in Section B: `trade_check_v34_endpoints.py:_pivot_zone` classifies a
+price into a zone, `tc_v4_endpoints.py:_pivot_bar` renders one, and `v8_intra_backtest.py:_pivot_room_ok`
+is a predicate over values handed to it. None of them derives a level.
+
+The three that do compute use the **identical classic floor-pivot formula**:
+
+| file | formula |
+|---|---|
+| `v8_paper.py:219` (writes `v8_paper_pivots`) | `pp=(h+l+c)/3`, `r1=2pp−l`, `s1=2pp−h`, `r2=pp+(h−l)`, `s2=pp−(h−l)` |
+| `invest_check_v2.py:257` | `pp=(h+l+close)/3`, `s1=2pp−h` |
+| `buy_reversal_simulator.py:154` | `pp=(h+l+c)/3`, `r1=2pp−l`, `s1=2pp−h` |
+
+The input window differs (5-session vs the writer's configurable base), but each states its own:
+`v8_paper` persists `window_start`, `window_end` and `base_days` on every row, `invest_check_v2`'s
+docstring says "off a 5-session window", and `buy_reversal_simulator`'s function is named `_5d`.
+A parameter that is declared is not a clash. **No action needed here.**
+
 ### Section D — RSI: CONFIRMED, and this one is the most consequential on the board
 
 Three files define an RSI. Two are the same algorithm; the third is a different one.

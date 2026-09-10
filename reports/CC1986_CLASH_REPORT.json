@@ -120,8 +120,8 @@
   ]
  },
  "section_d": {
-  "complete": false,
-  "status": "1 CONFIRMED (labelling); 1 source-difference candidate; rest not compared",
+  "complete": true,
+  "status": "COMPLETE: RSI confirmed, fall_from_day_high label confirmed, pivots rejected, PCR answered by section A",
   "confirmed": [
    {
     "type": "D-label",
@@ -207,6 +207,20 @@
    "why_it_matters": "v12_backtest is the BACKTESTER: RSI-keyed rules are validated on one metric and run live on another, so a strategy that passes backtest is not the strategy that ships",
    "precedent": "cc#854 - weekly RSI 45 vs 40, a 5 point gap, silently killed a basket; this gap reaches 18.71",
    "fix_is_a_decision": "either v12_backtest adopts Wilder, or the divergence is named in the backtest output"
+  },
+  "pivots_REJECTED": {
+   "status": "REJECTED - no clash",
+   "not_computations": [
+    "trade_check_v34_endpoints.py:_pivot_zone (classifies a price into a zone)",
+    "tc_v4_endpoints.py:_pivot_bar (renders)",
+    "v8_intra_backtest.py:_pivot_room_ok (predicate over given values)"
+   ],
+   "real_implementations_all_identical": {
+    "v8_paper.py:219": "pp=(h+l+c)/3, r1=2pp-l, s1=2pp-h, r2=pp+(h-l), s2=pp-(h-l)",
+    "invest_check_v2.py:257": "pp=(h+l+close)/3, s1=2pp-h",
+    "buy_reversal_simulator.py:154": "pp=(h+l+c)/3, r1=2pp-l, s1=2pp-h"
+   },
+   "window": "differs (5-session vs the writer's configurable base) but each DECLARES its own - v8_paper persists window_start/window_end/base_days, invest_check_v2's docstring says 5-session, buy_reversal_simulator is named _5d. A declared parameter is not a clash."
   }
  },
  "section_a": {
