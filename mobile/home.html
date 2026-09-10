@@ -4801,7 +4801,7 @@ function pfRow(r, i){
 }
 function renderPortfolio(){
   var el = document.getElementById('pfblock'), pf = PF.data;
-  if (!el || !pf) return;
+  if (!el || !pf) return;   // cc#1918: #pfblock is no longer painted on Home — this guard is what keeps both call sites silent
   el.innerHTML = '<div class="chd"><div class="t">My Portfolio</div>'
     + '<div class="rgt">'
     + (pf.empty ? '' : '<span class="' + cls(pf.mtm) + '">' + inr(pf.mtm) + '</span> ')
@@ -5668,17 +5668,25 @@ function renderHome(d, pv){
      everything it renders (aggregate + 22-position list) is untouched. This slot now opens with
      the APPROVED TRADES slider; V8 Closed Book (bookFace2) keeps its own heading below, no
      longer sharing a 2-face swipe deck with a face that no longer exists. */
-  h += apTrShellHtml()
-    + '<div class="sect">THE BOOK</div>' + bookFace2();
+  h += apTrShellHtml();
+  /* cc#1918 (founder 10-Sep-2026): THE BOOK hidden on Home — the V8 Closed Book lives on /m/v8
+     (bottom nav). bookFace2(), rateCell() and the bk payload read stay intact; hide, never delete. */
+  // h += '<div class="sect">THE BOOK</div>' + bookFace2();
 
   /* cc#1875 phase 1 (founder 09-Sep-2026): HOME 3rd CARD — DERIVATIVES, additive, right after THE
      BOOK and before MY PORTFOLIO. Nothing above or below this line changes. */
-  h += derivShellHtml();
+  /* cc#1918 (founder 10-Sep-2026): DERIVATIVES hidden on Home — founder says it is captured
+     elsewhere. derivShellHtml(), loadDerivatives() and /api/mobile/home/derivatives untouched;
+     cc#1875 phase 2 stays pending, unchanged. */
+  // h += derivShellHtml();
 
   /* 3 · MY PORTFOLIO — cc#911: rendered by renderPortfolio() into #pfblock, so a row tap can
      redraw just this card instead of the whole page. */
   PF.data = d.portfolio || {};
-  h += '<div class="sect">MY PORTFOLIO</div><div class="c slab" id="pfblock"></div>';
+  /* cc#1918 (founder 10-Sep-2026): MY PORTFOLIO card hidden on Home — it lives on /m/myportfolio
+     behind the Dashboard tile (cc#1916). PF.data above is still set; renderPortfolio() returns
+     early when #pfblock is absent (its existing guard covers both call sites). */
+  // h += '<div class="sect">MY PORTFOLIO</div><div class="c slab" id="pfblock"></div>';
 
   /* cc#1322: LIVE NEWS moved off this page onto /m/v10 (scorr_v10_signal.html), last section
      there — founder ask 25-Aug. Nothing replaces it here; TOOLS is now the last section on Home. */
@@ -5688,7 +5696,7 @@ function renderHome(d, pv){
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
   loadIndexBook();    /* cc#1382: #heroCard3Body only exists after this paint, same as the mood letters */
   loadApprovedTrades();  /* cc#1867: #apTrBody only exists after this paint, same reason */
-  loadDerivatives();  /* cc#1875: #derivBody only exists after this paint, same reason */
+  // loadDerivatives();  /* cc#1875: #derivBody only exists after this paint — cc#1918: not called while the DERIVATIVES card is hidden */
   loadHeroPositions(); /* cc#1386: #heroPositionsBody, same reason */
   heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
   glitterSync();          /* cc#1378: sets the initial active-face class, same reason */
