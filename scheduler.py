@@ -4764,6 +4764,27 @@ def _bg_tc_universe_tick():
         log.error(f"_bg_tc_universe_tick: {e}")
 
 
+def _bg_marker_ticks_tcs():
+    """cc#1978: persist v8_marker_ticks TCS state (fired/not, per bucket) by reading
+    tc_universe_ticks and applying the existing amber condition — ZERO NEW COMPUTE, no re-run of
+    Trade Check. Same 5-min market-hours beat as _bg_tc_universe_tick (dispatched right after it,
+    same block, so it reads that tick's own write on most passes; a one-cycle lag if not is still
+    a valid latest-tick read, never a fabricated value). Own scheduler_master row so its cost/
+    timing shows separately (ENGINE_LIVENESS_RULE 13829)."""
+    try:
+        import v8_marker_ticks
+        conn = v8_marker_ticks._conn()
+        try:
+            v8_marker_ticks.ensure_schema(conn)
+            res = v8_marker_ticks.persist_tcs_ticks(conn)
+        finally:
+            conn.close()
+        if not res.get("ok"):
+            log.error(f"marker_ticks_tcs: {res}")
+    except Exception as e:
+        log.error(f"_bg_marker_ticks_tcs: {e}")
+
+
 _tc_scanner_eod_ran = None    # cc#1599 P5: the IST date the EOD sweep last completed (restart resets it)
 
 
@@ -5019,6 +5040,7 @@ async def _scheduler_loop():
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             _spawn(_bg_tc_scanner)            # cc#464 engine; cc#1746 / 39467: every 5 min (was the m%15 slot below)
             _spawn(_bg_tc_universe_tick)      # cc#1862: full-universe all-4-bucket persistence, same beat, stops 15:20 IST
+            _spawn(_bg_marker_ticks_tcs)      # cc#1978: v8_marker_ticks TCS state off tc_universe_ticks, zero new compute
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours

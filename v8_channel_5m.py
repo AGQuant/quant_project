@@ -351,9 +351,21 @@ def run_tick(conn=None) -> Dict[str, Any]:
         now = _ist_now()
         if now.hour == 15 and now.minute == 20:
             purged = _purge_old(conn)
+        # cc#1978: persist the STATE (fired or not) of the full-universe fits this tick already
+        # computed into v8_marker_ticks — ZERO NEW COMPUTE, reads chan["fits"] in memory, never
+        # re-evaluates. Wrapped so a persistence failure never breaks the existing triangle-marker
+        # write above (do_not_touch: evaluate_triangle_markers itself is untouched).
+        marker_ticks = None
+        try:
+            import v8_marker_ticks
+            v8_marker_ticks.ensure_schema(conn)
+            marker_ticks = v8_marker_ticks.persist_chan_ticks(conn, chan["fits"])
+        except Exception as e:
+            log.warning("cc#1978 v8_marker_ticks chan persist failed (non-fatal): %s", e)
         return {"ok": True, "universe": len(universe), "window_start": chan["window_start"],
                 "computed": len(chan["fits"]), "candidates": markers["candidates"],
                 "sell_new": markers["sell_new"], "buy_new": markers["buy_new"], "purged": purged,
+                "marker_ticks": marker_ticks,
                 "zero_tick": markers["sell_new"] == 0 and markers["buy_new"] == 0}
     except Exception as e:
         log.exception("v8_channel_5m tick failed")

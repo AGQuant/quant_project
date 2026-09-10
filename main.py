@@ -135,6 +135,7 @@ from screeners_endpoints import router as screeners_router   # cc#824 predefined
 from max_ivr_endpoints import router as max_ivr_router   # cc#836 Max IVR guided CIO tree + telemetry
 from max_native_cards import router as max_cards_router   # cc#836 phase B: native card templates
 from v8_pivot_star import router as pivot_star_router   # cc#856 pivot-star marker (read-only)
+from v8_marker_ticks import router as marker_ticks_router   # cc#1978: /api/v8/marker_ticks/{symbol}, full-universe CHAN+TCS state
 from preview_endpoints import router as preview_router   # cc#866 preview screens (Claude.ai pushes previews/)
 from mobile_endpoints import router as mobile_router     # cc#874 promoted mobile screens (/m/*)
 from v8_futures_book import router as v8_futures_book_router   # cc#885 /api/v8/futures_book
@@ -916,6 +917,7 @@ app.include_router(hr_report_pdf_router)   # cc#652 Portfolio Health Report whit
 app.include_router(max_ivr_router)   # cc#836: /api/max/ivr/* (guided CIO tree, config-driven)
 app.include_router(max_cards_router)   # cc#836 phase B: /api/max/card/{intent} (native, $0)
 app.include_router(pivot_star_router)   # cc#856: /api/v8/pivot_star
+app.include_router(marker_ticks_router)   # cc#1978: /api/v8/marker_ticks/{symbol}
 app.include_router(preview_router)   # cc#866: /preview + /preview/{name}
 app.include_router(mobile_router)    # cc#874: promoted mobile screens — all logic in mobile_endpoints.py
 # cc#885: futures-basis open book. Its own file and its own route ON PURPOSE — /api/paper/status
