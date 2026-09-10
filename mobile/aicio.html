@@ -1,65 +1,67 @@
 <!doctype html>
-<!-- ══ mobile/aicio.html — AI CIO section page (cc#1904, APP_CARD_LAYOUT_LAW_V1,
-     session_log 42536). NEW route — no /m/aicio page or Home-grid tile existed before this card.
-     Design authority: design_refs/scorr_app_aicio_R1.html, founder-approved 09-Sep-2026
-     (commit 3602575). Real GOLD NIGHT tokens only. Data from /api/mobile/aicio_app
-     (aicio_app_mobile.py). GATE CHECKED: max_chats confirmed the only chat-like table in the
-     schema. "Last used" corrected from the ref's created_at-based 13-Jun to the true
-     MAX(updated_at) — see aicio_app_mobile.py's docstring for the full account. Reachable via
-     the NAV array's mobile More sheet — PROTECTED + NAV_REGISTRY "nav-mobile" tier, same as
-     cc#1903's /m/mf. -->
+<!-- ══ mobile/aicio.html — AI CIO app page. Fable single-mode build 10-Sep-2026. Data: /api/max/ivr/tree, /api/max/card/{intent}, /api/max/ivr/tap, POST /api/scorr/chat — the web /cio (scorr_cockpit.html) endpoints called directly, same dispatch order: glossary → native card → C·A·R·D → native chat,
+     so a tap here and a tap on the web give the same bytes. Contract tokens only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>AI CIO · Scorr</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <style>
-/* cc#1904 — page-local rules (ac-*). Same discipline as every other section page this session:
-   bridge colour tokens + scorr_themes.css scale tokens only, no raw hex OR raw length — the
-   border-left below uses var(--bw-3), not the literal "3px" every earlier page this session
-   used (flagged as a finding on cc#1903/1902; fixed here, going forward). */
-.ac-asof{padding:var(--space-10) var(--space-14) 0;font-size:var(--type-10);color:var(--dim)}
-.ac-km{margin:var(--space-10) var(--space-12) 0;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-left:var(--bw-3) solid var(--blu);border-radius:0 var(--radius-12) var(--radius-12) 0;padding:var(--space-14) var(--space-14)}
-.ac-k{font-size:var(--type-10);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.ac-v{font-size:var(--type-24);font-weight:800;line-height:1.05;margin-top:var(--space-5);font-family:'IBM Plex Mono',ui-monospace,monospace}
-.ac-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-12)}
-.ac-cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-9) var(--space-10)}
-.ac-cell .ac-k{font-size:var(--type-9)}
-.ac-cell .ac-v{font-size:var(--type-14);margin-top:var(--space-3)}
-.ac-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-18) var(--space-14) var(--space-7)}
-.ac-slab h2{font-size:var(--type-11);font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.ac-slab .hint{font-size:var(--type-10);color:var(--dim)}
-.ac-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-14) var(--space-4);
- scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.ac-rail::-webkit-scrollbar{display:none}
-.ac-c{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--line);
- border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
-.ac-c.gap{border-style:dashed}
-.ac-ch{display:flex;align-items:baseline;justify-content:space-between}
-.ac-ch .t{font-size:var(--type-11);font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:var(--track-em8)}
-.ac-ch .n{font-size:var(--type-11);color:var(--mut)}
-.ac-lst{margin-top:var(--space-9)}
-.ac-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--panel2)}
-.ac-lr:last-child{border-bottom:none}
-.ac-lr .s{font-size:var(--type-125);font-weight:800}
-.ac-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
-.ac-lr .a{font-size:var(--type-115);color:var(--mut)}
-.ac-lr .b{font-size:var(--type-125);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
-.ac-more{font-size:var(--type-11);color:var(--dim);padding:var(--space-7) 0 0}
-.ac-emp{font-size:var(--type-115);color:var(--dim);line-height:1.6;margin-top:var(--space-7)}
-.ac-emp b{display:block;color:var(--txt);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
-.ac-ft{margin-top:var(--space-9);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line);font-size:var(--type-105);color:var(--mut)}
-.ac-note{margin:var(--space-22) var(--space-14) var(--space-8);padding:var(--space-12) var(--space-14);
- border:var(--bw-1) dashed var(--line);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--dim);line-height:1.65}
-.ac-note b{color:var(--mut)}
-.ac-empty{padding:var(--space-14);color:var(--dim);font-size:var(--type-12);text-align:center}
-.ac-err{margin:var(--space-14)}
+.pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
+.pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+.seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+.lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
+.row:last-child{border-bottom:none}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
+.row.up::before{background:var(--win)}.row.dn::before{background:var(--loss)}.row.mu::before{background:var(--edge)}
+.row .nm{font-size:var(--type-125);font-weight:800}.row .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.row .nm .tag.b{color:var(--win)}.row .nm .tag.s{color:var(--loss)}.row .nm .tag.g{color:var(--brand)}
+.row .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}.row .sub b{color:var(--ink);font-weight:700}
+.row .v{text-align:right}.row .v .n{font-size:var(--type-15);font-weight:800;line-height:1}.row .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+.emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.rule{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8)}.rule b{color:var(--brand)}.rule.mu{color:var(--muted);font-size:var(--type-115)}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+.chips{display:flex;gap:var(--space-6);overflow-x:auto;padding:var(--space-4) var(--space-16) 0;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel)}.chip.on{color:var(--brand);background:var(--hi)}
+.gates{display:inline-flex;gap:var(--space-2);vertical-align:middle;margin-left:var(--space-4)}.gates i{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--edge)}.gates i.ok{background:var(--win)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.menu{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.mi{display:grid;grid-template-columns:34px 1fr 16px;align-items:center;gap:var(--space-8);padding:var(--space-11) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit}.mi:last-child{border-bottom:none}
+.mi .ic{font-size:var(--type-17);color:var(--brand);text-align:center}.mi .lb{font-size:var(--type-125);font-weight:800}.mi .lb small{display:block;font-size:var(--type-95);color:var(--muted);font-weight:600;margin-top:var(--space-2)}.mi .ar{color:var(--muted);font-weight:800}
+.crumb{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-105);color:var(--muted)}.crumb a{color:var(--brand);text-decoration:none;font-weight:700}
+.ctx{margin:var(--space-8) var(--space-16) 0;font-size:var(--type-105);color:var(--muted)}.ctx b{color:var(--ink)}.ctx a{color:var(--brand);font-weight:700;text-decoration:none;margin-left:var(--space-6)}
+.qin{display:block;width:100%;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);color:var(--ink);font:inherit;font-size:var(--type-14);font-weight:600;padding:var(--space-9) var(--space-10);box-sizing:border-box}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8)}
+.btn{display:block;width:100%;text-align:center;margin-top:var(--space-10);padding:var(--space-9);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:800;cursor:pointer;box-sizing:border-box;background:var(--brand);color:var(--field);border:none}
+.askbar{position:fixed;left:0;right:0;bottom:calc(var(--space-60) + env(safe-area-inset-bottom,0px));background:var(--panel);border-top:var(--bw-1) solid var(--edge);padding:var(--space-8) var(--space-12);display:grid;grid-template-columns:1fr 64px 60px;gap:var(--space-6);align-items:center;z-index:5}
+.askbar .qin{padding:var(--space-8) var(--space-10)}.askbar .btn{margin:0;padding:var(--space-8) 0}
+.pill{font-size:var(--type-10);font-weight:800;color:var(--muted);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-6) 0;text-align:center;background:var(--hi);cursor:pointer}.pill.on{color:var(--win);border-color:var(--win)}
+.aihint{position:fixed;left:0;right:0;bottom:calc(var(--space-60) + var(--space-40) + env(safe-area-inset-bottom,0px));font-size:var(--type-9);color:var(--muted);text-align:center;padding:var(--space-3) var(--space-12);background:var(--field);z-index:5}
+.pg{padding-bottom:calc(var(--space-80) + var(--space-80))}
+.mdb{font-size:var(--type-115);line-height:1.6;margin-top:var(--space-8)}.mdb p{margin:0 0 var(--space-8)}.mdb ul{margin:0 0 var(--space-8);padding-left:var(--space-18)}.mdb code{background:var(--hi);border-radius:var(--radius-4);padding:0 var(--space-4);font-size:var(--type-105)}.mdb .mh{font-weight:800;color:var(--brand);margin:var(--space-8) 0 var(--space-4)}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:var(--space-6) 0 var(--space-8)}.mdb table{border-collapse:collapse;min-width:100%;font-size:var(--type-105)}.mdb th{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);text-align:left;padding:var(--space-6) var(--space-8);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap}.mdb td{padding:var(--space-6) var(--space-8);border-bottom:var(--bw-1) solid var(--hi);white-space:nowrap;font-weight:600}.mdb td a{color:var(--brand);text-decoration:none;font-weight:800}
+.foot2{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-6)}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -68,79 +70,121 @@ if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">AI CIO</span></div><div class="as-slot"></div></div>
-<div class="ac-asof" id="ac-asof">Loading…</div>
-<div id="ac-body"><div class="ac-empty">Loading…</div></div>
+<div class="pg">
+<div class="asof" id="asof">Loading…</div>
+<div id="ans"></div><div id="menu"><div class="err">Loading…</div></div>
+</div>
+<div class="aihint" id="aihint">Free-text answers read the database only. Turn AI on for reasoning.</div><div class="askbar"><input id="q" class="qin" placeholder="Ask Max anything…"><button class="btn" id="send">Ask</button><span class="pill" id="ai">AI off</span></div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
   <a class="bn" href="/m/trades"><span class="i">☷︎</span>WoT</a>
-  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+  <a class="bn on" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
 <script>
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function dmd(ds){ if(!ds) return '—'; var p=String(ds).slice(0,10).split('-');
-  if(p.length!==3) return String(ds); var m=parseInt(p[1],10)-1;
-  return parseInt(p[2],10)+' '+(MON[m]||p[1]); }
-
-function kmHtml(k){
-  return '<div class="ac-km"><div class="ac-k">Conversations</div><div class="ac-v">'+(k.conversations!=null?k.conversations:'—')+'</div>'
-    + '<div class="ac-kg">'
-    + '<div class="ac-cell"><div class="ac-k">Last used</div><div class="ac-v">'+dmd(k.last_used)+'</div></div>'
-    + '<div class="ac-cell"><div class="ac-k">Ratings reach</div><div class="ac-v">'+esc(k.ratings_reach||'—')+'</div></div>'
-    + '<div class="ac-cell"><div class="ac-k">Sectors</div><div class="ac-v">'+(k.sectors!=null?k.sectors:'—')+'</div></div>'
-    + '<div class="ac-cell"><div class="ac-k">Result write-ups</div><div class="ac-v">'+(k.result_writeups!=null?k.result_writeups:'—')+'</div></div>'
-    + '</div></div>';
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16); }
+function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
+function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+/* ── light markdown: headings, bold, italic, code, bullets, pipe tables, paragraphs ── */
+function md(s){
+  s=String(s||''); var lines=s.split(/\r?\n/), out=[], i=0;
+  function inl(t){ t=esc(t); t=t.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/(^|[^\w])_([^_]+)_(?!\w)/g,'$1<i>$2</i>').replace(/\*(?!\s)([^*]+?)\*/g,'<i>$1</i>'); return t; }
+  while(i<lines.length){
+    var l=lines[i];
+    if(/^\s*\|/.test(l)){ var rows=[]; while(i<lines.length && /^\s*\|/.test(lines[i])){ rows.push(lines[i]); i++; }
+      var cells=rows.map(function(r){ return r.trim().replace(/^\||\|$/g,'').split('|').map(function(c){return c.trim();}); }).filter(function(c){ return !c.every(function(x){return /^:?-{2,}:?$/.test(x)||x==='';}); });
+      if(cells.length){ out.push('<div class="tw"><table><thead><tr>'+cells[0].map(function(c){return '<th>'+inl(c)+'</th>';}).join('')+'</tr></thead><tbody>'+cells.slice(1).map(function(r){return '<tr>'+r.map(function(c){ var sym=/^[A-Z][A-Z0-9&-]{1,14}$/.test(c); return '<td>'+(sym?'<a href="/m/check?sym='+encodeURIComponent(c)+'">'+esc(c)+'</a>':inl(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>'); }
+      continue; }
+    if(/^\s*[-*] /.test(l)){ var li=[]; while(i<lines.length && /^\s*[-*] /.test(lines[i])){ li.push('<li>'+inl(lines[i].replace(/^\s*[-*] /,''))+'</li>'); i++; } out.push('<ul>'+li.join('')+'</ul>'); continue; }
+    var h=l.match(/^(#{1,4})\s+(.*)/); if(h){ out.push('<div class="mh">'+inl(h[2])+'</div>'); i++; continue; }
+    if(l.trim()===''){ i++; continue; }
+    var para=[l]; i++; while(i<lines.length && lines[i].trim()!=='' && !/^\s*[|#]|^\s*[-*] /.test(lines[i])){ para.push(lines[i]); i++; }
+    out.push('<p>'+para.map(inl).join('<br>')+'</p>');
+  }
+  return out.join('');
 }
-function whatItIsCardHtml(d){
-  var w=d.what_it_is||{};
-  return '<div class="ac-c"><div class="ac-ch"><span class="t">What it is</span><span class="n">open</span></div>'
-    + '<div class="ac-emp" style="margin-top:0">'+esc(w.message||'')+'</div>'
-    + (w.footnote?'<div class="ac-ft">'+esc(w.footnote)+'</div>':'')+'</div>';
+var TREE=[], BY={}, PATH=[], CTX={sym:'',sym2:'',seg:''}, ANS=[], AI=false, SID='app-'+Date.now().toString(36);
+function kids(pid){ return TREE.filter(function(n){ return (n.parent_id||null)===(pid||null); }); }
+function crumbs(){ return PATH.map(function(id){ return BY[id]?BY[id].label:id; }); }
+function renderMenu(){
+  var cur=PATH.length?PATH[PATH.length-1]:null, list=kids(cur), n=cur?BY[cur]:null, needs=(n&&n.action_params&&n.action_params.needs)||'';
+  var h='';
+  if(needs==='symbol' && !CTX.sym) h+=symBox('Which stock?','sym');
+  else if(needs==='symbol2' && !CTX.sym2) h+=symBox('Compare '+esc(CTX.sym)+' with?','sym2');
+  if(CTX.sym) h+='<div class="ctx">Stock: <b>'+esc(CTX.sym)+'</b>'+(CTX.sym2?' vs <b>'+esc(CTX.sym2)+'</b>':'')+' <a href="#" id="ctx-clr">change</a></div>';
+  if(!cur){ h+='<div class="hero"><div class="eye">AI CIO · Max</div><div class="big"><div class="n" style="font-size:var(--type-125);color:var(--ink)">Tap a question. Every answer here is read from the Scorr database — no model, no cost. Ask anything else at the bottom.</div></div></div>'; }
+  if(list.length) h+='<div class="menu">'+list.map(function(k){ return '<a href="#" class="mi" data-n="'+esc(k.node_id)+'"><span class="ic">'+(k.icon||'›')+'</span><span class="lb">'+esc(k.label)+(k.sublabel?'<small>'+esc(k.sublabel)+'</small>':'')+'</span><span class="ar">›</span></a>'; }).join('')+'</div>';
+  if(PATH.length) h='<div class="crumb"><a href="#" id="c-home">Max</a>'+crumbs().map(function(c,i){ return ' › <a href="#" data-c="'+i+'">'+esc(c)+'</a>'; }).join('')+'</div>'+h;
+  document.getElementById('menu').innerHTML=h;
+  document.querySelectorAll('.mi').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); tap(a.getAttribute('data-n')); }); });
+  var ch=document.getElementById('c-home'); if(ch) ch.addEventListener('click', function(e){ e.preventDefault(); PATH=[]; renderMenu(); });
+  document.querySelectorAll('.crumb [data-c]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); PATH=PATH.slice(0,Number(a.getAttribute('data-c'))+1); renderMenu(); }); });
+  var clr=document.getElementById('ctx-clr'); if(clr) clr.addEventListener('click', function(e){ e.preventDefault(); CTX.sym=''; CTX.sym2=''; renderMenu(); });
+  var sb=document.getElementById('symin'); if(sb){ sb.focus(); sb.addEventListener('keydown', function(e){ if(e.key==='Enter'){ var v=sb.value.trim().toUpperCase(); if(!v) return; CTX[sb.getAttribute('data-k')]=v; renderMenu(); } }); var go=document.getElementById('symgo'); if(go) go.addEventListener('click', function(){ var v=sb.value.trim().toUpperCase(); if(!v) return; CTX[sb.getAttribute('data-k')]=v; renderMenu(); }); }
 }
-function conversationsCardHtml(d){
-  var c=d.your_conversations||{};
-  var label = c.count ? 'Barely used so far' : 'Nothing yet';
-  return '<div class="ac-c gap"><div class="ac-ch"><span class="t">Your conversations</span><span class="n">'+(c.count!=null?c.count+' stored':'')+'</span></div>'
-    + '<div class="ac-emp"><b>'+esc(label)+'</b>'+esc(c.message||'')+'</div></div>';
+function symBox(label,k){ return '<div class="card"><div class="ch"><span class="t">'+label+'</span></div><div class="two" style="grid-template-columns:1fr 84px"><input id="symin" data-k="'+k+'" class="qin" placeholder="NSE symbol, e.g. TCS" autocapitalize="characters"><button class="btn" id="symgo" style="margin-top:8px">Go</button></div></div>'; }
+function tap(id){
+  var n=BY[id]; if(!n) return;
+  try{ fetch('/api/max/ivr/tap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node_id:id,session_id:SID}),credentials:'same-origin'}); }catch(e){}
+  var p=n.action_params||{}, ks=kids(id);
+  if(n.action_intent==='freetext'){ document.getElementById('q').focus(); return; }
+  if(p.needs && !have(p.needs)){ PATH.push(id); renderMenu(); return; }
+  if(ks.length){ PATH.push(id); renderMenu(); return; }
+  run(n);
 }
-function reachCardHtml(d){
-  var r=d.reach||{}, rows=r.rows||[];
-  var lst = rows.map(function(row){
-    return '<div class="ac-lr"><span class="s">'+esc(row.label)+'</span><div class="r">'+(row.note?'<span class="a">'+esc(row.note)+'</span>':'')+'<span class="b">'+esc(row.value)+'</span></div></div>';
-  }).join('');
-  return '<div class="ac-c"><div class="ac-ch"><span class="t">Data it can see</span><span class="n">live</span></div>'
-    + '<div class="ac-lst">'+lst+'</div>'
-    + (r.message?'<div class="ac-more">'+esc(r.message)+'</div>':'')+'</div>';
+function have(need){ return need==='symbol'?!!CTX.sym:(need==='symbol2'?!!CTX.sym2:(need==='segment'?!!CTX.seg:true)); }
+function run(n){
+  var p=n.action_params||{};
+  if(p.href){ location.href=p.href; return; }
+  if(p.needs_sym && !CTX.sym){ PATH.push('analyze'); renderMenu(); return; }
+  if(n.action_intent==='learn_glossary'){ answer(n.label, p.body||'', 'Native · ₹0'); return; }
+  if(n.has_card){ runCard(n); return; }
+  if(p.card && CTX.sym){ location.href='/m/check?sym='+encodeURIComponent(CTX.sym)+(p.card==='D'?'#deriv':''); return; }
+  var q=(p.q||n.label).replace(/\{sym\}/g,CTX.sym||'').replace(/\{sym2\}/g,CTX.sym2||'').replace(/\{seg\}/g,CTX.seg||'');
+  ask(q.trim(), n.label);
 }
-function limitsCardHtml(d){
-  var l=d.limits||{};
-  return '<div class="ac-c"><div class="ac-ch"><span class="t">What it will not do</span><span class="n">by design</span></div>'
-    + '<div class="ac-emp" style="margin-top:0">'+esc(l.message||'')+'</div></div>';
+function runCard(n){
+  var p=n.action_params||{}, qs=new URLSearchParams(); if(CTX.sym) qs.set('sym',CTX.sym); if(CTX.seg) qs.set('seg',CTX.seg); if(p.screen_id) qs.set('screen_id',p.screen_id); if(p.cat) qs.set('cat',p.cat); qs.set('node',n.node_id);
+  var id=answer(n.label,'_Reading…_','Native · ₹0');
+  fetch('/api/max/card/'+encodeURIComponent(n.action_intent)+'?'+qs.toString(),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    replace(id, d.title||n.label, d.error&&!d.body?('**'+d.error+'**'):(d.body||''), 'Native · ₹0'+(d.as_of?' · as of '+esc(d.as_of):''));
+  }).catch(function(){ replace(id, n.label, '**This card could not be built right now.**', ''); });
 }
-
-function render(d){
-  var k=d.key_metrics||{};
-  document.getElementById('ac-asof').textContent = (k.conversations!=null?k.conversations:'—')+' conversations stored · last '+dmd(k.last_used);
-  var html = kmHtml(k)
-    + '<div class="ac-slab"><h2>Ask the CIO</h2><span class="hint">2 · swipe →</span></div>'
-    + '<div class="ac-rail">'+whatItIsCardHtml(d)+conversationsCardHtml(d)+'</div>'
-    + '<div class="ac-slab"><h2>What it can reach</h2><span class="hint">1 · swipe →</span></div>'
-    + '<div class="ac-rail">'+reachCardHtml(d)+'</div>'
-    + '<div class="ac-slab"><h2>Limits</h2><span class="hint">1 · swipe →</span></div>'
-    + '<div class="ac-rail">'+limitsCardHtml(d)+'</div>'
-    + '<div class="ac-note"><b>This surface is barely used.</b> max_chats holds '+(k.conversations!=null?k.conversations:'—')+' rows; the last one was active '+dmd(k.last_used)+'. This page shows the real count and the true last-activity date rather than an empty state that implies a fresh start.</div>';
-  document.getElementById('ac-body').innerHTML = html;
+function ask(q, title){
+  if(!q) return;
+  var id=answer(title||q, '_Thinking…_', AI?'AI':'Native · ₹0');
+  fetch('/api/scorr/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:q}], mode: AI?null:'native', claude_on: AI, use_tools: AI}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    var rep=(d.reply==null?'':(typeof d.reply==='string'?d.reply:JSON.stringify(d.reply)));
+    var u=d.usage||{}; replace(id, title||q, rep||('**'+(d.error||'No answer.')+'**'), (d.model?esc(d.model)+' · $'+Number(u.cost_usd||0).toFixed(4):'Native · ₹0')+(d.duration_ms?' · '+Math.round(d.duration_ms)+' ms':''));
+  }).catch(function(){ replace(id, title||q, '**Could not reach Max.**', ''); });
 }
-
-fetch('/api/mobile/aicio_app', {credentials:'same-origin'})
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    if(d.error){ document.getElementById('ac-body').innerHTML = '<div class="ac-err ac-empty">Could not load: '+esc(d.error)+'</div>'; return; }
-    render(d);
-  })
-  .catch(function(e){ document.getElementById('ac-body').innerHTML = '<div class="ac-err ac-empty">Could not load.</div>'; });
+var AID=0;
+function answer(title, body, foot){ var id='a'+(++AID); ANS.unshift({id:id,title:title,body:body,foot:foot}); drawAns(); return id; }
+function replace(id,title,body,foot){ for(var i=0;i<ANS.length;i++) if(ANS[i].id===id){ ANS[i]={id:id,title:title,body:body,foot:foot}; } drawAns(); }
+function drawAns(){
+  var el=document.getElementById('ans'); if(!ANS.length){ el.innerHTML=''; return; }
+  el.innerHTML='<div class="sec"><h2>Answers</h2><span class="hint" id="a-clr" style="color:var(--brand);font-weight:800">clear</span></div>'+ANS.map(function(a){ return '<div class="card ansc" id="'+a.id+'"><div class="ch"><span class="t">'+esc(a.title)+'</span></div><div class="mdb">'+md(a.body)+'</div>'+(a.foot?'<div class="foot2">'+a.foot+'</div>':'')+'</div>'; }).join('');
+  document.getElementById('a-clr').addEventListener('click', function(){ ANS=[]; drawAns(); });
+  window.scrollTo(0, document.getElementById('ans').getBoundingClientRect().top+window.scrollY-70);
+}
+function boot(){
+  fetch('/api/max/ivr/tree',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    TREE=d.nodes||[]; TREE.forEach(function(n){ BY[n.node_id]=n; });
+    document.getElementById('asof').innerHTML='<b>'+TREE.length+'</b> questions on tap · '+(d.cards_available||[]).length+' native cards · answers cost nothing unless you turn AI on';
+    renderMenu();
+  }).catch(function(){ document.getElementById('menu').innerHTML='<div class="err">Could not load Max.</div>'; });
+  var q=document.getElementById('q');
+  document.getElementById('send').addEventListener('click', function(){ var v=q.value.trim(); if(!v) return; q.value=''; ask(v); });
+  q.addEventListener('keydown', function(e){ if(e.key==='Enter'){ var v=q.value.trim(); if(!v) return; q.value=''; ask(v); } });
+  document.getElementById('ai').addEventListener('click', function(){ AI=!AI; this.classList.toggle('on',AI); this.textContent=AI?'AI on':'AI off'; document.getElementById('aihint').textContent=AI?'Answers now use the model — costs a few cents each.':'Free-text answers read the database only. Turn AI on for reasoning.'; });
+}
+boot();
 </script>
 </body></html>
