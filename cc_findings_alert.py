@@ -113,9 +113,21 @@ def send_unsent_findings(sender=None) -> Optional[dict]:
                 ids.append(row_id)
                 continue
             failed += 1
-            reason = str(resp.get("reason") or "unknown")
+            reason = str(resp.get("reason") or "sender returned not-sent (HTTP not ok)")
             log.warning("cc_findings: finding log %s not sent: %s", row_id, reason)
+            # a failed send is written where it can be READ (ops_log), not only to a Railway log line
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                                   VALUES (CURRENT_DATE, NOW(), 'cc_findings', 'telegram send failed', %s::jsonb)""",
+                                (json.dumps({"log_id": row_id, "reason": reason, "response": resp}, default=str),))
+                conn.commit()
+            except Exception as e:
+                log.warning("cc_findings: ops_log write failed: %s", e)
             if "env not set" in reason:
                 # dead channel: stop here, mark nothing, the rows wait for the channel
                 break
+        if sent == 0:
+            # nothing went out: say so as an error, never as an 'ok' run (cc#526 lesson)
+            raise RuntimeError("cc_findings: %d pending, 0 sent (%s)" % (failed, reason))
         return {"sent": sent, "failed": failed, "ids": ids}
