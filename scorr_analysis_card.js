@@ -157,7 +157,12 @@
   /* ── the A card itself (verbatim, v8_dashboard.html) ────────────────────────────────── */
   async function qaAnalysis(sym){
     _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery · trajectory','<div class="empty">Loading…</div>');
-    try{var _mb=document.getElementById('mDcBtn');if(_mb)_mb.innerHTML=ScorrCardStripHtml(sym,'A');}catch(e){}   // cc#675: C·A·R·D strip
+    // cc#1959: the strip goes into the RESOLVED host slot -- _cur.d, set by _qaModal() on the line
+    // above (PAGE_IDS.d on /dashboard, OWN_IDS.d = the self-built shell's #scorrAnaCard). The old
+    // lookup named the dashboard slot id directly, which does not exist on /m/*, so #scorrAnaCard
+    // stayed empty and its :empty rule hid the whole row. Same try/catch, same active letter, same
+    // order (after the shell clear).
+    try{var _mb=document.getElementById((_cur||_ids()).d);if(_mb)_mb.innerHTML=ScorrCardStripHtml(sym,'A');}catch(e){}   // cc#675: C·A·R·D strip; cc#1959: resolved slot
     try{
       const [g,dm]=await Promise.all([
         getJSON('/api/gvm/snapshot/'+encodeURIComponent(sym)).catch(()=>null),
