@@ -2587,15 +2587,29 @@ function renderTape(){
    and tapeNum()/esc()/px()/pct()/cls() reused directly, not retyped. Paint-then-fill: /api/mobile/
    breadth is a real per-symbol query over the whole ~208-name universe, so it is fetched on the
    tap that opens this table, not folded into the home2 payload every page load already pays for. */
-var BREADTH = { rows: [], view: [], loaded: false, loading: false };
+var BREADTH = { rows: [], view: [], loaded: false, loading: false, sel: null };   /* cc#1933: sel = tapped sector (segment) or null */
 var BREADTH_SORT = { col: 'day', dir: -1 };   // biggest movers first, same default as Tape's own
 var BREADTH_COLS = [
   { key: 'sym',  label: 'Symbol',     cls: 'h-bsym' },
   { key: 'day',  label: 'Day %',      cls: 'h-bday' }
 ];
+/* cc#1933: the tapped sector's member set — the endpoint's own `members` list on that sector row (the
+   same gvm_scores.segment grouping its mcap-weighted figure came from), never re-derived here. */
+function breadthSelMembers(){
+  if (!BREADTH.sel) return null;
+  var secs = BREADTH.sectors || [];
+  for (var i = 0; i < secs.length; i++){
+    if (secs[i].segment === BREADTH.sel){
+      var m = {}; (secs[i].members || []).forEach(function(sym){ m[String(sym)] = 1; }); return m;
+    }
+  }
+  return {};
+}
 function breadthSortView(){
   var col = BREADTH_SORT.col, dir = BREADTH_SORT.dir;
-  var order = BREADTH.rows.map(function(_, i){ return i; });
+  var mem = breadthSelMembers();
+  var order = BREADTH.rows.map(function(_, i){ return i; })
+    .filter(function(i){ return !mem || mem[String(BREADTH.rows[i].symbol)]; });   /* cc#1933: filter to the tapped sector */
   order.sort(function(a, b){
     var ra = BREADTH.rows[a], rb = BREADTH.rows[b];
     if (col === 'sym'){
@@ -2619,9 +2633,11 @@ function breadthSort(col){
 function breadthHead(){
   return '<div class="brh">' + BREADTH_COLS.map(function(c){
     var on = BREADTH_SORT.col === c.key;
+    /* cc#1933: with a sector tapped the symbol header reads "SYMBOL · <sector> · <n>" */
+    var label = (c.key === 'sym' && BREADTH.sel) ? c.label + ' \u00b7 ' + BREADTH.sel + ' \u00b7 ' + BREADTH.view.length : c.label;
     return '<button class="' + c.cls + (on ? ' on' : '') + '"'
       + ' aria-label="Sort by ' + esc(c.label) + '"'
-      + ' onclick="breadthSort(\'' + c.key + '\')">' + esc(c.label)
+      + ' onclick="breadthSort(\'' + c.key + '\')">' + esc(label)
       + (on ? '<span class="ar">' + (BREADTH_SORT.dir < 0 ? '\u25bc' : '\u25b2') + '</span>' : '')
       + '</button>';
   }).join('') + '</div>';
@@ -2642,10 +2658,23 @@ function renderBreadth(){
   if (!BREADTH.rows.length){ el.innerHTML = '<div class="empty"><b>No breadth data</b></div>'; return; }
   breadthSortView();
   var body = BREADTH.view.map(function(i){ return breadthRow(BREADTH.rows[i]); }).join('');
+  /* cc#1933 item 5: a tapped sector whose members all lack a day% today gets one plain row, not an
+     empty table and not the full universe. */
+  if (BREADTH.sel && !BREADTH.view.some(function(i){ return BREADTH.rows[i].day_chg_pct != null; })){
+    body = '<div class="brr br-none">No prices yet for this sector</div>';
+  }
   /* cc#1592 (ADV_DECL_SECTOR_CAPS_V1, 36539; ref scorr_adv_decl_sectorcaps_R1): the sector capsule
      strip sits between the overlay header and the symbol table. The table markup below it is the
      same string it always was — breadthHead() + the same rows — nothing in it moved. */
   el.innerHTML = breadthSectors() + breadthHead() + body;
+  /* cc#1933 item 2: the tapped chip scrolls into view if it was half off-screen */
+  var selEl = el.querySelector('.ad-sc.sel');
+  if (selEl && selEl.scrollIntoView){ try { selEl.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' }); } catch(e){} }
+}
+/* cc#1933 items 2-3: tap a chip = select it (one at a time) and filter the table; tap it again = clear. */
+function breadthPick(seg){
+  BREADTH.sel = (BREADTH.sel === seg) ? null : seg;
+  renderBreadth();
 }
 /* five bands, per the ref: up2 >= +1.0 · up1 +0.15..1.0 · am -0.15..+0.15 · dn1 -1.0..-0.15 · dn2 <= -1.0 */
 function adBand(p){
@@ -2661,14 +2690,19 @@ function breadthSectors(){
   var secs = BREADTH.sectors || [];
   if (!secs.length) return '';
   var up = 0, flat = 0, dn = 0;
+  /* cc#1933: chips are buttons that filter the table below (breadthPick), no longer links to the web
+     sector page; the rail arrives from the endpoint already ordered best -> weak, unpriced last. An
+     unpriced sector (day_pct null) is band "na" — a dash, counted in none of the three dots. */
   var chips = secs.map(function(x){
-    var b = adBand(x.day_pct);
-    if (b === 'up1' || b === 'up2') up++; else if (b === 'am') flat++; else dn++;
-    return '<a class="ad-sc ' + b + '" href="/sector?segment=' + encodeURIComponent(x.segment) + '" data-scorr-skip="1">'
+    var b = (x.day_pct == null) ? 'na' : adBand(x.day_pct);
+    if (b === 'up1' || b === 'up2') up++; else if (b === 'am') flat++; else if (b !== 'na') dn++;
+    var sel = BREADTH.sel === x.segment;
+    return '<button type="button" class="ad-sc ' + b + (sel ? ' sel' : '') + '" aria-pressed="' + (sel ? 'true' : 'false')
+      + '" onclick="breadthPick(' + JSON.stringify(String(x.segment)).replace(/"/g, '&quot;') + ')">'
       + '<span class="ad-n" title="' + esc(x.segment) + '">' + esc(String(x.segment).toUpperCase()) + '</span>'
-      + '<span class="ad-v">' + pct(x.day_pct) + '</span></a>';
+      + '<span class="ad-v">' + (x.day_pct == null ? '\u2014' : pct(x.day_pct)) + '</span></button>';
   }).join('');
-  return '<div class="ad-wrap"><div class="ad-hd"><span>Sectors · Day %</span><span class="ad-r">mcap-weighted · biggest movers first</span></div>'
+  return '<div class="ad-wrap"><div class="ad-hd"><span>Sectors · Day %</span><span class="ad-r">mcap-weighted · best \u2192 weak</span></div>'
     + '<div class="ad-row">' + chips + '</div>'
     + '<div class="ad-foot"><div class="ad-dots"><i class="ad-u"></i><span>' + up + ' up</span><i class="ad-a"></i><span>' + flat + ' flat</span><i class="ad-d"></i><span>' + dn + ' down</span></div>'
     + '<span>as of ' + adAsOf(BREADTH.as_of) + '</span></div></div>';

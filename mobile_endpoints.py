@@ -2593,6 +2593,15 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #brov .ad-sc.am{background:rgba(255,159,69,.14);border-color:rgba(255,159,69,.3)} #brov .ad-sc.am .ad-n{color:#e0b98c} #brov .ad-sc.am .ad-v{color:var(--amber)}
 #brov .ad-sc.dn1{background:color-mix(in srgb, var(--red) 8%, transparent);border-color:color-mix(in srgb, var(--red) 22%, transparent)} #brov .ad-sc.dn1 .ad-n{color:color-mix(in srgb, var(--red) 40%, var(--ink))} #brov .ad-sc.dn1 .ad-v{color:color-mix(in srgb, var(--red) 75%, var(--ink))}
 #brov .ad-sc.dn2{background:color-mix(in srgb, var(--red) 16%, transparent);border-color:color-mix(in srgb, var(--red) 40%, transparent)} #brov .ad-sc.dn2 .ad-n{color:color-mix(in srgb, var(--red) 55%, var(--ink))} #brov .ad-sc.dn2 .ad-v{color:var(--red)}
+/* cc#1933: the chips are BUTTONS now (tap = filter the table), not links to the web sector page.
+   button reset keeps the band rules above in charge of colour (their two-class selectors outrank
+   this one-class one). .sel = the "dark border": a 2px var(--ink) edge (1px real border + 1px inset
+   ring, so the chip does not reflow by 2px when selected); --ink inverts correctly on light themes.
+   .na = a sector with no priced member today: muted chip, dash figure, still tappable. */
+#brov button.ad-sc{font:inherit;cursor:pointer;text-align:left;background:transparent;-webkit-tap-highlight-color:transparent}
+#brov .ad-sc.na{border-color:var(--line)} #brov .ad-sc.na .ad-n{color:var(--muted)} #brov .ad-sc.na .ad-v{color:var(--muted)}
+#brov .ad-sc.sel{border-color:var(--ink);box-shadow:inset 0 0 0 var(--bw-1) var(--ink)}
+#brov .brr.br-none{justify-content:center;color:var(--muted);font-size:var(--type-11)}
 #brov .ad-foot{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9,9px);color:var(--dim);margin-top:var(--space-8)}
 #brov .ad-dots{display:flex;gap:var(--space-5);align-items:center}
 #brov .ad-dots i{width:7px;height:7px;border-radius:50%;display:inline-block}
