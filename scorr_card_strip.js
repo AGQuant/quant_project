@@ -60,7 +60,11 @@
        mobile/home.html, mobile_endpoints.py (V8 sheet) and scorr_card_common.js (symbol sheet +
        cc#964 letter colours) were removed in the same push and point here. Change a pill => change
        it here. */
-    + 'body.mcards .scorr-cs-b{box-sizing:border-box;height:var(--space-28,28px);width:auto;min-width:var(--space-28,28px);padding:0 var(--space-10,10px);'
+    /* cc#1944 (founder 10-Sep 16:0x): height stays half (28px); width comes down 25% from the
+       equal-quarter stretch -- flex-basis 18.75% (= 75% of a quarter) with the same max-width, so
+       four pills no longer fill the row edge to edge; the row is CENTRED (justify-content below).
+       Consumers no longer set flex:1 on the pill -- this is the one place the pill's share lives. */
+    + 'body.mcards .scorr-cs-b{box-sizing:border-box;flex:0 1 18.75%;max-width:18.75%;height:var(--space-28,28px);width:auto;min-width:var(--space-28,28px);padding:0 var(--space-10,10px);'
     + 'border-radius:var(--radius-14,14px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
     + 'color:var(--brand,var(--txt,#d4af37));font-size:var(--type-11,11px);font-weight:800;letter-spacing:var(--track-em8,.08em);box-shadow:none}'
     + 'body.mcards .scorr-cs-b:active{background:var(--panel,#131316)}'
@@ -72,7 +76,8 @@
        a control */
     + 'body.mcards .scorr-cs-off{color:var(--muted,var(--mut,#8e8a7e));background:transparent;border-style:dashed;opacity:.75}'
     /* the compact (table-row) variant keeps its own metrics on the app too */
-    + 'body.mcards .scorr-cs-sm .scorr-cs-b{height:22px;min-width:22px;width:22px;padding:0;border-radius:5px;font-size:10px}';
+    + 'body.mcards .scorr-card-strip{justify-content:center}'
+    + 'body.mcards .scorr-cs-sm .scorr-cs-b{flex:0 0 auto;max-width:none;height:22px;min-width:22px;width:22px;padding:0;border-radius:5px;font-size:10px}';
   try {
     var st = document.createElement('style');
     st.setAttribute('data-scorr', 'card-strip');
