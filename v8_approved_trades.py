@@ -1,122 +1,124 @@
 """v8_approved_trades.py -- Home APPROVED TRADES slider.
 
-cc#1928 (10-Sep-2026): SOURCE CORRECTED. cc#1867 wired this to v8_paper_positions status=OPEN --
-the whole V8 paper book (22 rows) -- which the founder had NOT approved ("APPROVED TRADES 22 -- I
-have not approved them", 10-Sep 13:13). Approval lives ONLY in trade_alerts.approved_at, so:
+cc#1957 (10-Sep-2026, founder 17:0x "Approved trade give filter icon, 3 options: Future long,
+Future short, Equity"): SOURCE WIDENED + ONE BUILDER.
 
-DATA SOURCE (cc#1928):
-    trade_alerts WHERE approved_at IS NOT NULL AND source_engine='V8', each row joined to the
-    STILL-OPEN v8_paper_positions row it approved. The join key is the one the approve flow
-    writes (trade_alerts_endpoints.py cc#1620 origin link, _origin_v8): source_ref =
-    symbol@to_char(entry_ts,'YYYY-MM-DD HH24:MI:SS'). Not guessed -- the same key the Ideas /
-    Approved-tab resolvers use. Only positions still OPEN: an approval whose position has since
-    closed (moved to v8_paper_trades) drops off this slider -- it belongs to the closed book, not
-    to "approved trades open". Zero rows => count 0 and the app's empty state; NEVER a fallback to
+    Until this card the slider read trade_alerts WHERE source_engine='V8' only (cc#1928), joined to
+    the V8 paper position -- so an approved EQUITY trade (QB basket, Investment Scanner, Screeners,
+    Manual) or an approved TC Scanner / Index Intel signal never reached Home. The Wall of Trades'
+    Approved tab (trade_wall_approved.py, cc#1735/1762/1781) already serves EVERY approved alert
+    with side, engine, entry_level (= approved_price), cmp, target/stop, pnl through the one canon,
+    and open/closed via the trade_alert_levels sidecar. That builder -- trade_wall_approved.
+    approved_book() -- is now IMPORTED here, not copied: entry / cmp / pnl / levels on a Home card
+    are the SAME numbers the wall shows, to the paise. This module keeps only what the card needs on
+    top of that: instrument, the rail geometry, risk/reward left, and the V8 basket tag.
+
+DATA SOURCE (cc#1957):
+    approved_book(): trade_alerts WHERE status='approved' LEFT JOIN trade_alert_levels, every
+    engine. Home keeps the rows whose resolved close state is OPEN (sidecar closed_at IS NULL /
+    no engine exit mirrored). Zero rows => count 0 and the app's empty state; NEVER a fallback to
     the paper book.
 
-    approved_at / approved_via ride along on every card so the app can print
-    "Approved 06 Sep, 16:32" in the slot that used to say "Opened ...".
+INSTRUMENT per row: FUTURES when the symbol is in futures_universe WHERE is_active -- the same
+    bare-symbol test the Wall of Trades classifier uses (trade_wall_endpoints.py) -- else EQUITY.
+    `side` (LONG / SHORT) rides along from the builder. The three app filters are
+    Futures Long = FUTURES & LONG, Futures Short = FUTURES & SHORT, Equity = EQUITY any side;
+    `counts` in the payload carries all four numbers so the chip and the DB check agree.
 
-    Response shape is UNCHANGED from cc#1867 (count / positions[...] / formula) so the app needs
-    no structural change; the two approval fields are additive. `approved_alerts_total` is also
-    added: how many approved alerts exist at all, so a "count 0 while total 1" reading is
-    explainable at a glance (that approval's position closed) rather than looking like a miss.
+QTY: a V8-linked row carries its position qty from the builder (rupees = position-sized). A row
+    with no paper position (equity / manual / TC) has qty None and every rupee here is PER SHARE --
+    the card footer prints "per share" where a futures card prints "1 lot (n)". risk_left /
+    reward_left / potential_left use the same multiplier (qty, or 1 per share); they are rail
+    geometry against the builder's own cmp / target / stop, not a second P&L formula.
 
-REUSES THE ONE V8 UNREALISED FORMULA (V8_PNL_CANON_V1, CLAUDE.md rule 13; cc#1762) -- does not
-    retype it. v8_book_canon.open_marks() is the SAME latest-intraday-close CMP source the V8
-    OPEN BOOK total and the Wall of Trades already read; v8_book_canon.unrealised_rupees() is the
-    SAME side-aware (mark-entry)*qty formula, returning None (never a substituted 0.00) when cmp
-    is missing -- a stale or missing CMP renders the card WITHOUT a marker and WITHOUT a P&L.
-
-RAIL MARKER FORMULA (cc#1867, verified there; unchanged here):
-    left_end=min(stop,target); right_end=max(stop,target);
+RAIL MARKER FORMULA (cc#1867, unchanged): left_end=min(stop,target); right_end=max(stop,target);
     marker = (cmp-left_end)/(right_end-left_end)*100, clamped 0-100 -- the LOWER price always
-    renders on the LEFT (rail_left_label says which end is the target). Entry renders as a faint
-    tick at its own price on the same axis.
+    renders on the LEFT (rail_left_label says which end is the target). The engine entry (V8 only,
+    read by the same source_ref key the approve flow writes) renders as a faint tick.
 
-POTENTIAL LEFT: (target-cmp)*qty for LONG, (cmp-target)*qty for SHORT -- same sign-aware shape as
-    unrealised_rupees but against target instead of cmp. Computed inline here, once.
-
-DO_NOT_TOUCH honoured (cc#1867 + cc#1928): v8_paper_positions and every engine that writes it,
-    trade_alerts and the approve flow -- this module only SELECTs. The V8 page and its 22-position
-    open book are untouched (nothing in this file is imported by any V8-page-serving module).
+DO_NOT_TOUCH honoured: trade_wall_approved.py's builder is imported read-only (its loop was moved
+    into approved_book() line-for-line, no logic change -- see that file); v8_paper_positions,
+    trade_alerts and the approve flow are only SELECTed. The V8 page and the Wall of Trades are
+    untouched.
 """
 import logging
-import os
 from typing import Optional
 
-import psycopg
 from fastapi import APIRouter
 
-import v8_book_canon
+from mobile_endpoints import _conn
+from trade_wall_approved import approved_book   # cc#1957: THE approved-book builder, not a copy
 
 log = logging.getLogger("scorr.v8_approved_trades")
-DATABASE_URL = os.getenv("DATABASE_URL", "")
 router = APIRouter(tags=["v8-approved-trades"])
-
-
-def _conn():
-    return psycopg.connect(DATABASE_URL)
 
 
 def _f(v) -> Optional[float]:
     return None if v is None else float(v)
 
 
+def _iso_ist(stamp) -> Optional[str]:
+    """The builder stamps approved_at as naive IST 'YYYY-MM-DD HH:MM'. The card pins its clock to
+    Asia/Kolkata (apTrWhenIst), so hand it an unambiguous ISO string with the +05:30 offset --
+    a naive string would be read in the DEVICE zone and drift on any phone not set to IST."""
+    if not stamp:
+        return None
+    t = str(stamp)
+    return (t.replace(" ", "T") + ":00+05:30") if (len(t) == 16 and t[10] == " ") else t
+
+
 @router.get("/api/mobile/home/approved-trades")
 def approved_trades():
     with _conn() as conn, conn.cursor() as cur:
-        # cc#1928: founder-approved V8 entries (trade_alerts.approved_at) joined to the position
-        # they approved, on the approve flow's own key (symbol@entry_ts second-precision), and
-        # ONLY while that position is still OPEN. v8_paper_positions.entry_ts is a naive IST
-        # timestamp, exactly what the flow's to_char() wrote into source_ref -- no tz shift here.
-        cur.execute("""SELECT p.symbol, p.side, p.basket, p.qty, p.entry_price, p.target, p.stop_loss,
-                              p.entry_ts, a.id AS alert_id, a.approved_at, a.approved_via, a.approved_price
-                       FROM trade_alerts a
-                       JOIN v8_paper_positions p
-                         ON p.status = 'OPEN'
-                        AND p.symbol = split_part(a.source_ref, '@', 1)
-                        AND to_char(p.entry_ts, 'YYYY-MM-DD HH24:MI:SS') = split_part(a.source_ref, '@', 2)
-                       WHERE a.approved_at IS NOT NULL
-                         AND a.source_engine = 'V8'
-                         AND a.kind = 'entry'
-                         AND strpos(COALESCE(a.source_ref, ''), '@') > 0
-                       ORDER BY a.approved_at DESC, a.id DESC""")
-        cols = [d[0] for d in cur.description]
-        positions = [dict(zip(cols, r)) for r in cur.fetchall()]
-        cur.execute("SELECT count(*) FROM trade_alerts WHERE approved_at IS NOT NULL")
-        approved_total = int(cur.fetchone()[0])
-        # cc#1762: THE canon CMP source, not a second query -- marked for exactly these symbols.
-        marks = v8_book_canon.open_marks(cur, [p["symbol"] for p in positions]) if positions else {}
+        book = approved_book(cur, conn)
+        rows = [r for r in book["rows"] if not r.get("closed")]
+        syms = sorted({r["symbol"] for r in rows})
+        futs = set()
+        if syms:
+            cur.execute("SELECT symbol FROM futures_universe WHERE is_active AND symbol = ANY(%s)", (syms,))
+            futs = {x[0] for x in cur.fetchall()}
+        # V8 rows only: basket tag + engine entry for the rail tick, on the approve flow's own key
+        # (source_ref = symbol@entry_ts second-precision, cc#1928). SELECT only.
+        v8 = {}
+        refs = sorted({r["source_ref"] for r in rows if (r.get("engine") == "V8" and r.get("source_ref"))})
+        if refs:
+            try:
+                cur.execute("""SELECT symbol || '@' || to_char(entry_ts, 'YYYY-MM-DD HH24:MI:SS') AS ref,
+                                      basket, entry_price, entry_ts
+                               FROM v8_paper_positions
+                               WHERE status = 'OPEN' AND entry_ts IS NOT NULL
+                                 AND symbol || '@' || to_char(entry_ts, 'YYYY-MM-DD HH24:MI:SS') = ANY(%s)""", (refs,))
+                for ref, basket, ep, ets in cur.fetchall():
+                    v8.setdefault(ref, {"basket": basket, "entry": _f(ep), "entry_ts": ets})
+            except Exception as e:
+                log.warning("cc#1957 V8 basket lookup failed: %s", e)
 
     out = []
-    for p in positions:
-        sym = p["symbol"]
-        mk = marks.get(sym) or {}
-        cmp_v, cmp_ts = mk.get("cmp"), mk.get("cmp_ts")
-        entry, target, stop = _f(p["entry_price"]), _f(p["target"]), _f(p["stop_loss"])
-        qty, side = _f(p["qty"]), str(p["side"] or "").upper()
-
-        unrealised = v8_book_canon.unrealised_rupees(entry, cmp_v, side, qty)   # None if cmp missing
-        # R2 (Fable 10-Sep, founder "approved trades card needs redesign"): the card's headline is
-        # P&L SINCE THE APPROVAL PRICE -- the founder's own entry -- not the engine's entry. Same canon
-        # formula, approved_price in place of entry. Engine-entry P&L stays as `unrealised`.
-        approved_px = _f(p["approved_price"])
-        pnl_since = v8_book_canon.unrealised_rupees(approved_px, cmp_v, side, qty) if approved_px is not None else None
-        pnl_since_pct = (round((cmp_v - approved_px) / approved_px * 100.0 * (-1.0 if side == "SHORT" else 1.0), 2)
-                         if (approved_px and cmp_v is not None) else None)
+    counts = {"all": 0, "futures_long": 0, "futures_short": 0, "equity": 0}
+    for r in rows:
+        sym, side = r["symbol"], str(r.get("side") or "").upper()
         sign = -1.0 if side == "SHORT" else 1.0
-        risk_left = round((cmp_v - stop) * qty * sign, 2) if (cmp_v is not None and stop is not None and qty is not None) else None
-        reward_left = round((target - cmp_v) * qty * sign, 2) if (cmp_v is not None and target is not None and qty is not None) else None
+        instrument = "FUTURES" if sym in futs else "EQUITY"
+        counts["all"] += 1
+        if instrument == "EQUITY":
+            counts["equity"] += 1
+        elif side == "SHORT":
+            counts["futures_short"] += 1
+        else:
+            counts["futures_long"] += 1
+
+        approved_px, cmp_v = _f(r.get("entry_level")), _f(r.get("cmp"))
+        target, stop, qty = _f(r.get("target_price")), _f(r.get("stop_loss")), _f(r.get("qty"))
+        mult = qty if qty is not None else 1.0
+        lk = v8.get(r.get("source_ref")) if r.get("engine") == "V8" else None
+        entry = lk["entry"] if lk else None
+
+        risk_left = round((cmp_v - stop) * mult * sign, 2) if (cmp_v is not None and stop is not None) else None
+        reward_left = round((target - cmp_v) * mult * sign, 2) if (cmp_v is not None and target is not None) else None
         rr_left = round(reward_left / risk_left, 1) if (risk_left and reward_left is not None and risk_left > 0) else None
+        potential_left = reward_left
 
-        potential_left = None
-        if cmp_v is not None and target is not None and qty is not None:
-            sign = -1.0 if side == "SHORT" else 1.0
-            potential_left = round((target - cmp_v) * qty * sign, 2)
-
-        marker_pct = None
-        entry_pct = None
+        marker_pct = entry_pct = None
         if stop is not None and target is not None and stop != target:
             left_end, right_end = min(stop, target), max(stop, target)
             if entry is not None:
@@ -125,28 +127,29 @@ def approved_trades():
                 marker_pct = round(max(0.0, min(100.0, (cmp_v - left_end) / (right_end - left_end) * 100.0)), 1)
 
         out.append({
-            "symbol": sym, "side": side, "basket": p["basket"],
-            "opened_at": p["entry_ts"].isoformat() if p["entry_ts"] else None,
-            "approved_at": p["approved_at"].isoformat() if p["approved_at"] else None,   # cc#1928
-            "approved_via": p["approved_via"],                                            # cc#1928
-            "alert_id": p["alert_id"],                                                    # cc#1928
+            "symbol": sym, "side": side, "instrument": instrument,                      # cc#1957
+            "engine": r.get("engine"), "basket": (lk or {}).get("basket"),
+            "opened_at": (lk["entry_ts"].isoformat() if (lk and lk.get("entry_ts")) else None),
+            "approved_at": _iso_ist(r.get("approved_at")), "approved_via": r.get("approved_via"),
+            "alert_id": r.get("id"),
             "entry": entry, "entry_pct": entry_pct,
-            "cmp": cmp_v, "cmp_as_of": cmp_ts,
+            "cmp": cmp_v, "cmp_as_of": r.get("cmp_date"), "cmp_label": r.get("cmp_label"),
             "target": target, "stop_loss": stop,
             "rail_left_label": "target" if (target is not None and stop is not None and target <= stop) else "stop",
-            "unrealised": unrealised, "potential_left": potential_left,
-            "marker_pct": marker_pct,
-            # R2 fields
+            "marker_pct": marker_pct, "potential_left": potential_left,
             "approved_price": approved_px, "qty": qty,
-            "pnl_since_approval": pnl_since, "pnl_since_approval_pct": pnl_since_pct,
+            "qty_basis": r.get("qty_basis"), "per_share": qty is None,                   # cc#1957
+            "pnl_since_approval": _f(r.get("pnl")), "pnl_since_approval_pct": _f(r.get("pnl_pct")),   # the builder's own
             "risk_left": risk_left, "reward_left": reward_left, "rr_left": rr_left,
         })
     return {
-        "count": len(out), "positions": out,
-        "approved_alerts_total": approved_total,   # cc#1928: all approvals, open or since closed
-        "source": ("trade_alerts.approved_at (source_engine=V8, kind=entry) joined to the still-OPEN "
-                   "v8_paper_positions row on source_ref = symbol@entry_ts (cc#1928); never the paper book"),
-        "formula": ("v8_book_canon.unrealised_rupees over v8_book_canon.open_marks (cc#1762 canon); "
-                    "marker_pct = (cmp-min(stop,target))/(max(stop,target)-min(stop,target))*100, "
-                    "clamped 0-100 -- lower price renders left, per rail_left_label"),
+        "count": len(out), "positions": out, "counts": counts,
+        "approved_alerts_total": int(book.get("count") or 0),   # every approval, open or closed
+        "source": ("trade_wall_approved.approved_book() -- every approved alert (all engines), rows whose "
+                   "resolved close state is OPEN (cc#1957); never the paper book"),
+        "instrument_rule": "FUTURES if symbol in futures_universe WHERE is_active (the Wall of Trades test), else EQUITY",
+        "pnl_rule": book.get("pnl_rule"), "qty_rule": book.get("qty_rule"), "close_rule": book.get("close_rule"),
+        "formula": ("pnl_since_approval / _pct are the builder's own; risk/reward/potential = (level - cmp) x qty "
+                    "(1 per share) sign-aware; marker_pct = (cmp-min(stop,target))/(max-min)*100 clamped 0-100 "
+                    "-- lower price renders left, per rail_left_label"),
     }

@@ -1312,6 +1312,17 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
    here. Behaviour is the component's — same four popups. */
 .ap-card .cardstrip{margin-top:var(--space-8);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi);display:flex}
 .ap-card .cardstrip .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}   /* cc#1948: pills are content-sized and left-aligned by the single spec in scorr_card_strip.js; this row only spans the card */
+/* cc#1957: filter funnel right of the count chip; brand-coloured while a filter is active. The
+   sheet is the same overlay/sheet shape the Derivatives card already uses (.deriv-sheet-ov /
+   .deriv-sheet); only the option rows are this card's own. */
+.ap-hdr .filt{flex:none;display:inline-flex;align-items:center;justify-content:center;width:var(--space-24);height:var(--space-24);margin-left:var(--space-2);padding:0;background:transparent;border:var(--bw-1) solid var(--edge);border-radius:var(--radius-7);color:var(--muted);cursor:pointer}
+.ap-hdr .filt svg{width:var(--space-13);height:var(--space-13);display:block}
+.ap-hdr .filt.on{color:var(--brand);border-color:var(--brand)}
+.apf-opt{display:flex;align-items:center;gap:var(--space-10);width:100%;padding:var(--space-13) var(--space-14);background:transparent;border:0;border-bottom:var(--bw-1) solid var(--line2);color:var(--txt);font-size:var(--type-13);font-weight:700;text-align:left;cursor:pointer}
+.apf-opt .sub{margin-left:auto;font-size:var(--type-10);font-weight:700;color:var(--muted)}
+.apf-opt.on{color:var(--brand)}.apf-opt.on .sub{color:var(--brand)}
+.apf-opt .tick{width:var(--space-16);text-align:center;font-weight:800}
+.apf-note{padding:var(--space-10) var(--space-14) var(--space-16);font-size:var(--type-105);color:var(--muted);line-height:1.5}
 /* cc#1941: the pill LOOK (size, radius, fill, edge, letter, pressed, disabled) is defined ONCE in
    scorr_card_strip.js (body.mcards block) -- the cc#1939 spec moved there so every app consumer
    matches. This page only stretches the pills across the row. */
@@ -3525,9 +3536,9 @@ function apTrCardHtml(p){
   return '<div class="ap-card' + (dir ? ' ' + dir : '') + '">'
     + '<div class="ap-top"><div><div class="ap-sym">' + esc(p.symbol)
     + '<span class="ap-tag ' + (String(p.side || '').toUpperCase() === 'SHORT' ? 's' : 'b') + '">' + esc(apTrSideLabel(p.side)) + '</span>'
-    + (p.basket ? '<span class="ap-tag">' + esc(apTrBasketLabel(p.basket)) + '</span>' : '') + '</div>'
+    + (p.basket ? '<span class="ap-tag">' + esc(apTrBasketLabel(p.basket)) + '</span>' : (p.engine ? '<span class="ap-tag">' + esc(p.engine) + '</span>' : '')) + '</div>'   /* cc#1957: non-V8 rows have no basket; the engine names the source instead */
     /* cc#1931 point 3: approval date+time · lot — no word "approved" (the eyebrow already says it) */
-    + '<div class="ap-when">' + esc(apTrWhenIst(p.approved_at)) + ' · 1 lot (' + esc(apTrLot(p.qty)) + ')</div></div>'
+    + '<div class="ap-when">' + esc(apTrWhenIst(p.approved_at)) + (p.qty != null ? ' · 1 lot (' + esc(apTrLot(p.qty)) + ')' : ' · per share') + '</div></div>'   /* cc#1957: no paper position => per share */
     + '<div class="ap-pnl">' + head + '</div></div>'
     + rail
     + '<div class="ap-foot"><span>Risk left <b>' + (hasCmp ? esc(apTrInr(p.risk_left)) : '—') + '</b></span><span>Reward left <b>' + (hasCmp ? esc(apTrInr(p.reward_left)) : '—') + '</b></span><span>R:R <b>' + (hasCmp ? esc(apTrRr(p.rr_left)) : '—') + '</b></span></div>'
@@ -3535,8 +3546,66 @@ function apTrCardHtml(p){
     + '</div>';
 }
 function apTrShellHtml(){
-  return '<div class="approved-slider"><div class="ap-hdr"><span class="eye">APPROVED TRADES</span><div class="rule"></div><span class="cnt" id="apTrCount"></span></div>'
+  return '<div class="approved-slider"><div class="ap-hdr"><span class="eye">APPROVED TRADES</span><div class="rule"></div><span class="cnt" id="apTrCount"></span>'
+    + '<button type="button" class="filt" id="apTrFilt" title="Filter" onclick="apTrFilterOpen()">' + APTR_FUNNEL + '</button></div>'   /* cc#1957 */
     + '<div class="ap-empty" id="apTrBody">Loading…</div></div>';
+}
+/* cc#1957: the three-way filter. Session-only state (in memory, no storage): APTR.rows is the
+   endpoint's OPEN approved book (every engine), APTR.filter is one key or null (= All). Single
+   select; tapping the active option again clears to All. instrument / side come from the endpoint
+   (FUTURES = symbol in futures_universe WHERE is_active, the Wall of Trades test). */
+var APTR = { rows: [], filter: null, counts: null };
+var APTR_FILTERS = [
+  { key: 'fl', label: 'Futures Long',  test: function(p){ return p.instrument === 'FUTURES' && String(p.side || '').toUpperCase() === 'LONG'; } },
+  { key: 'fs', label: 'Futures Short', test: function(p){ return p.instrument === 'FUTURES' && String(p.side || '').toUpperCase() === 'SHORT'; } },
+  { key: 'eq', label: 'Equity',        test: function(p){ return p.instrument === 'EQUITY'; } }
+];
+var APTR_FUNNEL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12L9.5 8.6V13l-3 1.4V8.6L2 3z"/></svg>';
+function apTrFilterDef(){ for (var i = 0; i < APTR_FILTERS.length; i++){ if (APTR_FILTERS[i].key === APTR.filter) return APTR_FILTERS[i]; } return null; }
+function apTrVisible(){ var f = apTrFilterDef(); return f ? APTR.rows.filter(f.test) : APTR.rows.slice(); }
+function apTrRender(){
+  var body = document.getElementById('apTrBody'); if (!body) return;
+  var f = apTrFilterDef(), positions = apTrVisible();
+  var cnt = document.getElementById('apTrCount'); if (cnt) cnt.textContent = positions.length;   /* chip = the filtered count */
+  var fb = document.getElementById('apTrFilt'); if (fb) fb.className = 'filt' + (f ? ' on' : '');
+  if (!positions.length){
+    body.className = 'ap-empty';
+    body.innerHTML = f
+      ? '<b>No approved ' + esc(f.label) + ' open.</b>Tap the filter to see the other approved trades.'   /* cc#1957: never the paper book */
+      : '<b>No approved trades open</b>Approve from the Wall of Trades. Nothing is shown here until you do.';   /* ref, verbatim */
+    return;
+  }
+  body.className = '';
+  body.innerHTML = '<div class="ap-deck" id="apTrTrack" onscroll="apTrDots()">' + positions.map(apTrCardHtml).join('') + '</div>'
+    + (positions.length > 1 ? '<div class="ap-dots" id="apTrDots">' + positions.map(function(_, i){ return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>' : '');
+}
+function apTrFilterOv(){
+  var ov = document.getElementById('apTrFiltOv');
+  if (!ov){
+    ov = document.createElement('div'); ov.id = 'apTrFiltOv'; ov.className = 'deriv-sheet-ov';
+    ov.innerHTML = '<div class="deriv-sheet" id="apTrFiltSheet"></div>';
+    ov.addEventListener('click', function(e){ if (e.target === ov) apTrFilterClose(); });
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+function apTrFilterClose(){ var ov = document.getElementById('apTrFiltOv'); if (ov) ov.classList.remove('open'); }
+function apTrFilterOpen(){
+  var ov = apTrFilterOv(), sh = document.getElementById('apTrFiltSheet');
+  var h = '<div class="dsh-hd"><b>Approved trades</b><button type="button" class="dsh-close" onclick="apTrFilterClose()" aria-label="Close">×</button></div>';
+  APTR_FILTERS.forEach(function(f){
+    var on = APTR.filter === f.key, n = APTR.rows.filter(f.test).length;
+    h += '<button type="button" class="apf-opt' + (on ? ' on' : '') + '" onclick="apTrFilterPick(\'' + f.key + '\')">'
+      + '<span class="tick">' + (on ? '✓' : '') + '</span>' + esc(f.label) + '<span class="sub">' + n + '</span></button>';
+  });
+  h += '<div class="apf-note">One at a time. Tap the active option again to show all ' + APTR.rows.length + '.</div>';
+  sh.innerHTML = h;
+  ov.classList.add('open');
+}
+function apTrFilterPick(key){
+  APTR.filter = (APTR.filter === key) ? null : key;   /* tap the active one again => All */
+  apTrFilterClose();
+  apTrRender();
 }
 function apTrDots(){
   var tr = document.getElementById('apTrTrack'), dots = document.getElementById('apTrDots');
@@ -3552,17 +3621,9 @@ function apTrDots(){
 }
 function loadApprovedTrades(){
   fetch('/api/mobile/home/approved-trades').then(function(r){ return r.json(); }).then(function(x){
-    var body = document.getElementById('apTrBody'); if (!body) return;
-    var positions = x.positions || [];
-    var cnt = document.getElementById('apTrCount'); if (cnt) cnt.textContent = positions.length;   /* ref lock 8 */
-    if (!positions.length){
-      body.className = 'ap-empty';
-      body.innerHTML = '<b>No approved trades open</b>Approve from the Wall of Trades. Nothing is shown here until you do.';   /* ref, verbatim */
-      return;
-    }
-    body.className = '';
-    body.innerHTML = '<div class="ap-deck" id="apTrTrack" onscroll="apTrDots()">' + positions.map(apTrCardHtml).join('') + '</div>'
-      + (positions.length > 1 ? '<div class="ap-dots" id="apTrDots">' + positions.map(function(_, i){ return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>' : '');
+    APTR.rows = x.positions || [];
+    APTR.counts = x.counts || null;
+    apTrRender();   /* cc#1957: chip, deck and empty state all go through the one renderer */
   }).catch(function(){
     var body = document.getElementById('apTrBody');
     if (body){ body.className = 'ap-empty'; body.textContent = 'Could not load approved trades right now.'; }

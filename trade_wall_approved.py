@@ -123,17 +123,15 @@ def _err(status, msg, **extra):
     return JSONResponse(body, status_code=status)
 
 
-@router.get("/api/tradewall/approved")
-@_json_safe
-def tradewall_approved(request: Request):
-    """The Approved tab: every trade_alerts row with status = approved, newest approval first,
-    LEFT JOIN the sidecar. Open vs closed is `closed_at IS NULL` on the sidecar, never a state
-    change on trade_alerts."""
-    g = _guard(request)
-    if g:
-        return g
-    with _conn() as conn, conn.cursor() as cur:
-        _ensure(conn)
+def approved_book(cur, conn):
+    """cc#1957: THE approved-book row builder, importable. This is the body of the Approved tab's
+    GET, moved out of the route function byte-for-byte (same SQL, same resolver calls, same P&L
+    formula, same payload) so the Home APPROVED TRADES slider (v8_approved_trades.py) can read the
+    SAME rows instead of carrying a second computation of entry / cmp / pnl / levels. Nothing in
+    here changed; the route below just calls it. Caller owns the connection (psycopg v3, the
+    mobile_endpoints._conn kind) and the guard."""
+    _ensure(conn)
+    if True:   # cc#1957: indentation kept so the block below is a pure move, diffable line-for-line
         cur.execute("""SELECT a.id, a.symbol, a.direction, a.source_engine, a.source_ref, a.notes, a.approved_via,
                               a.approved_price,
                               a.approved_at AT TIME ZONE 'Asia/Kolkata' AS approved_ist,
@@ -235,6 +233,24 @@ def tradewall_approved(request: Request):
             })
         if mirrored:
             conn.commit()                      # cc#1781: engine mirrors written by this read
+    return _approved_book_payload(out, n_open, n_closed)
+
+
+@router.get("/api/tradewall/approved")
+@_json_safe
+def tradewall_approved(request: Request):
+    """The Approved tab: every trade_alerts row with status = approved, newest approval first,
+    LEFT JOIN the sidecar. Open vs closed is `closed_at IS NULL` on the sidecar, never a state
+    change on trade_alerts. cc#1957: the rows come from approved_book() above — one builder, also
+    read by the Home slider."""
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        return approved_book(cur, conn)
+
+
+def _approved_book_payload(out, n_open, n_closed):
     return {
         "rows": out, "count": len(out), "open_count": n_open, "closed_count": n_closed,
         "as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S"),
