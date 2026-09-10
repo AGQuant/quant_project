@@ -2011,7 +2011,7 @@ RESULTS_CARD_JS = """
       +'<th style=\"text-align:right\">PAT YoY</th><th style=\"text-align:right\">Margin vs LY</th>'
       +'<th style=\"text-align:right\">Move %</th></tr></thead><tbody>'+rows+'</tbody></table>'
       +'<div class=\"rcard-note\">Top-3 by GVM in '+esc(pr.segment||'segment')+' &middot; '+esc(pr.quarter||'')
-      +' &middot; YoY (screener export); move = close vs prior close on result day.</div></div>';
+      +' &middot; YoY vs the same quarter last year; move = close vs prior close on result day.</div></div>';   // cc#1955: no source name on the popup
     return '<div class=\"rcard-peerres\">'+btn+tbl+'</div>';
   }
 
