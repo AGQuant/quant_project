@@ -1,0 +1,163 @@
+{
+ "card": "cc#1986",
+ "generated": "2026-09-10T23:35+05:30",
+ "read_only": true,
+ "scope": {
+  "routes_parsed": 677,
+  "py_files": 257,
+  "routers_with_prefix": 29
+ },
+ "ranked_by_harm": [
+  {
+   "rank": 1,
+   "type": "B",
+   "table": "v8_metrics",
+   "status": "CONFIRMED",
+   "writers": [
+    "v8_signal_writer.py:1011 (5-min, market hours)",
+    "v8_engine.py:306 (EOD, bg_v8_eod ran 15:50 IST 10-Sep)"
+   ],
+   "mechanism": "both ON CONFLICT (symbol, score_date) DO UPDATE on the same row; EOD runs after the 15:20 last tick",
+   "guarded_columns": [
+    "mom_2d",
+    "day_1d",
+    "sector_day"
+   ],
+   "unguarded_columns": [
+    "gvm_score",
+    "dma_20",
+    "dma_50",
+    "dma_200",
+    "daily_rsi",
+    "rsi_month",
+    "rsi_weekly",
+    "month_return",
+    "week_return",
+    "year_return",
+    "eod_chg"
+   ],
+   "precedent": "v8_engine.py:331 comment - unguarded sector_day overwrite nulled the live value every trading day until cc#1461 added the guard",
+   "tension": "CLAUDE.md V8 architecture lock says EOD freezes gvm_score only",
+   "user_visible": "after ~15:50 IST the 11 unguarded columns show EOD values, not the 15:20 live tick",
+   "decision_needed": "guard the 11 columns with the same COALESCE the other three have, or rule that EOD is meant to win"
+  },
+  {
+   "rank": 2,
+   "type": "C",
+   "path": "GET /api/v8/metrics/all",
+   "status": "CONFIRMED",
+   "handlers": [
+    "v8_endpoints.py:1164 metrics_all",
+    "main.py:1991 v8_metrics_all"
+   ],
+   "winner": "v8_endpoints.py:1164",
+   "why": "app.include_router(v8_router) at main.py:816 registers before the duplicate at main.py:1991; FastAPI first match wins",
+   "payload_difference": "winner joins segment, verdict, futures theme, live v21 metrics and Vol R (RVOL); the dead copy is a bare SELECT off v8_metrics",
+   "user_visible": "none today",
+   "latent_risk": "moving the include_router below line 1991 silently degrades the dashboard Master tab",
+   "also": "logic in main.py violates rule 4 (wiring only)",
+   "owned_by": "cc#1984"
+  },
+  {
+   "rank": 3,
+   "type": "B",
+   "table": "v8_qualified",
+   "status": "CANDIDATE",
+   "writers": [
+    "v8_engine.py",
+    "v8_signal_writer.py"
+   ],
+   "note": "same two jobs and same EOD-after-live timing as v8_metrics; not yet verified at column level"
+  }
+ ],
+ "section_c": {
+  "complete": true,
+  "duplicate_method_path_pairs": 1,
+  "rejected": {
+   "count": 10,
+   "reason": "first pass did not resolve APIRouter(prefix=...); /trades, /positions, /summary, /status, /preview, /run, /tick, /backfill, /performance, /intraday, /health are distinct books (/api/v10/, /api/v14/, /api/qsr/, /api/bt6/ ...), which cc#1979 already ruled is not a clash"
+  }
+ },
+ "section_b": {
+  "complete": true,
+  "tables_with_multiple_writer_files": 42,
+  "by_design": {
+   "append_only_log_config_queue": [
+    "ops_log",
+    "session_log",
+    "cc_task_logs",
+    "app_config",
+    "job_runs",
+    "ops_metrics_t1_queue"
+   ],
+   "coordinated_insert_vs_retention_delete": [
+    "option_chain",
+    "pcr_daily",
+    "pcr_intraday",
+    "options_oi_daily",
+    "bt14_fut_oi",
+    "perf_request_log"
+   ],
+   "replay_vs_live_pairs_listed_not_confirmed": [
+    "v8_paper_positions",
+    "v8_paper_trades",
+    "v8_paper_pivots",
+    "qb_nav_daily",
+    "quant_paper_positions"
+   ]
+  },
+  "rejected_false_positives": [
+   {
+    "table": "v8_funnel_counts",
+    "file": "test_funnel_day_scope.py",
+    "why": "does not write; the string appears inside re.findall() grepping the writer's source as a test assertion"
+   },
+   {
+    "table": "polished_news",
+    "file": "news_guards.py",
+    "why": "match is inside a docstring stating there is no Python insert path; only real writer is news_tagger.py setting mentioned_symbols on existing rows"
+   }
+  ]
+ },
+ "section_d": {
+  "complete": false,
+  "status": "CANDIDATES ONLY - formulas not compared",
+  "candidates": {
+   "rsi": [
+    "invest_check_v2.py",
+    "tc_v4_endpoints.py",
+    "v12_backtest.py"
+   ],
+   "pivots": [
+    "invest_check_v2.py",
+    "trade_check_v34_endpoints.py",
+    "tc_v4_endpoints.py",
+    "v8_intra_backtest.py",
+    "buy_reversal_simulator.py",
+    "v8_paper.py"
+   ],
+   "fall_from_day_high_hourly_pct": [
+    "deriv_metrics.py (canonical)",
+    "v8_signal_writer.py",
+    "bt7_harness.py",
+    "v8_filter_killswitch.py",
+    "v8_dashboard.html",
+    "scorr_v13.html"
+   ],
+   "pcr": [
+    "pcr_endpoints.py",
+    "pcr_mood.py"
+   ]
+  }
+ },
+ "section_a": {
+  "complete": false,
+  "status": "NOT STARTED",
+  "remaining": "extend census read-set extraction to full helper depth across 676 routes, then group routes by the question they answer"
+ },
+ "out_of_scope_by_card": [
+  "TC family (cc#1982/1983, already ruled)",
+  "cc#1549 Ask Scorr v3.3 (founder parked)"
+ ],
+ "limits": "static analysis; route table not dumped from a running app (container cannot boot main.py safely). Registration order in main.py answers the one duplicate found. Two regex false positives were caught and corrected during this pass; the same risk applies to every Section D candidate."
+}
