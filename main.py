@@ -502,9 +502,15 @@ except Exception as _tbe:
     print("[cc#1203] theme boot NOT inlined (%s): %s" % (_THEME_BOOT_SRC, _tbe), flush=True)
 
 
+from pwa_endpoints import GOLDNIGHT_FIELD as _GN_FIELD   # cc#1938: the one token value for the app's system bar
 _MOBILE_APP_DARK = (
     b"<script>(function(){try{"
     b"document.documentElement.setAttribute('data-theme','dark');"
+    # cc#1938: _MOBILE_HEAD's meta theme-color above is the WEB light default (#F4F7FE); on /m/*
+    # the bar must be the app's dark field before first paint, so the first theme-color meta in
+    # <head> is set here, in head, before the body renders. Value = GOLD NIGHT --field from the
+    # token file via pwa_endpoints, not a second literal.
+    b"var mc=document.querySelector('meta[name=\"theme-color\"]');if(mc)mc.content='" + _GN_FIELD.encode() + b"';"
     b"}catch(e){}})();</script>"
 )
 

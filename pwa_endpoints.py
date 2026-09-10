@@ -72,6 +72,27 @@ def _icon(size: int) -> bytes:
 
 
 # ── web app manifest ──
+# cc#1938: the installed PWA's system bar takes the MANIFEST colour, not the page's meta -- and this
+# manifest said #F4F7FE (cc#348 light default) under a GOLD NIGHT-only app (theme switcher hidden in
+# sprint 2), so Android painted a white status bar above a dark Home (founder screenshot 10-Sep
+# 15:44). theme_color / background_color and the shell's default meta now follow GOLD NIGHT's own
+# --field, READ FROM THE TOKEN FILE (scorr_themes.css, body[data-theme="goldnight"]{--field:...}) so
+# there is no second copy to drift; the literal below is the fallback only if the file is unreadable.
+# applyTheme() still swaps the meta to the active theme's --field at runtime, so a future light theme
+# gets a light bar. NOTE: Android caches the manifest colour at install; an already-installed WebAPK
+# shows the new bar only after a reinstall / manifest refresh.
+import os as _os_tok, re as _re_tok
+def _theme_field(theme, fallback):
+    try:
+        with open(_os_tok.path.join(_os_tok.path.dirname(__file__), "scorr_themes.css"), "r", encoding="utf-8") as _f:
+            m = _re_tok.search(r'body\[data-theme="%s"\]\{[^}]*?--field:(#[0-9A-Fa-f]{6})' % _re_tok.escape(theme), _f.read())
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return fallback
+GOLDNIGHT_FIELD = _theme_field("goldnight", "#0A0A0C")   # token: scorr_themes.css goldnight --field
+
 MANIFEST = {
     "name": "Scorr — Invest Like an Institution",
     "short_name": "Scorr",
@@ -86,8 +107,8 @@ MANIFEST = {
     "start_url": "/",
     "display": "standalone",
     "orientation": "portrait",
-    "theme_color": "#F4F7FE",    # cc#348: LIGHT is the default now (founder 09-Jul)
-    "background_color": "#F4F7FE",
+    "theme_color": GOLDNIGHT_FIELD,        # cc#1938: GOLD NIGHT --field (was #F4F7FE, cc#348 light default)
+    "background_color": GOLDNIGHT_FIELD,   # cc#1938: same -- the splash behind a dark app is dark
     "icons": [
         {"src": "/static/icon-192.png", "type": "image/png", "sizes": "192x192"},
         {"src": "/static/icon-512.png", "type": "image/png", "sizes": "512x512"},
@@ -190,7 +211,7 @@ PWA_JS = """
   }
   if (!document.querySelector('meta[name="theme-color"]')) {
     var m = document.createElement('meta');
-    m.name = 'theme-color'; m.content = '#F4F7FE';   // cc#348: light default; applyTheme swaps on dark
+    m.name = 'theme-color'; m.content = '__SCORR_FIELD__';   // cc#1938: GOLD NIGHT --field (token, substituted at load); applyTheme re-syncs to the active theme
     document.head.appendChild(m);
   }
 
@@ -586,7 +607,9 @@ PWA_JS = """
         try { localStorage.setItem('scorr_theme', t); } catch (e) {}
       }
       var m = document.querySelector('meta[name="theme-color"]');
-      if (m) m.content = (t === 'light') ? '#F4F7FE' : '#0A0F1E';
+      // cc#1938: the bar follows the ACTIVE theme's own --field when the page declares one; the
+      // light/dark literals are only the fallback for a page with no token on <body>.
+      if (m) { var fc = ''; try { fc = getComputedStyle(document.body).getPropertyValue('--field').trim(); } catch (e) {} m.content = fc || ((t === 'light') ? '#F4F7FE' : '#0A0F1E'); }
       syncThemeBtn();
     }
     document.getElementById('pwa-theme-toggle').addEventListener('click', function () {
@@ -891,6 +914,8 @@ PWA_JS = """
   }
 })();
 """
+PWA_JS = PWA_JS.replace('__SCORR_FIELD__', GOLDNIGHT_FIELD)   # cc#1938: one token value, no second copy
+
 
 # ── nav hide/show toggle (cc_task #118) — shared across all pages ──
 # Collapse is driven by an attribute on <html> + head CSS rather than a class on the nav, so it
