@@ -1,598 +1,151 @@
 <!doctype html>
+<!-- ══ mobile/trade_wall.html — Wall of Trades app page. Fable single-mode build 10-Sep-2026. Data: /api/tradewall (the web wall's own endpoint, same rows), approve/dismiss via /api/alerts/approve_signal and /dismiss_signal exactly as trade_wall_web.html does; approval window from the payload,
+     so a decision here and a decision on the web land in the same trade_alerts row. Contract tokens only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Wall of Trades · Scorr</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
-<script src="/scorr_card_common.js"></script>
 <style>
-/* cc#991 · Wall of Trades. Every class is `tw-` prefixed, LEAVES INCLUDED. This app has been bitten
-   six times by short generic class names (cc#964 .v/.m, cc#966 .m, cc#967 .v, cc#974 .a, cc#986
-   .g/.n/.v), and cc#986 proved that scoping a short name under a prefixed parent is not protection
-   — mobile_app.css's own rules still win. */
-.tw-card{margin:0 var(--space-12) var(--space-8);padding:var(--space-11) var(--space-13);background:var(--panel);border:var(--bw-1) solid var(--line);
-  border-radius:var(--radius-12)}
-.tw-top{display:flex;align-items:baseline;gap:var(--space-8)}
-.tw-ev{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;
-  letter-spacing:var(--track-em13);padding:var(--space-3) var(--space-7);border-radius:var(--radius-5);flex:none}
-.tw-in{color:var(--grn);background:color-mix(in srgb, var(--grn) 13%, transparent)}
-.tw-out-up{color:var(--grn);background:color-mix(in srgb, var(--grn) 13%, transparent)}
-.tw-out-dn{color:var(--red);background:color-mix(in srgb, var(--red) 13%, transparent)}
-.tw-out-flat{color:var(--mut);background:var(--panel2)}
-.tw-sym{font-size:var(--type-14);font-weight:800;letter-spacing:var(--track-em5);min-width:0;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
-.tw-when{margin-left:auto;flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-105);color:var(--dim);text-align:right}
-/* cc#1532: QB Basket only — the batch-write clock time, honestly labelled "computed" so it is
-   never mistaken for a market entry time. Sits under the existing date, smaller/dimmer. */
-.tw-computed{display:block;font-size:var(--type-9);opacity:.75}
-.tw-meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-6);margin-top:var(--space-7)}
-.tw-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:700;
-  letter-spacing:var(--track-em10);padding:var(--space-2) var(--space-6);border-radius:var(--radius-5);border:var(--bw-1) solid var(--line2);
-  color:var(--mut)}
-.tw-long{color:var(--grn);border-color:color-mix(in srgb, var(--grn) 40%, transparent)}
-.tw-short{color:var(--red);border-color:color-mix(in srgb, var(--red) 40%, transparent)}
-.tw-px{margin-top:var(--space-7);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-115);
-  color:var(--mut);display:flex;flex-wrap:wrap;gap:var(--space-10);align-items:baseline}
-.tw-px b{color:var(--txt);font-weight:700}
-.tw-pnl{margin-left:auto;font-weight:800;font-size:var(--type-13)}
-.tw-note{margin-top:var(--space-6);font-size:var(--type-10);color:var(--dim);line-height:1.5}
-.tw-day{margin:var(--space-16) var(--space-12) var(--space-8);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);
-  font-weight:800;letter-spacing:var(--track-em16);text-transform:uppercase;color:var(--dim)}
-.tw-sent{padding:var(--space-18) var(--space-2);text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-10);color:var(--dim)}
-/* cc#1295: i-button (other engines not in the 5 primary buckets — QSR today). */
-.tw-ibtn{margin:0 var(--space-12) var(--space-10);padding:var(--space-8) var(--space-12);border-radius:var(--radius-9);border:var(--bw-1) solid var(--line);
-  background:var(--panel);color:var(--mut);font-size:var(--type-11);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace}
-/* cc#1831: "+ New alert" — manual/custom alert creation, moved here from the Alerts tab
-   (ALERTS_PURE_DISPLAY_V1, session_log 40507). Same .tw-ibtn box, an <a> not a <button> because
-   this is a plain deep-link to /m/alerts#new — the SAME alOpen()/#new flow mobile/alerts.html and
-   the Home "Custom Alert" tile already use (cc#1635), not a rebuilt modal on this page. display
-   is set explicitly (unlike .tw-ibtn, a native <button>) because an <a> defaults to inline, where
-   padding/margin box awkwardly around surrounding line content. */
-.tw-newalert{display:inline-block;margin:0 var(--space-12) var(--space-10);padding:var(--space-8) var(--space-12);
-  border-radius:var(--radius-9);border:var(--bw-1) solid var(--line);background:var(--panel);color:var(--mut);
-  font-size:var(--type-11);font-weight:700;font-family:'IBM Plex Mono',ui-monospace,monospace;text-decoration:none}
-.tw-ov{display:none;position:fixed;inset:0;background:color-mix(in srgb, var(--field) 60%, transparent);z-index:9998;
-  align-items:center;justify-content:center;padding:var(--space-20)}
-.tw-ov.open{display:flex}
-.tw-ov-box{background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:var(--radius-14);max-width:380px;
-  width:100%;padding:var(--space-16)}
-.tw-ov-h{font-size:var(--type-14);font-weight:800;margin-bottom:var(--space-2)}
-.tw-ov-s{font-size:var(--type-11);color:var(--dim);margin-bottom:var(--space-10);line-height:1.5}
-.tw-ov-row{display:flex;justify-content:space-between;padding:var(--space-9) 0;border-bottom:var(--bw-1) solid var(--line2);
-  font-size:var(--type-12)}
-.tw-ov-row:last-child{border-bottom:none}
-.tw-ov-close{margin-top:var(--space-12);width:100%}
-
-/* cc#1526 built Approve/Alert clusters here; cc#1537 (founder confirmed 31-Aug) removed them —
-   the wall is pure display, /m/alerts is the app's sole approve surface. What survives is the
-   read-only APPROVED badge row (a GET off approved_map, showing a decision already taken). */
-.twa-row{display:flex;gap:var(--space-8);align-items:center;flex-wrap:wrap;margin-top:var(--space-9)}
-.twa-row:empty{display:none}
-.twa-ok{font:700 var(--type-11) 'IBM Plex Mono',ui-monospace,monospace;color:var(--grn)}
+.pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
+.pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
+.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
+.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
+.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+.seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+.lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
+.row:last-child{border-bottom:none}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
+.row.up::before{background:var(--win)}.row.dn::before{background:var(--loss)}.row.mu::before{background:var(--edge)}
+.row .nm{font-size:var(--type-125);font-weight:800}.row .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.row .nm .tag.b{color:var(--win)}.row .nm .tag.s{color:var(--loss)}.row .nm .tag.g{color:var(--brand)}
+.row .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}.row .sub b{color:var(--ink);font-weight:700}
+.row .v{text-align:right}.row .v .n{font-size:var(--type-15);font-weight:800;line-height:1}.row .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+.emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
+.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+.ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
+.rule{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8)}.rule b{color:var(--brand)}.rule.mu{color:var(--muted);font-size:var(--type-115)}
+.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+.chips{display:flex;gap:var(--space-6);overflow-x:auto;padding:var(--space-4) var(--space-16) 0;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel)}.chip.on{color:var(--brand);background:var(--hi)}
+.gates{display:inline-flex;gap:var(--space-2);vertical-align:middle;margin-left:var(--space-4)}.gates i{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--edge)}.gates i.ok{background:var(--win)}
+.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.row{grid-template-columns:1fr 84px}.row .nm a{color:inherit;text-decoration:none}
+.px{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3)}.px b{color:var(--ink);font-weight:800}.mu2{font-size:var(--type-9)}
+.st{font-size:var(--type-95);font-weight:700;margin-top:var(--space-5);color:var(--muted)}.st.ok{color:var(--win)}.st b{color:inherit}
+.act{display:flex;gap:var(--space-6);align-items:center;margin-top:var(--space-7);flex-wrap:wrap}
+.ab{font:inherit;font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-6) var(--space-10);border-radius:var(--radius-10);cursor:pointer}
+.ab.ap{background:var(--brand);color:var(--field);border:none}.ab.ap[disabled]{opacity:.35}.ab.dm{background:var(--hi);color:var(--muted);border:var(--bw-1) solid var(--edge)}
+.am{font-size:var(--type-9);color:var(--muted)}
+.btn2{display:block;width:100%;text-align:center;padding:var(--space-10);border-radius:var(--radius-12);font:inherit;font-size:var(--type-115);font-weight:800;background:var(--hi);color:var(--brand);border:var(--bw-1) solid var(--edge)}
+.lr{display:grid;grid-template-columns:1fr 84px 80px;gap:var(--space-8);align-items:center;padding:var(--space-8) var(--space-12);border-bottom:var(--bw-1) solid var(--hi)}.lr:last-child{border-bottom:none}
+.lr .nm{font-size:var(--type-115);font-weight:800}.lr .nm small{color:var(--muted);font-weight:600;font-size:var(--type-9)}.lr .v{text-align:right;font-size:var(--type-115);font-weight:800}
 </style>
 </head>
 <body data-theme="goldnight">
-<!-- cc#1645 P3: before-paint theme boot, byte-copy of mobile/home.html's (cc#1644 whitelist + remap). -->
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
-if(t){/* cc#1119 lifted the gate for the two DARK themes; cc#1636 (founder 02-Sep) lifts it for all
-     four token sets in scorr_themes.css - goldnight, dark, aquawhite, goldday - the same ALLOWED set
-     the resolver and the logo-menu switcher use, so a saved choice paints before first paint. */}}catch(e){}
+if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
-<!-- cc#1645 P3: shared appshell header (VARIANT B). Existing .head strip below is untouched. -->
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Wall of Trades</span></div><div class="as-slot"></div></div>
-<!--
-  cc#991/cc#1295 — WALL OF TRADES. Read-only display over /api/tradewall; this page computes no
-  money of its own.
-
-  cc#1587 (session_log 36394, founder 02-Sep): the wall shows APPROVED TRADES ONLY. Engine
-  buckets are gated server-side by app_config.wot_buckets_enabled (default ["approved_alerts"]).
-  The hierarchy below (status -> instrument -> engine bucket) is kept intact and comes back
-  automatically if that flag is widened; in approved mode the chips are empty and hidden.
-
-  cc#1295 (founder direct 24-Aug, session_log 30420 WALL_OF_TRADES_GROUPS_V2): STATUS (Open|Closed,
-  default Open) -> INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is one POSITION
-  (entry+exit together when closed), not a flat entry/exit event.
-
-  THE HONESTY RULE THIS PAGE OBEYS AND THE READER CAN CHECK: a day-precision position (quant
-  baskets, investment scanner — DATE columns with no time) prints its date alone, never a
-  fabricated clock time the database does not hold.
--->
-<div class="screen">
-
-  <div class="head as-hide">
-    <h1>Wall of Trades</h1>
-    <div class="s" id="sub">loading…</div>
-  </div>
-
-  <div class="chips" id="chipsStatus"></div>
-  <div class="chips" id="chipsInstrument"></div>
-  <div class="chips" id="chipsBucket"></div>
-  <button class="tw-ibtn" onclick="openOther()" title="Other engines not in the 5 primary buckets">i &middot; other engines</button>
-  <a class="tw-newalert" href="/m/alerts#new">＋ New alert</a>
-
-  <div class="body" id="body">
-    <div class="loading">Loading every trade…</div>
-  </div>
-
-  <div class="cover" id="cover"></div>
+<div class="pg">
+<div class="asof" id="asof">Loading…</div>
+<div id="body"><div class="err">Loading…</div></div>
 </div>
-
-<div class="tw-ov" id="otherOv" onclick="if(event.target===this)closeOther()">
-  <div class="tw-ov-box">
-    <div class="tw-ov-h">Other engines</div>
-    <div class="tw-ov-s">Engines with a real trade book that are not one of the 5 primary buckets above.</div>
-    <div id="otherBody">Loading…</div>
-    <button class="chip tw-ov-close" onclick="closeOther()">Close</button>
-  </div>
-</div>
-
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
   <a class="bn on" href="/m/trades"><span class="i">☷︎</span>WoT</a>
-  <a class="bn" href="/m/models"><span class="i">◍</span>Models</a>
+  <a class="bn" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
-
 <script>
-/* cc#1535 (founder 31-Aug): Wall of Trades joined the bottom nav (WoT slot, replacing Alerts,
-   which moved to the home grid tile 1). The nav stays FIVE items; this page now marks its own
-   tab active like every other nav-reachable page. The old "no active tab" rule applied only
-   while this page was grid-only — that reason no longer applies. */
-/* cc#1295 (founder direct 24-Aug, session_log 30420 WALL_OF_TRADES_GROUPS_V2): the wall moved from
-   four flat groups + an Entry/Exit event toggle to STATUS (Open|Closed, default Open) ->
-   INSTRUMENT (Futures|Equity) -> tagged ENGINE BUCKETS. Every card is now one POSITION (entry+
-   exit together when closed), not a flat entry/exit event — see trade_wall_endpoints.py for why. */
-var BUCKETS = { FUTURES: ['V8', 'TC Scanner', 'Index Intel'], EQUITY: ['QB Basket', 'Investment Scanner', 'Screeners'] };   /* cc#1733: third equity source */
-/* cc#1587 (session_log 36394): the wall now shows APPROVED TRADES ONLY. The server-side flag
-   app_config.wot_buckets_enabled (default ["approved_alerts"]) decides which buckets reach the
-   feed; this page reads `buckets_enabled` off the same /api/tradewall response and picks a
-   render mode from it. mode 'approved' = a flat list of approved trades, no chips. If the flag
-   is ever widened to an engine bucket the page falls back to the cc#1295 hierarchy ('engines')
-   with nothing else to change. */
-var STATE = { events: [], counts: {}, statusCounts: {}, byEngine: {}, total: null,
-              status: 'open', instrument: 'FUTURES', bucket: 'V8', asOf: null,
-              mode: 'approved', approvedAsOf: null };
-var PAGE  = { cursor: null, more: true, busy: false, obs: null };
-var LIMIT = 40;
-
-function esc(s){ return String(s == null ? '' : s)
-  .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-
-function inr(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return (x < 0 ? '−' : '') + '₹' + Math.abs(Math.round(x)).toLocaleString('en-IN');
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
+function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16); }
+function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
+function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
+function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+var Q={inst:'',status:'open',eng:'',cursor:'',events:[],aw:null,total:null};
+function inrS(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v), a=Math.abs(x); var t=a>=1e5?(a/1e5).toFixed(2)+' L':Math.round(a).toLocaleString('en-IN'); return (x<0?'−':(s&&x>0?'+':''))+'₹'+t; }
+function tsShort(s){ if(!s) return '—'; s=String(s); return dm(s)+(s.length>=16?' '+s.slice(11,16):''); }
+function ref(e){ return e.symbol+'@'+((e.entry&&e.entry.ts)||''); }
+function dir(e){ return e.side==='SHORT'?'SELL':'BUY'; }
+function stateHtml(e){
+  var st=e.state||'', a=e.approval||{};
+  if(st==='approved') return '<div class="st ok">APPROVED at '+inrS(a.approved_price)+' · '+esc(tsShort(a.approved_at))+(a.pnl_approved!=null?' · since approval <b class="'+cls(a.pnl_approved)+'">'+inrS(a.pnl_approved,true)+'</b>':'')+'</div>';
+  if(st==='dismissed') return '<div class="st mu">DISMISSED'+(a.approved_at?' · '+esc(tsShort(a.approved_at)):'')+'</div>';
+  if(st==='suppressed-in-position'){ var h=e.suppressed_by||{}; return '<div class="st mu">Already holding '+esc(h.symbol||e.symbol)+' '+esc(h.side||'')+' via '+esc(h.engine||'')+' — no second entry</div>'; }
+  if(st==='not-approval-applicable') return '<div class="st mu">Basket position — no approval needed</div>';
+  if(e.src==='alert') return '<div class="st ok">Approved trade</div>';
+  if(Q.status!=='open') return '';
+  var open=!!(Q.aw&&Q.aw.open);
+  return '<div class="act" data-id="'+esc(e.id)+'"><button class="ab ap" data-act="approve"'+(open?'':' disabled')+'>Approve at live</button><button class="ab dm" data-act="dismiss">Dismiss</button><span class="am" id="am-'+esc(e.id)+'">'+(open?'':esc((Q.aw&&Q.aw.reason)||'approvals 09:15–15:15 IST'))+'</span></div>';
 }
-function pctFmt(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return (x >= 0 ? '+' : '') + x.toFixed(2) + '%';
+function row(e){
+  var open=e.status==='open', px=open?e.cmp:e.exit_price, pn=e.pnl, tagS=e.side==='SHORT'?'s':'b';
+  var sub=esc(e.engine||'')+(e.instrument?' · '+esc(e.instrument.toLowerCase()):'')+' · in '+esc(tsShort(e.entry&&e.entry.ts))+(open?'':' · out '+esc(tsShort(e.exit&&e.exit.ts)))+(e.qty!=null?' · '+(e.qty_basis==='one-lot'?'1 lot ('+e.qty+')':e.qty+' qty'):'')+(e.reversal_of?' · <b>reversal</b>':'');
+  var right='<div class="n '+cls(pn)+'">'+(pn!=null?inrS(pn,true):(e.pnl_pct!=null?pct(e.pnl_pct,1):'—'))+'</div><div class="c">'+(e.pnl_pct!=null&&pn!=null?pct(e.pnl_pct,1):(open?(e.pnl_basis||''):(e.result||'')))+'</div>';
+  return '<div class="row '+(open?ud(pn):(e.result==='WIN'?'up':(e.result==='LOSS'?'dn':'mu')))+'"><div><div class="nm"><a href="/m/check?sym='+encodeURIComponent(e.symbol)+'">'+esc(e.symbol)+'</a><span class="tag '+tagS+'">'+esc(e.side||'')+'</span></div><div class="sub">'+sub+'</div><div class="px">'+inrS(e.entry_price)+' → <b>'+inrS(px)+'</b>'+(open&&!e.cmp?' <span class="mu2">no live price</span>':'')+(!open&&e.note?' · '+esc(e.note):'')+'</div>'+stateHtml(e)+'</div><div class="v">'+right+'</div></div>';
 }
-function px(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  var x = Number(v);
-  return x < 100 ? x.toFixed(2) : Math.round(x).toLocaleString('en-IN');
+function draw(d, append){
+  if(!append){ Q.events=d.events||[]; } else { Q.events=Q.events.concat(d.events||[]); }
+  Q.aw=d.approval_window||Q.aw; Q.cursor=d.has_more?d.next_cursor:'';
+  var sc=d.status_counts||{}, eng=d.by_engine||{}, ac=d.approval_counts||{};
+  document.getElementById('asof').innerHTML='<b>'+(sc.open||0)+'</b> open · '+(sc.closed||0)+' closed · '+esc(d.scope||'')+(ac.pending!=null?' · <b>'+ac.pending+'</b> waiting for you':'')+(ac.approved_today?' · '+ac.approved_today+' approved today':'');
+  var h='<div class="seg" id="st"><span data-v="open"'+(Q.status==='open'?' class="on"':'')+'>Open · '+(sc.open||0)+'</span><span data-v="closed"'+(Q.status==='closed'?' class="on"':'')+'>Closed · '+(sc.closed||0)+'</span></div>';
+  var ic=d.counts||{};
+  h+='<div class="chips" id="inst"><span class="chip'+(Q.inst===''?' on':'')+'" data-v="">All</span>'+(d.instruments||[]).map(function(i){return '<span class="chip'+(Q.inst===i?' on':'')+'" data-v="'+i+'">'+i.charAt(0)+i.slice(1).toLowerCase()+(ic[i]!=null?' · '+ic[i]:'')+'</span>';}).join('')+'</div>';
+  var engs=Object.keys(eng); if(engs.length>1) h+='<div class="chips" id="eng" style="padding-top:6px"><span class="chip'+(Q.eng===''?' on':'')+'" data-v="">Every engine</span>'+engs.map(function(k){return '<span class="chip'+(Q.eng===k?' on':'')+'" data-v="'+esc(k)+'">'+esc(k)+' · '+eng[k]+'</span>';}).join('')+'</div>';
+  var list=Q.eng?Q.events.filter(function(e){return e.engine===Q.eng;}):Q.events;
+  h+='<div class="sec"><h2>'+(Q.status==='open'?'Signals and open trades':'Closed trades')+'</h2><span class="hint">'+list.length+(Q.cursor?'+':'')+' · newest first</span></div>';
+  h+= list.length ? '<div class="lst">'+list.map(row).join('')+'</div>' : '<div class="emp"><b>Nothing here</b>No '+Q.status+' trade for this filter since 10 Aug.</div>';
+  if(Q.cursor) h+='<div style="margin:10px 16px 0"><button class="btn2" id="more">Load more</button></div>';
+  if(Q.status==='closed'&&(d.closed_summary||[]).length){ var cs=d.closed_summary; h+='<div class="sec"><h2>Record</h2><span class="hint">wins · losses · flat</span></div><div class="lst">'+cs.map(function(r){return '<div class="lr"><div class="nm">'+esc(r.engine)+'<small> · '+esc(String(r.instrument).toLowerCase())+'</small></div><div class="v"><span class="pos">'+r.wins+'</span> · <span class="neg">'+r.losses+'</span> · '+r.flat+'</div><div class="v '+cls(r.rs_total)+'">'+(r.rs_rows?inrS(r.rs_total,true):'—')+'</div></div>';}).join('')+'</div>'; }
+  h+='<div class="note"><b>What this wall is.</b> Every engine signal since 10 Aug, newest first. Approve records the live price and puts the trade in My Alerts; Dismiss hides it. One position per symbol and direction — a second signal on a name you hold is held back and says so. Futures P&L is one lot; equity is the position. Research, not advice.</div>';
+  document.getElementById('body').innerHTML=h;
+  var seg=function(id,fn){ var el=document.getElementById(id); if(!el) return; el.addEventListener('click', function(ev){ var s=ev.target.closest('[data-v]'); if(!s) return; fn(s.getAttribute('data-v')); }); };
+  seg('st', function(v){ Q.status=v; Q.eng=''; load(); }); seg('inst', function(v){ Q.inst=v; load(); }); seg('eng', function(v){ Q.eng=v; draw({events:[],status_counts:sc,by_engine:eng,counts:ic,instruments:d.instruments,scope:d.scope,approval_counts:ac,closed_summary:d.closed_summary,approval_window:Q.aw,has_more:!!Q.cursor,next_cursor:Q.cursor}, true); });
+  var m=document.getElementById('more'); if(m) m.addEventListener('click', function(){ load(true); });
+  document.querySelectorAll('.ab').forEach(function(b){ b.addEventListener('click', function(){ act(b.getAttribute('data-act'), b.closest('.act').getAttribute('data-id'), b); }); });
 }
-function qty(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return null;
-  return Math.round(Number(v)).toLocaleString('en-IN');
+function find(id){ for(var i=0;i<Q.events.length;i++) if(String(Q.events[i].id)===String(id)) return Q.events[i]; return null; }
+function act(kind,id,btn){
+  var e=find(id); if(!e) return; var msg=document.getElementById('am-'+id), wrap=btn.parentNode;
+  if(kind==='approve'&&!(Q.aw&&Q.aw.open)){ if(msg) msg.textContent='not recorded: '+((Q.aw&&Q.aw.reason)||'approvals 09:15–15:15 IST'); return; }
+  wrap.querySelectorAll('button').forEach(function(b){b.disabled=true;}); if(msg) msg.textContent=kind==='approve'?'approving at live price…':'dismissing…';
+  var body={source_engine:e.engine, source_ref:ref(e), symbol:e.symbol, direction:dir(e), kind:'entry'}; if(kind==='approve') body.approved_via='app-wall'; else body.dismissed_via='app-wall';
+  fetch('/api/alerts/'+(kind==='approve'?'approve_signal':'dismiss_signal'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin'}).then(function(r){return r.json().then(function(d){return {ok:r.ok,status:r.status,d:d};});}).then(function(res){
+    var d=res.d||{};
+    if(!res.ok||d.error||!d.alert){ if(msg) msg.textContent='not recorded: '+(d.detail||d.error||('HTTP '+res.status)); wrap.querySelectorAll('button').forEach(function(b){b.disabled=false;}); return; }
+    var a=d.alert; e.state=a.status; e.approval={id:a.id,approved_price:a.approved_price,approved_at:a.approved_at,approved_via:a.approved_via,notes:a.notes};
+    load();
+  }).catch(function(){ if(msg) msg.textContent='not recorded: network'; wrap.querySelectorAll('button').forEach(function(b){b.disabled=false;}); });
 }
-/* cc#1587: an approved price is the exact figure the founder approved at — always 2 dp,
-   never rounded to a whole rupee the way px() does for readability on engine cards. */
-function pxApproved(v){
-  if (v === null || v === undefined || isNaN(Number(v))) return '--';
-  return Number(v).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+function load(more){
+  if(!more) document.getElementById('body').innerHTML='<div class="err">Loading…</div>';
+  fetch('/api/tradewall?limit=40&status='+Q.status+'&instrument='+encodeURIComponent(Q.inst)+(more&&Q.cursor?'&cursor='+encodeURIComponent(Q.cursor):''),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){ if(d.error&&!(d.events||[]).length){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; } draw(d, !!more); }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load the wall.</div>'; });
 }
-
-/* cc#1587: one approved trade = one card. Symbol, BUY/SELL, approved price, approved time
-   (IST), origin (engine that raised it, or manual), notes. No status badge, no P&L — an
-   approved trade is a decision, not a position with an exit. */
-function approvedCard(e){
-  var side = e.side === 'SHORT' ? 'SELL' : (e.side === 'LONG' ? 'BUY' : (e.side || '--'));
-  var sideCls = side === 'SELL' ? 'tw-short' : 'tw-long';
-  var h = '<div class="tw-card slab dense">'
-    + '<div class="tw-top">'
-      + '<span class="tw-ev tw-in">APPROVED</span>'
-      + '<span class="tw-sym">' + esc(e.symbol) + '</span>'
-      + '<span class="tw-when">' + esc((e.entry && e.entry.when_full) || '--') + '</span>'
-    + '</div>'
-    + '<div class="tw-meta">'
-      + '<span class="tw-chip ' + sideCls + '">' + esc(side) + '</span>'
-      + '<span class="tw-chip">' + esc(e.origin || 'manual') + '</span>'
-    + '</div>'
-    + '<div class="tw-px"><span>approved price <b>' + pxApproved(e.entry_price) + '</b></span></div>';
-  if (e.note) h += '<div class="tw-note">' + esc(e.note) + '</div>';
-  return h + '</div>';
-}
-
-function approvedFeedHtml(list){
-  var h = '', day = null;
-  list.forEach(function(e){
-    if (e.day !== day){ day = e.day; h += '<div class="tw-day">' + esc(day || 'undated') + '</div>'; }
-    h += approvedCard(e);
-  });
-  return h;
-}
-
-function renderApproved(){
-  var n = STATE.total == null ? '--' : STATE.total;
-  document.getElementById('sub').textContent =
-    n + ' approved trade' + (STATE.total === 1 ? '' : 's')
-    + (STATE.approvedAsOf ? ' · as of ' + STATE.approvedAsOf + ' IST' : '');
-  document.getElementById('chipsStatus').innerHTML = '';
-  document.getElementById('chipsInstrument').innerHTML = '';
-  document.getElementById('chipsBucket').innerHTML = '';
-  var ib = document.querySelector('.tw-ibtn');
-  if (ib) ib.style.display = 'none';
-  var body = document.getElementById('body');
-  if (!STATE.events.length){
-    body.innerHTML = '<div class="empty"><b>No approved trades yet.</b>'
-      + 'Approve a trade on the Alerts page and it shows here.</div>' + sentinelHtml();
-  } else {
-    body.innerHTML = approvedFeedHtml(STATE.events) + sentinelHtml();
-  }
-  updateCover();
-  armSentinel();
-}
-
-function evClass(e){
-  if (e.status === 'open') return 'tw-in';
-  if (e.pnl === null || e.pnl === undefined) {
-    if (e.pnl_pct === null || e.pnl_pct === undefined) return 'tw-out-flat';
-    return Number(e.pnl_pct) > 0 ? 'tw-out-up' : (Number(e.pnl_pct) < 0 ? 'tw-out-dn' : 'tw-out-flat');
-  }
-  return Number(e.pnl) > 0 ? 'tw-out-up' : (Number(e.pnl) < 0 ? 'tw-out-dn' : 'tw-out-flat');
-}
-
-function card(e){
-  var sideCls = e.side === 'SHORT' ? 'tw-short' : 'tw-long';
-  var isClosed = e.status === 'closed';
-  /* cc#1295 verify 5: Closed cards always carry realised P&L — pnl (rupees) when the engine
-     sizes positions, else pnl_pct for a signal-only engine (TC Scanner/Investment Scanner).
-     An em-dash appears only when the source data itself is incomplete, never fabricated. */
-  var pnlHtml = '';
-  if (isClosed){
-    if (e.pnl !== null && e.pnl !== undefined)
-      pnlHtml = '<span class="tw-pnl ' + (Number(e.pnl) >= 0 ? 'pos' : 'neg') + '">' + inr(e.pnl) + '</span>';
-    else if (e.pnl_pct !== null && e.pnl_pct !== undefined)
-      pnlHtml = '<span class="tw-pnl ' + (Number(e.pnl_pct) >= 0 ? 'pos' : 'neg') + '">' + pctFmt(e.pnl_pct) + '</span>';
-    else
-      pnlHtml = '<span class="tw-pnl">--</span>';
-  }
-  var h = '<div class="tw-card slab dense">'
-    + '<div class="tw-top">'
-      + '<span class="tw-ev ' + evClass(e) + '">' + esc(e.status.toUpperCase()) + '</span>'
-      + '<span class="tw-sym">' + esc(e.symbol) + '</span>'
-      /* day-precision (quant baskets, investment scanner) prints a date only, no invented clock time */
-      + '<span class="tw-when">' + esc(isClosed ? (e.exit.when_full || '--') : (e.entry.when_full || '--'))
-        /* cc#1532: entry.computed only exists on the entry side (a QB Basket batch-inception
-           timestamp) — shown only when this line is actually displaying the entry date. */
-        + (!isClosed && e.entry.computed ? '<span class="tw-computed">computed ' + esc(e.entry.computed.when) + '</span>' : '')
-        + '</span>'
-    + '</div>'
-    + '<div class="tw-meta">'
-      + '<span class="tw-chip ' + sideCls + '">' + esc(e.side || '--') + '</span>'
-      + '<span class="tw-chip">' + esc(e.engine) + '</span>'
-      + (e.result ? '<span class="tw-chip">' + esc(e.result) + '</span>' : '')
-    + '</div>'
-    + '<div class="tw-px"><span>entry <b>' + px(e.entry_price) + '</b></span>'
-      + (isClosed ? '<span>exit <b>' + px(e.exit_price) + '</b></span>' : (qty(e.qty) ? '<span>qty <b>' + qty(e.qty) + '</b></span>' : ''))
-      + pnlHtml
-    + '</div>';
-  if (e.note) h += '<div class="tw-note">' + esc(e.note) + '</div>';
-  h += twRow(e);   /* cc#1526: Approve/Alert cluster — open engine cards only */
-  return h + '</div>';
-}
-
-function bucketView(){
-  return STATE.events.filter(function(e){ return e.engine === STATE.bucket; });
-}
-
-function feedHtml(list){
-  var h = '', day = null;
-  list.forEach(function(e){
-    if (e.day !== day){ day = e.day; h += '<div class="tw-day">' + esc(day || 'undated') + '</div>'; }
-    h += card(e);
-  });
-  return h;
-}
-
-function statusChipsHtml(){
-  return ['open','closed'].map(function(k){
-    var n = (STATE.statusCounts || {})[k];
-    return '<button class="chip' + (k === STATE.status ? ' on' : '') + '" onclick="pickStatus(\'' + k + '\')">'
-      + (k === 'open' ? 'Open' : 'Closed') + (n == null ? '' : ' <span class="n">' + n + '</span>') + '</button>';
-  }).join('');
-}
-function instrumentChipsHtml(){
-  return ['FUTURES','EQUITY'].map(function(k){
-    return '<button class="chip' + (k === STATE.instrument ? ' on' : '') + '" onclick="pickInstrument(\'' + k + '\')">'
-      + (k.charAt(0) + k.slice(1).toLowerCase()) + '</button>';
-  }).join('');
-}
-function bucketChipsHtml(){
-  var list = BUCKETS[STATE.instrument] || [];
-  return list.map(function(eng){
-    var n = ((STATE.byEngine || {})[eng] || {})[STATE.status] || 0;
-    return '<button class="chip' + (eng === STATE.bucket ? ' on' : '') + '" onclick="pickBucket(\'' + eng + '\')">'
-      + esc(eng) + ' <span class="n">' + n + '</span></button>';
-  }).join('');
-}
-
-function sentinelHtml(){
-  if (!PAGE.more) return '<div class="tw-sent" id="sentinel">That is the whole wall for this filter.</div>';
-  return '<div class="tw-sent" id="sentinel">' + (PAGE.busy ? 'Loading more…' : ' ') + '</div>';
-}
-
-function render(){
-  if (STATE.mode === 'approved') return renderApproved();
-  document.getElementById('sub').textContent =
-    (STATE.total == null ? '--' : STATE.total) + ' positions since 10 Aug 2026, '
-    + STATE.status + ', ' + STATE.bucket;
-  document.getElementById('chipsStatus').innerHTML = statusChipsHtml();
-  document.getElementById('chipsInstrument').innerHTML = instrumentChipsHtml();
-  document.getElementById('chipsBucket').innerHTML = bucketChipsHtml();
-  var body = document.getElementById('body');
-  var view = bucketView();
-  if (!view.length){
-    /* cc#1295 verify 7: Investment Scanner's Closed bucket is expected to render empty for some
-       time — the engine landed its first signal today, no exits proven yet. Honest, not an error. */
-    var msg = 'No ' + STATE.status + ' positions for ' + esc(STATE.bucket) + '.';
-    if (STATE.bucket === 'Investment Scanner' && STATE.status === 'closed'){
-      msg = 'The engine landed its first signal today and has not closed a position yet.';
-    }
-    body.innerHTML = '<div class="empty"><b>Nothing here yet</b>' + msg + '</div>' + sentinelHtml();
-  } else {
-    body.innerHTML = feedHtml(view) + sentinelHtml();
-  }
-  updateCover();
-  armSentinel();
-}
-
-function updateCover(){
-  var el = document.getElementById('cover');
-  if (!el) return;
-  if (STATE.mode === 'approved'){
-    el.textContent = 'showing ' + STATE.events.length + ' of ' + (STATE.total == null ? '--' : STATE.total);
-    return;
-  }
-  var view = bucketView();
-  var of = ((STATE.byEngine || {})[STATE.bucket] || {})[STATE.status];
-  el.textContent = 'showing ' + view.length + ' of ' + (of == null ? '--' : of);
-}
-
-/* ══ INFINITE SCROLL — cc#983's pattern, reused, not reinvented ══════════════════════════════
-   Keyset cursor, IntersectionObserver with a 400px rootMargin so the wait is invisible, and an
-   APPEND rather than a re-render so a scroll never throws away the DOM under the reader's thumb.
-
-   The server call is scoped to (instrument, status); the ENGINE BUCKET is a display filter over
-   what that call already returned (cc#1295 — one instrument holds 2-3 buckets, not worth a
-   separate fetch per bucket). appendCards() below filters fresh rows by bucket the same way
-   render() does, so a scroll and a bucket switch never disagree about what should be on screen. */
-function armSentinel(){
-  if (PAGE.obs){ PAGE.obs.disconnect(); PAGE.obs = null; }
-  var el = document.getElementById('sentinel');
-  if (!el || !PAGE.more) return;
-  if (!('IntersectionObserver' in window)) return;   // no observer: the page stays one-shot
-  PAGE.obs = new IntersectionObserver(function(entries){
-    if (entries.some(function(x){ return x.isIntersecting; })) loadMore();
-  }, {rootMargin: '400px'});
-  PAGE.obs.observe(el);
-}
-
-function url(cursor){
-  /* cc#1587: approved mode is one flat list — no instrument/status split on the server call */
-  var inst = STATE.mode === 'approved' ? 'ALL' : STATE.instrument;
-  var st   = STATE.mode === 'approved' ? 'ALL' : STATE.status;
-  var u = '/api/tradewall?limit=' + LIMIT + '&instrument=' + encodeURIComponent(inst)
-        + '&status=' + encodeURIComponent(st);
-  if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
-  return u;
-}
-
-function loadMore(){
-  if (PAGE.busy || !PAGE.more || !PAGE.cursor) return;
-  PAGE.busy = true;
-  var s = document.getElementById('sentinel');
-  if (s) s.textContent = 'Loading more…';
-  fetchWithTimeout(url(PAGE.cursor))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.error) throw new Error(d.error);
-      PAGE.cursor = d.next_cursor || null;
-      PAGE.more   = !!(d.has_more && d.next_cursor);
-      /* de-dupe by id even though a keyset cursor should make repeats impossible — a duplicate
-         card is the one failure a reader would actually SEE, so it is cheap insurance. */
-      var seen = {};
-      STATE.events.forEach(function(e){ seen[e.id] = 1; });
-      var fresh = (d.events || []).filter(function(e){ return !seen[e.id]; });
-      appendCards(STATE.mode === 'approved' ? fresh
-                  : fresh.filter(function(e){ return e.engine === STATE.bucket; }));
-      STATE.events = STATE.events.concat(fresh);
-      PAGE.busy = false;
-      var s2 = document.getElementById('sentinel');
-      if (s2) s2.outerHTML = sentinelHtml();
-      updateCover();
-      armSentinel();
-    })
-    .catch(function(){
-      PAGE.busy = false;
-      var s3 = document.getElementById('sentinel');
-      if (s3) s3.innerHTML = 'Could not load more · '
-        + '<button class="chip" onclick="loadMore()">Retry</button>';
-    });
-}
-
-function appendCards(fresh){
-  if (!fresh.length) return;
-  var body = document.getElementById('body');
-  var sent = document.getElementById('sentinel');
-  /* the day heading only repeats when the day actually changes across the join, so an appended
-     page cannot print a second heading for the day already on screen */
-  var approved = STATE.mode === 'approved';
-  var view = approved ? STATE.events : bucketView();
-  var lastDay = view.length ? view[view.length - 1].day : null;
-  var h = '', day = lastDay;
-  fresh.forEach(function(e){
-    if (e.day !== day){ day = e.day; h += '<div class="tw-day">' + esc(day || 'undated') + '</div>'; }
-    h += approved ? approvedCard(e) : card(e);
-  });
-  var frag = document.createElement('div');
-  frag.innerHTML = h;
-  while (frag.firstChild) body.insertBefore(frag.firstChild, sent);
-}
-
-function pickStatus(k){
-  if (k === STATE.status) return;
-  STATE.status = k; STATE.events = [];
-  PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
-  document.getElementById('body').innerHTML = '<div class="loading">Loading…</div>';
-  boot(true);
-}
-function pickInstrument(k){
-  if (k === STATE.instrument) return;
-  STATE.instrument = k; STATE.bucket = (BUCKETS[k] || [])[0];
-  STATE.events = []; PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
-  document.getElementById('body').innerHTML = '<div class="loading">Loading…</div>';
-  boot(true);
-}
-function pickBucket(eng){
-  if (eng === STATE.bucket) return;
-  /* display filter over what is already loaded for this instrument+status — no refetch */
-  STATE.bucket = eng;
-  render();
-}
-
-function boot(keepCounts){
-  fetchWithTimeout(url(null))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (d.error) throw new Error(d.error);
-      /* cc#1587: mode follows the server flag. Approved-only is the default; anything wider
-         (an engine bucket switched on in app_config) drops back to the cc#1295 hierarchy and
-         refetches once with the instrument/status filters the hierarchy expects. */
-      var en = d.buckets_enabled;
-      var approvedOnly = Array.isArray(en) && en.length === 1 && en[0] === 'approved_alerts';
-      if (!approvedOnly && STATE.mode === 'approved'){
-        STATE.mode = 'engines';
-        STATE.events = []; PAGE.cursor = null; PAGE.more = true; PAGE.busy = false;
-        return boot(false);
-      }
-      STATE.approvedAsOf = d.approved_as_of || null;
-      STATE.events = d.events || [];
-      /* counts are head-of-feed values over the WHOLE wall, so a filter switch keeps the ones
-         it already has rather than blanking the chips. by_engine is refreshed every call since
-         it is what each bucket chip needs for its own live count under the active status. */
-      if (!keepCounts || STATE.total == null){
-        STATE.counts = d.counts || {};
-        STATE.statusCounts = d.status_counts || {};
-        STATE.total  = d.total;
-      }
-      STATE.byEngine = d.by_engine || {};
-      STATE.asOf  = d.as_of;
-      PAGE.cursor = d.next_cursor || null;
-      PAGE.more   = !!(d.has_more && d.next_cursor);
-      render();
-      /* cc#1526: paint APPROVED badges on engine cards — not needed in approved mode, where
-         every card already IS an approved trade */
-      if (STATE.mode !== 'approved') twLoadApproved();
-    })
-    .catch(function(e){
-      document.getElementById('body').innerHTML =
-        '<div class="empty"><b>Could not load the wall</b>' + esc(e.message)
-        + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-      document.getElementById('sub').textContent = 'failed to load';
-    });
-}
-
-/* cc#1295: the i-button — engines with a real book that are not one of the 5 primary buckets
-   (QSR today, any future minor engine the same way). Loaded lazily on first open, not on boot. */
-var OTHER_LOADED = false;
-function openOther(){
-  document.getElementById('otherOv').classList.add('open');
-  if (OTHER_LOADED) return;
-  fetchWithTimeout('/api/tradewall/other-engines')
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      OTHER_LOADED = true;
-      var list = d.engines || [];
-      document.getElementById('otherBody').innerHTML = list.length
-        ? list.map(function(e){
-            return '<div class="tw-ov-row"><span>' + esc(e.name) + '</span>'
-              + '<span>' + e.open + ' open &middot; ' + e.closed + ' closed</span></div>';
-          }).join('')
-        : '<div class="empty">No other engines with a trade book right now.</div>';
-    })
-    .catch(function(e){
-      document.getElementById('otherBody').innerHTML =
-        '<div class="empty">Could not load — ' + esc(e.message) + '</div>';
-    });
-}
-function closeOther(){ document.getElementById('otherOv').classList.remove('open'); }
-document.addEventListener('keydown', function(e){
-  if (e.key === 'Escape') closeOther();
-});
-
-/* ══ cc#1526 put Approve + Alert clusters on open engine-signal cards; cc#1537 (founder
-   explicit, 31-Aug: "wall of trade purely display, on alert tab for approve") REMOVED them.
-   The wall writes NOTHING — approval and alert creation live only on /m/alerts (app) and
-   /alerts (web, cc#1536). What survives is the read-only APPROVED badge: approved_map is a
-   GET, and showing a decision already taken is exactly what a display-only wall should do.
-   source_ref stays symbol + '@' + entry.ts AS SERVED — the one key every approve surface
-   writes, so the badge matches wherever the founder clicked. */
-var TWA = { approved: {} };
-function twFind(id){
-  for (var i = 0; i < STATE.events.length; i++) if (STATE.events[i].id === id) return STATE.events[i];
-  return null;
-}
-function twRef(e){ return e.symbol + '@' + ((e.entry && e.entry.ts) || ''); }
-function twTime(ts){
-  if (!ts) return '';
-  var d = new Date(String(ts).replace(' ', 'T'));
-  if (isNaN(d)) return String(ts).slice(11, 16);
-  var i = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
-  return ('0' + i.getHours()).slice(-2) + ':' + ('0' + i.getMinutes()).slice(-2);
-}
-function twCluster(e){
-  var mapHit = (TWA.approved[e.engine] || {})[twRef(e)];
-  if (!mapHit) return '';
-  return '<span class="twa-ok">APPROVED · ' + twTime(mapHit.approved_at) + '</span>';
-}
-function twRow(e){
-  /* the container renders on every eligible card even when empty — approved_map arrives AFTER
-     first paint and twPaint() needs a target to fill; :empty CSS collapses the blank ones */
-  if (e.status !== 'open' || e.src === 'alert') return '';
-  return '<div class="twa-row" data-twa="' + esc(e.id) + '">' + twCluster(e) + '</div>';
-}
-function twPaint(id){
-  var els = document.querySelectorAll('.twa-row');
-  var e = twFind(id);
-  if (!e) return;
-  for (var i = 0; i < els.length; i++)
-    if (els[i].getAttribute('data-twa') === id) els[i].innerHTML = twCluster(e);
-}
-function twLoadApproved(){
-  if (STATE.status !== 'open') return;
-  (BUCKETS[STATE.instrument] || []).forEach(function(eng){
-    fetchWithTimeout('/api/alerts/approved_map?engine=' + encodeURIComponent(eng))
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        TWA.approved[eng] = d.map || {};
-        STATE.events.forEach(function(e){ if (e.engine === eng) twPaint(e.id); });
-      })
-      .catch(function(){ /* the map is a paint optimisation — a miss just means no stamps yet */ });
-  });
-}
-boot(false);
+load();
+setInterval(function(){ fetch('/api/alerts/approval_window',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){ if(d&&typeof d.open!=='undefined') Q.aw=d; }).catch(function(){}); }, 60000);
 </script>
-</body>
-</html>
+</body></html>
