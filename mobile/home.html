@@ -5720,7 +5720,7 @@ function renderHome(d, pv){
     + gtile('/m/results', '\u2263', 'Results')
     + gtile('/m/digest', '\u2600', 'Digest')
     + gtile('/m/fpc', '\u20b9', 'FPC')
-    + gtile('/dashboard', '\u26a1', 'Dashboard')
+    + gtile('/m/dash', '\u26a1', 'Dashboard')   // cc#1916: app Dashboard hub, not the web V8 dashboard (founder 10-Sep)
     + gtile('/cio', '\u2299', 'AICIO')
     + gtile('/health', '\u2695', 'Portfolio Health')
     // cc#897: 9 -> 12 tiles. All three open WEB pages, the same 16915 exception the founder
@@ -5744,7 +5744,9 @@ function renderHome(d, pv){
     // cc#991 appended Wall of Trades as tile 15; cc#1526 moved it to tile 1 (top of this list).
     ;
   document.getElementById('body').appendChild(tools);
-  document.getElementById('body').insertAdjacentHTML('beforeend', dashSectionHtml());   // cc#1888 P4
+  // cc#1916: HIDDEN, not deleted — the four entries now live behind the /m/dash tile; the row-list
+  // under the grid would be a duplicate. dashSectionHtml() stays defined above.
+  // document.getElementById('body').insertAdjacentHTML('beforeend', dashSectionHtml());   // cc#1888 P4
 
   renderPortfolio();   // cc#911: the portfolio card owns its own render so a row tap can redraw it alone
 
