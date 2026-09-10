@@ -133,6 +133,7 @@ body[data-theme]{
 .gic{width:46px;height:46px;border-radius:var(--radius-14);background:var(--panel);border:var(--bw-1) solid var(--edge);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 0 var(--brandglow)}
 .gic svg{width:26px;height:26px;stroke:var(--brand);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .gic svg .f{fill:var(--brand);stroke:none;opacity:.22}
+.gic .gglyph{font-size:var(--type-22);line-height:1;color:var(--brand)}   /* cc#1972: the two un-hidden tiles reuse their pre-hidden text glyphs (no SVG in the R1 ref) */
 .glb{font-size:var(--type-11);font-weight:600;color:var(--ink);text-align:center;line-height:1.25;max-width:84px}
 .gtag{position:absolute;top:var(--space-4);right:var(--space-6);font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em9);text-transform:uppercase;padding:var(--space-2) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--brand)}
 .gtag.web{color:var(--muted)}
@@ -1987,7 +1988,7 @@ var TREND = { open: null, card: 0 };   /* which chip popup is open: 'adr' | 'pcr
    this grid — nearest candidate is "V10 Desk · Web" (/v10), but that is a guess, not a match, and
    the card's own instruction is to STOP and report rather than guess which was meant. /v10 is
    therefore NOT in this list; flagged in the cc#1888 result and the Fable Room instead. */
-var HIDDEN_GRID_TILES = ['/m/digest', '/m/v10', '/dashboard#index', '/v9', '/intraday', '/v10'];   // cc#1917 (founder 10-Sep): /v10 hidden, route + page untouched
+var HIDDEN_GRID_TILES = ['/dashboard#index', '/v9', '/intraday', '/v10'];   // cc#1917 (founder 10-Sep): /v10 hidden, route + page untouched. cc#1972 (founder 10-Sep 17:34): /m/digest and /m/v10 come OFF this list and back onto the grid under MARKET; the four web tiles stay hidden.
 function gtile(href, glyph, label){
   if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
   return '<a class="tool slab dense" href="' + href + '"><span>' + glyph + '</span>' + esc(label) + '</a>';
@@ -2005,10 +2006,17 @@ var G_GROUPS = [
       svg: '<svg viewBox="0 0 24 24"><rect class="f" x="3" y="4" width="18" height="16" rx="2"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h10M7 17h6"/></svg>' },
     { href: '/m/sector', label: 'Sector Intel', web: false,
       svg: '<svg viewBox="0 0 24 24"><path class="f" d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M12 12l8-4.6M12 12v9M12 12L4 7.4"/></svg>' },
+    // cc#1972 (founder 10-Sep 17:34: "add Index Intel and Daily Digest icons in Market"): both come off
+    // HIDDEN_GRID_TILES — routes never went away (/m/v10 v10_page_endpoints.py:73, /m/digest :79, both
+    // PROTECTED). The icon is the glyph each tile carried before it was hidden (the flat list's
+    // gtile('/m/v10', '\u25d0', ...) and gtile('/m/digest', '\u2600', ...)) — reused, not redrawn; the
+    // R1 ref (d215acd) kept both hidden and drew no SVG for them, so the disc shows the glyph itself.
+    { href: '/m/v10', label: 'Index Intel', web: false,
+      svg: '<span class="gglyph">\u25d0</span>' },
+    { href: '/m/digest', label: 'Daily Digest', web: false,
+      svg: '<span class="gglyph">\u2600</span>' },
     { href: '/m/results', label: 'Results', web: false,
       svg: '<svg viewBox="0 0 24 24"><path d="M4 19h16"/><rect class="f" x="6" y="11" width="3" height="8"/><rect x="6" y="11" width="3" height="8"/><rect class="f" x="11" y="7" width="3" height="12"/><rect x="11" y="7" width="3" height="12"/><rect class="f" x="16" y="4" width="3" height="15"/><rect x="16" y="4" width="3" height="15"/></svg>' },
-    { href: '/m/qb', label: 'Baskets', web: false,
-      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M4 9h16l-1.5 10h-13z"/><path d="M4 9h16l-1.5 10h-13z"/><path d="M8 9V6a4 4 0 018 0v3"/></svg>' },
     // cc#1961 (founder 10-Sep: "in grid 2 more options display — V8 and Learn"): LEARN = the Knowledge
     // Hub (the web /news Learn tab) as an app page, /m/learn, appended LAST in Market the way cc#1925
     // appended QB Builder last in Analytics. Open-book glyph in the same 1.7-stroke family — not in the
@@ -2036,6 +2044,10 @@ var G_GROUPS = [
       svg: '<svg viewBox="0 0 24 24"><path d="M7 4h9M7 8h9M9 8c4 0 6 2 6 5s-3 5-7 5l6 6"/></svg>' },
     // cc#1925 (founder 10-Sep: "1 more item add on grid QB builder"): LAST in Analytics. Circle-with-plus per
     // the card, same 1.7 stroke / round caps the .gic svg rule gives every tile — not in the R1 ref (d215acd).
+    // cc#1972: Baskets MOVES here from Market (same tile, same icon, same /m/qb route) so the two basket
+    // doors sit together, directly before QB Builder.
+    { href: '/m/qb', label: 'Baskets', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M4 9h16l-1.5 10h-13z"/><path d="M4 9h16l-1.5 10h-13z"/><path d="M8 9V6a4 4 0 018 0v3"/></svg>' },
     { href: '/m/qbbuilder', label: 'QB Builder', web: false,
       svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>' },
   ] },
