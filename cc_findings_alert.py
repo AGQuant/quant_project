@@ -37,6 +37,10 @@ from typing import Optional
 
 import psycopg
 
+# cc#1971 close-out: set once the first time we notice the Telegram leg is parked, so a parked
+# channel is reported ONCE per process instead of every 5-minute tick (no retry storm).
+_PARKED_LOGGED = False
+
 log = logging.getLogger("scorr.cc_findings")
 
 _DB = os.getenv("DATABASE_URL", "")
@@ -112,8 +116,23 @@ def send_unsent_findings(sender=None) -> Optional[dict]:
                 sent += 1
                 ids.append(row_id)
                 continue
-            failed += 1
             reason = str(resp.get("reason") or "sender returned not-sent (HTTP not ok)")
+            # cc#1971 close-out (founder 10-Sep 22:00): the Telegram leg is PARKED -- he declined to
+            # set the env vars. A parked channel is a DECISION, not a fault, so it must not raise,
+            # must not count as a failed send, and must not write an ops_log row on every tick. It is
+            # logged ONCE per process and the tick returns a skip. Nothing is marked sent, so the
+            # rows wait for the channel exactly as before. The moment V10_TELEGRAM_BOT_TOKEN and
+            # V10_TELEGRAM_CHAT_ID exist, v10_st_ema.telegram_alert() stops returning this reason and
+            # the ping starts on its own -- no code change here, which is why this card can close.
+            if "env not set" in reason:
+                global _PARKED_LOGGED
+                if not _PARKED_LOGGED:
+                    log.info("cc_findings: telegram PARKED (env not set); %d finding row(s) waiting. "
+                             "Set V10_TELEGRAM_BOT_TOKEN + V10_TELEGRAM_CHAT_ID to start the ping.",
+                             len(rows))
+                    _PARKED_LOGGED = True
+                return {"skipped": "telegram parked (env not set)", "pending": len(rows), "sent": sent}
+            failed += 1
             log.warning("cc_findings: finding log %s not sent: %s", row_id, reason)
             # a failed send is written where it can be READ (ops_log), not only to a Railway log line
             try:
@@ -124,10 +143,8 @@ def send_unsent_findings(sender=None) -> Optional[dict]:
                 conn.commit()
             except Exception as e:
                 log.warning("cc_findings: ops_log write failed: %s", e)
-            if "env not set" in reason:
-                # dead channel: stop here, mark nothing, the rows wait for the channel
-                break
         if sent == 0:
-            # nothing went out: say so as an error, never as an 'ok' run (cc#526 lesson)
+            # nothing went out on a LIVE channel: say so as an error, never as an 'ok' run
+            # (cc#526 lesson). The parked case returned above and never reaches this line.
             raise RuntimeError("cc_findings: %d pending, 0 sent (%s)" % (failed, reason))
         return {"sent": sent, "failed": failed, "ids": ids}
