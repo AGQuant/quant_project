@@ -85,17 +85,22 @@ def _paired_result_date(rows, period_end, today):
     return max(pick, key=lambda r: r[0]) if pick else None
 
 
-# cc#796 EXPECTATIONS. Screener's CSV carries an EXPECTED quarterly sales/profit per company. It is a
-# mechanical trend projection, NOT analyst consensus — Claude web measured the season at a median
-# deviation of -16% (155 beats vs 320 misses), which is what a run-rate extrapolation looks like, not
-# what a broker forecast looks like. So the surface must never call it "analyst estimates" or "street
-# expectations": it is "Screener projected run-rate", labelled "vs est." on the card.
+# cc#1954 NEXT QUARTER (supersedes cc#796 / cc#1950 / cc#1952 / cc#1953 "vs estimate BEAT/MISS").
+# screener_raw.expected_qtr_sales / expected_quarterly_net_profit / expected_quarterly_eps are the
+# export's trend projection for the NEXT quarter to be reported -- the quarter AFTER
+# last_result_quarter -- not an estimate of the quarter just printed. cc#796 compared them against
+# the just-reported actual and called the gap a BEAT or a MISS; every such tag on an already-reported
+# company was a quarter mismatch (Adani Green: projection Rs 41.53 cr for Q2 FY27 read as a "+2267%
+# beat" of the Q1 FY27 Rs 983 cr print; Fable investigation 10-Sep: sales 3,423 vs Sep-25 3,008 =
+# +14% fits Q2 seasonality, vs Jun-25 3,800 would be -10%). screener_expectations.py (cc#1865) already
+# reads the same column correctly as "Q2 FY27 expected revenue vs Sep-2025 actual"; this file now says
+# the same thing on the R-popup: a NEXT QUARTER block with the projection, its YoY vs the same quarter
+# LAST YEAR (fundamentals_history period_label, consolidated preferred -- never
+# screener_raw.sales_preceding_year_quarter) and its QoQ vs the just-reported quarter. No bands, no
+# beat, no miss, no source name on the popup (founder 10-Sep: "Don't mention Screener").
 #
-# The columns are NOT in screener_raw yet (63 columns, none expected-*). Adding them needs an
-# ALTER TABLE, which MAINTENANCE_LOCK_RULE blocks on the run_sql path — see the cc#796 task result for
-# the exact migration. This probes for them so the code is safe to deploy before OR after that lands:
-# absent columns simply return None, and the spec's own rule ("no expected value -> omit the line
-# entirely, no empty state") makes that the correct rendering rather than a degraded one.
+# The columns are probed rather than assumed so the code is safe whichever loader version populated
+# the table: absent columns return None, and a symbol with no projection omits the block entirely.
 _EXPECTED_COLS = None      # tri-state cache: None = not probed
 
 
@@ -115,7 +120,8 @@ def _expected_cols(cur):
                            WHERE table_name='screener_raw'
                              AND column_name IN ('expected_qtr_sales',
                                                  'expected_quarterly_net_profit',
-                                                 'expected_qtr_profit')""")
+                                                 'expected_qtr_profit',
+                                                 'expected_quarterly_eps')""")   # cc#1954: EPS projection too
             _EXPECTED_COLS = {r[0] for r in cur.fetchall()}
         except Exception:
             _EXPECTED_COLS = set()
@@ -130,22 +136,49 @@ def _q_key(label):
     return f"Q{m.group(1)}FY{m.group(2)}" if m else None
 
 
-def _expectations(cur, sym, actual_sales=None, actual_profit=None, card_quarter=None):
-    """cc#796: {sales:{expected,actual,dev_pct,tag}, profit:{...}} for whichever side is derivable.
-    Returns None when nothing is — the caller omits the line rather than rendering an empty state.
+def _next_q_label(label):
+    """cc#1954: 'Q1FY27' / 'Q1 FY27' -> ('Q2 FY27', 'Sep 2025', 'Q1 FY27'): the quarter AFTER the one
+    given (its 'Qn FYyy' label), the fundamentals_history period_label of the SAME quarter one year
+    earlier (the YoY base), and the given quarter's own pretty label. (None, None, None) when the
+    input is unparseable. Indian FY: Q4 rolls to Q1 of the next FY."""
+    k = _q_key(label)
+    if not k:
+        return None, None, None
+    q, fy = int(k[1]), 2000 + int(k[-2:])
+    nq, nfy = (q + 1, fy) if q < 4 else (1, fy + 1)
+    target = f"Q{nq} FY{str(nfy)[-2:]}"
+    end = _q_label_end(target)
+    base_lbl = date(end.year - 1, end.month, 1).strftime("%b %Y")   # 'Sep 2025' -- period_label grammar
+    return target, base_lbl, f"Q{q} FY{str(fy)[-2:]}"
 
-    Bands are founder-set: BEAT > +2%, IN-LINE within +/-2%, MISS < -2%. Deviation is reported
-    alongside the tag, never the tag alone, because a 2.1% beat and a 60% beat are not the same
-    statement and the binary hides that.
 
-    cc#1952 QUARTER GUARD. screener_raw.last_result_quarter is Screener's OWN label for the quarter
-    its expected_* figures belong to (per-company: 1,805 rows Q1FY27 / 74 Q4FY26 / 2 Q3FY26 on the
-    08-Sep upload). When the caller passes the quarter the popup is displaying (card_quarter, the
-    same 'Qn FYyy' label the rest of the card uses) and Screener's label is present and DIFFERENT,
-    the whole vs-estimate block is omitted -- never a number labelled for another quarter than the
-    one on screen. Per symbol, not table-wide: companies roll forward one by one as Screener
-    re-scrapes them. When either label is missing there is nothing to compare and the line renders
-    as before (the founder-visible basis label still says what the estimate is)."""
+def _next_quarter(cur, sym, actual_sales=None, actual_profit=None, card_quarter=None):
+    """cc#1954: the NEXT QUARTER block for the R-popup. Returns
+        {target_quarter:'Q2 FY27', last_quarter:'Q1 FY27', yoy_base_label:'Sep 2025',
+         yoy_base_found:bool, sales:{projected,yoy_pct,qoq_pct,yoy_base,qoq_base,directional},
+         profit:{...}, eps:{...}, basis:str}
+    for whichever sides have a projection, or None -- the caller omits the block rather than
+    rendering an empty state or an unlabelled number.
+
+    target_quarter = the quarter after screener_raw.last_result_quarter. That column is NOT in the
+    raw CSV: gvm_nightly._parse_yyyymm derives it from the numeric "Last result date" (202606 ->
+    Jun 2026 -> Q1FY27) at upload. Null / unparseable -> None (spec item 7).
+
+    QUARTER GUARD (kept from cc#1952): when the popup's own quarter (card_quarter) is present and
+    differs from last_result_quarter, the block is omitted -- the QoQ base below is "the just-reported
+    quarter the popup prints above", and if the export has rolled to a different quarter than the
+    card, that base would be the wrong quarter. Per symbol, never table-wide.
+
+    YoY base = fundamentals_history quarters row for the SAME quarter last year (period_label, e.g.
+    'Sep 2025' for a Q2 FY27 projection), consolidated preferred -- exactly cc#1865's rule. NEVER
+    screener_raw.sales_preceding_year_quarter. Base row missing -> yoy_pct None, never a substituted
+    base. QoQ base = the just-reported actual the caller already resolved for the popup header
+    (actual_sales / actual_profit); EPS QoQ base is the latest fundamentals_history quarter's
+    'EPS in Rs' read here.
+
+    directional (spec item 5, cc#1950's qualifier carried over): |YoY| > 300% OR the projection is
+    under 10% of the just-reported actual. The number is still shown; the app appends the
+    plain-language qualifier. Adani Green PAT 41.53 vs last actual 983 is the reference case."""
     cols = _expected_cols(cur)
     if not cols:
         return None
@@ -154,38 +187,84 @@ def _expectations(cur, sym, actual_sales=None, actual_profit=None, card_quarter=
         cur.execute(f"SELECT {sel}, last_result_quarter FROM screener_raw WHERE UPPER(nse_code)=UPPER(%s)", (sym,))
         r = cur.fetchone()
     except Exception as e:
-        log.warning(f"_expectations {sym}: {e}")
+        log.warning(f"_next_quarter {sym}: {e}")
         return None
     if not r:
         return None
     got = dict(zip(sorted(cols), r[:-1]))
-    est_q, card_q = _q_key(r[-1]), _q_key(card_quarter)
-    if est_q and card_q and est_q != card_q:
-        log.info(f"cc#1952 vs-est omitted for {sym}: estimate is {est_q}, card shows {card_q}")
+    last_q, card_q = _q_key(r[-1]), _q_key(card_quarter)
+    if not last_q:
+        return None
+    if card_q and last_q != card_q:
+        log.info(f"cc#1954 next-quarter omitted for {sym}: export is at {last_q}, card shows {card_q}")
+        return None
+    target, base_lbl, last_lbl = _next_q_label(last_q)
+    if not target:
         return None
 
-    def side(exp, act):
-        exp, act = _f(exp), _f(act)
-        if exp is None or act is None or exp == 0:
-            return None
-        dev = (act - exp) / abs(exp) * 100.0
-        tag = "BEAT" if dev > 2 else ("MISS" if dev < -2 else "IN-LINE")
-        return {"expected": round(exp, 2), "actual": round(act, 2),
-                "dev_pct": round(dev, 1), "tag": tag}
+    def num(m, *keys):
+        for k in keys:
+            v = (m or {}).get(k)
+            if v not in (None, "", "-"):
+                n = _f(str(v).replace(",", "").replace("%", ""))
+                if n is not None:
+                    return n
+        return None
 
-    out = {}
-    s = side(got.get("expected_qtr_sales"), actual_sales)
-    # cc#1191: real name first, historical alias second. Written as an explicit two-step rather
-    # than a single .get() so that which column actually answered is readable at a glance.
+    base = {}
+    try:
+        cur.execute("""SELECT metrics FROM fundamentals_history
+                       WHERE UPPER(symbol)=UPPER(%s) AND section='quarters' AND period_type='quarter'
+                         AND period_label=%s
+                       ORDER BY consolidated DESC LIMIT 1""", (sym, base_lbl))
+        b = cur.fetchone()
+        base = (b[0] or {}) if b else {}
+    except Exception as e:
+        log.warning(f"cc#1954 YoY base {sym} {base_lbl}: {e}")
+    last_eps = None
+    try:
+        cur.execute("""SELECT metrics FROM fundamentals_history
+                       WHERE UPPER(symbol)=UPPER(%s) AND section='quarters' AND period_type='quarter'
+                       ORDER BY period_end DESC LIMIT 1""", (sym,))
+        m = cur.fetchone()
+        last_eps = num(m[0], "EPS in Rs") if (m and m[0]) else None
+    except Exception as e:
+        log.warning(f"cc#1954 last EPS {sym}: {e}")
+
+    def pct(now, was):
+        if now is None or was in (None, 0):
+            return None
+        return round((now - was) / abs(was) * 100.0, 1)
+
+    def side(proj, base_v, last_v):
+        proj = _f(proj)
+        if proj is None:
+            return None
+        yoy, qoq = pct(proj, base_v), pct(proj, last_v)
+        directional = ((yoy is not None and abs(yoy) > 300.0)
+                       or (last_v not in (None, 0) and abs(proj) < 0.10 * abs(last_v)))
+        return {"projected": round(proj, 2), "yoy_pct": yoy, "qoq_pct": qoq,
+                "yoy_base": base_v, "qoq_base": last_v, "directional": bool(directional)}
+
     _exp_pat = got.get("expected_quarterly_net_profit")
     if _exp_pat is None:
-        _exp_pat = got.get("expected_qtr_profit")
-    p = side(_exp_pat, actual_profit)
-    if s:
-        out["sales"] = s
-    if p:
-        out["profit"] = p
-    return out or None
+        _exp_pat = got.get("expected_qtr_profit")   # cc#1191 alias, kept
+    out = {}
+    sd = side(got.get("expected_qtr_sales"), num(base, "Sales", "Revenue"), actual_sales)
+    pd_ = side(_exp_pat, num(base, "Net Profit"), actual_profit)
+    ed = side(got.get("expected_quarterly_eps"), num(base, "EPS in Rs"), last_eps)
+    if sd:
+        out["sales"] = sd
+    if pd_:
+        out["profit"] = pd_
+    if ed:
+        out["eps"] = ed
+    if not out:
+        return None
+    out.update({"target_quarter": target, "last_quarter": last_lbl,
+                "yoy_base_label": base_lbl, "yoy_base_found": bool(base),
+                "basis": "trend projection for the next quarter, not a broker forecast"})
+    return out
 
 
 # ── cc#1268 · RESULT DOT V3 (RESULT_DOT_RULE_V3, session_log 29790) ──────────────────────────────
@@ -353,11 +432,15 @@ def _l1_quarter(cur, sym, segment=None):
     }
 
 
-# cc#797 AUTO-VERDICT: one deterministic line, no LLM. 12 combinations = PAT YoY sign (2) x vs-est
-# band (3) x margin direction (2). The point is that the same inputs always produce the same sentence,
-# so the card cannot drift between renders or cost anything to generate. When a dimension is unknown
-# the sentence simply omits that clause rather than guessing a direction.
-def _auto_verdict(l1, expectations):
+# cc#797 AUTO-VERDICT: one deterministic line, no LLM. Combinations = PAT YoY sign (2) x margin
+# direction (2). The point is that the same inputs always produce the same sentence, so the card
+# cannot drift between renders or cost anything to generate. When a dimension is unknown the sentence
+# simply omits that clause rather than guessing a direction.
+# cc#1954: the "beat / missed / landed on the projected run-rate" clause is GONE. The projection it
+# compared against belongs to the NEXT quarter (see _next_quarter), so the sentence was claiming a
+# beat or miss that never happened. The second parameter is kept for call-site compatibility and
+# ignored.
+def _auto_verdict(l1, expectations=None):
     if not l1:
         return None
     pat = (l1.get("pat") or {})
@@ -366,23 +449,10 @@ def _auto_verdict(l1, expectations):
         return None
     mg = l1.get("margin") or {}
     pp = mg.get("pp")
-    band = None
-    exp = expectations or {}
-    if exp.get("profit"):
-        band = exp["profit"].get("tag")
-    elif exp.get("sales"):
-        band = exp["sales"].get("tag")
 
     grew = yoy >= 0
     head = ("Profit grew %.0f%%" % abs(yoy)) if grew else ("Profit fell %.0f%%" % abs(yoy))
-    if band == "BEAT":
-        mid = " and beat the projected run-rate"
-    elif band == "MISS":
-        mid = " but missed the projected run-rate" if grew else " and missed the projected run-rate"
-    elif band == "IN-LINE":
-        mid = " and landed on the projected run-rate"
-    else:
-        mid = ""
+    mid = ""   # cc#1954: no run-rate beat/miss clause (see above)
     if pp is None:
         tail = "."
     elif pp > 0.05:
@@ -1144,9 +1214,9 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
                     _act_pat = _f(_cr[1])
             except Exception as e:
                 log.warning(f"cc#1427 CSV actuals fallback {sym}: {e}")
-        expectations = _expectations(cur, sym, _act_sales, _act_pat, card_q)   # cc#1952: omitted when Screener's quarter label != the card's
+        next_quarter = _next_quarter(cur, sym, _act_sales, _act_pat, card_q)   # cc#1954: next-quarter projection; None when the export's quarter != the card's or no projection
         l1 = _l1_quarter(cur, sym, segment)              # cc#797 block 1; cc#1311: segment for industry PE
-        auto_verdict = _auto_verdict(l1, expectations)  # cc#797 deterministic verdict line
+        auto_verdict = _auto_verdict(l1)                 # cc#797 deterministic verdict line; cc#1954: no beat/miss clause
         # cc#1268 RESULT_DOT_RULE_V3: own-estimate dot, struck against the SAME actuals block
         # above and gated on ex_dt (the result date the snapshot must predate). Dotless when no
         # pre-result snapshot survives — see _result_dot_v3's docstring for why that is currently
@@ -1159,7 +1229,7 @@ def results_card(symbol: str, generate: bool = False, full: int = 0):
 
         def _sections(base):
             base.update({"fy27_growth": fy27, "raw_news": raw_news, "polished_news": pol_news,
-                         "expectations": expectations,    # cc#796: None -> card omits the line
+                         "next_quarter": next_quarter,    # cc#1954: None -> card omits the block (replaces cc#796 "expectations")
                          "l1": l1, "auto_verdict": auto_verdict,   # cc#797
                          "result_dot": result_dot,    # cc#1268: {dot, basis, est_sales, est_pat, snapshot_date}
                          "src": src})                 # cc#1706: {ec_id, ex_date} the figures were paired to

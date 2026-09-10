@@ -1705,8 +1705,9 @@ RESULTS_CARD_JS = """
     + 'padding:4px 9px;border-radius:6px;margin-left:auto}'
     + '.rcard-hit{color:var(--volt, #0f9d58);background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4)}'
     + '.rcard-missed{color:var(--heat, #d0433b);background:rgba(208,67,59,.12);border:1px solid rgba(208,67,59,.35)}'
-    /* cc#796 — vs est. rows: actual, expected, deviation %, banded tag. IN-LINE is deliberately grey,
-       not green: matching a mechanical run-rate projection is not an achievement. */
+    /* cc#796 -> cc#1954 — NEXT QUARTER rows: projected value, YoY vs the same quarter last year, QoQ vs
+       the just-reported quarter. No bands, no beat/miss pills (the projection is for the NEXT quarter,
+       so a beat/miss against the quarter just printed was always a quarter mismatch). */
     + '.rcard-inline{font:700 10px/1 Sora,sans-serif;text-transform:uppercase;letter-spacing:.06em;'
     + 'padding:4px 9px;border-radius:6px;color:var(--mut,#667085);background:rgba(148,166,210,.14);'
     + 'border:1px solid rgba(148,166,210,.3)}'
@@ -2069,14 +2070,15 @@ RESULTS_CARD_JS = """
   // and a green HIT on that basis reads as "the year is banked" when one quarter says no such thing.
   // I flagged this when the tag shipped in cc#788 and put the caveat in a note; the founder's ruling
   // is that a caveat under a wrong comparison is still a wrong comparison. Tag removed, not softened.
-  // Quarterly hit/miss now lives ONLY in the vs-est block (cc#796), which compares like with like.
+  // cc#1954: there is no quarterly hit/miss anywhere on the card any more -- the projection column is
+  // for the NEXT quarter and is shown as such in the Next quarter block above this one.
   function fy27Html(g){
     if (g == null) return '';
     var s = esc(_grow(g) || '--');   // cc#823: growth -> exactly one decimal
     var col = g>=0 ? '#0f9d58' : '#d0433b';
     return '<div class=\"rcard-lbl\">FY27 Est. Growth</div>'
       + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>'
-      + '<div class=\"rcard-note\">Full-year FY27 PAT growth estimate. Quarterly hit/miss is in the vs est. block above.</div>';
+      + '<div class=\"rcard-note\">Full-year FY27 PAT growth estimate. The next-quarter projection is in the block above.</div>';
   }
 
   // cc#797 BASIC POLISH L1 — block 1, ABSOLUTES FIRST. The number comes before its deltas because the
@@ -2154,56 +2156,42 @@ RESULTS_CARD_JS = """
     return h;
   }
 
-  // cc#796 EXPECTATIONS. Screener's CSV carries an expected quarterly sales/profit. It is a MECHANICAL
-  // TREND PROJECTION, not analyst consensus — the season measured a median deviation of -16%
-  // (155 beats vs 320 misses), which is what a run-rate extrapolation looks like, not a broker forecast.
-  // So this NEVER says "analyst estimates" or "street expectations": the label is "vs est." and the
-  // tooltip says exactly what it is.
+  // cc#1954 NEXT QUARTER (supersedes cc#796 "vs est." + cc#1950 qualifier + cc#1952 guard). The
+  // export's expected quarterly sales / PAT / EPS are its trend projection for the NEXT quarter to be
+  // reported, not an estimate of the quarter just printed -- so this block says what it is: the
+  // target quarter, the projected number, YoY vs the same quarter LAST YEAR and QoQ vs the quarter
+  // just reported. No BEAT/MISS pills, no bands, and NO source name anywhere on the popup (founder
+  // 10-Sep: "Don't mention Screener"). Backend: results_endpoints._next_quarter (payload key
+  // next_quarter). Absent => the whole block is omitted, never an empty state or an unlabelled number.
   //
-  // The deviation % is shown NEXT TO the tag, never the tag alone — a 2.1% beat and a 60% beat are not
-  // the same statement, and the binary hides that. Bands are founder-set: BEAT > +2, IN-LINE +/-2,
-  // MISS < -2. No expected value (about 5% of the top 500, ~14% of the full CSV) => the whole line is
-  // omitted, never an empty state.
-  var EXP_NOISY_DEV = 300;   // cc#1950: |deviation| beyond this % gets the plain-language qualifier (founder-tunable)
-  function expHtml(e){
-    if (!e || (!e.sales && !e.profit)) return '';
-    function row(lbl, o){
+  // `directional` is set by the backend (|YoY| > 300% or projection < 10% of the last actual --
+  // Adani Green PAT 41.53 vs 983): the number still shows, with a plain-language qualifier under it.
+  function nextQtrHtml(n){
+    if (!n || (!n.sales && !n.profit && !n.eps)) return '';
+    var F = _F();
+    function _col(v){ return v==null ? 'var(--mut,#667085)' : (v>0 ? '#0f9d58' : (v<0 ? '#d0433b' : 'var(--mut,#667085)')); }
+    function _chg(v){ return v==null ? '—' : _pc(v); }
+    function row(lbl, o, money){
       if (!o) return '';
-      var cls = o.tag==='BEAT' ? 'rcard-hit' : (o.tag==='MISS' ? 'rcard-missed' : 'rcard-inline');
-      // cc#823: actual and expected are ABSOLUTES -> integer + Indian grouping; the deviation is a
-      // change -> one decimal. The BEAT/IN-LINE/MISS bands still key off the raw value, so trimming
-      // display precision cannot move a row across a band boundary.
-      var dev = _pc(o.dev_pct);
-      var col = o.dev_pct>2 ? '#0f9d58' : (o.dev_pct<-2 ? '#d0433b' : 'var(--mut,#667085)');
-      // cc#1705 stat table: 'Rs 23,165 cr' / 'vs est. Rs 23,816 cr' — money through the shared
-      // formatter; a negative actual reads '-Rs 1,234 cr' in the card's red; absent is an em dash.
-      var F = _F(), _a = F ? F.moneyCr(o.actual) : String(o.actual), _e = F ? F.moneyCr(o.expected) : String(o.expected);
-      // cc#1950 (founder 10-Sep 16:16, ADANIGREEN "+2267% BEAT" beside "PAT +19.3% MISS vs peers"):
-      // beyond EXP_NOISY_DEV the deviation is a fact about the ESTIMATE, not the company -- the
-      // trend projection sat near zero (Adani Green: est. Rs 42 cr vs Rs 983 cr reported), so any
-      // normal quarter reads as a four-digit beat. Nothing is hidden or re-computed: the number,
-      // the tag and the direction stay; a plain-language line under the row says what the number
-      // means. Same check on Sales and PAT (this row() serves both).
-      var noisy = o.dev_pct != null && Math.abs(Number(o.dev_pct)) > EXP_NOISY_DEV;
-      return '<div class=\"rcard-exp-row'+(noisy?' rcard-exp-noisy':'')+'\"><span class=\"rcard-exp-l\">'+lbl+'</span>'
-        + '<span class=\"rcard-exp-v\"'+(F && F.isNeg(o.actual)?' style=\"color:#d0433b\"':'')+'>'+esc(_a)+'</span>'
-        + '<span class=\"rcard-exp-e\">vs est. '+esc(_e)+'</span>'
-        + '<span class=\"rcard-exp-d\" style=\"color:'+col+'\">'+dev+'</span>'
-        + '<span class=\"'+cls+'\">'+esc(o.tag)+'</span>'
-        + (noisy ? '<span class=\"rcard-exp-q\">Estimate near zero \u2014 treat the '+(o.tag==='MISS'?'miss':'beat')+' as directional only, not a measure of size</span>' : '')
+      // cc#823 grammar kept: absolutes -> integer + Indian grouping through the shared formatter;
+      // EPS is a per-share rupee figure, so it prints as 'Rs 11.73', never through moneyCr.
+      // A crore figure under 100 keeps two decimals (Adani Green PAT 'Rs 41.53 cr', the spec's own
+      // test case): rounding it to 'Rs 42 cr' would hide how close to zero the projection sits.
+      var _n = Number(o.projected), _small = isFinite(_n) && Math.abs(_n) < 100;
+      var v = money ? (_small ? ('Rs ' + _n.toFixed(2) + ' cr') : (F ? F.moneyCr(o.projected) : String(o.projected)))
+                    : ('Rs ' + (isFinite(_n) ? _n.toFixed(2) : String(o.projected)));
+      return '<div class=\"rcard-exp-row'+(o.directional?' rcard-exp-noisy':'')+'\"><span class=\"rcard-exp-l\">'+lbl+'</span>'
+        + '<span class=\"rcard-exp-v\"'+(F && F.isNeg(o.projected)?' style=\"color:#d0433b\"':'')+'>'+esc(v)+'</span>'
+        + '<span class=\"rcard-exp-e\">YoY <b style=\"color:'+_col(o.yoy_pct)+'\">'+esc(_chg(o.yoy_pct))+'</b> vs '+esc(n.yoy_base_label||'—')+'</span>'
+        + '<span class=\"rcard-exp-e\">QoQ <b style=\"color:'+_col(o.qoq_pct)+'\">'+esc(_chg(o.qoq_pct))+'</b> vs '+esc(n.last_quarter||'—')+'</span>'
+        + (o.directional ? '<span class=\"rcard-exp-q\">(trend projection — treat as directional)</span>' : '')
         + '</div>';
     }
-    var body = row('Sales', e.sales) + row('PAT', e.profit);
+    var body = row('Sales', n.sales, true) + row('PAT', n.profit, true) + row('EPS', n.eps, false);
     if (!body) return '';
-    // cc#1705: the block label is the one-line estimate read the founder asked for:
-    // 'vs estimate: Sales MISS -2.7%, Profit MISS -25.5%' — each side only when it exists.
-    var parts = [];
-    if (e.sales && e.sales.tag) parts.push('Sales '+esc(e.sales.tag)+' '+esc(_pc(e.sales.dev_pct)));
-    if (e.profit && e.profit.tag) parts.push('Profit '+esc(e.profit.tag)+' '+esc(_pc(e.profit.dev_pct)));
-    return '<div class=\"rcard-lbl\" title=\"Screener projected run-rate\">vs estimate'+(parts.length?': '+parts.join(', '):'')+'</div>'
+    return '<div class=\"rcard-lbl\">Next quarter &middot; '+esc(n.target_quarter||'')+' &middot; projected</div>'
       + '<div class=\"rcard-exp\">'+body+'</div>'
-      + '<div class=\"rcard-note\">vs Screener projected run-rate &mdash; a mechanical projection from '
-      + 'reported trend, not a broker forecast. Bands: beat above +2%, in-line within 2%, miss below -2%.</div>';
+      + '<div class=\"rcard-note\">Trend projection for the next quarter, not a broker forecast.</div>';
   }
 
   // cc#788 LEVEL 2: the long-form editorial moves out of the inline Result Analysis block and behind
@@ -2347,7 +2335,7 @@ RESULTS_CARD_JS = """
       }
       // cc#788: LEVEL 2 gate sits ABOVE the FY27 section; absent when there is no V2 row for this quarter.
       h += l1Html(d && d.l1, d && d.auto_verdict, d && d.src);   // cc#797 block 1: absolutes-first + deterministic verdict; cc#1706 src tag
-      h += expHtml(d && d.expectations);   // cc#796: reported quarter vs Screener run-rate; omitted when absent
+      h += nextQtrHtml(d && d.next_quarter);   // cc#1954: next-quarter projection (YoY / QoQ); omitted when absent
       // cc#1414 · founder ruling (ICICIAMC review): an announced card with NO matching V2 row
       // used to omit the detailed-analysis section entirely (cc#788's hidden-when-empty rule).
       // It now states Not Available explicitly in that slot, so the reader knows the long-form
