@@ -49,7 +49,30 @@
        SIZE PROP, deliberately not a second implementation: a table-row copy is precisely how the
        R/V pair drifted from the modal in the first place. */
     + '.scorr-cs-sm{gap:3px;vertical-align:middle;margin-left:6px}'
-    + '.scorr-cs-sm .scorr-cs-b{width:22px;height:22px;border-radius:5px;font-size:10px}';
+    + '.scorr-cs-sm .scorr-cs-b{width:22px;height:22px;border-radius:5px;font-size:10px}'
+    /* cc#1941 SINGLE SOURCE for the APP (founder 10-Sep 15:51: "one spec change should reflect all
+       C A R D button consistent everywhere"). body.mcards is the /m/* app shell class
+       (scorr_card_common.js addClass). This block is THE ONE app pill definition -- the cc#1939 look
+       the founder approved on the Home approved-trade card, now the same on every app consumer:
+       Home approved card, A/D sheet rows, V8 position cards, GVM hero, the symbol sheet, the C/A/D
+       card headers. Contract tokens with the legacy-name fallbacks the bridge provides. Consumers
+       may only POSITION the strip (flex/gap/width); the local pill copies that lived in
+       mobile/home.html, mobile_endpoints.py (V8 sheet) and scorr_card_common.js (symbol sheet +
+       cc#964 letter colours) were removed in the same push and point here. Change a pill => change
+       it here. */
+    + 'body.mcards .scorr-cs-b{box-sizing:border-box;height:var(--space-28,28px);width:auto;min-width:var(--space-28,28px);padding:0 var(--space-10,10px);'
+    + 'border-radius:var(--radius-14,14px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
+    + 'color:var(--brand,var(--txt,#d4af37));font-size:var(--type-11,11px);font-weight:800;letter-spacing:var(--track-em8,.08em);box-shadow:none}'
+    + 'body.mcards .scorr-cs-b:active{background:var(--panel,#131316)}'
+    /* current letter: brand fill, field-coloured glyph -- the same "you are here" the web strip
+       shows in blue, in the app's own brand */
+    + 'body.mcards .scorr-cs-on{background:var(--brand,#d4af37);color:var(--field,#0a0a0c);border-color:var(--brand,#d4af37)}'
+    /* unavailable letter (D on a non-future, R with no result): cc#964's legibility floor kept --
+       muted glyph at .75, not .42, on a dashed unfilled pill, so a disabled control still reads as
+       a control */
+    + 'body.mcards .scorr-cs-off{color:var(--muted,var(--mut,#8e8a7e));background:transparent;border-style:dashed;opacity:.75}'
+    /* the compact (table-row) variant keeps its own metrics on the app too */
+    + 'body.mcards .scorr-cs-sm .scorr-cs-b{height:22px;min-width:22px;width:22px;padding:0;border-radius:5px;font-size:10px}';
   try {
     var st = document.createElement('style');
     st.setAttribute('data-scorr', 'card-strip');

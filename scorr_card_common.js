@@ -801,8 +801,9 @@ window.scorrAsofStamp = function (asof) {
     + 'body.mcards .symsheet-x{background:none;border:none;color:var(--dim,#5E6B8F);'
     + '  font-size:18px;cursor:pointer}'
     + 'body.mcards .symsheet-strip{display:flex;justify-content:center;padding:4px 0 2px}'
-    + 'body.mcards .symsheet-strip .scorr-cs-b{width:52px;height:52px;border-radius:12px;'
-    + '  font-size:17px;margin:0 5px}'
+    /* cc#1941: the symbol-sheet pills used to carry their own 52px size here; the pill spec is now
+       single-source in scorr_card_strip.js (body.mcards block). Only the spacing between them stays. */
+    + 'body.mcards .symsheet-strip .scorr-cs-b{margin:0 5px}'
     /* ── cc#918: the three overlays cc#917 could not verify at push time ──────────────────────
        C = #scorrChartOv / #scorrChartBoxWrap, A = #scorrAnaOv / .sa-box, D = #dcOv / .dc-sheet.
        Selectors read out of the three files, not assumed.
@@ -1082,10 +1083,9 @@ window.scorrAsofStamp = function (asof) {
        that stands out, and the unavailable state gets a legibility floor instead of dim x .42
        (which composited to ~1.6:1 on the panel — a glyph you cannot see is not a disabled
        control, it is a missing one). Mobile-scoped: the web strip is untouched. */
-    + 'body.mcards .scorr-cs-b{color:var(--mut)}'
-    + 'body.mcards .scorr-cs-on{color:#fff}'
-    + 'body.mcards .scorr-cs-off{color:var(--mut);opacity:.75;'
-    + '  background:var(--surface2);border-style:dashed}'
+    /* cc#1941: the three letter-colour rules that lived here (mut letters, white active letter,
+       the .75 dashed disabled state) are folded into scorr_card_strip.js's body.mcards block --
+       the ONE app pill definition -- with the same legibility floor. Nothing is re-declared here. */
 
     /* ── cc#965 item 1: the C card's own header failed the audit at 360px ───────────────────
        #scorrChartHead is one nowrap flex row built for a 640px modal: title · H/L · verdict ·

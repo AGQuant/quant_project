@@ -142,8 +142,19 @@ body[data-theme]{
  * rule. Same fix as #scorrAnaOv: add it to this bridge rather than build a second one. No CSS
  * value in mobile/alerts.html itself changes — the token NAMES were already right, only the scope
  * that gives them a real per-theme value was missing.
+ *
+ * cc#1941 (founder 10-Sep 15:51, D popup white on the dark app): scorr_cockpit_card.js's self-built
+ * "D" shell (#dcOv, appended to <body> like #scorrAnaOv) was NEVER in this list -- the cc#963/964
+ * comment in mobile_endpoints.py names #dcOv as one of the overlays needing the bridge, but only
+ * #scorrAnaOv was ever added here. Its sheet reads --c-bg:var(--panel,#fff), --c-panel:var(
+ * --surface2,#f6f8fb), --c-bd:var(--line2), --c-tx:var(--txt), --c-mut:var(--mut), --c-dim:
+ * var(--dim), --c-grn/--c-red/--c-blu:var(--grn/--red/--blu) -- exactly this family's names --
+ * so outside the bridge the sheet took the light fallbacks (white ground, pink quadrant) while
+ * --surface2 alone resolved from mobile_app.css's :root literal (navy tiles on white). Same fix,
+ * same place: #dcOv joins the list. #scorrChartOv (C) is added alongside for the same reason --
+ * it is the third body-appended card shell and reads the same names.
  */
-.screen,.bnav,#scorrAnaOv,#alWrap{
+.screen,.bnav,#scorrAnaOv,#alWrap,#dcOv,#scorrChartOv{
   --bg:var(--t-field); --panel:var(--t-panel); --panel2:var(--t-hi);
   --surface2:var(--t-hi);   /* cc#1778: the C·A·R·D tile fill; a :root literal in mobile_app.css until now */
   --line:var(--t-edge); --line2:var(--t-edge);

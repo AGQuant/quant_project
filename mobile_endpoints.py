@@ -1575,7 +1575,7 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
    is under the 44px touch minimum the framework (session_log 15913) sets, and that this same
    sheet already applies to .a — so the strip is stretched to the row width and clamped to 44px
    high HERE, in the mobile sheet, rather than by editing the shared file for one surface. */
-.cardstrip .scorr-cs-b{flex:1;text-align:center;min-height:44px}
+.cardstrip .scorr-cs-b{flex:1}   /* cc#1941: pill look (incl. height) is the single app spec in scorr_card_strip.js; layout only here */
 .a{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
   font-size:11.5px;font-weight:700;color:var(--blu);border:1px solid rgba(77,124,254,.4);
   border-radius:10px;text-decoration:none;background:none;font-family:inherit;cursor:pointer}
