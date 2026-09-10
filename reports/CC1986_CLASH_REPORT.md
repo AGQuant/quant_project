@@ -106,6 +106,39 @@ passes it through. So the cc#1872 risk (a page carrying its own reimplementation
 Precedent says this section is where the damage hides: cc#854 (weekly RSI 45 vs 40 killed a basket
 silently) and cc#1872 (a whole second A/D implementation in `scorr_result_corner.html`).
 
+
+### Section D — RSI: CONFIRMED, and this one is the most consequential on the board
+
+Three files define an RSI. Two are the same algorithm; the third is a different one.
+
+- `invest_check_v2.py:163` — **Wilder**: seeds with the SMA of the first 14 gains/losses, then applies
+  Wilder smoothing across the whole remaining series.
+- `tc_v4_endpoints.py:90` — **Wilder**, same algorithm, same result.
+- `v12_backtest.py:447` — **NOT Wilder.** It sums only the last 14 changes and divides by 14. No seed,
+  no smoothing, and every bar before the last 14 is ignored. That is Cutler's RSI, a different metric.
+
+Measured on identical inputs (three 120-bar series):
+
+| series | Wilder (the live scorers) | `v12_backtest` | gap |
+|---|---|---|---|
+| uptrend | 69.77 | 71.48 | 1.71 |
+| choppy | 58.39 | 47.61 | **10.78** |
+| uptrend then a 20-bar drop | 18.71 | **0.00** | **18.71** |
+
+The third row is the one to look at. A stock that rallied for 100 bars and then sold off for 20 reads
+**18.71 — oversold but alive —** to every live scorer, and **0.00 — maximally oversold —** to the
+backtester, because in the last 14 bars alone there were no gains at all so the ratio collapses.
+
+**Why this matters more than the other findings here:** `v12_backtest.py` is the BACKTESTER. Any rule
+keyed on an RSI threshold is validated against one metric and then run live against a different one.
+A strategy that passes backtest is not the strategy that ships. The precedent the card cites is
+cc#854, where weekly RSI 45 vs 40 — a **five** point gap — silently killed a basket. This gap reaches
+eighteen.
+
+Not fixed here (this card is read-only). It needs its own card, and the fix is a decision, not a
+patch: either `v12_backtest` adopts Wilder so backtest matches live, or the divergence is deliberate
+and must be named in the backtest output so no one reads those results as live-equivalent.
+
 ## Section A — same question, different source. FIRST PASS DONE, one CONFIRMED clash.
 
 Method: every route's read-set resolved to full helper depth (transitive call walk, depth 6, across

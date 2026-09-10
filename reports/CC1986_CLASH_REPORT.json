@@ -178,6 +178,35 @@
     "pcr_endpoints.py",
     "pcr_mood.py"
    ]
+  },
+  "rsi_CONFIRMED": {
+   "status": "CONFIRMED",
+   "severity": "highest on the board",
+   "wilder": [
+    "invest_check_v2.py:163",
+    "tc_v4_endpoints.py:90"
+   ],
+   "not_wilder": "v12_backtest.py:447 - sums only the last 14 changes, no seed, no smoothing, ignores all prior bars (Cutler's RSI)",
+   "measured_gaps": {
+    "uptrend": {
+     "wilder": 69.77,
+     "v12": 71.48,
+     "gap": 1.71
+    },
+    "choppy": {
+     "wilder": 58.39,
+     "v12": 47.61,
+     "gap": 10.78
+    },
+    "uptrend_then_drop": {
+     "wilder": 18.71,
+     "v12": 0.0,
+     "gap": 18.71
+    }
+   },
+   "why_it_matters": "v12_backtest is the BACKTESTER: RSI-keyed rules are validated on one metric and run live on another, so a strategy that passes backtest is not the strategy that ships",
+   "precedent": "cc#854 - weekly RSI 45 vs 40, a 5 point gap, silently killed a basket; this gap reaches 18.71",
+   "fix_is_a_decision": "either v12_backtest adopts Wilder, or the divergence is named in the backtest output"
   }
  },
  "section_a": {
