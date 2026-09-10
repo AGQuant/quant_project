@@ -3283,20 +3283,33 @@ function ibkSetSym(sym){
 }
 /* ══ cc#1867: APPROVED TRADES slider — replaces the V8 OPEN BOOK aggregate in this home slot.
    V8 stays in the bottom nav and its own page (aggregate + 22-position list) is UNCHANGED; this
-   is a NEW read from GET /api/mobile/home/approved-trades (v8_paper_positions status=OPEN),
-   which reuses v8_book_canon's ONE unrealised formula — no money computed client-side.
+   is a NEW read from GET /api/mobile/home/approved-trades, which reuses v8_book_canon's ONE
+   unrealised formula — no money computed client-side.
+   cc#1928 SOURCE FIX: that endpoint now reads trade_alerts.approved_at (founder approvals) joined
+   to the still-OPEN V8 position each approval points at — NOT v8_paper_positions OPEN (that was
+   the whole 22-row paper book, which nobody had approved). Count chip = approved open positions.
+   Zero rows => the empty state below; this page NEVER falls back to the paper book. Each card's
+   meta line prints "Approved 06 Sep, 16:32" from approved_at (falls back to "Opened …" only if
+   the payload has no approved_at). Payload shape is unchanged; approved_at/approved_via are
+   additive fields.
    Paint-then-fill, same pattern as loadIndexBook()/loadHeroPositions(): the shell paints with
    #apTr immediately, loadApprovedTrades() fills it after. */
 function apTrBasketLabel(b){
   return b ? String(b).replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); }) : '';
 }
 function apTrSideLabel(s){ s = String(s || '').toUpperCase(); return s.charAt(0) + s.slice(1).toLowerCase(); }
-function apTrOpenedTxt(iso){
+function apTrWhenTxt(label, iso){
   if (!iso) return '';
   var d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  return 'Opened ' + d.toLocaleDateString('en-IN', {day:'2-digit', month:'short'}) + ', '
+  return label + ' ' + d.toLocaleDateString('en-IN', {day:'2-digit', month:'short'}) + ', '
     + d.toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', hour12:false});
+}
+function apTrOpenedTxt(iso){ return apTrWhenTxt('Opened', iso); }
+/* cc#1928: the meta line is the APPROVAL time ("Approved 06 Sep, 16:32"), which is what this
+   slider is about; "Opened …" only if a row somehow arrives without approved_at. */
+function apTrMetaTxt(p){
+  return p.approved_at ? apTrWhenTxt('Approved', p.approved_at) : apTrOpenedTxt(p.opened_at);
 }
 function apTrCardHtml(p){
   var hasCmp = num(p.cmp) && num(p.marker_pct);
@@ -3312,7 +3325,7 @@ function apTrCardHtml(p){
     + (hasCmp ? '<div class="rail-dot" style="left:' + p.marker_pct + '%"></div>' : '')
     + '</div>';
   return '<div class="tcard">'
-    + '<div class="row-top"><div><div class="sym">' + esc(p.symbol) + '</div><div class="meta">' + esc(apTrOpenedTxt(p.opened_at)) + '</div></div>'
+    + '<div class="row-top"><div><div class="sym">' + esc(p.symbol) + '</div><div class="meta">' + esc(apTrMetaTxt(p)) + '</div></div>'
     + '<div class="right"><div class="lbl">Entry</div><div class="val">' + esc(inr(p.entry)) + '</div></div></div>'
     + '<div class="chips"><span class="chip chip-basket">' + esc(apTrBasketLabel(p.basket)) + '</span><span class="chip chip-side">' + esc(apTrSideLabel(p.side)) + '</span></div>'
     + '<div class="cmp"><span class="cmp-px">' + (num(p.cmp) ? esc(inr(p.cmp)) : '—') + '</span>'
@@ -3343,7 +3356,7 @@ function loadApprovedTrades(){
     var positions = x.positions || [];
     if (!positions.length){
       body.className = 'g-empty'; body.style.padding = '18px 0';
-      body.textContent = 'No approved trades open right now.'; return;
+      body.textContent = 'No approved trades open. Approve from Alerts or V8.'; return;   /* cc#1928 */
     }
     body.className = ''; body.style.padding = '';
     body.innerHTML = '<p class="hint">Swipe for more</p>'
