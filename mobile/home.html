@@ -1878,7 +1878,7 @@ var TREND = { open: null, card: 0 };   /* which chip popup is open: 'adr' | 'pcr
    this grid — nearest candidate is "V10 Desk · Web" (/v10), but that is a guess, not a match, and
    the card's own instruction is to STOP and report rather than guess which was meant. /v10 is
    therefore NOT in this list; flagged in the cc#1888 result and the Fable Room instead. */
-var HIDDEN_GRID_TILES = ['/m/digest', '/m/v10', '/dashboard#index', '/v9', '/intraday'];
+var HIDDEN_GRID_TILES = ['/m/digest', '/m/v10', '/dashboard#index', '/v9', '/intraday', '/v10'];   // cc#1917 (founder 10-Sep): /v10 hidden, route + page untouched
 function gtile(href, glyph, label){
   if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
   return '<a class="tool slab dense" href="' + href + '"><span>' + glyph + '</span>' + esc(label) + '</a>';
@@ -5716,6 +5716,11 @@ function renderHome(d, pv){
     + gtile('/m/intel', '\u25a4', 'Intel')
     + gtile('/m/qb', '\u25a6', 'Baskets')
     + gtile('/m/screeners', '\u2637', 'Screeners')
+    // cc#1917 (founder 10-Sep): TC Scanner = the Run Scan mode of /m/check (deep link #scan);
+    // Investment Scanner = the web /inv-scanner page (cc#1286), same 16915 exception as AICIO /
+    // Portfolio Health — an app page for it comes later on its own card.
+    + gtile('/m/check#scan', '\u25ce', 'TC Scanner')
+    + gtile('/inv-scanner', '\u2316', 'Investment Scanner')
     + gtile('/m/sector', '\u2b21', 'Sector Intel')
     + gtile('/m/results', '\u2263', 'Results')
     + gtile('/m/digest', '\u2600', 'Digest')
