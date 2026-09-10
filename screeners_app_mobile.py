@@ -178,3 +178,146 @@ def mobile_screeners_app(request: Request):
         },
         "never_run": bool(never_run) and len(never_run) == len(rows),
     }
+
+
+# ═══ QB_APP-STYLE V2 (SCREENERS_APP_R2_LOCK, session_log 42826; Fable 10-Sep-2026) ═════════════════
+# Two additive endpoints. The cc#1899 endpoint above is untouched.
+#   GET /api/mobile/screeners_app/list          → quant screens only, grouped, rule in plain words
+#   GET /api/mobile/screeners_app/screen?id=<n> → the screen's names for the sortable table
+# QUANT vs client list: filters non-empty vs empty on v13_presets (rule 1). Groups from the filters
+# (rule 2). Never a name list.
+
+_LABEL = {
+    "gvm_score": "GVM", "g_score": "G", "v_score": "V", "m_score": "M", "roce": "ROCE",
+    "market_cap": "mcap", "week_index_52": "52-wk pos", "month_index": "month pos",
+    "rsi_month": "monthly RSI", "vol_ratio": "volume", "vol_ratio_21": "volume", "dma_50": "vs 50-DMA",
+    "return_1y": "1-yr return", "year_return": "1-yr return", "return_3y": "3-yr return",
+    "month_return": "month return", "sector_month": "sector month",
+}
+_PCT = {"return_1y", "year_return", "return_3y", "month_return", "sector_month"}
+
+
+def _cr(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return ("₹%.0fL Cr" % (v / 100000)) if v >= 100000 else ("₹%sk Cr" % int(v / 1000) if v >= 1000 else "₹%s Cr" % int(v))
+
+
+def _rule_words(filters):
+    parts = []
+    for k, spec in (filters or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        lab = _LABEL.get(k, k.replace("_", " "))
+        lo, hi = spec.get("min"), spec.get("max")
+        if k == "market_cap":
+            if lo is not None and hi is not None:
+                parts.append("%s %s–%s" % (lab, _cr(lo), _cr(hi)))
+            elif lo is not None:
+                parts.append("%s ≥ %s" % (lab, _cr(lo)))
+            elif hi is not None:
+                parts.append("%s ≤ %s" % (lab, _cr(hi)))
+            continue
+        if k in ("week_index_52", "month_index") and lo is not None and float(lo) >= 90:
+            parts.append("near 52-wk high" if k == "week_index_52" else "near month high")
+            continue
+        if k == "dma_50" and lo is not None and float(lo) >= 0:
+            parts.append("above 50-DMA")
+            continue
+        if k in ("vol_ratio", "vol_ratio_21") and lo is not None:
+            parts.append("volume %s×" % (("%g" % float(lo))))
+            continue
+        sfx = "%" if k in _PCT else ""
+        def fmt(x):
+            x = float(x)
+            return ("%d" % x if x == int(x) else "%g" % x) + sfx
+        if lo is not None and hi is not None:
+            parts.append("%s %s–%s" % (lab, fmt(lo), fmt(hi)))
+        elif lo is not None:
+            parts.append("%s ≥ %s" % (lab, fmt(lo)))
+        elif hi is not None:
+            parts.append("%s ≤ %s" % (lab, fmt(hi)))
+    return " · ".join(parts)
+
+
+def _group_of(filters):
+    f = filters or {}
+    v = (f.get("v_score") or {}).get("min")
+    if v is not None and float(v) >= 7.5:
+        return "value"
+    if any(k in f for k in ("week_index_52", "month_index", "rsi_month")) or (f.get("m_score") or {}).get("min") is not None:
+        return "momentum"
+    return "quality"
+
+
+_GROUPS = [("momentum", "Momentum & breakouts", "what is moving now"),
+           ("quality", "Quality & growth", "built to compound"),
+           ("value", "Value", "priced below their quality")]
+
+
+@router.get("/api/mobile/screeners_app/list")
+@_json_safe
+def mobile_screeners_list(request: Request):
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT p.id, p.name, p.filters, p.sort_key,
+                   COUNT(r.symbol) AS members, MAX(r.last_seen) AS last_run
+            FROM v13_presets p LEFT JOIN v13_screen_results r ON r.screen_id = p.id
+            WHERE COALESCE(p.scope,'global') = 'global'
+              AND p.filters IS NOT NULL AND p.filters::text NOT IN ('{}', 'null')
+            GROUP BY p.id, p.name, p.filters, p.sort_key ORDER BY p.name
+        """)
+        rows = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
+        ids = [r["id"] for r in rows]
+        top = max([r["last_run"] for r in rows if r["last_run"]] or [None])
+        names_today = 0
+        if ids and top:
+            cur.execute("SELECT COUNT(DISTINCT symbol) FROM v13_screen_results WHERE screen_id = ANY(%s) AND last_seen = %s", (ids, top))
+            names_today = cur.fetchone()[0] or 0
+    cards = []
+    for r in rows:
+        stale = bool(r["last_run"] and top and r["last_run"] != top)
+        cards.append({"id": r["id"], "name": r["name"], "members": int(r["members"] or 0),
+                      "last_run": str(r["last_run"]) if r["last_run"] else None, "stale": stale,
+                      "rule": _rule_words(r["filters"]), "group": _group_of(r["filters"])})
+    groups = []
+    for key, title, hint in _GROUPS:
+        gs = sorted([c for c in cards if c["group"] == key], key=lambda c: -c["members"])
+        groups.append({"key": key, "title": title, "hint": hint, "rows": gs})
+    return {"as_of": str(top) if top else None,
+            "key_metrics": {"screens": len(cards), "names_today": names_today, "stale": sum(1 for c in cards if c["stale"])},
+            "groups": groups}
+
+
+@router.get("/api/mobile/screeners_app/screen")
+@_json_safe
+def mobile_screeners_screen(request: Request, id: int = 0):
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name, filters, sort_key FROM v13_presets WHERE id=%s", (id,))
+        p = cur.fetchone()
+        if not p:
+            return {"error": "no such screen"}
+        cur.execute("""
+            SELECT r.symbol, r.rank, r.last_seen, r.first_seen, r.snapshot,
+                   g.gvm_score, g.growth, g.value, g.momentum, g.segment
+            FROM v13_screen_results r LEFT JOIN gvm_cache g ON g.symbol = r.symbol
+            WHERE r.screen_id=%s ORDER BY r.rank NULLS LAST, r.symbol
+        """, (id,))
+        rows = []
+        for sym, rank, ls, fs, snap, gvm, gr, va, mo, seg in cur.fetchall():
+            snap = snap or {}
+            rows.append({"symbol": sym, "rank": rank, "last_seen": str(ls) if ls else None, "first_seen": str(fs) if fs else None,
+                         "gvm": float(gvm) if gvm is not None else (float(snap["gvm_score"]) if snap.get("gvm_score") is not None else None),
+                         "g": float(gr) if gr is not None else None, "v": float(va) if va is not None else None,
+                         "m": float(mo) if mo is not None else None, "sector": seg,
+                         "mcap": snap.get("market_cap")})
+    return {"id": p[0], "name": p[1], "rule": _rule_words(p[2]), "sort_key": p[3], "rows": rows, "count": len(rows),
+            "last_run": max([r["last_seen"] for r in rows if r["last_seen"]] or [None])}
