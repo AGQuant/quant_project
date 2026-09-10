@@ -224,7 +224,9 @@ def compute_channels(conn, symbols: List[str]) -> Dict[str, Any]:
     # live tick 10-Sep, cc#1893). Localise once, here, at the only write -- the same fix
     # tc_v4_dual._tc_tick_today() uses for the same table shape. Rows written before this
     # change were re-stamped once (ts - 5h30) on the card.
-    window_start_tz = datetime.combine(window_start, datetime.min.time()).replace(tzinfo=IST)
+    # IST is a pytz zone: .replace(tzinfo=IST) would attach the +05:53 LMT offset -- localize() is the
+    # correct pytz call and yields +05:30.
+    window_start_tz = IST.localize(datetime.combine(window_start, datetime.min.time()))
     fits: Dict[str, Any] = {}
     rows = []
     for sym in symbols:
@@ -234,7 +236,7 @@ def compute_channels(conn, symbols: List[str]) -> Dict[str, Any]:
         fits[sym] = fit
         latest_ts = fit["latest_ts"]
         if latest_ts.tzinfo is None:
-            latest_ts = latest_ts.replace(tzinfo=IST)
+            latest_ts = IST.localize(latest_ts)
         rows.append((sym, latest_ts, round(fit["upper_today"], 4), round(fit["lower_today"], 4),
                       round(fit["slope"], 6), fit["n_bars"], window_start_tz))
 
