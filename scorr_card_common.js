@@ -1148,6 +1148,10 @@ window.scorrAsofStamp = function (asof) {
     // cc#1547: the marker-detail sheet joins the uniform dismiss set — tap-outside, Escape and
     // Android back all reach it exactly like every sheet registered above.
     try { if (window.ScorrMarkerDetail && window.ScorrMarkerDetail.close) window.ScorrMarkerDetail.close(); } catch (e) {}
+    // cc#1962: the shared (i) info sheet (cc#1708, below) already closes on its own backdrop and
+    // Escape, but hardware back reaches sheets ONLY through this list -- without this line a back
+    // press consumed the history marker and left the sheet on screen.
+    try { if (window.ScorrInfoSheet && window.ScorrInfoSheet.close) window.ScorrInfoSheet.close(); } catch (e) {}
   }
   function isBackdrop(el) {
     /* the click landed on the overlay ELEMENT itself (not the dialog inside it):

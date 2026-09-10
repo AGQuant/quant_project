@@ -1321,6 +1321,18 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 /* cc#1957: filter funnel right of the count chip; brand-coloured while a filter is active. The
    sheet is the same overlay/sheet shape the Derivatives card already uses (.deriv-sheet-ov /
    .deriv-sheet); only the option rows are this card's own. */
+.ap-card{cursor:pointer}   /* cc#1962: the whole card opens the detail sheet (strip buttons excluded in apTrDeckTap) */
+/* cc#1962: the detail sheet rows inside the shared ScorrInfoSheet (.isheet). Tokens only. */
+.apd{display:flex;flex-direction:column}
+.apd-row{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-10);padding:var(--space-8) 0;border-bottom:var(--bw-1) solid var(--hi)}
+.apd-row:last-child{border-bottom:none}
+.apd-k{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;color:var(--muted);flex:0 0 auto}
+.apd-k small{display:block;font-weight:600;letter-spacing:0;text-transform:none;margin-top:var(--space-2)}
+.apd-v{text-align:right;font-size:var(--type-125);font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums}
+.apd-v .p{font-size:var(--type-10);font-weight:700;color:var(--muted);margin-left:var(--space-4)}
+.apd-v .b{display:block;font-size:var(--type-95);font-weight:600;color:var(--muted);margin-top:var(--space-2)}
+.apd-v.pos,.apd-v.pos .p{color:var(--win)}.apd-v.neg,.apd-v.neg .p{color:var(--loss)}
+.apd-note{font-size:var(--type-10);color:var(--muted);line-height:1.5;margin-top:var(--space-10)}
 .ap-hdr .filt{flex:none;display:inline-flex;align-items:center;justify-content:center;width:var(--space-24);height:var(--space-24);margin-left:var(--space-2);padding:0;background:transparent;border:var(--bw-1) solid var(--edge);border-radius:var(--radius-7);color:var(--muted);cursor:pointer}
 .ap-hdr .filt svg{width:var(--space-13);height:var(--space-13);display:block}
 .ap-hdr .filt.on{color:var(--brand);border-color:var(--brand)}
@@ -3543,7 +3555,7 @@ function apTrCardHtml(p){
      Graceful degrade: no strip function at render time => no strip row, never a dead tap. */
   var strip = (typeof window.ScorrCardStripHtml === 'function')
     ? '<div class="cardstrip">' + window.ScorrCardStripHtml(String(p.symbol || ''), '') + '</div>' : '';
-  return '<div class="ap-card' + (dir ? ' ' + dir : '') + '">'
+  return '<div class="ap-card' + (dir ? ' ' + dir : '') + '" data-alert="' + esc(p.alert_id) + '">'   /* cc#1962: tap target = the whole card (see apTrDeckTap) */
     + '<div class="ap-top"><div><div class="ap-sym">' + esc(p.symbol)
     + '<span class="ap-tag ' + (String(p.side || '').toUpperCase() === 'SHORT' ? 's' : 'b') + '">' + esc(apTrSideLabel(p.side)) + '</span>'
     + (p.basket ? '<span class="ap-tag">' + esc(apTrBasketLabel(p.basket)) + '</span>' : (p.engine ? '<span class="ap-tag">' + esc(p.engine) + '</span>' : '')) + '</div>'   /* cc#1957: non-V8 rows have no basket; the engine names the source instead */
@@ -3588,6 +3600,63 @@ function apTrRender(){
   body.className = '';
   body.innerHTML = '<div class="ap-deck" id="apTrTrack" onscroll="apTrDots()">' + positions.map(apTrCardHtml).join('') + '</div>'
     + (positions.length > 1 ? '<div class="ap-dots" id="apTrDots">' + positions.map(function(_, i){ return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') + '</div>' : '');
+  var tr = document.getElementById('apTrTrack'); if (tr) tr.addEventListener('click', apTrDeckTap);   /* cc#1962 */
+}
+/* cc#1962 (founder 10-Sep: "if somebody clicks on the whole card, show a pop-out table"): ONE
+   delegated handler on the deck. The C·A·R·D strip keeps its own handlers -- a tap inside
+   .scorr-card-strip returns before anything else happens (cc#913 bug class) -- and the filter
+   funnel lives in the header, outside the deck. The sheet is the shared ScorrInfoSheet (cc#1708),
+   which closes on backdrop tap, Escape and, via closeAll(), Android back. */
+function apTrDeckTap(e){
+  if (e.target.closest('.scorr-card-strip')) return;
+  var card = e.target.closest('.ap-card'); if (!card) return;
+  var id = card.getAttribute('data-alert');
+  var p = null; APTR.rows.forEach(function(r){ if (String(r.alert_id) === String(id)) p = r; });
+  if (p) apTrDetailOpen(p);
+}
+function apTrPx(v){                     /* cc#1962: a price LEVEL on the sheet keeps two decimals (the card face rounds via inr) */
+  var x = Number(v); if (v == null || isNaN(x)) return '—';
+  return (x < 0 ? '−' : '') + '₹' + Math.abs(x).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function apTrDetailRow(k, sub, v, cls, basis){
+  return '<div class="apd-row"><div class="apd-k">' + esc(k) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>'
+    + '<div class="apd-v' + (cls ? ' ' + cls : '') + '">' + v + (basis ? '<span class="b">' + esc(basis) + '</span>' : '') + '</div></div>';
+}
+function apTrPnlCls(v){ return (v == null || isNaN(Number(v))) ? '' : (Number(v) > 0 ? 'pos' : (Number(v) < 0 ? 'neg' : '')); }
+function apTrPnlHtml(v, pct){
+  if (v == null) return '—';
+  return esc(apTrSignedInr(v)) + (pct != null ? '<span class="p">' + esc(apTrPct(pct)) + '</span>' : '');
+}
+function apTrDetailOpen(p){
+  if (!window.ScorrInfoSheet) return;
+  var v8 = !!(p.engine === 'V8' && (p.entry != null || p.opened_at));
+  var lbl = (typeof window.scorrBasketLabel === 'function') ? window.scorrBasketLabel : function(s){ return String(s || ''); };   /* cc#880: the ONE slug map */
+  var tag = esc(p.engine || 'Manual') + (p.basket ? ' · ' + esc(lbl(p.basket)) : '');
+  var hasCmp = p.cmp != null;
+  var when = function(iso){ return apTrWhenIst(iso); };
+  var h = '<div class="apd">';
+  /* entry: a V8 row has TWO events -- the engine entry and the founder's approval -- both labelled;
+     a non-V8 row has no engine entry by construction, so the approval is the entry, labelled as such */
+  if (v8) {
+    h += apTrDetailRow('Entry', 'engine entry', esc(when(p.opened_at)) + ' · ' + esc(apTrPx(p.entry)));
+    h += apTrDetailRow('Approved', 'your entry', esc(when(p.approved_at)) + ' · ' + esc(apTrPx(p.approved_price)));
+  } else {
+    h += apTrDetailRow('Entry', 'approval (no engine entry)', esc(when(p.approved_at)) + ' · ' + esc(apTrPx(p.approved_price)));
+  }
+  h += apTrDetailRow('Tag', '', tag);
+  h += apTrDetailRow('Target', '', esc(apTrPx(p.target)));
+  h += apTrDetailRow('Stop loss', '', esc(apTrPx(p.stop_loss)));
+  var dayBasis = p.prev_close != null
+    ? ('vs close ' + apTrPx(p.prev_close) + ' on ' + when(p.prev_close_date).slice(0, 6).trim() + (p.prev_close_is_prior_session === false ? ' (not the last session)' : ''))
+    : 'no prior close on record';
+  h += apTrDetailRow('Day P&L', 'since previous close', hasCmp ? apTrPnlHtml(p.day_pnl, p.day_pnl_pct) : '—', hasCmp ? apTrPnlCls(p.day_pnl) : '', dayBasis);
+  h += apTrDetailRow('Net P&L', 'since your approval price', hasCmp ? apTrPnlHtml(p.pnl_since_approval, p.pnl_since_approval_pct) : '—', hasCmp ? apTrPnlCls(p.pnl_since_approval) : '');
+  h += apTrDetailRow('Target', 'level · value left · % move needed', esc(apTrPx(p.target)) + (hasCmp ? ' · ' + apTrPnlHtml(p.reward_left, p.reward_left_pct) : ''), '', hasCmp ? 'the % is the move still needed from the current price' : '');
+  h += apTrDetailRow('Stop', 'level only', esc(apTrPx(p.stop_loss)));   /* founder: NO value, NO percent on the stop, in any state */
+  h += '</div>';
+  h += '<div class="apd-note">' + (hasCmp ? 'Live price ' + esc(apTrPx(p.cmp)) + (p.cmp_as_of ? ' as of ' + esc(String(p.cmp_as_of).slice(0, 16)) : '') : 'No live price right now, so the P&L rows are blank.')
+    + (p.qty != null ? ' · 1 lot (' + esc(apTrLot(p.qty)) + ')' : ' · per share') + '</div>';
+  window.ScorrInfoSheet.open(String(p.symbol || '') + ' · ' + apTrSideLabel(p.side), h);
 }
 function apTrFilterOv(){
   var ov = document.getElementById('apTrFiltOv');
