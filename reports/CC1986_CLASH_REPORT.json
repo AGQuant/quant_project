@@ -181,9 +181,73 @@
   }
  },
  "section_a": {
-  "complete": false,
-  "status": "NOT STARTED",
-  "remaining": "extend census read-set extraction to full helper depth across 676 routes, then group routes by the question they answer"
+  "complete": "first pass",
+  "status": "1 CONFIRMED clash; book tails rejected; 1 open candidate",
+  "method": "read-sets resolved to full helper depth (depth-6 transitive call walk), table names intersected with the 283 real tables in information_schema; an unfiltered pass matched prose (FROM the / INTO a) and was discarded",
+  "coverage": {
+   "routes_total": 677,
+   "routes_with_real_readset": 76,
+   "note": "the rest run no SQL or reach it via helpers this walk cannot resolve - NOT claimed as clean"
+  },
+  "confirmed": [
+   {
+    "question": "what is the PCR?",
+    "status": "CONFIRMED",
+    "sources": {
+     "pcr_intraday.pcr_atm5": {
+      "nifty": 1.938,
+      "as_of": "15:25",
+      "note": "ATM+/-5 band, a different measure stored in a column called pcr"
+     },
+     "oi_structure_daily.pcr": {
+      "nifty": [
+       1.332,
+       1.303
+      ],
+      "as_of": [
+       "10:55",
+       "15:20"
+      ]
+     },
+     "pcr_daily.pcr": {
+      "nifty": 1.302,
+      "as_of": "today"
+     },
+     "pcr_intraday.pcr_total": {
+      "nifty": 1.287,
+      "as_of": "15:25"
+     },
+     "live_from_option_chain": {
+      "nifty": 1.3,
+      "as_of": "15:35"
+     }
+    },
+    "routes": [
+     "/api/daily/pcr -> pcr_daily",
+     "/api/pcr/intraday -> pcr_intraday",
+     "/api/oi/structure -> live off option_chain",
+     "/api/pcr/mood -> pcr_daily + option_chain, banded"
+    ],
+    "corroboration": "mobile_home_derivatives.py docstring already states the Home tape PCR and Home card PCR are different composers - two PCRs on one screen",
+    "harm": "a surface reading the 'pcr' column can show a number ~50% higher than the chain ratio with nothing in the name to explain it"
+   }
+  ],
+  "rejected": [
+   {
+    "group": "per-book /trades /positions /performance /nav tails",
+    "why": "resolve to disjoint per-book tables (v10_trades, v14_trades, qsr_trades, qb_nav_daily, v8_paper_trades); different books by design, already ruled by cc#1979"
+   }
+  ],
+  "open_candidates": [
+   {
+    "routes": [
+     "/api/v8/positions -> cmp_prices + personal_journal",
+     "/api/clients/positions -> v8_paper_positions",
+     "/api/test/positions -> v8_paper_positions"
+    ],
+    "why": "three routes a reader would call 'the V8 positions' over two different stores; may be correct but not self-evident, and rule 7 context isolation makes it worth checking"
+   }
+  ]
  },
  "out_of_scope_by_card": [
   "TC family (cc#1982/1983, already ruled)",

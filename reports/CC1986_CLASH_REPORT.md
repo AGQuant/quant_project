@@ -106,14 +106,48 @@ passes it through. So the cc#1872 risk (a page carrying its own reimplementation
 Precedent says this section is where the damage hides: cc#854 (weekly RSI 45 vs 40 killed a basket
 silently) and cc#1872 (a whole second A/D implementation in `scorr_result_corner.html`).
 
-## Section A — same question, different source. NOT DONE.
+## Section A — same question, different source. FIRST PASS DONE, one CONFIRMED clash.
 
-Honest status: **not started.** It needs the census read-set extended from one level of helper expansion
-to full depth across 676 routes, then grouping by question. I did not do it and I am not going to imply
-otherwise. It is the largest remaining piece of this card.
+Method: every route's read-set resolved to full helper depth (transitive call walk, depth 6, across
+modules), table names taken from SQL string literals and then **intersected with the 283 real tables
+in `information_schema`** — an unfiltered pass matched English words out of prose (`FROM the`,
+`INTO a`) and was discarded. 76 of 677 routes resolve to a non-empty real read-set; the rest either
+run no SQL or reach it through a helper this walk cannot resolve, and are NOT claimed as clean.
 
-Out of scope by the card's own instruction: the TC family (cc#1982/1983, already ruled) and cc#1549
-Ask Scorr v3.3 (founder parked).
+**CONFIRMED: "what is the PCR?" has five answers today.** Same question, five sources, and they
+disagree by more than a rounding step:
+
+| source | NIFTY value | as-of |
+|---|---|---|
+| `pcr_intraday.pcr_atm5` | **1.938** | 15:25 |
+| `oi_structure_daily.pcr` | 1.332 | 10:55 |
+| `oi_structure_daily.pcr` | 1.303 | 15:20 |
+| `pcr_daily.pcr` | 1.302 | today |
+| `pcr_intraday.pcr_total` | 1.287 | 15:25 |
+| live off `option_chain` (near expiry) | 1.30 | 15:35 |
+
+Routes: `/api/daily/pcr` reads `pcr_daily`; `/api/pcr/intraday` reads `pcr_intraday`;
+`/api/oi/structure` computes it live from `option_chain`; `/api/pcr/mood` reads `pcr_daily` **and**
+`option_chain` together and bands the result.
+The 1.938 is the ATM±5 band and is a legitimately different measure — but it is stored in a column
+called `pcr` beside a whole-chain `pcr_total`, so a surface reading "the pcr column" gets a number
+50% higher than the chain ratio with nothing in the name to say why. The other four are the *same*
+measure kept by four independent writers, agreeing only to about the third decimal.
+This is not a new suspicion: `mobile_home_derivatives.py`'s own docstring already states the Home
+tape PCR (`pcr_mood.latest_pcr()`, banded) and the Home card PCR (`oi_structure()`'s chain ratio)
+are different composers — two PCRs on one screen, by design, undocumented on the screen itself.
+
+**Rejected, per the card's own rule.** The repeated `/trades`, `/positions`, `/performance`,
+`/nav` tails across `/api/v10`, `/api/v14`, `/api/qsr`, `/api/qb` and `/api/v8` resolve to
+disjoint per-book tables (`v10_trades`, `v14_trades`, `qsr_trades`, `qb_nav_daily`,
+`v8_paper_trades`). Different books by design — cc#1979 already ruled this, and the read-sets
+confirm it rather than contradict it. Not padded into the report.
+
+**Open candidate, not confirmed.** `/api/v8/positions` resolves to `cmp_prices` + `personal_journal`,
+while `/api/clients/positions` and `/api/test/positions` resolve to `v8_paper_positions`. Three
+routes a reader would call "the V8 positions" over two different stores. It may be correct (journal
+vs paper book are different products) but it is not self-evident from the paths, and rule 7's
+context-isolation lock makes it worth a look.
 
 ## Method and limits
 
