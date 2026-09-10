@@ -311,50 +311,42 @@ def run_tc_screener_precompute():
 
 @router.get("/api/trade-check/screen-cached")
 def screen_cached(universe: str = "nifty50", side: Optional[str] = None, top: int = 10):
-    """Fast read of the nightly tc_screener_cache — top LONG + top SHORT for today.
-    Falls back to live ntc.screen_top50 if today's cache is empty (first day/weekend)."""
-    top = max(1, min(top, 50))
-    run_date = _ist().date()
-    conn = psycopg.connect(_DB)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM tc_screener_cache WHERE run_date = %s", (run_date,))
-            n_today = int(cur.fetchone()[0] or 0)
-            if n_today == 0:
-                return {"cached": False, "run_date": str(run_date), "universe": universe,
-                        "note": "cache empty for today — live fallback",
-                        "live": ntc.screen_top50(n=50, top=top)}
-            sides = ["LONG", "SHORT"] if not side else [side.upper()]
-            result = {}
-            for sd in sides:
-                cur.execute("""SELECT symbol, score, verdict, cmp, pivot_zone, failed_rules
-                               FROM tc_screener_cache
-                               WHERE run_date = %s AND side = %s
-                               ORDER BY score DESC NULLS LAST LIMIT %s""",
-                            (run_date, sd, top))
-                cols = [d[0] for d in cur.description]
-                result[sd.lower()] = [dict(zip(cols, r)) for r in cur.fetchall()]
-    finally:
-        conn.close()
-    return {"cached": True, "run_date": str(run_date), "universe": universe, "top": top, **result}
+    """RETIRED cc#1982 (TC V2 migration, founder ruling 10-Sep, cc_task_logs 6228: "V2 everywhere").
+    tc_screener_cache is frozen since 08-Sep. Repo-wide search on 10-Sep-2026 found no frontend
+    file calling this route, so per the card's "migrate, or retire if the only consumers are gone"
+    rule it is retired rather than migrated. Left wired, not deleted (no route deleted on a P0
+    card). Live equivalent: GET /api/mobile/check/scan?universe=... (app_check_endpoints.py, reads
+    tc_universe_ticks via tc_resolver)."""
+    return {"cached": False, "retired": True,
+            "note": "retired 10-Sep-2026 (no consumer found); see tc_universe_ticks via "
+                    "/api/mobile/check/scan",
+            "universe": universe, "side": side, "top": top}
 
 
 @router.get("/api/trade-check/movers")
 def movers(universe: str = "futures", side: str = "LONG"):
-    """CC-48: diff today's tc_screener_cache vs the most recent prior run_date.
-    Categorizes each symbol into new_pass / dropped / score_up / score_down /
-    verdict_flip. Returns baseline_only=true until a 2nd snapshot exists.
-    Verdict rank: STRONG > VALID > WATCH (PASS = STRONG or VALID)."""
+    """cc#1982: migrated off tc_screener_cache onto tc_universe_ticks (TC V2, canonical; founder
+    ruling 10-Sep, cc_task_logs 6228: "V2 everywhere"). Diffs the best-of-bucket score100 at the
+    latest tick of the two most recent trading days present in tc_universe_ticks, for the
+    requested side (LONG maps to the table's BUY, SHORT to SELL). "Best of bucket" is the same
+    definition app_check_endpoints.py uses for the app Check tab: highest score100 among that
+    side's style buckets at the latest tick. pivot_zone and failed_rules do not exist in
+    tc_universe_ticks and are dropped rather than faked; `bucket` (which style won) is added.
+    Categorizes each symbol into new_pass / dropped / score_up / score_down / verdict_flip.
+    Returns baseline_only=true until a 2nd trading day of ticks exists.
+    Verdict rank: STRONG > VALID > WATCH > REJECT (PASS = STRONG or VALID)."""
     side = (side or "LONG").upper()
+    tc_side = "SELL" if side == "SHORT" else "BUY"   # LONG/SHORT -> tc_universe_ticks' BUY/SELL
     PASS = {"STRONG", "VALID"}
     conn = psycopg.connect(_DB)
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT run_date FROM tc_screener_cache ORDER BY run_date DESC LIMIT 2")
+            cur.execute("""SELECT DISTINCT (ts AT TIME ZONE 'Asia/Kolkata')::date
+                           FROM tc_universe_ticks ORDER BY 1 DESC LIMIT 2""")
             dates = [r[0] for r in cur.fetchall()]
             if not dates:
                 return {"baseline_only": True, "universe": universe, "side": side,
-                        "message": "No screener cache yet — run the nightly TC screener first.",
+                        "message": "No tc_universe_ticks data yet.",
                         "new_pass": [], "dropped": [], "score_up": [], "score_down": [], "verdict_flip": []}
             today = dates[0]
             if len(dates) < 2:
@@ -362,21 +354,30 @@ def movers(universe: str = "futures", side: str = "LONG"):
                         "message": "Building baseline — movers available from tomorrow",
                         "new_pass": [], "dropped": [], "score_up": [], "score_down": [], "verdict_flip": []}
             prev = dates[1]
-            cur.execute("""SELECT symbol, score, verdict, cmp, pivot_zone
-                           FROM tc_screener_cache WHERE run_date=%s AND side=%s""", (today, side))
+            # best-scoring bucket per symbol at each day's latest tick, one query for both days
+            cur.execute("""
+                SELECT symbol, d, score100, verdict10, bucket, cmp FROM (
+                    SELECT symbol, (ts AT TIME ZONE 'Asia/Kolkata')::date AS d,
+                           score100, verdict10, bucket, cmp,
+                           ROW_NUMBER() OVER (PARTITION BY symbol, (ts AT TIME ZONE 'Asia/Kolkata')::date
+                                               ORDER BY ts DESC, score100 DESC) AS rn
+                    FROM tc_universe_ticks
+                    WHERE side = %s AND (ts AT TIME ZONE 'Asia/Kolkata')::date IN (%s, %s)
+                ) x WHERE rn = 1""", (tc_side, today, prev))
             tcols = [d[0] for d in cur.description]
-            today_rows = {r[0]: dict(zip(tcols, r)) for r in cur.fetchall()}
-            cur.execute("""SELECT symbol, score, verdict FROM tc_screener_cache
-                           WHERE run_date=%s AND side=%s""", (prev, side))
-            prev_rows = {r[0]: {"score": _f(r[1]), "verdict": r[2]} for r in cur.fetchall()}
+            all_rows = [dict(zip(tcols, r)) for r in cur.fetchall()]
     finally:
         conn.close()
 
+    today_rows = {r["symbol"]: r for r in all_rows if r["d"] == today}
+    prev_rows = {r["symbol"]: {"score": _f(r["score100"]), "verdict": r["verdict10"]}
+                 for r in all_rows if r["d"] == prev}
+
     new_pass, dropped, score_up, score_down, verdict_flip = [], [], [], [], []
     for sym, t in today_rows.items():
-        tv, ts = t.get("verdict"), _f(t.get("score"))
+        tv, ts = t.get("verdict10"), _f(t.get("score100"))
         row = {"symbol": sym, "score": ts, "verdict": tv,
-               "cmp": _f(t.get("cmp")), "pivot_zone": t.get("pivot_zone")}
+               "cmp": _f(t.get("cmp")), "bucket": t.get("bucket")}
         p = prev_rows.get(sym)
         if p is None:
             if tv in PASS:
@@ -414,5 +415,12 @@ def movers(universe: str = "futures", side: str = "LONG"):
 
 @router.post("/api/admin/run-tc-screener")
 def run_tc_screener():
-    """Manually seed today's tc_screener_cache (synchronous; off-hours use)."""
-    return run_tc_screener_precompute()
+    """RETIRED cc#1982 (TC V2 migration, founder ruling 10-Sep, cc_task_logs 6228: "V2 everywhere,
+    do not re-activate bg_tc_screener_precompute"). No longer writes tc_screener_cache from this
+    route. run_tc_screener_precompute() itself is left untouched -- scheduler.py:1944 still wires
+    it to the bg_tc_screener_precompute job row (active=false in scheduler_master); no writer is
+    enabled or disabled here (do_not_touch, cc#1982 spec). tc_universe_ticks has its own 5-min
+    writer (bg_tc_universe_tick) and needs no manual trigger."""
+    return {"ok": False, "retired": True,
+            "note": "retired 10-Sep-2026; tc_universe_ticks is written every 5 min by "
+                    "bg_tc_universe_tick, no manual trigger needed"}
