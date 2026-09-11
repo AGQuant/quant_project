@@ -445,7 +445,51 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         except Exception:
             return None
 
-    batch = [tuple(cell(c, r.get(c)) for c in cols) for _, r in df.iterrows()]
+    # ── cc#1993 R8: MARKET_CAP JUMP GUARD ───────────────────────────────────────────────────────
+    # A single bad market_cap row (TVSHLTD: screener_raw held 12,64,711.73 Cr where every external
+    # feed put it near 27,500 Cr — a ~46x error, most likely a units or holdco-consolidation slip at
+    # source) fed straight into compute_sector_ratings' weighting with nothing to catch it before
+    # this card. This is a clean-replace loader (DELETE then INSERT), so the prior value has to be
+    # read BEFORE the delete or there is nothing left to compare against or fall back to.
+    #
+    # Symmetric: rejects a >10x move in EITHER direction versus the value this nse_code already
+    # carries. The spec's own wording and example ("jumps >10x") was written against the upward
+    # case; a units slip can as easily divide as multiply, and the guard costs nothing extra to
+    # apply both ways — narrow it to upward-only on a one-line ask if that is not wanted.
+    #
+    # REJECT = only the market_cap cell is put back to the PREVIOUS value; every other fresh field
+    # on the row is kept. Deliberately not a whole-row reject: throwing away a legitimate price/PE/
+    # fundamentals refresh over one bad column would trade a visible problem for a silent stale one.
+    # Deliberately not the cc#828 column-drop-guard shape either — that guard flags and still loads;
+    # this card's incident is exactly the "flagged but still scored" gap, so this one substitutes.
+    _old_mcap = {}
+    try:
+        with _conn() as _c3, _c3.cursor() as _cur3:
+            _cur3.execute('SELECT nse_code, market_cap FROM screener_raw '
+                          'WHERE market_cap IS NOT NULL AND nse_code IS NOT NULL')
+            _old_mcap = {r[0]: float(r[1]) for r in _cur3.fetchall() if r[1] is not None}
+    except Exception as _e:
+        log.warning("cc#1993 mcap-jump guard: could not read prior market_cap, guard skipped this "
+                    "load: %s", _e)
+
+    _mc_pos = cols.index("market_cap") if "market_cap" in cols else None
+    batch = []
+    mcap_rejected = []
+    for _, r in df.iterrows():
+        vals = [cell(c, r.get(c)) for c in cols]
+        if _mc_pos is not None:
+            code = r.get("nse_code")
+            old_v = _old_mcap.get(code)
+            new_v = vals[_mc_pos]
+            if old_v and old_v > 0 and new_v is not None and (new_v > old_v * 10 or new_v < old_v / 10):
+                mcap_rejected.append({"nse_code": code, "rejected_market_cap": new_v,
+                                      "kept_market_cap": old_v, "ratio": round(new_v / old_v, 2)})
+                vals[_mc_pos] = old_v
+        batch.append(tuple(vals))
+    if mcap_rejected:
+        log.error("cc#1993 MARKET_CAP_JUMP_GUARD: %d row(s) rejected (>10x move vs prior value), "
+                  "previous value kept, NOT silently accepted: %s", len(mcap_rejected),
+                  ", ".join(f"{x['nse_code']} ({x['ratio']}x)" for x in mcap_rejected))
 
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM screener_raw")
@@ -466,8 +510,9 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         log.warning(f"cc#1865 screener_expectations snapshot failed (screener_raw load still succeeded): {e}")
 
     log.info("load_screener: %d/%d rows (dropped %d no-nse_code, %d duplicate), %d columns "
-             "(%d added: %s)", len(batch), rows_in_file, dropped_no_nse, dropped_dupe,
-             len(cols), len(added), ", ".join(added) or "none")
+             "(%d added: %s), %d market_cap jump(s) rejected", len(batch), rows_in_file,
+             dropped_no_nse, dropped_dupe, len(cols), len(added), ", ".join(added) or "none",
+             len(mcap_rejected))
     return {
         "rows_loaded": len(batch),
         "rows_in_file": rows_in_file,
@@ -479,6 +524,9 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         # cc#828 part_1: columns that WERE >90% populated and are not in this file. After the
         # clean-replace they are NULL for every row. Empty list = nothing was silently lost.
         "columns_dropped_populated": dropped_populated,
+        # cc#1993 R8: rows whose market_cap moved >10x vs the prior load and were rejected —
+        # previous value kept, every other field on the row still loaded. Empty list = none tripped.
+        "market_cap_jump_guard_rejections": mcap_rejected,
         "qoq_sales_computed": bool(qoq_sales_ok),
         "qoq_profit_computed": bool(qoq_profit_ok),
         "result_quarter": result_quarter,
@@ -537,6 +585,7 @@ def compute_sector_ratings(target_date: date) -> Dict:
 
         rows = []
         thinned = []
+        dominant = []
         for seg, grp in df.groupby("segment"):
             if seg in ("Unknown", "", None):
                 continue
@@ -549,6 +598,23 @@ def compute_sector_ratings(target_date: date) -> Dict:
             # equal-weight mean over the whole group is the honest answer there — it is stated in the
             # payload rather than presented as a weighting that happened.
             total_mcap = float(wgrp["market_cap"].sum()) if len(wgrp) else 0.0
+
+            # cc#1993 R8: DOMINANCE IS NOT THE SIGNAL. RELIANCE ~63pct of its own segment, TITAN
+            # ~74pct, ASIANPAINT ~72pct are real market structures and must never be capped — this
+            # ONLY logs, the same way excluded_no_market_cap above logs rather than adjusts. It
+            # exists because the opposite failure can also swing a segment onto one bad row (the
+            # TVSHLTD case: a market_cap ~47x too high dominated Castings & Forgings until caught),
+            # and that should be visible before it ships, not discovered after. total_mcap here is
+            # the real weighted sum, read before the equal-weight fallback below can overwrite it.
+            if total_mcap > 0:
+                for r in wgrp.itertuples():
+                    _frac = float(r.market_cap) / total_mcap
+                    if _frac > 0.50:
+                        dominant.append({"segment": str(seg), "symbol": str(r.symbol),
+                                          "market_cap": round(float(r.market_cap), 2),
+                                          "segment_total_mcap": round(total_mcap, 2),
+                                          "weight_pct": round(_frac * 100, 1)})
+
             base = wgrp if (len(wgrp) and total_mcap > 0) else grp
             if not (len(wgrp) and total_mcap > 0):
                 total_mcap = float(len(grp))
@@ -608,13 +674,19 @@ def compute_sector_ratings(target_date: date) -> Dict:
             conn.commit()
 
         log.info(f"sector_ratings: {len(rows)} segments written for {target_date}")
+        if dominant:
+            log.warning("cc#1993: %d segment member(s) carry >50pct of their segment's weighted "
+                        "market cap (reporting only, formula unchanged): %s", len(dominant),
+                        ", ".join(f"{d['symbol']} ({d['weight_pct']}pct of {d['segment']})"
+                                  for d in dominant))
         # cc#1104: the exclusions travel WITH the result. A caller that prints "ok, 130 segments"
         # and nothing else would hide the fact that a segment lost a 34,000 Cr member from its own
         # weighting — which is the whole reason this card required the report, not just the fix.
         return {"status": "ok", "segments": len(rows), "date": str(target_date),
                 "weight_source": "screener_raw.market_cap",
                 "excluded_no_market_cap": excluded,
-                "thinned_segments": thinned}
+                "thinned_segments": thinned,
+                "dominant_segment_members": dominant}
 
     except Exception as e:
         log.error(f"compute_sector_ratings failed: {e}")
