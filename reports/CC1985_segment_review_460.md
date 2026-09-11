@@ -375,4 +375,113 @@ moving it would end the rating distortion **as a side effect**, but it would not
 cap, which would then distort `Holding Companies` instead. Fix the number, then move it — in that
 order.
 
-*Batches 4 onward continue below as they are completed.*
+---
+
+## BATCH 4 — 60 companies (candidates 155–214 of 263 flagged)
+
+| # | Symbol | Company | Mcap ₹Cr | Current segment | cc#1980 proposed | Verdict | One-line reason |
+|---|---|---|---|---|---|---|---|
+| 155 | TIINDIA | Tube Investments of India | 51,103 | Engineering - Large | Auto - Engines & Thermal | **FLAG** | Precision tubes, bicycles, auto components and TI Clean Mobility. Genuinely diversified; at ₹51,103 Cr `Engineering - Large` is defensible and the auto tag reads one division as the whole. |
+| 156 | THERMAX | Thermax | 43,219 | Engineering - Large | Electronics - Heavy Electrical & Industrial | **AS-IS** | Boilers, heaters, water treatment and EPC — capital goods and energy solutions, not electronics. |
+| 157 | TEGA | Tega Industries | 12,361 | Engineering - Large | Capital Goods - Industrial Small | **MOVE*** | Mill liners and mineral-processing consumables. Capital goods is right; ₹12,361 Cr is Mid, not Small. |
+| 158 | MTARTECH | MTAR Technologies | 24,069 | Engineering - Large | Electrical Equipment Small | **MOVE*** | Precision components for nuclear, space and defence. Aerospace/defence precision — not electrical equipment, and not "Small" at ₹24,069 Cr. |
+| 159 | BALAJITELE | Balaji Telefilms | 1,153 | Entertainment, Content & Digital | Broadcasting & OTT | **AS-IS** | It **produces** content; it broadcasts nothing. The current segment is the precise one. |
+| 160 | ZTECH | Z-Tech (India) | 677 | Entertainment, Content & Digital | Environmental Services | **FLAG** | Screener tags it Waste Management, the segment says entertainment, and the company does infrastructure work. All three disagree — needs a primary-source read, not a tag. |
+| 161 | GRAVITA | Gravita India | 12,455 | Environmental Services | Mining | **AS-IS** | It **recycles** lead, aluminium and plastic. Recycling is not mining; the current segment is right. |
+| 162 | PRAJIND | Praj Industries | 6,194 | Environmental Services | Capital Goods - Industrial Small | **MOVE** | It builds ethanol and bio-refinery **plants** — process engineering and capital goods. |
+| 163 | TRUALT | TruAlt Bioenergy | 3,601 | Environmental Services | FMCG - Small | **MOVE*** | Sugarcane-based **ethanol**. Neither environmental services nor FMCG — sugar/agri-processing or energy is the right family. |
+| 164 | GANECOS | Ganesha Ecosphere | 2,665 | Environmental Services | Synthetic Fibres & Yarn | **FLAG** | It recycles PET bottles **into** polyester fibre, so both segments are literally true. Needs a rule on whether the input or the output defines the peer set. |
+| 165 | PROTEAN | Protean eGov Technologies | 2,047 | Exchanges & Ratings - Mid | IT - Micro | **MOVE** | PAN and NPS technology infrastructure — IT services. It runs no exchange and rates nothing. |
+| 166 | CRISIL | CRISIL | 34,993 | Exchanges & Ratings - Mid | Broking & Wealth Management | **AS-IS** | A ratings and analytics firm — the current segment names it exactly, and it does no broking. |
+| 167 | GANDHAR | Gandhar Oil Refinery | 2,567 | FMCG - Small | Adhesives, Coatings & Polymers | **MOVE*** | White oils and petroleum specialities. `Petrochemicals & Lubricants` is the precise home; FMCG is plainly wrong and the proposal only slightly less so. |
+| 168 | GFLLIMITED | GFL Ltd | 690 | Fluorochemicals & Industrial Gases | Holding Companies | **MOVE** | The holding company of the Gujarat Fluorochemicals group; it manufactures nothing itself. |
+| 169 | PATELRMART | Patel Retail | 722 | Garments & Apparel | Retail - Mid | **MOVE*** | Supermarkets plus food processing. Retail is right in kind; at ₹722 Cr it is Small, not Mid. |
+| 170 | FOCE | Foce India | 572 | Garments & Apparel | Gems & Jewellery - Small | **MOVE** | Watches and writing instruments. Not apparel. |
+| 171 | TEMBO | Tembo Global Industries | 1,088 | Garments & Apparel | Steel - Mid & Small | **MOVE*** | Pipe clamps, fasteners and engineering products. Not apparel — but industrial products, not generic steel. |
+| 172 | IGIL | International Gemmological Institute | 13,805 | Gems & Jewellery - Large | Business Services | **MOVE** | It **certifies** diamonds. A testing and certification business scored against jewellers is the wrong comparison entirely. |
+| 173 | GODREJIND | Godrej Industries | 38,470 | Holding Companies | Diversified | **FLAG** | An operating conglomerate — chemicals, agrovet, real estate — plus group stakes. Also one of the 12 **non-financial** companies sitting in a BFSI segment (H3), so it is being scored on the BFSI rulebook. |
+| 174 | CREST | Crest Ventures | 1,022 | Holding Companies | MSME Finance - Mid | **AS-IS** | An investment, NBFC and real-estate holding vehicle. It is not an MSME lender. |
+| 175 | NIBE | NIBE Ltd | 2,064 | **Home Textiles & Technical** | Defence - Small | **MOVE** | It manufactures launcher systems and armoured vehicles. Filing a defence manufacturer under home textiles is a plain error. |
+| 176 | KALAMANDIR | Sai Silks (Kalamandir) | 1,304 | Home Textiles & Technical | Retail - Mid | **MOVE** | A saree and ethnic-wear **retail chain**. It sells textiles; it does not make them, and retail economics are not mill economics. |
+| 177 | POLYMED | Poly Medicure | 17,738 | Hospitals - Mid & Small | Diagnostics & Healthcare Services | **MOVE*** | It makes **medical devices** — cannulae and infusion sets. It runs no hospital and no lab, so neither option is right; medical devices is. Feeds H1. |
+| 178 | CUPID | Cupid Ltd | 37,341 | Hospitals - Mid & Small | FMCG - Large | **MOVE*** | It manufactures condoms and medical devices. Not a hospital. **Also flagged for H4**: its ₹37,341 Cr market cap would make it larger than CRISIL, and it carries the same signature as TVSHLTD — mcap and PE (271.7) inflated together and internally consistent. Worth an outside check. Feeds H1. |
+| 179 | RVNL | Rail Vikas Nigam | 43,535 | **Housing Finance** | Engineering - EPC Civil Small | **MOVE*** | **The worst filing error in this card.** RVNL builds railway infrastructure and is sitting in Housing Finance — which is a BFSI segment, so it is also being scored on the BFSI rulebook (H3), with Interest Coverage dropped. EPC is right; at ₹43,535 Cr "Small" is not. |
+| 180 | PFS | PTC India Financial Services | 1,771 | Housing Finance | MSME Finance - Mid | **MOVE*** | An infrastructure and power-sector NBFC. It is neither a housing financier nor an MSME lender — both listed options are wrong. (Both are BFSI, so no rulebook change either way.) |
+| 181 | AQYLON | Aqylon Nexus | 609 | IT - Micro | Entertainment, Content & Digital | **FLAG** | Screener tags it TV broadcasting and software production; the segment says IT. Too little to judge from tags — needs a primary-source read. |
+| 182 | CNL | Creative Newtech | 1,739 | IT - Micro | Diversified Trading | **MOVE** | An IT-products **distributor**. Distribution margins and inventory cycles, not software economics. |
+| 183 | STYL | Seshaasai Technologies | 6,250 | IT - Mid | Digital Aggregators & E-Commerce | **FLAG** | Payment cards and secure documents — manufacturing plus fintech services. H2 again: there is no fintech segment to put it in. |
+| 184 | BLS | BLS International Services | 9,841 | IT - Mid | Hotels - Mid | **MOVE*** | Visa and consular outsourcing. Not IT, and certainly not hotels — `Business Services` is the right home. |
+| 185 | CYIENTDLM | Cyient DLM | 7,234 | IT - Small | Defence - Small | **MOVE*** | An **electronics manufacturing services** firm whose customers include aerospace and defence. It manufactures to order; it is not a defence prime and not an IT company. |
+| 186 | CMSINFO | CMS Info Systems | 3,802 | IT - Small | Business Services | **MOVE** | ATM cash management and logistics. A cash-in-transit business, not IT. |
+| 187 | NPST | Network People Services Technologies | 3,625 | IT - Small | Digital Aggregators & E-Commerce | **FLAG** | UPI and payments technology. H2 again — the right segment does not exist. |
+| 188 | OPTIEMUS | Optiemus Infracom | 5,027 | IT - Small | Telecom Services | **MOVE*** | It **manufactures** handsets and accessories (EMS). Not IT services and not a telecom operator — electronics manufacturing. |
+| 189 | MANINFRA | Man Infraconstruction | 5,232 | Infrastructure - Roads | Realty - Mid | **MOVE** | Real-estate development is now the larger half, with port and EPC work alongside. It builds no roads. |
+| 190 | LLOYDSME | Lloyds Metals & Energy | 100,304 | Integrated Steel - Large | Mining | **MOVE** | Its profit comes overwhelmingly from **iron-ore mining** at Surjagarh; steel making is the smaller, newer half. At ₹1,00,304 Cr it would be a large member of Mining. |
+| 191 | URBANCO | Urban Company | 26,402 | Internet & Digital Small | Digital Aggregators & E-Commerce | **MOVE** | A services **marketplace** — the proposed segment names it, and at ₹26,402 Cr it is not "Small". |
+| 192 | DENTALKART | Vasa Denticity (Dentalkart) | 706 | Internet & Digital Small | Diagnostics & Healthcare Services | **MOVE*** | An **e-commerce platform** for dental supplies. It provides no healthcare service — `Digital Aggregators & E-Commerce` is the right home. |
+| 193 | UNIECOM | Unicommerce eSolutions | 944 | Internet & Digital Small | IT - Small | **MOVE** | A SaaS product company (e-commerce order management). Software, not a consumer internet business. |
+| 194 | YATRA | Yatra Online | 1,786 | Internet & Digital Small | Hotels - Mid | **MOVE*** | An online travel **agency** — a booking platform that owns no hotels. `Digital Aggregators & E-Commerce`, not Hotels. |
+| 195 | BAJAJFINSV | Bajaj Finserv | 310,383 | Life Insurance | Holding Companies | **MOVE** | The holding company for Bajaj Finance and both Bajaj Allianz insurers. Life insurance is one of several holdings, not the business. |
+| 196 | ABCAPITAL | Aditya Birla Capital | 108,900 | Life Insurance | Holding Companies | **MOVE** | Lending, AMC and insurance under one roof — a diversified financial holding company, not a life insurer. |
+| 197 | GKWLIMITED | GKW Ltd | 945 | Logistics - Small | Holding Companies | **MOVE** | An investment company; the manufacturing business is long gone and it moves nothing. |
+| 198 | SHREEJISPG | Shreeji Shipping Global | 11,433 | Logistics - Small | Shipping & Maritime | **MOVE** | Dry-bulk shipping and port logistics. With GESHIP (batch 3) this would take `Shipping & Maritime` from 5 members to 7, which also answers item 6's thin-segment concern. |
+| 199 | EDELWEISS | Edelweiss Financial Services | 12,622 | MSME Finance - Mid | Holding Companies | **MOVE** | A diversified financial holding company — ARC, AMC, insurance, lending. Not an MSME lender. |
+| 200 | BLIL | Balmer Lawrie Investments | 1,615 | MSME Finance - Small | Holding Companies | **MOVE** | A pure holding company whose only asset is its stake in Balmer Lawrie. It lends nothing. |
+| 201 | KISSHT | Kissht (Onemi Technology) | 5,742 | MSME Finance - Small | Broking & Wealth Management | **AS-IS** | Digital consumer and small-merchant lending. It does no broking; the current segment is the closer of the two. |
+| 202 | STEL | STEL Holdings | 1,120 | Microfinance & MSME | Holding Companies | **MOVE** | A Jindal-group investment and holding vehicle. It is not a microfinance lender. |
+| 203 | CMPDI | Central Mine Planning & Design Institute | 17,268 | Mining | Engineering - EPC Civil Small | **MOVE*** | A mine-planning and design **consultancy**. It mines nothing and builds nothing — engineering/consulting services, and ₹17,268 Cr is not "Small". |
+| 204 | SANDUMA | Sandur Manganese & Iron Ores | 9,567 | Mining | Integrated Steel - Large | **AS-IS** | Manganese and iron-ore mining is still the core; ferroalloys and coke are downstream additions, not a change of business. |
+| 205 | PFC | Power Finance Corporation | 116,939 | NBFC - Large | Housing Finance | **AS-IS** | It lends to the **power sector**. `NBFC - Large` is right and Housing Finance is simply wrong. |
+| 206 | PNBGILTS | PNB Gilts | 1,473 | NBFC - Large | Holding Companies | **MOVE*** | A **primary dealer** in government securities. Neither a large NBFC nor a holding company — capital markets is the right family. |
+| 207 | SUMICHEM | Sumitomo Chemical India | 24,538 | Organic Chemicals - Large | Agro Chemicals - Small | **MOVE*** | Agrochemicals are the whole business, so the family is right — but ₹24,538 Cr into an "Agro Chemicals - **Small**" bucket is the size error again. |
+| 208 | SWANCORP | Swan Corp | 8,681 | Organic Chemicals - Large | Petrochemicals & Lubricants | **FLAG** | LNG terminals, textiles and shipbuilding. Genuinely diversified and neither segment describes it. |
+| 209 | KNAGRI | KN Agri Resources | 505 | Packaged Foods & Dairy | Edible Oil & Animal Feed | **MOVE** | Soya and edible-oil processing — a crusher, not a packaged-foods brand. |
+| 210 | KRBL | KRBL | 9,997 | Packaged Foods & Dairy | FMCG - Small | **AS-IS** | India Gate basmati — a branded packaged food. The current segment is right, and ₹9,997 Cr is not "Small" either. |
+| 211 | BAJAJCON | Bajaj Consumer Care | 6,724 | Packaged Foods & Dairy | FMCG - Large | **MOVE*** | Hair oil — **personal care**, not packaged food, so the flag is real. But ₹6,724 Cr is FMCG Mid or Small, not Large. |
+| 212 | DVL | Dhunseri Ventures | 1,037 | Petrochemicals & Lubricants | Consumer Plastics & Others | **MOVE*** | PET resin, plus tea and investments. Packaging materials is the right family; "Consumer Plastics" reads the wrong end of the chain. |
+| 213 | STYRENIX | Styrenix Performance Materials | 3,752 | Petrochemicals & Lubricants | Organic Chemicals - Small | **MOVE** | ABS and polystyrene — specialty polymers, not refining or lubricants. |
+| 214 | ALEMBICLTD | Alembic Ltd | 2,805 | Pharma - Formulations | Realty - Mid | **MOVE*** | The **holding company** for Alembic Pharmaceuticals, with a real-estate arm attached. It formulates nothing itself — `Holding Companies`, not Realty. |
+
+### Batch 4 tally
+
+- **Reviewed: 60** — 9 confirmed as-is · 22 move-as-proposed · 21 move-elsewhere · 8 flagged.
+
+### Running total after batch 4
+
+**214 of 263 flagged reviewed** · 55 confirmed as-is · 84 move-as-proposed · 59 move-elsewhere ·
+16 flagged · plus 210 rejected by the validated prefilter. **424 of 473 resolved.**
+
+### H7 — the worst filing errors are concentrated, not scattered
+
+Four of this batch's rows are not judgement calls at all; they are companies filed somewhere that
+has nothing to do with what they do, and three of the four are in **BFSI segments**, which means
+H3's rulebook problem is riding along with them:
+
+| Symbol | Filed under | What it actually does | BFSI rulebook? |
+|---|---|---|---|
+| **RVNL** (₹43,535 Cr) | **Housing Finance** | builds railway infrastructure | **yes** — scored as a financial |
+| NIBE (₹2,064 Cr) | Home Textiles & Technical | makes launcher systems and armoured vehicles | no |
+| GESHIP (₹19,726 Cr, batch 3) | Defence PSU | private shipping and offshore | no |
+| SCILAL (₹1,812 Cr, batch 3) | Education | demerged land-holding entity | no |
+
+RVNL is the one to fix first: it is the largest, the furthest from its segment, and the only one
+whose misfiling changes how it is **scored** rather than only how it is labelled.
+
+### H8 — a second market cap with the TVSHLTD signature
+
+**CUPID** (candidate 178) carries a market cap of **₹37,341 Cr**, which would make a condom and
+medical-device manufacturer larger than CRISIL (₹34,993 Cr), on a PAT of ₹137 Cr and a PE of
+**271.7**. The signature matches TVSHLTD exactly: market cap and PE inflated **together** and
+internally consistent (`market_cap ÷ (PE × PAT)` = 1.000), so no cross-check inside this database
+catches it.
+
+**And I checked whether a rule could find these, and it cannot.** 74 companies carry a PE above
+150, and most are genuine high-multiple names — ETERNAL at 718, PHYSICSWALLAH at 603, IDEAFORGE at
+1,004. High PE is not evidence. Nor is segment dominance: RELIANCE, TITAN, ASIANPAINT and BHARTIARTL
+all legitimately carry 60–75% of their segments. **Both candidate signals produce mostly true
+positives of the wrong kind**, so TVSHLTD and CUPID are flagged on outside knowledge and labelled
+as such — not on a rule I could hand to a job. The durable fix is an external price × share-count
+check at import time, because `screener_raw` holds no share count at all
+(`Number of equity shares` is NULL for all 1,881 rows).
+
+*Batches 5 onward continue below as they are completed.*
