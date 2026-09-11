@@ -1312,12 +1312,25 @@ def _bg_tc_screener_v2():
     Built, mounted, registered and never once executed. That is ENGINE_LIVENESS_RULE exactly:
     registered is not live, and a green status on the job beside it proves nothing about this one.
 
-    ALONGSIDE, NOT INSTEAD OF. The 16:00 old-path job keeps running and keeps writing the archive
-    table, per the card: tc_screener_cache is left exactly as it is. This runs five minutes later
-    so the two can be compared row-for-row on the same evening's data before any read path moves.
+    ALONGSIDE, NOT INSTEAD OF -- AS WRITTEN AT THE TIME. The 16:00 old-path job kept running and
+    kept writing the archive table, per the card: tc_screener_cache was left exactly as it was.
+    This ran five minutes later so the two could be compared row-for-row on the same evening's
+    data before any read path moved.
 
-    ALL DAYS, like the 16:00 job it shadows, which has no weekday gate either. A screener cache
-    built on a Saturday scores Friday's metrics, which is what a cache is for.
+    CORRECTED cc#1992 (11-Sep): THIS IS NOW HISTORY, NOT PRESENT TENSE. cc#1982's TC V2 migration
+    (founder ruling 10-Sep, "V2 everywhere") moved every live read off both tc_screener_cache and
+    tc_screener_v2 onto tc_universe_ticks -- and scheduler_master confirms neither writer job
+    is running any more: bg_tc_screener_precompute (the 16:00 old-path job this comment describes
+    as "keeps running") is active=false, deactivated by cc#1862 (PR #161, sha 1b21ef24); this job,
+    bg_tc_screener_v2, is ALSO active=false today. The comparison this comment describes happened,
+    served its purpose, and both sides of it are now off. tc_universe_ticks has its own 5-min
+    writer (bg_tc_universe_tick) and needs neither. The paragraph above is left as the historical
+    record of why this job was built and what it caught -- ENGINE_LIVENESS_RULE holding a second
+    time in the making of it is worth keeping -- corrected here rather than deleted, since deleting
+    it would lose the lesson the same way the false "keeps running" line would have kept telling it.
+
+    ALL DAYS, like the 16:00 job it shadowed, which had no weekday gate either -- moot now both
+    are off, kept for the same reason as the paragraph above.
     """
     global _tc_screener_v2_running
     if _job_active("bg_tc_screener_v2") is not True:
