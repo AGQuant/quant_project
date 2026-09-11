@@ -307,7 +307,9 @@ function renderTC(){
     + (c.rules || []).map(function(r, i){
         var st = ruleState(r);
         return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id' + (String(r.rule).indexOf('LOCK_') === 0 ? ' lk' : '') + '">' + esc(String(r.rule).replace('LOCK_', '')) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + ptsText(r) + '</span>'
-          + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div><div class="c-why">' + whyLine(r, st, c) + '</div></div>';
+          /* cc#1989: the commentary line comes OFF the front row — rows are id · name · credit · bar
+             only. whyLine() is NOT deleted: cc#1990 renders the same words inside the tap sheet. */
+          + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div></div>';
       }).join('') + '</section>';
   if (c.unmapped_rules && c.unmapped_rules.length) h += '<div class="c-note">Rules with no registry row (scored at weight 1): ' + esc(c.unmapped_rules.join(', ')) + '.</div>';
   h += '<div class="c-cover">Personal trade context · not a V8 signal · scored ' + esc(scoredLabel(d.computed_at)) + '</div>';
@@ -612,6 +614,65 @@ var VOLROWS = {
   BUY:  [['vol_r', "Today's pace ≥ 1.2×", 'x'], ['vol_p', 'Yesterday ≥ 1.0×', 'x'], ['vol_d', 'Delivery pickup ≥ 1.1×', 'x'], ['vol_ad', 'Accumulation ≥ 55%', '%']],
   SELL: [['vol_r', "Today's pace ≥ 1.2×", 'x'], ['vol_p', 'Yesterday ≥ 1.0×', 'x'], ['vol_d', 'Delivery pickup ≥ 1.1×', 'x'], ['vol_ad', 'Distribution ≤ 45%', '%']]
 };
+/* cc#1990 · KEYWORD REGISTRY. ONE place, in the page, because tc_rule_weights has NO short-code
+   column today (verified: bucket, rule_key, rule_label, weight, active, source, updated_at) and the
+   card says propose that column rather than add it here. So this map is the single source for the
+   app's shorthand until the registry carries it. POSTED IN THE FORUM for the founder to correct on
+   glass — the keywords are a first pass, not a lock.
+   Shape: rule -> [ [value key, KEYWORD, plain name + threshold, format] ... ].
+   Formats: p=percent, n=number(1dp), n2=number(2dp), x=ratio(1.33x), pct=percent(0dp), b=above/below. */
+var RULEKEYS = {
+  R2:  [['wk','Sect W','Sector week'], ['mo','Sect M','Sector month']],
+  R3:  [['dir','Peers Up','Peers up today','n0'], ['n','Peers','Peers compared','n0'], ['strong','Peers S','Peers up strongly','n0']],
+  R4:  [['d20','MA 20','Price vs 20-day average'], ['d50','MA 50','Price vs 50-day average'], ['d200','MA 200','Price vs 200-day average']],
+  R7:  [['mRSI','RSI M','Monthly RSI','n'], ['trueWk','RSI W','Weekly RSI','n']],
+  R8:  [['mo','Ret M','Month return'], ['wk','Ret W','Week return']],
+  R9:  [['vwap','VWAP','VWAP level','n'], ['rangePos','Range','Position in today range','pct']],
+  R10: [['mom_2d','Mom 2D','Two-day move'], ['low_5d','Low 5D','5-day low','n'], ['s1','S1','Support 1','n']],
+  R11: [['abovePP','Pivot','Trading above the pivot','b'], ['room','Room R1','Room left to R1'], ['mom_2d','Mom 2D','Two-day move'], ['week_return','Ret W','Week return']],
+  R12: [['oi_chg','OI D','Open-interest change'], ['day','Day','Day move'], ['basis_now','Basis','Futures basis now']],
+  R16: [['pos','Fib','Up the 3-month swing'], ['zone','Zone','Zone']],
+  R17: [['v_score','V','Value pillar','n']],
+  R18: [['m','M','Stock momentum','n'], ['sector_m','M Sect','Sector momentum','n']],
+  R19: [['ret63_pct','Ret 63','63-day return'], ['rs_nifty_pct','RS Nifty','Strength vs Nifty (pts)','n'], ['rs_sector_pct','RS Sect','Strength vs sector (pts)','n']],
+  R20: [['dgvm180','GVM D','GVM move over 180 days','n2']],
+  R21: [['dma_50','DMA 50','Distance from the 50-day average']],
+  R22: [['w52','52W','Position in the 52-week range','n']],
+  R23: [['gvm','GVM','GVM score','n']],
+  R24: [['deliv_3d','Deliv 3D','Delivery, last 3 days'], ['deliv_base','Deliv B','Delivery, own base'], ['ratio','Deliv R','Pickup ratio','x']],
+  R25: [['m','M','M-score now','n2'], ['m_1m','M 1M','M-score a month ago','n2'], ['m_3m','M 3M','M-score three months ago','n2']],
+  R26: [['dma5','DMA 5','5-day average','n2'], ['dma20','DMA 20','20-day average','n2'], ['gap_pct','Gap','5-day vs 20-day gap']]
+};
+function keyVal(v, k, fmt){
+  var x = v[k];
+  if (x == null) return '—';
+  if (fmt === 'b') return x ? 'above' : 'below';
+  if (fmt === 'pct') return Math.round(Number(x) * 100) + '%';
+  if (fmt === 'x') return xs(x);
+  if (fmt === 'n') return tv(x, 1);
+  if (fmt === 'n0') return tv(x, 0);
+  if (fmt === 'n2') return num(Number(x), 2);
+  return pc(x);
+}
+/* cc#1990 · rows for a NON-volume rule, built from the SAME r.value the commentary already uses —
+   no new data, no second source. A rule with no registry entry, or whose values are all absent,
+   returns '' and the sheet falls back to its one-line numbers, never an empty sheet. */
+function ruleRows(r){
+  var spec = RULEKEYS[r.rule], v = r.value;
+  if (!spec || !v || typeof v !== 'object') return '';
+  var rows = spec.filter(function(k){ return v[k[0]] != null; }).map(function(k){
+    return '<div class="c-vrow"><span class="k"><b class="c-kw">' + esc(k[1]) + '</b> ' + esc(k[2]) + '</span>'
+      + '<span class="v">' + esc(keyVal(v, k[0], k[3])) + '</span></div>';
+  });
+  return rows.length ? '<div class="c-vrows">' + rows.join('') + '</div>' : '';
+}
+/* cc#1990 · the footer is EXACTLY the line cc#1989 takes off the front row, now living where it
+   belongs — the rule's own total and tier. */
+function ruleFoot(r, st){
+  var e = ptsEarned(r), w = r.weight;
+  var pts = (e == null || w == null) ? null : (ptsFmt(e) + ' of ' + ptsFmt(Number(w)) + ' pts');
+  return '<div class="c-sfoot"><span>' + (pts ? esc(pts) : '&nbsp;') + '</span><span>' + esc(stateWord(st)) + '</span></div>';
+}
 function ruleSheet(c, r){
   var st = ruleState(r), name = plainName(r), v = r.value || {};
   var head = '<div class="c-sh"><div class="c-shn">' + esc(name) + '</div><div class="c-shs">' + esc(ptsText(r)) + '</div></div>';
@@ -622,7 +683,7 @@ function ruleSheet(c, r){
       var val = x == null ? '—' : (k[2] === '%' ? tv(x, 0) + '%' : xs(x));
       return '<div class="c-vrow"><span class="k">' + esc(k[1]) + (key === 'vol_r' && v.early_slot ? ' (before 09:30: half)' : '') + '</span><span class="v">' + val + '</span><span class="t ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '✗') + '</span><span class="p' + (pts ? '' : ' z') + '">' + ptsFmt(pts == null ? 0 : pts) + ' / ' + ptsFmt(mx == null ? 0 : mx) + '</span></div>';
     }).join('');
-    return head + '<div class="c-vrows">' + rows + '</div>';
+    return head + '<div class="c-vrows">' + rows + '</div>' + ruleFoot(r, st);   /* cc#1990 footer */
   }
   var lad = ladderText(r.required), hasHalf = (lad.half && lad.half !== 'no half tier');
   var on = st.cls === 'pass' ? 'full' : (st.cls === 'watch' ? 'half' : (st.cls === 'fail' ? 'none' : ''));
@@ -632,7 +693,11 @@ function ruleSheet(c, r){
   if (f){ try { line2 = f(r.value, c); } catch(e){ line2 = null; } }
   if (!line2) line2 = actualText(r.value);
   if (st.cls === 'na') line2 = 'not applicable' + (line2 && line2 !== '—' ? ' · ' + line2 : '');
-  return head + boxes + '<div class="c-nums">' + esc(line2) + '</div>';
+  /* cc#1990: keyword rows are ADDED above the cc#1788 FULL|HALF|NONE boxes, not swapped for them.
+     The boxes are the locked TC_RULE_SHEET_SIMPLE_V1 shape (session_log 39720) and they carry the
+     LADDER — what would have earned full vs half — which the rows do not. Removing them to make
+     room would lose that, so this is additive. Flagged in the forum for Fable to rule on. */
+  return head + ruleRows(r) + boxes + '<div class="c-nums">' + esc(line2) + '</div>' + ruleFoot(r, st);
 }
 $('c-sheet-x').addEventListener('click', closeSheet);
 $('c-scrim').addEventListener('click', closeSheet);

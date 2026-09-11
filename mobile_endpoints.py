@@ -2560,9 +2560,13 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
    into the well, the same color-mix the mock uses and this sheet already uses for its ladder), the
    line-2 numbers, and the four Volume rows. Old .c-shd/.c-kv/.c-ladder/.c-swhy/.c-sfoot rules stay for
    the (i) sheet and the invest sheet. */
-.c-sheet .c-sh{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-10);margin:var(--space-2) 0 var(--space-12);padding-right:36px}
-.c-sheet .c-shn{font-family:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;font-style:italic;font-size:var(--type-19);letter-spacing:.01em;color:var(--chalk)}
-.c-sheet .c-shs{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:var(--type-18);white-space:nowrap;color:var(--chalk)}
+.c-sheet .c-sh{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-10);margin:var(--space-2) 0 var(--space-12);padding-right:52px}
+/* cc#1990 defect (a): the credit read '7 of 1' because it rendered UNDER the close button. Measured
+   cause, not a guess: .c-x is right:14px + width:30px = 44px of occupied space, and this row only
+   reserved 36px. 52px clears the button with 8px to spare. The title now ellipsises instead of
+   squeezing the credit, and the credit never shrinks. */
+.c-sheet .c-shn{font-family:'Archivo Black','Space Grotesk','Sora',system-ui,sans-serif;font-style:italic;font-size:var(--type-19);letter-spacing:.01em;color:var(--chalk);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-sheet .c-shs{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:var(--type-18);white-space:nowrap;color:var(--chalk);flex:0 0 auto}
 .c-sheet .c-bxs{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-8)}
 .c-sheet .c-bxs.two{grid-template-columns:repeat(2,1fr)}
 .c-sheet .c-bx{border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-10) var(--space-9);min-height:92px;background:var(--well);opacity:.55}
@@ -2577,7 +2581,15 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 .c-sheet .c-vrows{margin-top:var(--space-2)}
 .c-sheet .c-vrow{display:grid;grid-template-columns:1fr auto auto auto;gap:var(--space-10);align-items:center;padding:var(--space-9) var(--space-2);border-bottom:var(--bw-1) solid var(--line);font-size:var(--type-125)}
 .c-sheet .c-vrow:last-child{border-bottom:0}
-.c-sheet .c-vrow .k{color:var(--chalk)}.c-sheet .c-vrow .v{color:var(--mute);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace}
+.c-sheet .c-vrow .k{color:var(--chalk)}.c-sheet .c-vrow .v{color:var(--chalk);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace}
+/* cc#1990 defect (b): the measured value (1.33x) was painted in --mute. That token is LOW CONTRAST
+   BY DESIGN — it is the chrome colour — so the number was near-invisible on the light sets and weak
+   on the dark ones. A measured value is DATA, not chrome, so it now uses --chalk, the same ink the
+   points column beside it already used. This is correct on all 15 sets by construction: --chalk is
+   --t-ink and the sheet ground is the theme's own panel, which is the pair every set is built to
+   contrast. NOT a cc#1970 issue — mobile/check.html uses none of the older-family tokens that
+   bridge touches (grepped: --panel/--txt/--mut/--dim/--line2/--surface2 all zero in that file). */
+.c-sheet .c-vrow .k .c-kw{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:var(--type-11);letter-spacing:.08em;color:var(--gold);margin-right:var(--space-6)}
 .c-sheet .c-vrow .t{font-weight:700;width:16px;text-align:center}.c-sheet .c-vrow .t.ok{color:var(--up)}.c-sheet .c-vrow .t.no{color:var(--down)}
 .c-sheet .c-vrow .p{font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-weight:700;min-width:44px;text-align:right;color:var(--chalk)}.c-sheet .c-vrow .p.z{color:var(--dim)}
 .c-sheet .c-sfoot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4) var(--space-10);margin-top:var(--space-12);font-family:'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-95);color:var(--dim)}
