@@ -188,4 +188,100 @@ sanity-guard in `compute_sector_ratings` is a scoring-path change. Raised as its
 
 ---
 
-*Batches 2 onward continue below as they are completed.*
+---
+
+## BATCH 2 — 52 companies (candidates 51–102 of 263 flagged)
+
+| # | Symbol | Company | Mcap ₹Cr | Current segment | cc#1980 proposed | Verdict | One-line reason |
+|---|---|---|---|---|---|---|---|
+| 51 | IRMENERGY | IRM Energy | 1,154 | Oil Services & Small | City Gas Distribution | **MOVE** | A licensed city-gas distributor (Banaskantha, Fatehgarh Sahib). The proposed segment is literally its business. |
+| 52 | CONFIPET | Confidence Petroleum India | 2,788 | Oil Services & Small | City Gas Distribution | **AS-IS** | LPG bottling and auto-LPG — cylinder logistics, not a piped-gas utility. Current segment fits. |
+| 53 | BODALCHEM | Bodal Chemicals | 2,249 | Organic Chemicals - Small | Specialty Chemicals - Small | **AS-IS** | Dyes and dye intermediates are commodity-cyclical, not specialty. |
+| 54 | SUDARSCHEM | Sudarshan Chemical | 9,848 | Organic Chemicals - Small | Specialty Chemicals - Small | **MOVE\*** | A global top-3 pigments maker — genuinely specialty. But at ₹9,848 Cr, a Mid/Large specialty bucket, not "Small". |
+| 55 | CUB | City Union Bank | 23,318 | **PSU Banks** | Private Banks | **MOVE** | City Union Bank has been a private-sector bank since 1904 and has never been state-owned. This is a factual error, not a taxonomy preference. |
+| 56 | IDBI | IDBI Bank | 96,449 | PSU Banks | Private Banks | **FLAG** | RBI re-categorised it private in Jan 2019 and Screener tags it so, but LIC (state-owned) holds the controlling stake and disinvestment is live. Genuinely ambiguous — founder's call, not mine. |
+| 57 | BECTORFOOD | Mrs Bectors Food | 7,056 | Packaged Foods & Dairy | FMCG - Large | **AS-IS** | Biscuits and breads — the current segment is the precise one, and ₹7,056 Cr is not "Large". |
+| 58 | HEXAGON | Hexagon Nutrition | 815 | Packaged Foods & Dairy | FMCG - Large | **AS-IS** | Same, and at ₹815 Cr "Large" is plainly wrong. |
+| 59 | PANAMAPET | Panama Petrochem | 2,922 | Petrochemicals & Lubricants | Adhesives, Coatings & Polymers | **AS-IS** | Specialty petroleum products and lubricants. Current segment names it exactly. |
+| 60 | SOTL | Savita Oil Technologies | 4,696 | Petrochemicals & Lubricants | Adhesives, Coatings & Polymers | **AS-IS** | Transformer oils and lubricants. Same. |
+| 61 | PREMIERENE | Premier Energies | 44,667 | Power - Mid | Electrical Equipment Small | **MOVE\*** | It **manufactures** solar cells and modules; it does not generate power, so "Power - Mid" is wrong. But ₹44,667 Cr into a "Small" bucket is the size error again — solar/renewable equipment at Mid or Large. |
+| 62 | WAAREERTL | Waaree Renewable Technologies | 8,848 | Power - Mid | Electrical Equipment Small | **FLAG** | Solar EPC plus some IPP assets — it straddles generation and contracting, and neither the current nor the proposed segment captures that. Needs a decision on which half leads. |
+| 63 | JYOTISTRUC | Jyoti Structures | 1,263 | Power - Small | Electronics - Heavy Electrical & Industrial | **MOVE** | Transmission towers and T&D contracting. It generates no power. |
+| 64 | TRANSRAILL | Transrail Lighting | 5,645 | Power - Small | Electronics - Heavy Electrical & Industrial | **MOVE** | Same: towers, poles and T&D EPC, not generation. |
+| 65 | JSWENERGY | JSW Energy | 96,496 | Power Generation - Large | Renewable Energy - Mid | **AS-IS** | An IPP still majority-thermal, and at ₹96,496 Cr not "Mid". |
+| 66 | NTPC | NTPC | 320,038 | Power Generation - Large | Renewable Energy - Mid | **AS-IS** | India's largest **thermal** generator. The proposal is simply wrong on both business and size. |
+| 67 | KPIL | Kalpataru Projects International | 24,250 | Power Services & Trading | Engineering - EPC Civil Small | **MOVE\*** | A T&D and civil **EPC contractor** — it neither services nor trades power. EPC is the right family; at ₹24,250 Cr "Small" is not. (This is the KPIL that cc#1980 warned could be confused with KALPATARU; they are separate rows and both are correctly named.) |
+| 68 | OMPOWER | Om Power Transmission | 583 | Power Services & Trading | Engineering - EPC Civil Small | **MOVE** | A small T&D contractor. Both kind and size fit the proposal. |
+| 69 | QPOWER | Quality Power Electrical Equipments | 11,548 | Power Services & Trading | Electronics - Heavy Electrical & Industrial | **MOVE** | Makes reactors, transformers and HVDC equipment. A manufacturer in a services segment. |
+| 70 | SKIPPER | Skipper | 6,797 | Power Services & Trading | Electronics - Heavy Electrical & Industrial | **MOVE** | Transmission towers and polymer pipes — manufacturing, not power services. |
+| 71 | CAPACITE | Capacite Infraprojects | 1,709 | Realty - Mid | Engineering - EPC Civil Small | **MOVE** | A construction contractor **for** developers. It owns no development book, so realty peers are the wrong comparison. |
+| 72 | AHLUCONT | Ahluwalia Contracts | 3,985 | Realty - Mid | Engineering - EPC Civil Small | **MOVE** | Same: a pure civil contractor. |
+| 73 | OSWALGREEN | Oswal Green Tech | 522 | Realty - Small | Holding Companies | **FLAG** | Largely an investment and asset-holding vehicle now, but the evidence is thin and the move would change its scoring rulebook (see H3). |
+| 74 | BLAL | BEML Land Assets | 676 | Realty - Small | Holding Companies | **MOVE** | A demerged land-**holding** entity. It holds; it does not develop. |
+| 75 | EMMVEE | Emmvee Photovoltaic Power | 22,740 | Renewable Energy - Mid | Electrical Equipment Small | **MOVE\*** | A solar module manufacturer, not an energy producer — but ₹22,740 Cr is not "Small". |
+| 76 | WAAREEENER | Waaree Energies | 74,502 | Renewable Energy - Mid | Electrical Equipment Small | **MOVE\*** | India's largest solar module maker. Manufacturer, yes; "Small" at ₹74,502 Cr, no. |
+| 77 | SWSOLAR | Sterling & Wilson Renewable | 4,334 | Renewable Energy - Small | Engineering - EPC Civil Small | **MOVE** | A solar **EPC contractor** — contracting is the business. Nuance: it is solar EPC, not civil EPC, so the destination is right in family and loose in detail. |
+| 78 | SOLARWORLD | Solarworld Energy Solutions | 1,287 | Renewable Energy - Small | Engineering - EPC Civil Small | **MOVE** | Same business, same nuance. |
+| 79 | AHCL | Anlon Healthcare | 829 | Specialty Chemicals - Micro | Pharma - Micro | **MOVE** | Makes pharma intermediates and APIs. Pharma is the right family. |
+| 80 | SIGACHI | Sigachi Industries | 1,360 | Specialty Chemicals - Micro | Pharma - Micro | **MOVE** | Microcrystalline cellulose — a pharmaceutical excipient. Its customers and cycle are pharma. |
+| 81 | GTLINFRA | GTL Infrastructure | 1,512 | Telecom Equipment & Services | Telecom Services | **AS-IS** | It owns passive **towers** — an asset-leasing business, not a service operator like Airtel. Neither segment is right; the proposal is the worse of the two. |
+| 82 | SUYOG | Suyog Telematics | 842 | Telecom Equipment & Services | Telecom Services | **AS-IS** | Same: tower infrastructure, not telecom services. |
+| 83 | GRAUWEIL | Grauer & Weil (India) | 3,245 | Adhesives, Coatings & Polymers | Commodity & Chlor-Alkali Chemicals | **AS-IS** | Surface-finishing chemicals and paints — specialty, and "Commodity" is the wrong direction. |
+| 84 | GULPOLY | Gulshan Polyols | 1,151 | Adhesives, Coatings & Polymers | FMCG - Small | **MOVE\*** | Calcium carbonate, starch, sorbitol and grain alcohol — neither adhesives nor FMCG. Agri and mineral processing is the right family. |
+| 85 | DEEPAKFERT | Deepak Fertilisers & Petrochem | 17,049 | Agro Chemicals - Large | Commodity & Chlor-Alkali Chemicals | **AS-IS** | Genuinely both a fertiliser and an industrial-chemicals maker (TAN, nitric acid). Defensible either way; the current segment is not an error. |
+| 86 | BASF | BASF India | 16,400 | Agro Chemicals - Large | Organic Chemicals - Small | **MOVE\*** | Diversified chemicals — agri is one division of several — so "Agro Chemicals" understates it. But ₹16,400 Cr into "Organic Chemicals - **Small**" is the size error again. |
+| 87 | EXCELINDUS | Excel Industries | 1,254 | Agro Chemicals - Small | Organic Chemicals - Small | **MOVE** | Makes agrochemical **intermediates** and environmental chemicals — a chemicals maker feeding agro, not an agrochemical brand. |
+| 88 | RATNAVEER | Ratnaveer Precision Engineering | 2,497 | Aluminium & Non Ferrous | Steel - Mid & Small | **MOVE** | Makes **stainless steel** washers, tubes and sheets. There is no aluminium in the business. |
+| 89 | SHANTIGEAR | Shanthi Gears | 5,391 | Auto - Drivetrain & Precision | Capital Goods - Industrial Small | **MOVE** | Industrial gears and gearboxes — the order book is industrial, not automotive drivetrain. |
+| 90 | RANEHOLDIN | Rane Holdings | 2,413 | Auto - Engines & Thermal | Holding Companies | **MOVE** | The holding company of the Rane auto-component group; its value is its stakes. Note: the destination is a BFSI segment, so this move also changes its scoring rulebook (H3) — intended, but worth saying. |
+| 91 | DYNAMATECH | Dynamatic Technologies | 7,806 | Auto - Engines & Thermal | Capital Goods - Industrial Small | **MOVE\*** | Aerospace structures now lead the book, ahead of hydraulics and auto castings. Aerospace/defence is the better home, and ₹7,806 Cr stretches "Small". |
+| 92 | EXICOM | Exicom Tele-Systems | 2,563 | Auto - Wiring & Electricals | Electronics - Heavy Electrical & Industrial | **MOVE** | EV chargers and telecom power systems. It makes no auto wiring. |
+| 93 | MAHSCOOTER | Maharashtra Scooters | 15,248 | Auto OEM | Holding Companies | **MOVE** | It manufactures almost nothing; it is a Bajaj-group holding vehicle whose value is its stakes. Same BFSI note as RANEHOLDIN. |
+| 94 | ASAHIINDIA | Asahi India Glass | 24,281 | Building Materials - Glass, Ceramics & Ply | Auto - Engines & Thermal | **MOVE\*** | Roughly two-thirds automotive glass, so the flag is real — but "Engines & Thermal" is not a glass peer set. Auto components is the right family. |
+| 95 | BLSE | BLS E-Services | 2,896 | Business Services | IT - Micro | **AS-IS** | Digital service delivery and banking-correspondent points — a services business, and ₹2,896 Cr is not "Micro". |
+| 96 | RAMANEWS | Shree Rama Newsprint | 501 | Business Services | Paper & Packaging | **MOVE** | It is a paper mill. It makes newsprint. "Business Services" is not close. |
+| 97 | INNOVISION | Innovision | 600 | Business Services | Infrastructure - Roads | **AS-IS** | Facility management and manpower services. Screener's "Road Assets" tag is a data artifact of the CHEMPLASTS/VINDHYATEL kind, not a business match. |
+| 98 | NAMOEWASTE | Namo eWaste Management | 659 | Business Services | Environmental Services | **MOVE** | E-waste collection and recycling — the proposed segment names it exactly. |
+| 99 | PRECWIRE | Precision Wires India | 8,825 | Capital Goods - Heavy Electrical | Aluminium & Non Ferrous | **FLAG** | See H5 — this one contradicts batch 1 and the contradiction matters more than the individual answer. |
+| 100 | ISGEC | ISGEC Heavy Engineering | 5,726 | Capital Goods - Heavy Electrical | Engineering - EPC Civil Small | **AS-IS** | Boilers, presses and heavy equipment with EPC attached; manufacturing is the core. |
+| 101 | MOLDTECH | Mold-Tek Technologies | 650 | Capital Goods - Industrial Small | Engineering - EPC Civil Small | **MOVE\*** | A structural-detailing and engineering-services (KPO) firm. It makes no capital goods and builds nothing — engineering services is the right family, and neither listed option is it. |
+| 102 | CHOICEIN | Choice International | 16,782 | Capital Markets - Large | Holding Companies | **AS-IS** | An operating financial-services group — broking, NBFC, advisory. Screener's "Holding Company" tag describes the structure, not the business. |
+
+### Batch 2 tally
+
+- **Reviewed: 52**
+- **Confirmed correct as-is: 16**
+- **Proposed to move, destination as cc#1980 suggested: 22**
+- **Proposed to move, but to a DIFFERENT destination: 10** — nine of the ten because the proposed
+  segment carried a "Small"/"Micro" size tag that the company's market cap contradicts.
+- **Flagged, not decided: 4** (IDBI, WAAREERTL, OSWALGREEN, PRECWIRE)
+
+### Running total after batch 2
+
+**102 of 263 flagged reviewed** · 38 confirmed as-is · 38 move-as-proposed · 22 move-elsewhere ·
+4 flagged · plus 210 rejected by the validated prefilter. **312 of 473 resolved.**
+
+---
+
+## H5 — a contradiction my own batch 1 created, caught in batch 2
+
+Batch 1 proposed moving **DPEL** and **KSHINTL** *out of* `Aluminium & Non Ferrous` and into
+`Electrical Cables`, because both make enamelled copper winding wire.
+
+Batch 2's candidate **PRECWIRE** (Precision Wires India, ₹8,825 Cr) is proposed to move *into*
+`Aluminium & Non Ferrous` — and Precision Wires makes **the same product**: enamelled copper
+winding wire.
+
+Three companies, one business, and the two proposals point in opposite directions. Whatever the
+right answer is, it is the same answer for all three, and I am not going to record it as two
+separate judgements that happen to disagree. The three should be decided together:
+
+- **Option A** — all three in `Electrical Cables` (their customers and competitors are cable and
+  wire makers; the metal is the input, not the business). My recommendation.
+- **Option B** — all three in `Aluminium & Non Ferrous` (the metal is the cost driver and the
+  cycle they actually trade on).
+
+Batch 1's DPEL/KSHINTL rows above stand as written, with this note attached: they are provisional
+on the same decision, not independent of it.
+
+*Batches 3 onward continue below as they are completed.*
