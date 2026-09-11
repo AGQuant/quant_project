@@ -18,7 +18,7 @@ it. Once a symbol has >=60 rows the Options-Cost verdict auto-upgrades from IV/R
 """
 import os, math, time, logging
 from datetime import date
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 import psycopg
 import requests
@@ -1542,6 +1542,57 @@ def _price_rows(strikes, spot, T, rv20, px_of):
     return rows
 
 
+def _stored_iv_gap_map(cur, sym: str) -> Tuple[Optional[str], Dict[float, Dict]]:
+    """cc#1994 (FOUNDER_RULING_11SEP on cc_tasks.spec, relayed cc_task_logs 6358): the ATM put/call
+    IV asymmetry is accepted as REAL MARKET STRUCTURE, not a solver bug. Do not fix the pricer, do
+    not re-solve anything -- surface it as a plain fact from the STORED nightly capture
+    (option_iv_daily, populated by option_iv_history.py off the prior day's NSE bhavcopy settle).
+
+    Deliberately NOT derived from this endpoint's own live ce/pe iv above -- those are intraday,
+    Black-Scholes-inverted from a live Fyers ltp, a different day's data with a different solve
+    context than the bhavcopy settle. Mixing the two into one "gap" would misstate which day's data
+    produced it, so this is its own field with its own as-of (the bhavcopy trade_date), not derived
+    from or blended with the chain's own iv.
+
+    A strike only gets a gap when BOTH legs' stored iv clear 0.001 -- comfortably above the
+    solver's own bisection floor of 1e-4 (option_iv_history._bs_iv_vec, lo=1e-4). An iv landing
+    on that floor means the stored close price was below what any positive vol could produce (a
+    deep-ITM leg priced under intrinsic in that day's bhavcopy is the usual cause) -- not a real
+    solved value, so a "gap" built from it would be a numeric artifact wearing the shape of a
+    market fact. That strike is simply left out of the map (no manufactured number), same
+    have-a-number-or-say-so discipline as gvm_nightly.py's excluded_no_market_cap. Confirmed on
+    real data before shipping: NIFTY 10-Sep strikes 23000-23300 CE all floor at 1e-4 (deep ITM,
+    close below intrinsic) and RELIANCE 10-Sep strike 1370 PE floors the same way at the other
+    end -- both correctly excluded, ATM-area strikes on both names show a clean, present gap.
+
+    Read-only against option_iv_daily -- never writes it (do_not_touch, cc#1994's own card)."""
+    cur.execute("SELECT MAX(trade_date) FROM option_iv_daily WHERE symbol=%s", (sym,))
+    r = cur.fetchone()
+    trade_date = r[0] if r else None
+    if not trade_date:
+        return None, {}
+    cur.execute("""SELECT strike, option_type, iv FROM option_iv_daily
+                   WHERE symbol=%s AND trade_date=%s""", (sym, trade_date))
+    ce_iv, pe_iv = {}, {}
+    for st, ot, iv in cur.fetchall():
+        if iv is None:
+            continue
+        (ce_iv if (ot or "").upper() == "CE" else pe_iv)[float(st)] = float(iv)
+    gap_map: Dict[float, Dict] = {}
+    for s, civ in ce_iv.items():
+        piv = pe_iv.get(s)
+        if piv is not None and civ > 0.001 and piv > 0.001:
+            # gap_vol_pts is derived from the two ALREADY-ROUNDED display fields below, not
+            # independently rounded from the raw fraction -- so "gap shown equals stored put_iv
+            # minus call_iv" (the card's own verify wording) holds EXACTLY on the numbers a reader
+            # actually sees, never off by 0.1 from independent rounding on each side.
+            call_pct = round(civ * 100, 1)
+            put_pct = round(piv * 100, 1)
+            gap_map[s] = {"call_iv": call_pct, "put_iv": put_pct,
+                          "gap_vol_pts": round(put_pct - call_pct, 1)}
+    return str(trade_date), gap_map
+
+
 @deriv_router.get("/api/deriv/strike-chain/{symbol}")
 def strike_chain(symbol: str):
     """cc#666 part_3: on-demand ATM±10 CE/PE chain with Black-Scholes fair value. Live ltp per contract
@@ -1584,6 +1635,7 @@ def strike_chain(symbol: str):
                     WHERE underlying = %(u)s AND expiry = (SELECT e FROM exp) AND ts = (SELECT t FROM mts)
                 """, {"u": root})
                 chain_rows = cur.fetchall()
+                stored_asof, gap_map = _stored_iv_gap_map(cur, sym)  # cc#1994: read-only, same cursor
             if not chain_rows:
                 return {"symbol": sym, "spot": round(spot, 2), "strikes": [], "source": "option_chain",
                         "error": "no option_chain rows for this index"}
@@ -1598,10 +1650,13 @@ def strike_chain(symbol: str):
             days = max((exp - today).days, 0) if exp else 0
             T = days / 365.0
             rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: px.get((s, ot)))
+            for row in rows:
+                row["stored_iv_gap"] = gap_map.get(row["strike"])  # cc#1994, may be None
             return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp) if exp else None,
                     "days_to_expiry": days, "rv20": round(rv20 * 100, 1) if rv20 else None,
                     "quoted": len(px), "strikes": rows, "source": "option_chain",
-                    "chain_tick": str(tick) if tick else None}
+                    "chain_tick": str(tick) if tick else None,
+                    "stored_iv_asof": stored_asof}
         import stock_options_backfill as sob
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
@@ -1615,6 +1670,7 @@ def strike_chain(symbol: str):
                 raise HTTPException(404, f"no spot price for {sym}")
             token = sob._load_token(conn)
             rv20 = _rv20_annualized(cur, sym)
+            stored_asof, gap_map = _stored_iv_gap_map(cur, sym)  # cc#1994: read-only, same cursor
         now_t = time.time()
         if not _SYM_MASTER_CACHE["text"] or now_t - _SYM_MASTER_CACHE["t"] > 21600:
             _SYM_MASTER_CACHE["text"] = sob._load_symbol_master()
@@ -1629,9 +1685,11 @@ def strike_chain(symbol: str):
         tickers = [sob.strike_ticker(sym, code, s, ot) for s in strikes for ot in ("CE", "PE")]
         ltp = _batch_quotes(tickers, token)
         rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: ltp.get(sob.strike_ticker(sym, code, s, ot)))
+        for row in rows:
+            row["stored_iv_gap"] = gap_map.get(row["strike"])  # cc#1994, may be None
         return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp), "days_to_expiry": days,
                 "rv20": round(rv20 * 100, 1) if rv20 else None, "quoted": len(ltp), "strikes": rows,
-                "source": "fyers"}
+                "source": "fyers", "stored_iv_asof": stored_asof}
     except HTTPException:
         raise
     except Exception as e:

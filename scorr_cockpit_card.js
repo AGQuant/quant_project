@@ -369,20 +369,29 @@
         +'<td style="'+B+';color:var(--c-mut)">'+(o.fair!=null?o.fair:'&mdash;')+'</td>'
         +'<td style="'+B+'"><span style="font-size:9px;font-weight:800;color:'+tagCol(o.tag)+'">'+(o.tag||'&mdash;')+(o.ratio!=null?' '+o.ratio+'&times;':'')+'</span></td>';
     };
+    // cc#1994 FOUNDER_RULING_11SEP: put/call IV asymmetry is real market structure, surfaced as a
+    // plain stored fact (own as-of, own row label) — never blended into the live ce/pe iv above.
+    const gapLbl=r=>{
+      const g=r.stored_iv_gap; if(!g)return '';
+      const sign=g.gap_vol_pts>=0?'+':'';
+      return '<div title="Stored (bhavcopy): put IV '+g.put_iv+'% minus call IV '+g.call_iv+'%, as of '+(d.stored_iv_asof||'?')+'" '
+        +'style="font-size:8.5px;font-weight:700;color:var(--c-mut);margin-top:2px;cursor:help">&Delta;IV '+sign+g.gap_vol_pts+'</div>';
+    };
     const rows=d.strikes.map(r=>{
       const hl=r.atm?' style="background:var(--c-blubg)"':'';
       return '<tr'+hl+'>'+cell(r.ce)
-        +'<td style="text-align:center;padding:5px 8px;border-top:1px solid var(--c-grid);font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx)">'+r.strike+(r.atm?'&nbsp;ATM':'')+'</td>'
+        +'<td style="text-align:center;padding:5px 8px;border-top:1px solid var(--c-grid);font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx)">'+r.strike+(r.atm?'&nbsp;ATM':'')+gapLbl(r)+'</td>'
         +cell(r.pe)+'</tr>';
     }).join('');
     const hcol='style="text-align:right;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';
-    box.innerHTML='<div style="font-size:10px;color:var(--c-dim);margin-bottom:6px">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d) &middot; RV20 '+(d.rv20!=null?d.rv20+'%':'&mdash;')+' &middot; '+d.quoted+' contracts quoted</div>'
+    const asofLbl=d.stored_iv_asof?(' &middot; stored IV as of '+d.stored_iv_asof):'';
+    box.innerHTML='<div style="font-size:10px;color:var(--c-dim);margin-bottom:6px">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d) &middot; RV20 '+(d.rv20!=null?d.rv20+'%':'&mdash;')+' &middot; '+d.quoted+' contracts quoted'+asofLbl+'</div>'
       +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
       +'<thead><tr><td '+hcol+'>CE ltp</td><td '+hcol+'>IV</td><td '+hcol+'>fair</td><td '+hcol+'>tag</td>'
       +'<td style="text-align:center;padding:4px 8px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
       +'<td '+hcol+'>PE ltp</td><td '+hcol+'>IV</td><td '+hcol+'>fair</td><td '+hcol+'>tag</td></tr></thead>'
       +'<tbody>'+rows+'</tbody></table></div>'
-      +'<div style="font-size:9px;color:var(--c-dim);margin-top:6px">Fair = Black-Scholes (&sigma;=RV20, r=7%). Tag: EXPENSIVE &gt;+25% &middot; REASONABLE 0..+25% &middot; CHEAP &lt;0% (ltp vs fair).</div>';
+      +'<div style="font-size:9px;color:var(--c-dim);margin-top:6px">Fair = Black-Scholes (&sigma;=RV20, r=7%). Tag: EXPENSIVE &gt;+25% &middot; REASONABLE 0..+25% &middot; CHEAP &lt;0% (ltp vs fair). &Delta;IV = stored put IV minus call IV at that strike (nightly bhavcopy capture, not this table\'s own live IV) &mdash; shown only where both legs solved cleanly.</div>';
   }
   // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
   // Date()/timezone drift (the server stamp is already IST).
