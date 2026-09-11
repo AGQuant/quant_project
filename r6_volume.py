@@ -100,6 +100,46 @@ def r6_read(cur, symbol: str) -> dict:
             "rvol_closed": bool((lv or {}).get("closed"))}
 
 
+def r6_read_batch(cur, symbols) -> dict:
+    """cc#1978 MARKER_TICKS_V1: batch form of r6_read for the {rvol, vol_p} pair ONLY — the two
+    fields evaluate_activity() (the only caller a universe-wide tick needs this for) actually
+    reads; NOT full parity with r6_read's dict (partial/rvol_slot/rvol_early/rvol_closed are not
+    reproduced here — no caller of this batch form needs them; use r6_read itself if they matter).
+
+    Composes two EXACT batch primitives, not an approximation: live_rvol_batch (already shipped,
+    rvol_engine.py) for the live/rvol leg, and eod_rvol_pair_batch (added by this card, same file
+    — a true PARTITION BY rewrite of eod_rvol_pair's own SQL, verified byte-identical to it on
+    real data) for the EOD pair. Reproduces r6_read's exact branching for vol_p: when the EOD
+    pair's own latest session equals the live anchor (today's close has already landed), read the
+    pair's LAG side (vol_p/prev_asof); otherwise read the pair's own latest (rvol/asof) directly.
+
+    ONE APPROXIMATION, inherited rather than introduced: live_rvol_batch anchors every symbol to
+    the SAME latest session date (one _sessions(cur,1) call for the whole batch), where
+    single-symbol live_rvol resolves each symbol's own latest intraday date independently. This
+    batch form uses that same shared anchor for the vol_p branch test too — already the accepted
+    convention of live_rvol_batch itself (in production use elsewhere before this card), not a
+    new approximation this card adds.
+
+    Returns {symbol: {'rvol': float-or-None, 'vol_p': float-or-None}}."""
+    from rvol_engine import live_rvol_batch, eod_rvol_pair_batch, _sessions
+    symbols = [(s or "").upper() for s in symbols]
+    if not symbols:
+        return {}
+    rvol_map = live_rvol_batch(cur, symbols)
+    days = _sessions(cur, 1)
+    anchor = str(days[0]) if days else None
+    pair_map = eod_rvol_pair_batch(cur, symbols)
+    out = {}
+    for sym in symbols:
+        pair = pair_map.get(sym) or {}
+        if pair.get("asof") is not None and anchor is not None and str(pair["asof"]) == anchor:
+            vol_p = pair.get("vol_p")
+        else:
+            vol_p = pair.get("rvol")
+        out[sym] = {"rvol": rvol_map.get(sym), "vol_p": vol_p}
+    return out
+
+
 def r6_state(vr):
     """3-tier on the r6_read dict: True=PASS (both clear), 'watch'=exactly one clears,
     False=neither, None=no data at all. Same for LONG/SHORT — participation confirms either

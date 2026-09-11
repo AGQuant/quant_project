@@ -459,6 +459,54 @@ def eod_rvol_pair(cur, symbol):
             "prev_asof": (str(r[3]) if r[3] is not None else None)}
 
 
+def eod_rvol_pair_batch(cur, symbols):
+    """cc#1978 MARKER_TICKS_V1: TRUE batch form of eod_rvol_pair — the identical window-function
+    SQL with PARTITION BY symbol added to every OVER() clause and symbol = ANY(%s) in place of
+    symbol = %s. Not a different derivation composed to approximate the single-symbol read (that
+    was tried and rejected — day_rvol_batch/_day_ratios reads a DIFFERENT source, intraday_prices +
+    rvol_profiles, which is only asserted "algebraically identical" for a closed session by a
+    comment on eod_volume_ratio, and measured NOT bit-identical on real data: RELIANCE 11-Sep,
+    rvol_profiles 15:25 avg_cum_vol 10731480 vs this exact window's a21 10731748 — same formula,
+    different independently-computed snapshots, a real if tiny drift). This is the SAME table,
+    the SAME window, computed once for many symbols instead of once per symbol — verified
+    byte-identical to eod_rvol_pair on real data (TCS, NATIONALUM, RELIANCE, INFY, 11-Sep) before
+    this card wires it in.
+
+    Returns {symbol: eod_rvol_pair(cur, symbol)'s own dict, or None} — same shape, same values,
+    one round trip."""
+    symbols = list(symbols)
+    if not symbols:
+        return {}
+    cur.execute(f"""
+        SELECT symbol, rv, vp, price_date, prev_d FROM (
+          SELECT symbol, price_date,
+                 CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END AS rv,
+                 LAG(CASE WHEN a21 > 0 AND n21 >= {EOD_MIN_SESSIONS} THEN vol / a21 END)
+                   OVER (PARTITION BY symbol ORDER BY price_date) AS vp,
+                 LAG(price_date) OVER (PARTITION BY symbol ORDER BY price_date) AS prev_d,
+                 ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+          FROM (
+            SELECT symbol, price_date, volume::numeric AS vol,
+                   AVG(volume::numeric) OVER (PARTITION BY symbol ORDER BY price_date
+                                              ROWS BETWEEN 21 PRECEDING AND 1 PRECEDING) AS a21,
+                   COUNT(volume)        OVER (PARTITION BY symbol ORDER BY price_date
+                                              ROWS BETWEEN 21 PRECEDING AND 1 PRECEDING) AS n21
+            FROM raw_prices
+            WHERE symbol = ANY(%s) AND price_date >= CURRENT_DATE - 60 AND volume IS NOT NULL
+          ) b
+        ) z WHERE rn = 1""", (symbols,))
+    out = {}
+    for sym, rv, vp, pdate, prev_d in cur.fetchall():
+        if rv is None and vp is None:
+            out[sym] = None
+            continue
+        out[sym] = {"rvol": (round(float(rv), 2) if rv is not None else None),
+                    "vol_p": (round(float(vp), 2) if vp is not None else None),
+                    "asof": str(pdate),
+                    "prev_asof": (str(prev_d) if prev_d is not None else None)}
+    return out
+
+
 def eod_volume_ratio(cur, symbol):
     """cc#1631: the END-OF-DAY volume ratio for ANY symbol raw_prices carries - the latest session's
     volume over the trailing 21-session average (that session excluded from its own average),

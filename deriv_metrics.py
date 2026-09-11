@@ -1042,6 +1042,59 @@ def _ad_21d(cur, sym):
     return {"up_vol_pct": up_pct, "label": label, "days": len(rows) - 1, "bars": bars}
 
 
+def _ad_21d_batch(cur, syms: List[str]) -> Dict[str, Optional[Dict]]:
+    """cc#1978 MARKER_TICKS_V1: batch form of _ad_21d -- ONE windowed query for every symbol
+    instead of N single-symbol round trips, via ROW_NUMBER() OVER (PARTITION BY symbol ...) —
+    the identical pattern v8_pivot_star.evaluate_dma_state already uses for its own per-symbol
+    close-history read (same file, DMA_FETCH). _ad_21d itself is UNTOUCHED (do_not_touch beyond
+    the guard: other callers keep the single-symbol form); this is a pure addition.
+
+    Returns {symbol: <_ad_21d(cur, symbol)'s own dict, or None>} -- computed the same way,
+    row-for-row, just fetched once for the whole symbol list rather than once per symbol. Verified
+    against the single-symbol form directly (SQL-level, real data) before this card wires it in —
+    see reports/CC1978_marker_ticks_proposal.md."""
+    syms = list(syms)
+    if not syms:
+        return {}
+    cur.execute("""
+        SELECT symbol, price_date, close, volume FROM (
+            SELECT symbol, price_date, close, volume,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+            FROM raw_prices WHERE symbol = ANY(%s) AND close IS NOT NULL
+        ) x WHERE rn <= 22
+        ORDER BY symbol, price_date""", (syms,))
+    by_sym: Dict[str, List] = {}
+    for sym, pdate, close, vol in cur.fetchall():
+        by_sym.setdefault(sym, []).append((pdate, _f(close), _f(vol) or 0.0))
+    out: Dict[str, Optional[Dict]] = {}
+    for sym in syms:
+        rows = by_sym.get(sym) or []   # already oldest-first (ORDER BY symbol, price_date ASC)
+        if len(rows) < 3:
+            out[sym] = None
+            continue
+        up_vol = dn_vol = 0.0
+        bars = []
+        for i in range(1, len(rows)):
+            d_i, close_i, vol_i = rows[i]
+            _d_prev, close_prev, _v_prev = rows[i - 1]
+            if close_i is None or close_prev is None:
+                continue
+            is_up = close_i > close_prev
+            if is_up:
+                up_vol += vol_i
+            elif close_i < close_prev:
+                dn_vol += vol_i
+            bars.append({"d": str(d_i), "v": vol_i, "up": bool(is_up), "close": close_i})
+        tot = up_vol + dn_vol
+        if tot <= 0:
+            out[sym] = None
+            continue
+        up_pct = round(up_vol / tot * 100.0, 0)
+        label = "Accumulation" if up_pct >= 55 else "Distribution" if up_pct <= 45 else "Neutral"
+        out[sym] = {"up_vol_pct": up_pct, "label": label, "days": len(rows) - 1, "bars": bars}
+    return out
+
+
 def _recent3d_vol_ratio(cur, sym) -> Optional[float]:
     """cc#516 Part D (founder-specified): AVG(volume, t-1..t-3) / AVG(volume, t-1..t-21) -- the base
     average INCLUDES the recent 3 sessions, per the founder's exact formula. >=1.3 = participation
