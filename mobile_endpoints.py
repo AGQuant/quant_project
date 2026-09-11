@@ -2440,6 +2440,17 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #ckp .c-rule .c-bar i{position:absolute;left:0;top:0;bottom:0}
 #ckp .c-rule.pass .c-bar i{background:var(--up)}#ckp .c-rule.watch .c-bar i{background:var(--amber)}#ckp .c-rule.fail .c-bar{border-color:color-mix(in srgb, var(--down) 45%, transparent)}
 #ckp .c-rule.na .c-bar{background:repeating-linear-gradient(45deg,var(--well) 0 4px,var(--line) 4px 6px)}
+/* cc#1991 item 3 — THE NOT-WEIGHTED RULE. A rule the registry carries no active weight for still
+   ran, so it stays on the list; hiding a rule that executed would be dishonest. But it earned
+   nothing toward the score, so it must not be painted in a pass/watch/fail colour that reads like
+   it did. Greyed throughout: the name and the id drop to --dim, the label reads "0 pts · not
+   weighted" (set in check.html's ptsText), and the credit bar is drawn as the same hatched
+   not-applicable fill .na uses rather than a coloured fill — a rule with no weight has no share of
+   the score to fill in. Tokens only, no literals (cc#1970). */
+#ckp .c-rule.nw .c-k,#ckp .c-rule.nw .c-id{color:var(--dim)}
+#ckp .c-rule .c-st.nw{color:var(--dim);font-weight:700;letter-spacing:var(--track-px5)}
+#ckp .c-rule.nw .c-bar{background:repeating-linear-gradient(45deg,var(--well) 0 4px,var(--line) 4px 6px)}
+#ckp .c-rule.nw .c-bar i{display:none}
 #ckp .c-rule .c-why{grid-column:2/span 2;font-size:var(--type-115);color:var(--mute);line-height:1.35}
 #ckp .c-why b{color:var(--chalk);font-family:var(--mono);font-weight:600}
 /* scan */

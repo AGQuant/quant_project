@@ -314,11 +314,39 @@ function renderTC(){
       }).join('') + '</div>'
     + alertChips(d.alerts)
     + '</section>';
-  h += '<div class="c-sect">' + esc(c.label) + ' · ' + (c.n_rules || (c.rules || []).length) + ' rules <span class="c-r">heaviest first · weighted ' + n1(c.weighted_earned) + ' / ' + (ws == null ? '?' : n1(ws)) + '</span></div>';
+  /* cc#1991 — ONE NUMBER, ONE SOURCE, AND TWO MOMENTS SAID OUT LOUD (Fable ruling 11-Sep, option b).
+     This header printed `weighted 64.5 / 100.0`, a total the ENDPOINT re-derived by summing
+     weight x credit/max over the rules it was about to render, sitting directly under a card that
+     printed the engine's 61.0 for the same bucket at the same tick. The endpoint no longer computes
+     it and the key is gone from the payload, so this line now prints score100 — the engine's own
+     number — and nothing else can disagree with the card.
+     THE GAP WAS NEVER UNMAPPED RULES and the direction is the proof: that sum only ever added a
+     rule that HAD a weight, so an unmapped rule could only push the header DOWN, and the header was
+     UP. It is a time mismatch — score100 comes from the stored 15:20 tick, the rule breakdown is
+     evaluated live at render. Option (b) does not hide that: it labels both moments. `rules_as_of`
+     is when the registry and the breakdown were read, `computed_at` is when the engine scored.
+     cc#1995 removes the second moment properly with per-rule tick history.
+     The rule COUNT is now the engine's (n_weighted, the registry's active count for this bucket),
+     not the number of rows this list happens to draw — cc#1991 item 4. */
+  var nEng = (c.n_weighted != null) ? c.n_weighted : (c.n_rules || (c.rules || []).length);
+  var nShown = (c.rules || []).length;
+  var asOf = d.rules_as_of ? hhmm(d.rules_as_of) : null;
+  var scoredAt = d.computed_at ? hhmm(d.computed_at) : null;
+  var twoMoments = (asOf && scoredAt && asOf !== scoredAt);
+  h += '<div class="c-sect">' + esc(c.label) + ' · ' + nEng + ' rules'
+    + (nShown !== nEng ? ' <span class="c-r">(' + nShown + ' shown)</span>' : '')
+    + '<span class="c-r">' + (score == null ? '—' : n1(score)) + ' / ' + (ws == null ? '?' : n1(ws))
+    + (twoMoments ? ' · scored ' + esc(scoredAt) + ' · rules read ' + esc(asOf) : (scoredAt ? ' · ' + esc(scoredAt) : ''))
+    + '</span></div>';
   h += '<section class="slab" id="tc-rules"><div class="c-grp"><span>RULE · CREDIT · WEIGHT</span><span>bar = credit earned</span></div>'
     + (c.rules || []).map(function(r, i){
         var st = ruleState(r);
-        return '<div class="c-rule ' + st.cls + '" data-rule="' + i + '"><span class="c-id' + (String(r.rule).indexOf('LOCK_') === 0 ? ' lk' : '') + '">' + esc(String(r.rule).replace('LOCK_', '')) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + st.cls + '">' + ptsText(r) + '</span>'
+        /* cc#1991 item 3: a rule the registry carries no active weight for still RAN, so it stays
+           on the list — hiding a rule that executed would be dishonest. But it earned nothing, so
+           it is greyed and labelled rather than painted pass/half/fail as if it had scored.
+           Fable's default on the card, taken as written. */
+        var nw = (r.weighted === false || r.weight == null);
+        return '<div class="c-rule ' + (nw ? 'nw' : st.cls) + '" data-rule="' + i + '"><span class="c-id' + (String(r.rule).indexOf('LOCK_') === 0 ? ' lk' : '') + '">' + esc(String(r.rule).replace('LOCK_', '')) + '</span><span class="c-k">' + esc(plainName(r)) + '</span><span class="c-st ' + (nw ? 'nw' : st.cls) + '">' + ptsText(r) + '</span>'
           /* cc#1989: the commentary line comes OFF the front row — rows are id · name · credit · bar
              only. whyLine() is NOT deleted: cc#1990 renders the same words inside the tap sheet. */
           + '<div class="c-bar"><i style="width:' + Math.round(st.ratio * 100) + '%"></i></div></div>';
@@ -621,7 +649,14 @@ function closeSheet(){ $('c-sheet').classList.remove('open'); $('c-scrim').class
    check · value · tick · points, from the engine's per-check pts_* / max_*. Nothing else. */
 function ptsEarned(r){ var w = Number(r.weight), mx = Number(r.max); return (mx > 0 && !isNaN(w)) ? w * (Number(r.credit) / mx) : null; }
 function ptsFmt(x){ return x == null ? '—' : (Math.abs(x - Math.round(x)) < 0.005 ? String(Math.round(x)) : num(x, 2)); }
-function ptsText(r){ var e = ptsEarned(r); return (e == null || r.weight == null) ? (ruleState(r).word) : (ptsFmt(e) + ' of ' + ptsFmt(Number(r.weight))); }
+/* cc#1991 item 3: an UNWEIGHTED rule used to print FULL / HALF / NONE, which reads exactly like a
+   rule that scored. It now says what is true — it ran, it carries no registry weight, it
+   contributed nothing. A rule that HAS a weight is unchanged. */
+function ptsText(r){
+  if (r.weighted === false || r.weight == null) return '0 pts · not weighted';
+  var e = ptsEarned(r);
+  return (e == null) ? (ruleState(r).word) : (ptsFmt(e) + ' of ' + ptsFmt(Number(r.weight)));
+}
 var VOLROWS = {
   BUY:  [['vol_r', "Today's pace ≥ 1.2×", 'x'], ['vol_p', 'Yesterday ≥ 1.0×', 'x'], ['vol_d', 'Delivery pickup ≥ 1.1×', 'x'], ['vol_ad', 'Accumulation ≥ 55%', '%']],
   SELL: [['vol_r', "Today's pace ≥ 1.2×", 'x'], ['vol_p', 'Yesterday ≥ 1.0×', 'x'], ['vol_d', 'Delivery pickup ≥ 1.1×', 'x'], ['vol_ad', 'Distribution ≤ 45%', '%']]

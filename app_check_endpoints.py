@@ -66,6 +66,16 @@ def _weight_sums(cur):
     return {b: float(w) for b, w in cur.fetchall()}
 
 
+def _weight_counts(cur):
+    """cc#1991 item 4: how many rules the ENGINE actually weighted for each bucket — the registry's
+    own active count, read now, never the number of rows the surface happens to render. The header
+    said "19 rules" from len(rules); if the engine summed a different number of rules than the
+    display lists, that label was quietly wrong. Same query shape and same freshness rule as
+    _weight_sums so the two can never disagree about which registry read they came from."""
+    cur.execute("SELECT bucket, COUNT(*) FROM tc_rule_weights WHERE active GROUP BY bucket")
+    return {b: int(n) for b, n in cur.fetchall()}
+
+
 def _company(cur, symbol):
     cur.execute("""SELECT company_name, segment, gvm_score, market_cap
                    FROM gvm_scores WHERE symbol = %s ORDER BY score_date DESC LIMIT 1""", (symbol,))
@@ -114,21 +124,42 @@ def app_check_tc(request: Request, symbol: str = ""):
         return {"error": (r or {}).get("error", "trade check failed"), "symbol": sym}
     with _conn() as conn, conn.cursor() as cur:
         sums = _weight_sums(cur)
+        counts = _weight_counts(cur)          # cc#1991 item 4
         meta = _company(cur, sym)
         cmp_line = _cmp_line(cur, sym)
+        # cc#1991 option (b), Fable ruling 11-Sep 08:30: the rule list is rendered from the
+        # registry AS IT IS RIGHT NOW, while score100 is the engine's number from the stored tick.
+        # Those are two different moments and the surface must SAY SO rather than let the reader
+        # assume one. Server clock, not the caller's, and the same "AT TIME ZONE Asia/Kolkata"
+        # convention mobile_endpoints._ist_now uses — on the cursor already open, rather than
+        # opening a second connection to ask the same database the same question.
+        cur.execute("SELECT NOW() AT TIME ZONE 'Asia/Kolkata'")
+        rules_as_of = str(cur.fetchone()[0])
     cards = []
     for c in r.get("cards") or []:
         label = c.get("label")
         rules = []
-        earned = 0.0
+        # cc#1991 item 1 — THE SECOND SCORE IS GONE. This loop used to accumulate `earned` as
+        # SUM(weight x credit/max) over the DISPLAYED rules and ship it as `weighted_earned`; the
+        # Check header printed that (64.5 for PNB BUY-REV) beside the card's score100 (61.0). Same
+        # bucket, same tick, same quantity, two computations — a TYPE D clash.
+        # It is NOT an unmapped-rule gap, and the direction proves it: this sum only ever ADDED a
+        # rule that HAS a weight, so an unmapped rule could only make the header SMALLER, and the
+        # header was LARGER. The real cause is time: tc_v4_dual overwrites score100 with the stored
+        # 15:20 tick while the rule breakdown is evaluated live at render. Two moments, one label.
+        # The engine score is the only score (Fable ruling, cc#1991 spec). Per-rule tick history —
+        # which removes the second moment properly instead of labelling it — is cc#1995.
         for x in c.get("rules") or []:
             mx = _f(x.get("max")) or 0.0
             w = _f(x.get("weight"))
             cr = _f(x.get("credit")) or 0.0
-            if mx > 0 and w is not None:
-                earned += w * (cr / mx)
             rules.append({"rule": x.get("rule"), "label": x.get("label"), "credit": cr, "max": mx,
-                          "weight": w, "value": x.get("value"), "required": x.get("required")})
+                          # cc#1991 item 3: a rule the registry carries no active weight for ran and
+                          # is shown, but it scored nothing. The surface greys it and says so; it is
+                          # never hidden (that would conceal a rule that ran) and never drawn as if
+                          # it scored (that would be a lie about the number).
+                          "weight": w, "weighted": w is not None,
+                          "value": x.get("value"), "required": x.get("required")})
         cards.append({
             "label": label, "side": c.get("side"), "style": c.get("style"),
             "score100": _f(c.get("score100")), "score10": _f(c.get("score10")),
@@ -139,8 +170,13 @@ def app_check_tc(request: Request, symbol: str = ""):
             "no_score_today": bool(c.get("no_score_today")),
             "raw_score": _f(c.get("score")), "raw_max": _f(c.get("max")),
             "weight_sum": sums.get(label),
-            "weighted_earned": round(earned, 2),
+            # cc#1991: `weighted_earned` is REMOVED, not renamed and not zeroed. A key that still
+            # exists is a key a surface can still print.
             "unmapped_rules": c.get("score10_unmapped_rules") or [],
+            # n_weighted is what the ENGINE summed (registry active count for this bucket);
+            # n_rules stays as what this payload renders. When they differ that is information,
+            # so both ship and the header prints the engine's.
+            "n_weighted": counts.get(label),
             "n_rules": len(rules), "rules": rules,
         })
     best = r.get("best") or {}
@@ -155,11 +191,19 @@ def app_check_tc(request: Request, symbol: str = ""):
         "best_weighted": bool(best.get("score10_weighted")),
         "cuts": _cuts100(),
         "weight_sums": sums,
+        "weight_counts": counts,              # cc#1991 item 4
+        # cc#1991 option (b): the two moments, both stated. computed_at is when the ENGINE scored
+        # (the stored tick); rules_as_of is when THIS response read the registry and the rule
+        # breakdown. Equal on a live tick, apart after 15:20 — and the surface shows both.
+        "rules_as_of": rules_as_of,
         "alerts": r.get("alerts") or [],
         "pivots": r.get("pivots") or {},
         "cards": cards,
         "engine": "tc_v4_dual four-bucket via tc_resolver.get_primary_styles",
         "scale": "score100 = score10 x 10 = 100 x sum(w x credit/max) / sum(w), w from tc_rule_weights (active), read now",
+        # cc#1991: one number, one source, said out loud in the payload so no future surface
+        # re-derives it again.
+        "score_source": "score100 from the engine tick (tc_v4_dual / tc_universe_ticks). No surface recomputes it.",
         "price_basis": "spot price, not futures",
         "spec_ref": r.get("spec_ref"), "version": r.get("version"),
     }
