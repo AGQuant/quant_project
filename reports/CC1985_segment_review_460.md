@@ -484,4 +484,114 @@ as such — not on a rule I could hand to a job. The durable fix is an external 
 check at import time, because `screener_raw` holds no share count at all
 (`Number of equity shares` is NULL for all 1,881 rows).
 
-*Batches 5 onward continue below as they are completed.*
+---
+
+## BATCH 5 — 49 companies (candidates 215–263, the last of the flagged set)
+
+| # | Symbol | Company | Mcap ₹Cr | Current segment | cc#1980 proposed | Verdict | One-line reason |
+|---|---|---|---|---|---|---|---|
+| 215 | TTKHLTCARE | TTK Healthcare | 1,613 | Pharma - Micro | Diversified | **MOVE** | Consumer products (Woodward's, Eva), medical devices and pharma. Genuinely three businesses, none dominant. |
+| 216 | INDGN | Indegene | 14,159 | Pharma - Mid Formulations | CDMO & Contract Mfg | **MOVE*** | Healthcare commercialisation and digital services **for** pharma. It formulates nothing and manufactures nothing — IT/healthcare services, not CDMO. |
+| 217 | CESC | CESC | 19,214 | Power - Mid | Power Generation - Large | **AS-IS** | An integrated utility — generation plus Kolkata distribution — and at ₹19,214 Cr the "Mid" tier is right beside NTPC and POWERGRID. |
+| 218 | GPIL | Godawari Power & Ispat | 16,360 | Power - Mid | Steel - Mid & Small | **MOVE** | Iron-ore pellets, sponge iron and steel. The "Power" in the name is legacy; the business is steel. |
+| 219 | DPSCLTD | India Power Corporation | 700 | Power - Small | Power Generation - Large | **AS-IS** | A small integrated utility. At ₹700 Cr, "Large" is plainly the wrong tier. |
+| 220 | ENRIN | Siemens Energy India | 113,816 | Power Generation - Large | Electronics - Heavy Electrical & Industrial | **MOVE*** | It **manufactures** transmission and generation equipment; it generates nothing. Heavy electrical is the right family, but ₹1,13,816 Cr needs a Large bucket. |
+| 221 | POWERGRID | Power Grid Corporation | 246,559 | Power Generation - Large | Power Services & Trading | **MOVE*** | It **transmits**; it barely generates. Neither segment is a transmission utility — the proposal is the closer of the two and still not precise. |
+| 222 | RTNINDIA | RattanIndia Enterprises | 3,890 | Power Services & Trading | Digital Aggregators & E-Commerce | **MOVE*** | Now holds Revolt (EV), Cocoblu and Neobrands — a new-economy holding group with no power business left. `Holding Companies` fits the structure better than e-commerce. |
+| 223 | RELINFRA | Reliance Infrastructure | 2,333 | Power Services & Trading | Power Generation - Large | **AS-IS** | EPC, roads, defence and some power. At ₹2,333 Cr it is not a "Large" generator by any reading. |
+| 224 | AMAGI | Amagi Media Labs | 12,469 | **Print Media & Publishing** | IT - Micro | **MOVE*** | Cloud broadcast **SaaS**. Print media is a plain error; "IT - Micro" at ₹12,469 Cr is the size error. IT/SaaS at Mid or Large. |
+| 225 | AUBANK | AU Small Finance Bank | 80,109 | Private Banks | Small Finance Banks | **FLAG** | Its **licence** says small finance bank; its ₹80,109 Cr scale says private bank, and a universal licence application is pending. Genuinely a founder call — licence or scale. |
+| 226 | GKENERGY | GK Energy | 2,598 | Pumps, Refractories & Industrial | Engineering - EPC Civil Small | **MOVE** | Solar agricultural-pump **EPC** under PM-KUSUM. It installs pumps; it does not make them. |
+| 227 | NXT-INFRA | Nxt-Infra Trust | 5,245 | REITs | Engineering - EPC Civil Small | **AS-IS** | An **InvIT** holding transmission assets. It builds nothing; the trust structure is the right peer set. |
+| 228 | NDRINVIT | NDR InvIT Trust | 6,642 | REITs | Business Services | **AS-IS** | An InvIT holding warehousing assets. Same reasoning. |
+| 229 | IRBINVIT | IRB InvIT Fund | 5,113 | REITs | Infrastructure - Roads | **AS-IS** | A trust that **owns** road assets rather than operating or building them. Trust economics, not contractor economics. |
+| 230 | KRT | Knowledge Realty Trust | 50,353 | Realty - Large | REITs | **MOVE** | It **is** a REIT, and Screener's industry tag says so outright. Scoring it against developers is the wrong comparison. |
+| 231 | TEXINFRA | Texmaco Infrastructure & Holdings | 1,496 | Realty - Small | Business Services | **MOVE*** | A holding and real-estate company. `Holding Companies` is the right home; business services is not. |
+| 232 | TREL | TransIndia Real Estate | 658 | Realty - Small | Logistics - Small | **MOVE** | Demerged from Allcargo to hold **warehousing and logistics parks**. Its tenants and cycle are logistics. |
+| 233 | ATGL | Adani Total Gas | 66,604 | Refineries & Exploration - Large | City Gas Distribution | **MOVE** | It **is** a city gas distributor. With IRMENERGY (batch 2) this takes `City Gas Distribution` from 5 members to 7, answering item 6's thin-segment concern. |
+| 234 | IREDA | Indian Renewable Energy Development Agency | 31,520 | Renewable Energy - Mid | Housing Finance | **MOVE*** | It **lends** to renewable projects; it generates nothing. Neither option is right — but it is a financial institution sitting in a **non-BFSI** segment, so it is one of H3's 25 and is scored on interest coverage as if it were an industrial. |
+| 235 | SUZLON | Suzlon Energy | 61,986 | Renewable Energy - Mid | Electronics - Heavy Electrical & Industrial | **MOVE*** | It **manufactures** wind turbines and services them. An equipment maker, not a generator — but a renewable-equipment segment at Large scale, not the proposed one. |
+| 236 | INOXGREEN | Inox Green Energy Services | 6,944 | Renewable Energy - Small | Business Services | **MOVE** | Operations and maintenance services for wind farms. A services business, not an energy producer. |
+| 237 | BFUTILITIE | BF Utilities | 1,999 | Renewable Energy - Small | Infrastructure - Roads | **MOVE** | Its principal asset is a road BOT concession (Nandi Infrastructure); the windmills are the smaller half. |
+| 238 | SAYAJIHOTL | Sayaji Hotels | 566 | Restaurants & QSR | Hotels - Small | **MOVE** | It operates hotels. The proposed segment names the business and the size tier fits. |
+| 239 | FIRSTCRY | Brainbees Solutions (FirstCry) | 9,131 | Retail - Large | Digital Aggregators & E-Commerce | **AS-IS** | Omnichannel retail — 1,000+ own stores plus online, selling its own inventory. That is retail, not a marketplace. |
+| 240 | REDTAPE | Redtape | 6,518 | Retail - Mid | Footwear | **MOVE** | It designs, manufactures and sells footwear. The proposed segment names the product. |
+| 241 | IDEAFORGE | ideaForge Technology | 3,944 | **Solar & Renewable Equipment Small** | Defence - Small | **MOVE** | It makes military **drones**. There is no solar or renewable business; this is a plain filing error. |
+| 242 | QUADFUTURE | Quadrant Future Tek | 1,747 | Solar & Renewable Equipment Small | Electrical Cables | **MOVE** | Specialty railway cables and KAVACH train-control systems. Cables is right for the larger half; solar is not in the business. |
+| 243 | SPECTRUM | Spectrum Electrical Industries | 4,088 | Solar & Renewable Equipment Small | Capital Goods - Industrial Small | **MOVE** | Electrical components and switchgear made for brand owners. Not solar equipment. |
+| 244 | PCCL | Petro Carbon & Chemicals | 1,057 | Specialty Chemicals - Micro | Mining | **MOVE*** | It makes **calcined petroleum coke** — a carbon-products maker feeding aluminium smelters. It mines nothing. See H9: this is the same carbon-products family as HEG and GRAPHITE. |
+| 245 | MOL | Meghmani Organics | 1,711 | Specialty Chemicals - Small | Agro Chemicals - Small | **FLAG** | Post-demerger it holds pigments **and** agrochemicals, with neither clearly dominant. Needs a revenue split, not a tag. |
+| 246 | IOLCP | IOL Chemicals & Pharmaceuticals | 6,261 | Specialty Chemicals - Small | Pharma - Micro | **MOVE*** | India's largest ibuprofen maker — an **API** producer. `Pharma - Bulk & API` is the precise home, and ₹6,261 Cr is not "Micro". |
+| 247 | MIDHANI | Mishra Dhatu Nigam | 8,824 | Steel - Mid & Small | Defence - Small | **MOVE** | Superalloys and special steels for defence and space. It **is** a defence PSU, so `Defence PSU` is the precise destination — unlike AZAD and JYOTICNC in batch 3, which are in that segment and are not PSUs. |
+| 248 | STEELCAS | Steelcast | 3,248 | Steel - Mid & Small | Castings & Forgings | **MOVE** | It makes steel castings for mining and earthmoving equipment. The proposed segment names it. |
+| 249 | INTERARCH | Interarch Building Solutions | 2,854 | Steel - Mid & Small | Engineering - EPC Civil Small | **MOVE** | Pre-engineered steel buildings — design, manufacture and erection. A building-systems business, not commodity steel. |
+| 250 | RPEL | Raghav Productivity Enhancers | 7,762 | Steel - Mid & Small | Pumps, Refractories & Industrial | **MOVE** | It makes **ramming mass**, a refractory — and Screener tags it "Electrodes & Refractories", the **same tag as HEG and GRAPHITE**. See H9: this changes the arithmetic on the cc#1985 gate. |
+| 251 | NAVA | Nava Ltd | 15,751 | Steel - Mid & Small | Renewable Energy - Mid | **AS-IS** | Ferroalloys, thermal power in Zambia and mining. There is no renewable business; the proposal is wrong. |
+| 252 | NELCAST | Nelcast | 994 | Steel Products & Misc | Castings & Forgings | **MOVE** | Ductile and grey iron castings for commercial vehicles and tractors. The proposed segment is exactly the business. |
+| 253 | EPACKPEB | EPack Prefab Technologies | 2,363 | Steel Products & Misc | Capital Goods - Industrial Small | **MOVE** | Pre-engineered buildings and prefab panels — the same family as INTERARCH above. |
+| 254 | PRAKASH | Prakash Industries | 2,271 | Steel Products & Misc | Integrated Steel - Large | **AS-IS** | Integrated steel and power, yes — but at ₹2,271 Cr, putting it in with Tata Steel and JSW is the MANAKSTEEL error exactly. |
+| 255 | RAJRATAN | Rajratan Global Wire | 2,507 | Steel Tubes & Wires | Auto - Engines & Thermal | **AS-IS** | It makes **bead wire** — a steel wire maker that happens to sell to tyre companies. The customer is not the business. |
+| 256 | PENIND | Pennar Industries | 2,462 | Steel Tubes & Wires | Capital Goods - Industrial Small | **MOVE** | Cold-rolled profiles, tubes, railway wagons and solar mounting systems — diversified engineering, not a tube maker. |
+| 257 | KARNIKA | Karnika Industries | 744 | Synthetic Fibres & Yarn | Retail - Mid | **MOVE*** | Knitted hosiery garments. Not fibre and not retail — `Garments & Apparel` is the right home. |
+| 258 | NELCO | NELCO | 2,118 | Telecom Equipment & Services | IT - Small | **AS-IS** | VSAT satellite communication **services**. It is a telecom service provider, which the current segment covers. |
+| 259 | MTNL | Mahanagar Telephone Nigam | 1,605 | Telecom Equipment & Services | Telecom Services | **MOVE** | A telecom operator in Delhi and Mumbai. It makes no equipment. |
+| 260 | ASTRAMICRO | Astra Microwave Products | 16,568 | Telecom Services | Defence - Small | **MOVE*** | Defence radar and RF subsystems. It provides no telecom service — but ₹16,568 Cr stretches "Small". |
+| 261 | BBOX | Black Box | 13,605 | Telecom Services | IT - Micro | **MOVE*** | Global IT infrastructure and network integration services. Not a telecom operator, and at ₹13,605 Cr not "Micro" either. |
+| 262 | ARVINDFASN | Arvind Fashions | 5,901 | Textiles - Large | Retail - Mid | **MOVE** | It **retails brands** — US Polo, Tommy Hilfiger, Calvin Klein. Arvind Ltd, the mill, is a separate listing. A third demerger case after KALPATARU and RAYMOND. |
+| 263 | PASUPTAC | Pasupati Acrylon | 604 | Textiles Smallcap | Petrochemicals & Lubricants | **MOVE*** | It makes **acrylic fibre** — `Synthetic Fibres & Yarn` is the precise home, not petrochemicals. Note it is one of only four members of `Textiles Smallcap`, so moving it takes that thin segment to three. |
+
+### Batch 5 tally
+
+- **Reviewed: 49** — 11 confirmed as-is · 22 move-as-proposed · 14 move-elsewhere · 2 flagged.
+
+---
+
+## FINAL TOTAL — the 473 are reviewed
+
+| | count |
+|---|---|
+| Rejected by the validated prefilter (3+ segment-mates share the company's Screener industry — a deliberate split) | **210** |
+| Individually read | **263** |
+| — confirmed correctly placed as-is | **66** |
+| — proposed to move, to the destination cc#1980 named | **106** |
+| — proposed to move, but to a **different** destination | **73** |
+| — flagged, genuinely undecided, named for the founder | **18** |
+| **Total resolved** | **473** |
+
+**179 companies are proposed for a move** (106 + 73) and **none of them has been applied.** The card
+pre-approved exactly ten; eight were written and two are held at the n=2 gate. This list is the
+founder's to rule on.
+
+**The single most common defect is not a wrong business — it is a wrong SIZE.** Of the 73
+move-elsewhere calls, the majority are cases where cc#1980 correctly spotted that the current
+segment is wrong and then proposed a segment carrying a `Small`, `Mid` or `Micro` tag that the
+company's market cap contradicts: WAAREEENER (₹74,502 Cr → "Electrical Equipment **Small**"),
+PREMIERENE (₹44,667 Cr → same), RVNL (₹43,535 Cr → "EPC Civil **Small**"), AMAGI (₹12,469 Cr →
+"IT - **Micro**"), IKS (₹30,657 Cr → "IT - **Micro**"). cc#1980 named this limitation itself on
+MANAKSTEEL; it turns out to be the dominant one.
+
+---
+
+## H9 — the n=2 gate has a third member, and it changes the recommendation
+
+`reports/CC1985_segment_moves.md` holds HEG and GRAPHITE at the gate because a 2-member
+`Graphite Electrodes` segment cannot benchmark anything, and proposes
+`Pumps, Refractories & Industrial` as the fallback.
+
+Batch 5 found **RPEL** (Raghav Productivity Enhancers, ₹7,762 Cr), a ramming-mass maker whose
+Screener industry tag is **"Electrodes & Refractories" — the identical tag HEG and GRAPHITE
+carry** — and whose own proposed destination is **that same fallback segment**.
+
+So the fallback is not a compromise at all. With HEG, GRAPHITE and RPEL moved in,
+`Pumps, Refractories & Industrial` would hold **19 members, six of them in the
+Electrodes & Refractories industry**: RHIM, VESUVIUS, IFGLEXPOR, ORIENTCER, plus the three moving
+in. That is a real peer set for a graphite-electrode maker, arrived at from the data rather than
+from a preference.
+
+**PCCL** (Petro Carbon & Chemicals, ₹1,057 Cr, calcined petroleum coke) is the same carbon-products
+family one step upstream and is worth considering alongside them, though its Screener tag
+(Industrial Minerals) differs.
+
+This strengthens Option A on the gate — move the pair to `Pumps, Refractories & Industrial` rather
+than found a 2-member segment — and it is offered as evidence for the founder's ruling, not as a
+reason to act without one. **Nothing here has been written.**
