@@ -327,12 +327,33 @@ def store_metrics(conn, m: Dict):
              %(ma9_vs_ma21)s, %(vol_ratio)s,
              NOW() AT TIME ZONE 'Asia/Kolkata')
             ON CONFLICT (symbol, score_date) DO UPDATE SET
-                gvm_score=EXCLUDED.gvm_score, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, dma_20=EXCLUDED.dma_20,
-                rsi_month=EXCLUDED.rsi_month, rsi_weekly=EXCLUDED.rsi_weekly, daily_rsi=EXCLUDED.daily_rsi,
-                month_return=EXCLUDED.month_return, week_return=EXCLUDED.week_return,
-                year_return=EXCLUDED.year_return,
+                -- cc#2000: gvm_score is the ONE column EOD is meant to win on (CLAUDE.md V8 lock,
+                -- 18-Jun-2026: "EOD frozen: gvm_score only ... Live every 5-min: all 19 other
+                -- metrics via v8_signal_writer"). Left as a bare overwrite, deliberately, alone.
+                gvm_score=EXCLUDED.gvm_score,
+                -- cc#2000 TWO-WRITER GUARD: every column below gets the SAME guard mom_2d/day_1d/
+                -- sector_day/sector_week/sector_month already had (cc#1461) — prefer whatever is
+                -- already in TODAY's row (written live through the day by v8_signal_writer) and
+                -- fall back to this EOD recompute only when nothing live claimed the column. Safe
+                -- by construction even for a column the live writer never touches: score_date is
+                -- part of the conflict key, so every trading day starts a fresh row and there is no
+                -- multi-day freeze risk. This was 14 bare EXCLUDED overwrites (v8_engine's own EOD
+                -- recompute silently beating whatever the live writer had put there since 09:15),
+                -- found by grep rather than assumed from the card's own count of eleven: three
+                -- DMAs, three RSIs, three returns, eod_chg, month_index, week_index_52,
+                -- ma9_vs_ma21, vol_ratio.
+                dma_50=COALESCE(v8_metrics.dma_50, EXCLUDED.dma_50),
+                dma_200=COALESCE(v8_metrics.dma_200, EXCLUDED.dma_200),
+                dma_20=COALESCE(v8_metrics.dma_20, EXCLUDED.dma_20),
+                rsi_month=COALESCE(v8_metrics.rsi_month, EXCLUDED.rsi_month),
+                rsi_weekly=COALESCE(v8_metrics.rsi_weekly, EXCLUDED.rsi_weekly),
+                daily_rsi=COALESCE(v8_metrics.daily_rsi, EXCLUDED.daily_rsi),
+                month_return=COALESCE(v8_metrics.month_return, EXCLUDED.month_return),
+                week_return=COALESCE(v8_metrics.week_return, EXCLUDED.week_return),
+                year_return=COALESCE(v8_metrics.year_return, EXCLUDED.year_return),
                 mom_2d=COALESCE(v8_metrics.mom_2d, EXCLUDED.mom_2d),
-                day_1d=COALESCE(v8_metrics.day_1d, EXCLUDED.day_1d), eod_chg=EXCLUDED.eod_chg,
+                day_1d=COALESCE(v8_metrics.day_1d, EXCLUDED.day_1d),
+                eod_chg=COALESCE(v8_metrics.eod_chg, EXCLUDED.eod_chg),
                 -- cc#1461: sector_day gets the SAME guard its two siblings below already have.
                 -- This EOD pass computes sector_day=None (it is a live-only metric, written by
                 -- v8_signal_writer every 5-min per cc#1102's theme grouping) and runs AFTER the
@@ -341,8 +362,10 @@ def store_metrics(conn, m: Dict):
                 sector_day=COALESCE(v8_metrics.sector_day, EXCLUDED.sector_day),
                 sector_week=COALESCE(v8_metrics.sector_week, EXCLUDED.sector_week),
                 sector_month=COALESCE(v8_metrics.sector_month, EXCLUDED.sector_month),
-                month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
-                ma9_vs_ma21=EXCLUDED.ma9_vs_ma21, vol_ratio=EXCLUDED.vol_ratio,
+                month_index=COALESCE(v8_metrics.month_index, EXCLUDED.month_index),
+                week_index_52=COALESCE(v8_metrics.week_index_52, EXCLUDED.week_index_52),
+                ma9_vs_ma21=COALESCE(v8_metrics.ma9_vs_ma21, EXCLUDED.ma9_vs_ma21),
+                vol_ratio=COALESCE(v8_metrics.vol_ratio, EXCLUDED.vol_ratio),
                 -- cc#855: set EXPLICITLY. This upsert previously left computed_at to the column
                 -- DEFAULT, which on the live table is still a bare now() (= UTC on Railway).
                 -- Changing that default needs ALTER TABLE, which MAINTENANCE_LOCK_RULE id=3041
