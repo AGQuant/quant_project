@@ -55,7 +55,7 @@ Base URL: `https://quantproject-production.up.railway.app`
 |---|---|---|---|
 | GET | `/api/digest/daily` | `digest_daily` | Composite daily digest: global indices, domestic (NIFTY/BANKNIFTY live+EOD), ADR, support levels, pivots (rolling-5d), PCR trend |
 | GET | `/api/daily/adr` | `daily_adr` | ADR series. Query: `days` (1–30, default 5) |
-| GET | `/api/daily/pcr` | `daily_pcr` | PCR series. Query: `underlying` (default NIFTY), `days` (1–30) |
+| GET | `/api/daily/pcr` | `daily_pcr` | PCR series, `pcr_daily.pcr` — **canonical for daily-close PCR** (cc#2001 R1). Query: `underlying` (default NIFTY), `days` (1–30) |
 | POST | `/api/daily/compute_metrics` | `compute_daily_metrics_now` | 🔒 admin — compute & store ADR + PCR |
 
 ---
@@ -270,10 +270,28 @@ cc#602 news-discovered LEAD (a company merely named in an article). Rules:
 | GET | `/api/v10/summary` | summary |
 
 ### PCR — `pcr_endpoints.py` (prefix `/api/pcr`)
+
+**Which PCR is canonical (cc#2001, Fable ruling 11-Sep 08:40 IST, log 6255 R1).** Any surface that
+just says "PCR" means the whole-chain put/call OI ratio at the latest 5-min bar —
+**`pcr_intraday.pcr_total`**, served below by `/api/pcr/intraday`. Daily-close surfaces use
+**`pcr_daily.pcr`** (also whole-chain, EOD — see Daily Digest & Market Data above).
+`oi_structure_daily.pcr` (`/api/oi/structure`, below) and `pcr_mood.py`'s live-computed PCR
+(`/api/pcr/mood`, right below) are **independent writers of the same whole-chain measure** —
+non-canonical, kept for now, agreeing with `pcr_total` to about the third decimal on a clean tick.
+
+**`pcr_intraday.pcr_atm5`** is a genuinely **different, narrower** measure (ATM ±5 strikes only,
+not the whole chain — ~50pct higher than `pcr_total` on a real NIFTY tick, cc#1986 10-Sep finding)
+— **not a mislabeling to fix**: every payload that reads it already keys it as `pcr_atm5`, never
+bare `pcr` (re-verified fresh for this card across all 8 files that reference the column — the
+2024-vintage worry that it was "stored in a column called `pcr`" does not match the live schema,
+which has carried `pcr_atm5`/`pcr_total` as its two real column names throughout; see the cc#2001
+finding on cc#1199 for the full reader-by-reader list).
+
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/pcr/intraday` | intraday PCR |
-| GET | `/api/pcr/mood?underlying=NIFTY\|BANKNIFTY` | `pcr_mood.py` (cc#1568, session_log 36200): label, band, dial_segments, label_colour, reason, note, basis, as_of. **cc#1576 (36294)** adds `interpret`: `state` (STRENGTH \| CAUTION \| COMPLACENCY \| WEAK_SUPPORT \| NEUTRAL, the three-input rule: PCR vs yesterday, Nifty day %, VIX vs prev close), `band` (read band), `headline`, `read[]`/`read_text`, `change_line`, `hour_line`, `range_line`, `caveats[]`, `evidence {n, up, down, avg_next_pct, scored}` + `evidence_line` for the current state (pcr_daily × raw_prices × INDIAVIX, last 120 sessions, scored=false below 20), `evidence_by_state`, `evidence_by_band`, `inputs`, `option_price` (ATM CE/PE ltp vs Black-Scholes fair via `/api/deriv/strike-chain`, cached 5 min). Descriptive only. |
+| GET | `/api/pcr/intraday` | 5-min PCR trend, **both** `pcr_atm5` and `pcr_total` (canonical) per row, correctly distinct keys already — `underlying`, `days` query params |
+| GET | `/api/pcr/mood?underlying=NIFTY\|BANKNIFTY` | `pcr_mood.py` (cc#1568, session_log 36200): label, band, dial_segments, label_colour, reason, note, basis, as_of. `pcr` here is a **live, independent whole-chain computation straight off `option_chain`** (cc#1846 — not a read of `pcr_total`/`pcr_daily`; non-canonical writer, same measure). **cc#1576 (36294)** adds `interpret`: `state` (STRENGTH \| CAUTION \| COMPLACENCY \| WEAK_SUPPORT \| NEUTRAL, the three-input rule: PCR vs yesterday, Nifty day %, VIX vs prev close), `band` (read band), `headline`, `read[]`/`read_text`, `change_line`, `hour_line`, `range_line`, `caveats[]`, `evidence {n, up, down, avg_next_pct, scored}` + `evidence_line` for the current state (pcr_daily × raw_prices × INDIAVIX, last 120 sessions, scored=false below 20), `evidence_by_state`, `evidence_by_band`, `inputs`, `option_price` (ATM CE/PE ltp vs Black-Scholes fair via `/api/deriv/strike-chain`, cached 5 min). Descriptive only. |
+| GET | `/api/pcr/intraday_hourly` | 5-min-resolution `pcr_total` only (never touches `pcr_atm5`) over the last 5 trading days, payload key `pcr` — unambiguous in practice since this endpoint is always-and-only the total measure |
 | POST | `/api/pcr/intraday/compute` | compute intraday PCR |
 | POST | `/api/pcr/backfill` | backfill PCR |
 
@@ -400,7 +418,7 @@ loudly on anything not in its documented `KNOWN_EXCEPTIONS` (the four above), an
 ### OI Structure — `oi_structure.py` (cc#1575, OI_STRUCTURE_INTERPRET_V1 · session_log 36283)
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/oi/structure?underlying=NIFTY\|BANKNIFTY` | Max Pain (i) read for both surfaces: live snapshot (spot + basis, max pain, call/put walls + OI, second walls, PCR, one_sided, mp_dist_pct, range_width_pct, days_to_expiry), `scenario` (PIN \| RANGE \| ABOVE_CALL_WALL \| BELOW_PUT_WALL \| MAX_PAIN_FAR \| ONE_SIDED), `headline` + `read[]` + `caveats[]` in plain words, `evidence {n, up, down, avg_next_pct, scored}` + `evidence_line` counted only from `oi_structure_daily` close rows with a filled next day (same scenario, last 60 sessions; `scored=false` below 20), `history[]` = last 10 close snapshots. Descriptive only, never a signal. |
+| GET | `/api/oi/structure?underlying=NIFTY\|BANKNIFTY` | Max Pain (i) read for both surfaces: live snapshot (spot + basis, max pain, call/put walls + OI, second walls, PCR — **non-canonical, same whole-chain measure as `pcr_total`, see PCR section above (cc#2001 R1)** —, one_sided, mp_dist_pct, range_width_pct, days_to_expiry), `scenario` (PIN \| RANGE \| ABOVE_CALL_WALL \| BELOW_PUT_WALL \| MAX_PAIN_FAR \| ONE_SIDED), `headline` + `read[]` + `caveats[]` in plain words, `evidence {n, up, down, avg_next_pct, scored}` + `evidence_line` counted only from `oi_structure_daily` close rows with a filled next day (same scenario, last 60 sessions; `scored=false` below 20), `history[]` = last 10 close snapshots. Descriptive only, never a signal. |
 
 Snapshots: `oi_structure_daily` (PK underlying, d, snapshot_kind) written by the app scheduler at 11:00 IST (`bg_oi_structure_mid`) and 15:25 IST (`bg_oi_structure_close`); `bg_oi_structure_fill` at 09:20 fills `next_day_pct/high/low` from index spot bars; `bg_oi_structure_backfill` is armed by `app_config.oi_structure_backfill_run='pending'`. Max pain math stays in `max_pain.py`.
 
