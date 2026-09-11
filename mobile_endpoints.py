@@ -2457,6 +2457,16 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 #ckp .c-ib{min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;padding:0;cursor:pointer;color:var(--accent)}
 #ckp .c-ib i{width:22px;height:22px;border-radius:50%;border:var(--bw-1) solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-family:var(--mono);font-style:normal;font-weight:800;font-size:var(--type-11);line-height:1}
 #ckp .c-buckets{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-6);margin-top:var(--space-12)}
+/* cc#1987: the verdict card is THREE parts and gets TWO hairlines — one between Part 1 (.c-hd)
+   and Part 2 (.c-p2), one between Part 2 and Part 3 (.c-buckets). border-top on the wrapper
+   spans the card's INNER width automatically, so it respects the section's own horizontal
+   padding without a hardcoded width. Colour is var(--line), the theme's line token, never a
+   literal grey — so it reads light grey on the light sets and stays a faint line on Gold Night.
+   The gap is var(--space-12) above AND below each line, which is the step .c-buckets already
+   used between major rows — the card's own value, not a new one — so Part 2 sits centred
+   between the two lines. */
+#ckp .c-hero > .c-p2,
+#ckp .c-hero > .c-buckets{border-top:var(--bw-1) solid var(--line);margin-top:var(--space-12);padding-top:var(--space-12)}
 #ckp .c-bk{text-align:center;padding:var(--space-8) var(--space-4);background:var(--well);border:var(--bw-1) solid var(--line);border-radius:var(--radius-7);cursor:pointer}
 #ckp .c-bk-k{font-family:var(--mono);font-size:var(--type-9);letter-spacing:var(--track-px10);color:var(--mute)}#ckp .c-bk-v{font-family:var(--mono);font-size:var(--type-17);font-weight:800;margin-top:var(--space-2)}#ckp .c-bk-s{font-family:var(--mono);font-size:var(--type-9);color:var(--dim)}
 #ckp .c-bk.on{border-color:var(--gold);background:var(--gold-d)}#ckp .c-bk.on .c-bk-k{color:var(--gold)}

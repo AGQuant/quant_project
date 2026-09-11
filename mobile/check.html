@@ -289,13 +289,25 @@ function renderTC(){
   var h = '<section class="pressed c-hero">'
     + '<div class="c-hd"><div><div class="c-sym">' + esc(d.symbol) + '</div><div class="c-nm">' + esc(d.company || '') + (d.segment ? ' · ' + esc(d.segment) : '') + (d.gvm != null ? ' · GVM ' + num(d.gvm, 2) : '') + '</div></div>'
     + '<div class="c-px"><div class="c-pv">' + inr(d.cmp) + '</div><div class="c-ps">CMP · ' + esc(cmpTs || '—') + ' · spot</div></div></div>'
+    /* cc#1987: PART 2 gets its own wrapper. Parts 1 (.c-hd) and 3 (.c-buckets) were already
+       wrappers; the verdict was four loose siblings. The card asks for wrappers rather than
+       margins on inner elements so the hairline survives future edits inside a part. */
+    + '<div class="c-p2">'
     + '<div class="c-vrow"><div><div class="c-eye">' + (c.label === d.best_label ? 'BEST OF 4 · ' : 'BUCKET · ') + esc(c.label) + '</div><div class="c-vword ' + cls + '">' + esc(bandWord(c)) + '</div></div>'
     + '<div class="c-vscore"><div class="c-n">' + (score == null ? '—' : n1(score)) + '<small> / 100</small></div><div class="c-l">TC SCORE</div></div></div>'
     + '<div class="c-meter"><i style="width:' + clamp(Number(score) || 0, 0, 100) + '%"></i>'
       + ['watch','valid','strong'].map(function(k){ return cuts[k] == null ? '' : '<span class="c-cut" style="left:' + clamp(Number(cuts[k]), 0, 100) + '%"></span>'; }).join('') + '</div>'
     + '<div class="c-mlabels"><span>FAIL</span><span>WATCH ' + n1(cuts.watch) + '</span><span>VALID ' + n1(cuts.valid) + '</span><span>STRONG ' + n1(cuts.strong) + '</span></div>'
-    /* cc#1782: the read and the formula footer sit behind this (i) now — see infoSheet('tc') */
-    + '<div class="c-irow"><button type="button" class="c-ib" data-info="tc" aria-label="How to read this score"><i>i</i></button></div>'
+    /* cc#1988 (founder: "not much relevant here"): the TC (i) button and its row are REMOVED, so the
+       band-bar labels are now the last line of Part 2, sitting above the cc#1987 hairline.
+       WHAT IT OPENED, and the consequence, recorded here rather than left to be discovered:
+       infoSheet('tc') — the "How to read this score" sheet carrying readText() and the score
+       formula footer (score = weighted credits ÷ registry weight × 100). With this button gone
+       that content is reachable from NOWHERE on the Check tab. The Invest Check (i)
+       (data-info="ic") is untouched and still opens its own infoSheet('ic'), so the shared
+       [data-info] listener MUST stay — deleting it would break Invest Check. Flagged for a ruling
+       on whether the TC read should be re-homed rather than simply lost. */
+    + '</div>'
     + '<div class="c-buckets">' + tiles.map(function(t){
         var tc = t.weighted ? (bandCls(t.band) === 'pass' ? 'up' : (bandCls(t.band) === 'watch' ? 'am' : 'dn')) : 'mu';
         return '<div class="c-bk' + (t.label === c.label ? ' on' : '') + '" data-bucket="' + esc(t.label) + '" role="button"><div class="c-bk-k">' + esc(t.label) + '</div><div class="c-bk-v ' + tc + '">' + (t.score100 == null ? '—' : n1(t.score100)) + '</div><div class="c-bk-s">' + esc(t.weighted ? (t.band || '—') : 'UNWEIGHTED') + '</div></div>';
