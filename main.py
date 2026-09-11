@@ -1987,15 +1987,17 @@ def v8_run_for_date(target_date: str, x_admin_token: Optional[str] = Header(None
     from datetime import date as _date; d = _date.fromisoformat(target_date)
     with get_conn() as conn: return run_v8_engine(conn, target_date=d)
 
-@app.get("/api/v8/metrics/all")
-def v8_metrics_all():
-    return api_query("""
-        SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20, rsi_month, rsi_weekly, daily_rsi,
-               month_return, week_return, year_return, mom_2d, day_1d, eod_chg,
-               month_index, week_index_52, ma9_vs_ma21, vol_ratio,
-               sector_week, sector_month
-        FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics) ORDER BY symbol
-    """)
+# cc#1984 item 1: GET /api/v8/metrics/all was defined TWICE -- here, directly on the app, and in
+# v8_endpoints.py:1163 under the router's /api/v8 prefix. Starlette matches in REGISTRATION order
+# and returns on the first full match, and app.include_router(v8_router) runs at line 816 of this
+# file, well before this decorator at ~1990. So the router half registered first and this one has
+# never served a request. Confirmed by a LIVE probe rather than by reading: the payload from the
+# running app carries segment, verdict, theme, hourly_pct, rvol, vs_pp, room_pct and r1_touch --
+# all of which only v8_endpoints.py builds -- and carries no score_date, which was the only key
+# unique to the handler that stood here. Deleting it therefore changes no payload for any consumer
+# (scorr_filters.html, scorr_v13.html, v8_dashboard.html, mcp_dispatch.py); they were all already
+# being served the router's shape. It also puts this file back in line with rule 4, main.py is
+# wiring only. Nothing moved -- the surviving handler already lives in v8_endpoints.py.
 
 @app.get("/api/v8/metrics/{symbol}")
 def v8_metrics_single(symbol: str, score_date: Optional[str] = None):

@@ -779,93 +779,37 @@ def m_v8():
 @router.get("/api/mobile/check")
 @_json_safe   # cc#887
 def mobile_check(request: Request, symbol: str = "", side: str = "LONG", limit: int = 20):
+    """RETIRED by cc#1984 item 6. Returns 410, reads nothing.
+
+    WHY. This handler SELECTed tc_screener_cache, which stopped being written when cc#1862
+    (PR #161, sha 1b21ef24) deliberately deactivated bg_tc_screener_precompute. The canonical
+    Trade Check store is tc_universe_ticks (TC_LIVE_INTRADAY_CANON_V1), and every live Check
+    surface already reads the app_check_endpoints.py family -- /api/mobile/check/tc, /scan,
+    /scan/start, /scan/progress and /invest. cc#1982 migrated the last two readers of the frozen
+    table off it; this route was the orphan left behind.
+
+    ZERO CONSUMERS, checked the way the card asked. A boundary-aware search for the EXACT path
+    (excluding /api/mobile/check/<child>) across .html, .js, .py, .gs, .json and .md returns two
+    hits: this definition, and a historical note in app_check_endpoints.py describing what the
+    page USED to read. mobile/check.html calls only the children.
+
+    THE ROUTE STAYS WIRED, per the card -- an unknown caller gets a clear 410 and a pointer,
+    never a 404 or, worse, a stale answer. It also takes with it the comment that sat here
+    claiming "bg_tc_lite writes tc_screener_cache EVERY session"; bg_tc_lite runs
+    tc_lite_scanner, which writes tc_intraday_signals and has never written tc_screener_cache.
+    That single false sentence is why the table's staleness went unnoticed for two days
+    (cc#1982 finding).
+    """
     g = _guard(request)
     if g:
         return g
-    sym = (symbol or "").strip().upper()
-    side = (side or "LONG").strip().upper()
-    if side not in ("LONG", "SHORT"):
-        side = "LONG"
-    limit = max(1, min(limit, 50))
-    try:
-        now = _ist_now()
-        with _conn() as conn, conn.cursor() as cur:
-            # cc#888 item 1 — SOURCE SWAP. This read tc_cache, whose newest row is 18-Jun: fifty
-            # days dead, no writer, and the app's core retail question ("should I take this
-            # trade?") was being answered with June's verdicts. bg_tc_lite writes
-            # tc_screener_cache EVERY session — 418 rows today, computed 16:00 IST. The right
-            # answers were one table over the whole time.
-            # tc_cache itself is untouched: its web consumers keep it (card do_not_touch).
-            #
-            # computed_at is TIMESTAMPTZ — converted in SQL, never in Python. That is the cc#887
-            # class, and it cost the home screen a raw 500 yesterday.
-            #
-            # ORDER BY carries an explicit `symbol` tiebreak. Scores tie often (three symbols at
-            # 17.5 today), and `ORDER BY score DESC` alone leaves the top-5 to physical row order —
-            # so the same query could answer differently on two runs. A parity check against a
-            # non-deterministic list proves nothing.
-            base = """
-                SELECT symbol, side, score, verdict, cmp, pivot_zone, failed_rules,
-                       (computed_at AT TIME ZONE 'Asia/Kolkata') AS computed_at
-                FROM tc_screener_cache
-                WHERE run_date = (SELECT MAX(run_date) FROM tc_screener_cache)
-            """
-            if sym:
-                # A searched symbol returns BOTH sides — the retail question about one stock is
-                # "is there a trade here at all", not "is there a long here".
-                cur.execute(base + " AND symbol = %s ORDER BY side, score DESC, symbol", (sym,))
-            else:
-                cur.execute(base + " AND side = %s ORDER BY score DESC, symbol LIMIT %s",
-                            (side, limit))
-            rows = _rows(cur)
-            cur.execute("""
-                SELECT MAX(computed_at AT TIME ZONE 'Asia/Kolkata')
-                FROM tc_screener_cache
-                WHERE run_date = (SELECT MAX(run_date) FROM tc_screener_cache)
-            """)
-            newest = cur.fetchone()[0]
-    except Exception as e:
-        log.exception("mobile check failed")
-        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "results": []}
-
-    age_days = ((now - newest).total_seconds() / 86400.0) if newest else None
-    def f(v):
-        return float(v) if v is not None else None
-    return {
-        "query": sym or None,
-        "side": None if sym else side,
-        "results": [{
-            "symbol": r["symbol"], "side": r["side"], "cmp": f(r["cmp"]),
-            "score": f(r["score"]),
-            # ARRAY column -> one readable line. Empty means nothing failed, which is a real
-            # answer and renders as nothing rather than as an empty label.
-            "not_passed": ", ".join(r["failed_rules"]) if r["failed_rules"] else None,
-            "pivot_zone": r["pivot_zone"],
-            "verdict": r["verdict"],
-            "computed_at": r["computed_at"].strftime("%d-%b %H:%M") if r["computed_at"] else None,
-        } for r in rows],
-        "count": len(rows),
-        # cc#888: n_pass / n_fail / n_watch and `total` DO NOT EXIST in tc_screener_cache. They are
-        # removed rather than derived — a pass/fail count invented from failed_rules would look
-        # like a measurement and be a guess. The card is explicit: do not fabricate.
-        #
-        # The staleness banner STAYS even though it now reads fresh. It is data, not decoration:
-        # if bg_tc_lite ever dies, this is what tells the founder honestly instead of a screen
-        # that keeps showing yesterday's verdicts as if they were today's.
-        "freshness": {
-            "computed_at": newest.strftime("%d-%b-%Y %H:%M IST") if newest else None,
-            "age_days": round(age_days, 1) if age_days is not None else None,
-            "stale": bool(age_days is not None and age_days > 1),
-            "note": ("Trade Check has not been recomputed since "
-                     + (newest.strftime("%d-%b-%Y") if newest else "never")
-                     + ". These verdicts are historical, not today's.") if age_days and age_days > 1 else None,
-        },
-        # cc#888: was REFERENCE against a 1440-minute cadence, which described the dead table.
-        # bg_tc_lite runs every 5 minutes in session, so the rail is judged on that — and after
-        # the close it reads CLOSED, not stale (cc#841).
-        "rail": rail_state(newest, 5, now),
-        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    return JSONResponse(status_code=410, content={
+        "error": "gone",
+        "retired": "cc#1984",
+        "message": "This endpoint read tc_screener_cache, which is no longer written. "
+                   "Use /api/mobile/check/tc?symbol=<SYMBOL> for a live Trade Check.",
+        "use_instead": "/api/mobile/check/tc",
+    })
 
 
 @router.get("/m/check", response_class=HTMLResponse)
@@ -1441,9 +1385,15 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
   Preview design carried: search + LONG/SHORT first; the verdict is a WORD with the score beside
   it; THE GAPS ARE THE PRODUCT — every failed rule prints as its own red-edged row; passed rules
   collapse to one line; the check states its own age.
-  Data honesty vs the preview, stated: the live source is tc_screener_cache (fresh daily, cc#888)
-  whose verdict words are STRONG / VALID / WATCH — shown as-is (DISPLAY_PARITY 16202, same words
-  as the web scanner). It carries NO pass/watch/fail counts and no per-rule value-vs-required
+  Data honesty vs the preview, stated. CORRECTED BY cc#1984: this said "the live source is
+  tc_screener_cache (fresh daily, cc#888)". BOTH HALVES ARE NOW FALSE. The page has read
+  /api/mobile/check/tc (app_check_endpoints.py, the four-bucket v4 scorer) since cc#1593, not
+  the old /api/mobile/check; and tc_screener_cache is not fresh daily and has no writer at all —
+  cc#1862 (PR #161, sha 1b21ef24) deactivated bg_tc_screener_precompute deliberately. A sentence
+  exactly like this one, left in place after the thing it described changed, is why the table's
+  staleness went unnoticed for two days (cc#1982 finding). The verdict words STRONG / VALID /
+  WATCH are unchanged and still shown as-is (DISPLAY_PARITY 16202, same words as the web
+  scanner). It carries NO pass/watch/fail counts and no per-rule value-vs-required
   detail, so the preview's count chips and gap explanations are NOT fabricated: a gap row shows
   the rule name, and the chip shows the gap COUNT, which is real. Score renders without "/total"
   because the source has no total.
