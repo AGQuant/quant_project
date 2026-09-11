@@ -40,6 +40,30 @@ FUNC = re.compile(r"\b(rgba?|hsla?)\s*\([^)]*\)")
 LEN = re.compile(r"(?<![\w#.])-?\d*\.?\d+(px|rem|em)\b")
 VAR = re.compile(r"var\([^)]*\)")
 
+# cc#1998 step A — THE SECOND RATCHET, and the reason it has to exist.
+# Look at count_raw: it does `bare = VAR.sub("", val)` BEFORE searching for a literal. That strips
+# the whole var(...) call, fallback and all — so `color: var(--txt, #E9EEFB)` scores ZERO on the
+# raw ratchet and always has. That is not a bug in count_raw; a token reference is exactly what it
+# is meant to reward. But it means the ONE construct that silently defeats the token layer has been
+# invisible to the gate the entire time, and 844 of them accumulated (cc#1969 census).
+# A fallback fires precisely when the name is UNDEFINED — the one case the theme bridge exists to
+# prevent — so each is a second, silent answer to "what colour is this", chosen to look right on
+# Gold Night and wrong on every other set. The worst single case found: --txt falls back to
+# #E9EEFB (near-white) in 64 places and #1c2536 (near-black) in 12. One name, opposite meanings.
+# So: a text-level scan, deliberately NOT built on the CSS declaration walker. A fallback is a
+# fallback wherever it is written — inside a .css rule, a .py CSS constant, a template literal in
+# .js, or an inline style attribute in .html — and the construct is unambiguous enough that
+# matching it needs no parser. The second argument must be a COLOUR literal; var(--a, var(--b)) and
+# var(--gap, 8px) are not what this bans.
+VAR_FALLBACK = re.compile(
+    r"var\(\s*--[A-Za-z0-9_-]+\s*,\s*(#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?)\s*\([^()]*\))")
+
+# Which files the fallback ratchet judges. Wider than the raw ratchet's .css/.html on purpose: the
+# census found 128 fallbacks in pwa_endpoints.py and 54 in scorr_card_common.js, so limiting this to
+# stylesheets would leave the two biggest offenders unguarded.
+FALLBACK_EXTS = (".css", ".html", ".js", ".py")
+FALLBACK_BASELINE_FILE = os.path.join(HERE, "reports", "theme_fallback_baseline_v1.json")
+
 # The families a theme can move. width/height/clip-path are layout, not theme — the P3 schema does
 # not key them and the validator must not count them, or the two disagree about the same file.
 FAMILY = re.compile(
@@ -116,6 +140,48 @@ def count_raw(css, detail=False):
             if detail:
                 rows.append({"sel": sel[:60], "prop": prop, "val": val[:50]})
     return (n, rows) if detail else n
+
+
+def count_fallbacks(text):
+    """How many var(--name, <colour literal>) fallbacks this file writes. Comments are masked the
+    same way count_raw masks them, so a commented-out example is not counted as debt."""
+    return len(VAR_FALLBACK.findall(mask_comments(text)))
+
+
+def count_fallbacks_file(path, content=None):
+    if content is None:
+        with open(os.path.join(HERE, path), encoding="utf-8") as fh:
+            content = fh.read()
+    return count_fallbacks(content)
+
+
+def load_fallback_baseline():
+    try:
+        with open(FALLBACK_BASELINE_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {"files": {}, "total": None, "note": "no fallback baseline on disk"}
+
+
+def check_fallbacks(path, content=None):
+    """The same RATCHET shape as check_file: down or level, never up. A file with no baseline is
+    unmeasured, not a pass — except that for THIS ratchet a new file with fallbacks in it should be
+    caught, so an unmeasured file is allowed at ZERO and refused above it. That is the difference
+    between "we have not counted you yet" and "you are adding the thing we just banned"."""
+    base = load_fallback_baseline().get("files", {})
+    now = count_fallbacks_file(path, content)
+    was = base.get(path)
+    if was is None:
+        return {"path": path, "now": now, "baseline": None, "ok": now == 0,
+                "delta": now,
+                "note": ("clean — no fallbacks" if now == 0 else
+                         "NEW FILE with %d literal fallback%s — the ban applies from here"
+                         % (now, "" if now == 1 else "s"))}
+    return {"path": path, "now": now, "baseline": was, "ok": now <= was, "delta": now - was,
+            "note": ("clean" if now == 0 else
+                     "improved by %d" % (was - now) if now < was else
+                     "level" if now == was else
+                     "REGRESSION: %d new literal fallback%s" % (now - was, "" if now - was == 1 else "s"))}
 
 
 def count_file(path, content=None):
@@ -211,12 +277,28 @@ def validate(paths=None):
     paths = paths or sorted(base.get("files", {}))
     files = [check_file(p) for p in paths]
     sets = check_sets()
+    # cc#1998 step A: the fallback ratchet reports BESIDE the raw one, never folded into it. Two
+    # different debts with two different baselines — adding them would hide which one moved.
+    fb_base = load_fallback_baseline()
+    fb_paths = sorted(fb_base.get("files", {}))
+    fallbacks = [check_fallbacks(p) for p in fb_paths]
+    fb_regressions = [f for f in fallbacks if not f["ok"]]
     return {"sets": sets, "files": files,
             "raw_total": sum(f["now"] for f in files),
             "baseline_total": base.get("total"),
             "baseline_sha": base.get("sha"),
             "regressions": [f for f in files if not f["ok"]],
-            "ok": not any(not f["ok"] for f in files)}
+            "fallbacks": {
+                "total": sum(f["now"] for f in fallbacks),
+                "baseline_total": fb_base.get("total"),
+                "files_with_any": sum(1 for f in fallbacks if f["now"]),
+                "worst": sorted(fallbacks, key=lambda f: -f["now"])[:8],
+                "regressions": fb_regressions,
+                "ok": not fb_regressions,
+                "note": "var(--name, <colour literal>) — invisible to the raw ratchet because "
+                        "count_raw strips var(...) before looking for a literal (cc#1998 step A)",
+            },
+            "ok": not any(not f["ok"] for f in files) and not fb_regressions}
 
 
 # cc#1249 scope 3 · DESIGN REFS ARE EXEMPT, BY POLICY, NOT BY ACCIDENT.
@@ -236,6 +318,23 @@ def gate(path, content):
     if path.startswith(EXEMPT_PREFIXES):
         return True, ("THEME_GATE_EXEMPT: %s is a design ref / preview — local token blocks and raw "
                       "hex are deliberate there, so the app ratchet does not apply." % path)
+    # cc#1998 step A — the FALLBACK ratchet runs FIRST and on a wider set of file types, because
+    # the raw ratchet below cannot see this construct at all (count_raw strips var(...) before
+    # searching). Checked before the raw check so a push that adds both is refused for the reason
+    # that is actually new.
+    if path.endswith(FALLBACK_EXTS):
+        fb = check_fallbacks(path, content)
+        if not fb["ok"]:
+            d = fb["delta"]
+            was = "0 (unmeasured)" if fb["baseline"] is None else str(fb["baseline"])
+            return False, (
+                "THEME_FALLBACK_LOCK: %s would add %d literal fallback%s (%s -> %d). "
+                "var(--name, #literal) fires exactly when the name is UNDEFINED — the one case the "
+                "theme bridge exists to prevent — so the literal wins on every set it was not "
+                "chosen for. Drop the fallback and let the token resolve: var(--name). If the name "
+                "genuinely may not exist in this scope, that is the bug to fix, not to paper over. "
+                "Resend with allow_theme_regression: true to land it deliberately."
+                % (path, d, "" if d == 1 else "s", was, fb["now"]))
     if not (path.endswith(".css") or path.endswith(".html")):
         return True, None
     r = check_file(path, content)
@@ -247,3 +346,48 @@ def gate(path, content):
                    "allow_theme_regression: true to land it deliberately."
                    % (path, d, "" if d == 1 else "s", r["baseline"], r["now"],
                       "it" if d == 1 else "them"))
+
+
+def rebaseline_fallbacks(root=None):
+    """Write reports/theme_fallback_baseline_v1.json from the tree as it stands.
+
+    Run ONCE to freeze today's 844 as the ceiling, and thereafter only when a deliberate,
+    reviewed reduction has landed — step B lowers this file, never raises it. It is a separate
+    file from theme_baseline_v1.json on purpose: two debts, two numbers, and neither can be
+    quietly re-baselined by touching the other.
+    """
+    root = root or HERE
+    skip = (".git", "node_modules", "__pycache__", "reports", "design_refs", "previews")
+    files = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
+        for fn in sorted(filenames):
+            if not fn.endswith(FALLBACK_EXTS):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, fn), root)
+            try:
+                n = count_fallbacks_file(rel)
+            except Exception:
+                continue
+            if n:
+                files[rel] = n
+    out = {"note": "cc#1998 step A ceiling: var(--name, <colour literal>) per file. Down or level, "
+                   "never up. Lowered by step B; never raised.",
+           "generated_by": "theme_validator.rebaseline_fallbacks",
+           "total": sum(files.values()), "files": files}
+    with open(FALLBACK_BASELINE_FILE, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, indent=1, sort_keys=True)
+    return out
+
+
+if __name__ == "__main__":
+    import sys
+    if "--rebaseline-fallbacks" in sys.argv:
+        r = rebaseline_fallbacks()
+        print("wrote %s: %d fallbacks across %d files"
+              % (os.path.relpath(FALLBACK_BASELINE_FILE, HERE), r["total"], len(r["files"])))
+    else:
+        v = validate()
+        print("raw_total %s (baseline %s) - fallbacks %s (baseline %s) - ok %s"
+              % (v["raw_total"], v["baseline_total"], v["fallbacks"]["total"],
+                 v["fallbacks"]["baseline_total"], v["ok"]))
