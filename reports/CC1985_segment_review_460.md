@@ -284,4 +284,95 @@ separate judgements that happen to disagree. The three should be decided togethe
 Batch 1's DPEL/KSHINTL rows above stand as written, with this note attached: they are provisional
 on the same decision, not independent of it.
 
-*Batches 3 onward continue below as they are completed.*
+---
+
+## BATCH 3 — 52 companies (candidates 103–154 of 263 flagged)
+
+| # | Symbol | Company | Mcap ₹Cr | Current segment | cc#1980 proposed | Verdict | One-line reason |
+|---|---|---|---|---|---|---|---|
+| 103 | IKS | Inventurus Knowledge Solutions | 30,657 | Capital Markets - Large | IT - Micro | **MOVE*** | A healthcare BPO and IT-services firm — nothing to do with capital markets. But ₹30,657 Cr into "IT - **Micro**" is the size error; IT - Large. |
+| 104 | JIOFIN | Jio Financial Services | 154,315 | Capital Markets - Large | Holding Companies | **AS-IS** | It operates — lending, insurance broking, an AMC joint venture. Screener's "Investment Company" tag describes the structure, not the business. |
+| 105 | GALAPREC | Gala Precision Engineering | 1,314 | Castings & Forgings | Capital Goods - Industrial Small | **MOVE** | Springs, coils and precision components — industrial components, not castings or forgings. |
+| 106 | TVSHLTD | TVS Holdings | 1,264,712 | Castings & Forgings | Holding Companies | **MOVE** | The TVS group holding company; it casts nothing. **This is the company in finding H4** — moving it out would also end the 80.3% weight distorting the `Castings & Forgings` sector rating, as a side effect rather than as the fix. |
+| 107 | ELECTCAST | Electrosteel Castings | 4,953 | Castings & Forgings | Steel - Mid & Small | **MOVE*** | It makes **ductile iron pipes** for water infrastructure. `Pipes & Tubes` is the precise home; generic steel is not. |
+| 108 | KANORICHEM | Kanoria Chemicals | 704 | Commodity & Chlor-Alkali Chemicals | Capital Goods - Industrial Small | **AS-IS** | Formaldehyde and pentaerythritol are the core; the auto-components arm is the smaller half. |
+| 109 | REFEX | Refex Industries | 3,814 | Commodity & Chlor-Alkali Chemicals | Environmental Services | **MOVE** | Ash handling and coal logistics now outweigh the refrigerant-gas business. The proposal follows the revenue. |
+| 110 | RMDRIP | R M Drip & Sprinklers | 977 | Consumer Plastics & Others | Flexible Packaging & Films | **MOVE*** | **Micro-irrigation** systems — drip and sprinkler lines. It is not packaging and not consumer plastics; agri-inputs is the right family and neither option offers it. |
+| 111 | AZAD | Azad Engineering | 18,255 | **Defence PSU** | Electronics - Heavy Electrical & Industrial | **MOVE*** | Azad Engineering is **privately held** — "Defence PSU" is factually wrong. It makes precision aerospace and turbine components, so a private aerospace/defence segment, not heavy electrical. |
+| 112 | JYOTICNC | Jyoti CNC Automation | 24,027 | **Defence PSU** | Capital Goods - Industrial Small | **MOVE*** | Also not a PSU. It makes CNC machine tools — capital goods is right in family, but ₹24,027 Cr is not "Small". |
+| 113 | GESHIP | Great Eastern Shipping | 19,726 | **Defence PSU** | Shipping & Maritime | **MOVE** | A private shipping and offshore company. Filing it under Defence PSU is a plain error, and the move takes `Shipping & Maritime` from 5 members to 6. |
+| 114 | MAXIND | Max India | 837 | Diagnostics & Healthcare Services | Holding Companies | **MOVE** | A holding company for senior care and health ventures; it runs no diagnostics chain. |
+| 115 | LENSKART | Lenskart Solutions | 119,803 | Digital Aggregators & E-Commerce | Retail - Mid | **MOVE*** | Omnichannel eyewear **retail** with 2,500+ stores — a specialty retailer, not a marketplace. At ₹1,19,803 Cr it is Retail - Large, not Mid. |
+| 116 | IRCTC | Indian Railway Catering & Tourism | 37,808 | Digital Aggregators & E-Commerce | Hotels - Mid | **AS-IS** | Rail ticketing, catering, packaged water and tourism. It operates no hotels; the current segment fits the ticketing platform that dominates its economics. |
+| 117 | VAKRANGEE | Vakrangee | 610 | Diversified | IT - Micro | **MOVE** | Assisted-commerce kiosks — IT-enabled services, and ₹610 Cr fits the size tag. |
+| 118 | RAYMOND | Raymond | 5,705 | Diversified | Capital Goods - Industrial Small | **MOVE** | **Post-demerger identity change**: the textile and realty arms are separate listings now, and what remains is the engineering business — auto components and tools. Exactly the KALPATARU-type trap cc#1980 warned about, in the other direction. |
+| 119 | KIRLOSIND | Kirloskar Industries | 3,895 | Diversified | Steel - Mid & Small | **MOVE*** | Principally a holding company for the Kirloskar stakes, with a small ferrous-castings arm. `Holding Companies`, not steel. |
+| 120 | CONSOFINVT | Consolidated Finvest & Holdings | 987 | Diversified | MSME Finance - Mid | **MOVE*** | An investment NBFC, not an MSME lender. `Holding Companies` is the right home; the proposed one would also put it on the BFSI rulebook for the wrong reason. |
+| 121 | NITCO | Nitco | 2,233 | Diversified Trading | Building Materials - Glass, Ceramics & Ply | **MOVE** | It manufactures and sells tiles and marble. The proposed segment names it. |
+| 122 | VIESL | Vision Infra Equipment Solutions | 973 | Diversified Trading | Business Services | **MOVE** | Road-construction equipment rental — a service business, not trading. |
+| 123 | FABTECH | Fabtech Technologies | 657 | Diversified Trading | CDMO & Contract Mfg | **MOVE*** | It builds pharma cleanrooms and turnkey plants — an **engineering contractor serving** pharma, not a contract manufacturer of drugs. Engineering/EPC is the right family. |
+| 124 | WEL | Wonder Electricals | 922 | Diversified Trading | Consumer Durables - Small | **MOVE** | A contract manufacturer of fans. It makes durables; it does not trade. |
+| 125 | HEXATRADEX | Hexa Tradex | 890 | Diversified Trading | Holding Companies | **MOVE** | A Jindal-group investment and holding vehicle. |
+| 126 | AEROENTER | Aeroflex Enterprises | 1,742 | Diversified Trading | Steel - Mid & Small | **MOVE*** | Makes stainless-steel flexible hoses and braids. A manufacturer, but `Pipes & Tubes` fits better than generic steel. |
+| 127 | EIFFL | Euro India Fresh Foods | 654 | Diversified Trading | FMCG - Large | **MOVE*** | Snacks and namkeen — genuinely FMCG, but ₹654 Cr is **FMCG - Small**, not Large. |
+| 128 | TINNARUBR | Tinna Rubber & Infrastructure | 1,805 | Diversified Trading | Sugar & Agri Processing | **MOVE*** | It recycles end-of-life **tyres** into crumb and reclaim rubber. There is nothing agricultural about it; rubber products or environmental services. |
+| 129 | BCLIND | BCL Industries | 1,060 | Edible Oil & Animal Feed | Beverages & Spirits | **FLAG** | Genuinely two businesses — edible oil and a grain-based distillery/ethanol arm that is now the growth half. Which one leads is a founder call, not mine. |
+| 130 | SCILAL | Shipping Corporation of India Land Assets | 1,812 | **Education** | Holding Companies | **MOVE** | A demerged land and asset holding entity. "Education" is not close to anything it does. |
+| 131 | BIRLACABLE | Birla Cable | 1,016 | Electrical Cables | Telecom Services | **AS-IS** | It manufactures optical fibre cable. The current segment is right; the proposal confuses the customer industry with the business. |
+| 132 | VIDYAWIRES | Vidya Wires | 1,899 | Electrical Equipment Small | Aluminium & Non Ferrous | **FLAG** | **Enamelled copper winding wire — the same product as DPEL, KSHINTL and PRECWIRE.** See H5: this makes it four companies, one business, and one decision. |
+| 133 | VIKRAN | Vikran Engineering | 1,533 | Electrical Equipment Small | Engineering - EPC Civil Small | **MOVE** | A transmission and water EPC contractor. It builds; it does not manufacture equipment. |
+| 134 | CONTROLPR | Control Print | 961 | Electrical Equipment Small | IT - Small | **AS-IS** | It manufactures industrial coding and marking printers. That is hardware, not IT services. |
+| 135 | EPACK | Epack Durable | 1,827 | Electrical Equipment Small | Consumer Durables - Small | **MOVE** | A contract manufacturer of air conditioners for brands — durables, not electrical equipment. |
+| 136 | JINDALPHOT | Jindal Photo | 1,049 | Electrical Equipment Small | Holding Companies | **MOVE** | An investment and holding company; the photographic-film business is long gone. |
+| 137 | PLATIND | Platinum Industries | 1,287 | Electrical Equipment Small | Organic Chemicals - Small | **MOVE** | It makes **PVC stabilisers**. A specialty chemicals maker filed under electrical equipment is one of the clearest mismatches in this pass. |
+| 138 | SURYAROSNI | Surya Roshni | 4,749 | Electronics - Consumer & Smart | Steel - Mid & Small | **MOVE*** | Two halves — steel pipes (the larger) and lighting. `Pipes & Tubes` is the precise destination; generic steel is not. |
+| 139 | AVL | Aditya Vision | 7,799 | Electronics - Consumer & Smart | Retail - Mid | **MOVE** | A consumer-electronics **retail chain**. It manufactures nothing, so an electronics-maker peer set is the wrong comparison entirely. |
+| 140 | CPPLUS | Aditya Infotech (CP Plus) | 44,955 | Electronics - Heavy Electrical & Industrial | Capital Goods - Industrial Small | **AS-IS** | Video-surveillance electronics. Electronics is the right family, and the proposal is wrong on both business and size. |
+| 141 | VASCONEQ | Vascon Engineers | 692 | Engineering - EPC Civil Small | Realty - Mid | **AS-IS** | It does both EPC contracting and development, with contracting the larger. Current segment fits. |
+| 142 | EFFWA | Effwa Infra & Research | 844 | Engineering - EPC Civil Small | Environmental Services | **FLAG** | Water and wastewater treatment EPC — an EPC firm in an environmental niche. Both segments are defensible; needs a rule on which axis wins. |
+| 143 | AXISCADES | AXISCADES Technologies | 7,839 | Engineering - EPC Mid | Defence - Small | **MOVE*** | An **engineering design services (ER&D)** firm with an aerospace vertical. It builds nothing and manufactures nothing — IT/ER&D services, not defence. |
+| 144 | BALUFORGE | Balu Forge Industries | 6,626 | Engineering - EPC Mid | Castings & Forgings | **MOVE** | Crankshafts and forged components. The proposed segment names its exact business. |
+| 145 | GMRP&UI | GMR Power & Urban Infra | 7,185 | Engineering - EPC Mid | Renewable Energy - Mid | **AS-IS** | Thermal power assets, EPC and urban infrastructure. There is no renewable business to move it for. |
+| 146 | SMLMAH | SML Mahindra (SML Isuzu) | 9,177 | Engineering - EPC Small | Auto OEM | **MOVE** | It manufactures commercial vehicles. Filing a truck maker under engineering EPC is plainly wrong. |
+| 147 | PITTIENG | Pitti Engineering | 4,364 | Engineering - EPC Small | Capital Goods - Industrial Small | **MOVE** | Electrical steel laminations and motor cores — a component manufacturer, not a contractor. |
+| 148 | ARIS | Arisinfra Solutions | 1,052 | Engineering - EPC Small | Cement - Small | **MOVE*** | A **B2B construction-materials marketplace**. It distributes; it makes no cement. Distribution/trading is the right family and neither option offers it. |
+| 149 | AGIIL | AGI Infra | 3,444 | Engineering - EPC Small | Realty - Mid | **MOVE** | A residential developer in Punjab with its own land bank. Realty is right. |
+| 150 | SANGHVIMOV | Sanghvi Movers | 3,824 | Engineering - Industrial Mfg A | Business Services | **MOVE** | India's largest crane **rental** company. It manufactures nothing — equipment rental is a service. |
+| 151 | BAJEL | Bajel Projects | 2,129 | Engineering - Industrial Mfg A | Electronics - Heavy Electrical & Industrial | **MOVE*** | Demerged from Bajaj Electricals to hold the **power transmission EPC** business. It contracts, it does not manufacture heavy electricals — an EPC segment, not an equipment one. |
+| 152 | RISHABH | Rishabh Instruments | 3,139 | Engineering - Industrial Mfg A | Electrical Equipment Small | **MOVE** | Electrical measurement instruments and precision components. The destination fits in kind and size. |
+| 153 | YUKEN | Yuken India | 1,397 | Engineering - Industrial Mfg B | Pumps, Refractories & Industrial | **MOVE** | Hydraulic pumps and valves. The proposed segment names the business. |
+| 154 | GGBL | Ganesh Green Bharat | 539 | Engineering - Industrial Mfg B | Electrical Equipment Small | **FLAG** | Solar EPC and electrical contracting — it builds rather than manufactures, so neither the current nor the proposed segment is right. |
+
+### Batch 3 tally
+
+- **Reviewed: 52** — 8 confirmed as-is · 24 move-as-proposed · 16 move-elsewhere · 4 flagged.
+- Three **factual** filing errors, not taxonomy preferences: **AZAD** and **JYOTICNC** are sitting in
+  `Defence PSU` and neither is a PSU; **GESHIP** (Great Eastern Shipping, a private shipping
+  company) is in the same segment; and **SCILAL**, a demerged land-holding entity, is filed under
+  `Education`.
+- One **post-demerger identity change** caught: **RAYMOND** is no longer a textile company — the
+  textile and realty arms are separate listings and what remains is engineering. This is the
+  KALPATARU trap running the other way, and it is the second instance in this card.
+
+### Running total after batch 3
+
+**154 of 263 flagged reviewed** · 46 confirmed as-is · 62 move-as-proposed · 38 move-elsewhere ·
+8 flagged · plus 210 rejected by the validated prefilter. **364 of 473 resolved.**
+
+### H5 grows to four companies
+
+**VIDYAWIRES** (Vidya Wires, ₹1,899 Cr) makes enamelled copper winding wire — the same product as
+DPEL, KSHINTL and PRECWIRE. Its proposal, like PRECWIRE's, points *into* `Aluminium & Non Ferrous`,
+against batch 1's proposal to move DPEL and KSHINTL *out* of it. Four companies now, one business,
+one decision. The options in H5 are unchanged; only the count is.
+
+### H6 — the same company is both a finding and a candidate
+
+**TVSHLTD** appears here as candidate 106 (proposed to `Holding Companies`, which I agree with) and
+as the subject of finding H4 (its market cap is ~47× too high and carries 80.3% of the
+`Castings & Forgings` sector rating). The two are independent problems that happen to share a row:
+moving it would end the rating distortion **as a side effect**, but it would not correct the market
+cap, which would then distort `Holding Companies` instead. Fix the number, then move it — in that
+order.
+
+*Batches 4 onward continue below as they are completed.*
