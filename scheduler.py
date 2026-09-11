@@ -1593,8 +1593,12 @@ def _bg_findings_alert():
     res = cc_findings_alert.send_unsent_findings()
     if not res:
         return _SKIPPED
-    log.info("findings_alert: sent %d, failed %d (%s)", res["sent"], res["failed"],
-             ", ".join("log %s" % i for i in res["ids"]))
+    # .get(), not [] -- a missing key here used to raise KeyError INSIDE the success path and record
+    # the whole tick as an error (seen 11-Sep 07:05 IST after c600cbf added a skip-shaped return).
+    # The module's contract is now "None = skip, else all three keys", but a log line is never worth
+    # failing a job that actually did its work, so it reads defensively either way.
+    log.info("findings_alert: sent %s, failed %s (%s)", res.get("sent"), res.get("failed"),
+             ", ".join("log %s" % i for i in (res.get("ids") or [])))
     return res
 
 

@@ -24,8 +24,9 @@ cc_finding_alerts (CREATE TABLE IF NOT EXISTS, which is permitted) holds one row
 log id with the send time and the sender's response — the first-run evidence lives there too.
 
 SEND ONCE, AND NEVER LOOP ON A DEAD CHANNEL. A row is marked only after a successful send. When the
-sender says the environment is not set, nothing is marked and the tick returns a skip, so the rows
-wait for the channel instead of being silently marked sent. A per-row send failure is logged and
+sender says the environment is not set, nothing is marked and the tick returns a skip (None, the
+one skip signal this module has), so the rows wait for the channel instead of being silently marked
+sent. A per-row send failure is logged and
 retried next tick; a poison row cannot block the others because every row commits on its own.
 
 READ-ONLY on cc_task_logs. Writes only its own sidecar table.
@@ -93,8 +94,10 @@ def pending(cur, limit: int = BATCH):
 
 
 def send_unsent_findings(sender=None) -> Optional[dict]:
-    """Poll → send → mark. Returns None when there was nothing to do (the scheduler records a
-    skip), else {"sent": n, "failed": m, "ids": [...]}. `sender` is injectable for tests."""
+    """Poll → send → mark. Returns None when there was nothing to DO OR NOTHING TO DO IT WITH —
+    no unsent rows, or the channel is parked — and the scheduler records a skip. Otherwise the
+    shape is exactly {"sent": n, "failed": m, "ids": [...]}, all three keys always present,
+    because the caller reads all three. `sender` is injectable for tests."""
     send = sender or _send
     with _conn() as conn:
         with conn.cursor() as cur:
@@ -131,7 +134,14 @@ def send_unsent_findings(sender=None) -> Optional[dict]:
                              "Set V10_TELEGRAM_BOT_TOKEN + V10_TELEGRAM_CHAT_ID to start the ping.",
                              len(rows))
                     _PARKED_LOGGED = True
-                return {"skipped": "telegram parked (env not set)", "pending": len(rows), "sent": sent}
+                # RETURN None, NOT A DICT. This function has exactly one skip signal and it is None
+                # (see the docstring); the scheduler turns that into _SKIPPED. c600cbf returned a
+                # {"skipped": ...} dict here instead, which is truthy, so the caller fell through to
+                # its success log line and raised KeyError('failed') -- the job then recorded
+                # last_status='error' every 5 minutes, which is the exact noise this branch was
+                # written to stop. Caught on the 11-Sep 07:05 IST tick. The count the dict carried is
+                # already in the one-time log line above, where a parked channel belongs.
+                return None
             failed += 1
             log.warning("cc_findings: finding log %s not sent: %s", row_id, reason)
             # a failed send is written where it can be READ (ops_log), not only to a Railway log line
