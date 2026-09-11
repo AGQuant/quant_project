@@ -81,7 +81,23 @@
     + '.scorr-card-strip.scorr-cs-app .scorr-cs-b{box-sizing:border-box;flex:0 0 auto;width:var(--space-20,20px);height:var(--space-20,20px);min-width:0;max-width:none;'
     + 'padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;font-size:var(--type-10,10px);font-weight:800;letter-spacing:0;'
     + 'border-radius:var(--radius-6,6px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
-    + 'color:var(--brand,var(--txt,#d4af37));box-shadow:none}'   /* cc#1956: 20px square */
+    + 'color:var(--brand,var(--txt,#d4af37));box-shadow:none;min-height:0;position:relative}'   /* cc#1956: 20px square */
+    /* cc#1973 (do_not_touch LIFTED for these two declarations, Fable log 6224). THE BUG, measured:
+       the served mobile.css has, inside @media(max-width:767px), a multi-line selector
+       `button,a.btn,.btn,.chip,.tab,.toggle,select,th[onclick],[role=button],...{min-height:44px}`.
+       The pill is a bare <button>, so it matched. This rule set height:20px but never min-height,
+       and MIN-HEIGHT BEATS HEIGHT — so the pill painted 20 wide x 44 tall, which is the ~2.5x
+       tall rectangle in the founder's screenshot. min-width:0 was already here and already beat
+       the matching min-width rule; min-height was the half that was missing. min-height:0 fixes it.
+       THE HIT AREA, and why it is 26x44 and NOT the 44x44 the card asked for. The row is four 20px
+       pills with 6px gaps = 98px. Four 44px targets need 176px. A 44px-wide target on a 20px pill
+       reaches 12px each side into a 6px gap, so neighbouring targets would OVERLAP BY 18px and a
+       tap near an edge would open the WRONG letter — worse than a small target, not better.
+       Vertical has no neighbour in the row, so 44px tall is free. Horizontal is therefore capped at
+       the gap midpoint: 20 + 3 + 3 = 26px, the widest that cannot steal a neighbour's tap.
+       Reported rather than bodged, per the ruling — 44x44 needs wider pills or a wider gap, which
+       is a design decision and not mine to take. */
+    + '.scorr-card-strip.scorr-cs-app .scorr-cs-b::after{content:"";position:absolute;left:-3px;right:-3px;top:-12px;bottom:-12px;border-radius:inherit}'
     + '.scorr-card-strip.scorr-cs-app .scorr-cs-b:active{background:var(--panel,#131316)}'
     /* current letter: brand fill, field-coloured glyph -- the same "you are here" the web strip
        shows in blue, in the app's own brand */
