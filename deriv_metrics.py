@@ -1688,23 +1688,38 @@ def strike_chain(symbol: str):
                     WHERE underlying = %(u)s AND expiry = (SELECT e FROM exp) AND ts = (SELECT t FROM mts)
                 """, {"u": root})
                 chain_rows = cur.fetchall()
+                if not chain_rows:
+                    return {"symbol": sym, "spot": round(spot, 2), "strikes": [], "source": "option_chain",
+                            "error": "no option_chain rows for this index"}
                 stored_asof, gap_map = _stored_iv_gap_map(cur, sym)  # cc#1994: read-only, same cursor
-            if not chain_rows:
-                return {"symbol": sym, "spot": round(spot, 2), "strikes": [], "source": "option_chain",
-                        "error": "no option_chain rows for this index"}
-            exp, tick = chain_rows[0][3], chain_rows[0][4]
-            px = {}
-            for st, ot, ltp, _e, _t in chain_rows:
-                if ltp is not None and float(ltp) > 0:
-                    px[(float(st), (ot or "").upper())] = float(ltp)
-            all_strikes = sorted({float(r[0]) for r in chain_rows})
-            strikes = sorted(sorted(all_strikes, key=lambda s: abs(s - spot))[:21])
-            today = date.today()
-            days = max((exp - today).days, 0) if exp else 0
+                exp, tick = chain_rows[0][3], chain_rows[0][4]
+                px = {}
+                for st, ot, ltp, _e, _t in chain_rows:
+                    if ltp is not None and float(ltp) > 0:
+                        px[(float(st), (ot or "").upper())] = float(ltp)
+                all_strikes = sorted({float(r[0]) for r in chain_rows})
+                strikes = sorted(sorted(all_strikes, key=lambda s: abs(s - spot))[:21])
+                today = date.today()
+                days = max((exp - today).days, 0) if exp else 0
+                # cc#1859/2004: same cursor, before the connection closes -- chain_tags needs
+                # `strikes` (moved earlier in this branch for exactly this) and is read-only
+                # against option_iv_daily, same discipline as _stored_iv_gap_map just above.
+                import option_ivp
+                tag_map = option_ivp.chain_tags(cur, sym, spot, strikes, days)
             T = days / 365.0
             rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: px.get((s, ot)))
             for row in rows:
                 row["stored_iv_gap"] = gap_map.get(row["strike"])  # cc#1994, may be None
+                ce_cell = tag_map.get((row["strike"], "CE")) or {}
+                pe_cell = tag_map.get((row["strike"], "PE")) or {}
+                # cc#1859/2004: a DISTINCT key from _price_rows' own pre-existing "tag" (the older
+                # RV20-fair-value EXPENSIVE/REASONABLE/CHEAP mechanism this card supersedes) --
+                # deliberately not overwritten here, so nothing already reading it silently
+                # changes meaning. "tag" is None (never fabricated) below the session floor.
+                row["ce"]["ivp"] = {"tag": ce_cell.get("tag"), "fair_value": ce_cell.get("fair_value"),
+                                     "percentile": ce_cell.get("ivp")}
+                row["pe"]["ivp"] = {"tag": pe_cell.get("tag"), "fair_value": pe_cell.get("fair_value"),
+                                     "percentile": pe_cell.get("ivp")}
             return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp) if exp else None,
                     "days_to_expiry": days, "rv20": round(rv20 * 100, 1) if rv20 else None,
                     "quoted": len(px), "strikes": rows, "source": "option_chain",
@@ -1724,22 +1739,35 @@ def strike_chain(symbol: str):
             token = sob._load_token(conn)
             rv20 = _rv20_annualized(cur, sym)
             stored_asof, gap_map = _stored_iv_gap_map(cur, sym)  # cc#1994: read-only, same cursor
-        now_t = time.time()
-        if not _SYM_MASTER_CACHE["text"] or now_t - _SYM_MASTER_CACHE["t"] > 21600:
-            _SYM_MASTER_CACHE["text"] = sob._load_symbol_master()
-            _SYM_MASTER_CACHE["t"] = now_t
-        today = date.today()
-        code, exp, strikes = sob._resolve_strikes(_SYM_MASTER_CACHE["text"], sym, spot, today, each_side=10)
-        if not strikes:
-            return {"symbol": sym, "spot": round(spot, 2), "strikes": [],
-                    "error": "no listed strikes for this underlying in the Fyers symbol master"}
-        days = max((exp - today).days, 0)
+            # cc#1859/2004: symbol-master cache + strike resolution moved inside this connection
+            # (neither needs `cur` — _resolve_strikes is a pure computation over the cached
+            # text — so this only means the DB connection stays open a little longer, not that
+            # DB access is required for them) so `strikes` is known while `cur` is still open,
+            # letting chain_tags run on the SAME cursor as the cc#1994 read just above.
+            now_t = time.time()
+            if not _SYM_MASTER_CACHE["text"] or now_t - _SYM_MASTER_CACHE["t"] > 21600:
+                _SYM_MASTER_CACHE["text"] = sob._load_symbol_master()
+                _SYM_MASTER_CACHE["t"] = now_t
+            today = date.today()
+            code, exp, strikes = sob._resolve_strikes(_SYM_MASTER_CACHE["text"], sym, spot, today, each_side=10)
+            if not strikes:
+                return {"symbol": sym, "spot": round(spot, 2), "strikes": [],
+                        "error": "no listed strikes for this underlying in the Fyers symbol master"}
+            days = max((exp - today).days, 0)
+            import option_ivp
+            tag_map = option_ivp.chain_tags(cur, sym, spot, strikes, days)
         T = days / 365.0
         tickers = [sob.strike_ticker(sym, code, s, ot) for s in strikes for ot in ("CE", "PE")]
         ltp = _batch_quotes(tickers, token)
         rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: ltp.get(sob.strike_ticker(sym, code, s, ot)))
         for row in rows:
             row["stored_iv_gap"] = gap_map.get(row["strike"])  # cc#1994, may be None
+            ce_cell = tag_map.get((row["strike"], "CE")) or {}
+            pe_cell = tag_map.get((row["strike"], "PE")) or {}
+            row["ce"]["ivp"] = {"tag": ce_cell.get("tag"), "fair_value": ce_cell.get("fair_value"),
+                                 "percentile": ce_cell.get("ivp")}
+            row["pe"]["ivp"] = {"tag": pe_cell.get("tag"), "fair_value": pe_cell.get("fair_value"),
+                                 "percentile": pe_cell.get("ivp")}
         return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp), "days_to_expiry": days,
                 "rv20": round(rv20 * 100, 1) if rv20 else None, "quoted": len(ltp), "strikes": rows,
                 "source": "fyers", "stored_iv_asof": stored_asof}

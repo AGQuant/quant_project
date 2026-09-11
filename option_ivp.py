@@ -170,6 +170,63 @@ def bucket_skew_history(cur, symbol: str) -> Dict[Tuple[str, str, int], List[Tup
     return out
 
 
+def chain_tags(cur, symbol: str, spot: float, strikes: List[float],
+                dte_today: int) -> Dict[Tuple[float, str], Dict]:
+    """cc#2004 wiring: ONE history fetch + ONE bucket fetch per chain REQUEST, not per strike —
+    a naive per-strike call to ivp_and_fair_value/strike_fair_tag would re-fetch the whole
+    symbol's option_iv_daily history once per (strike, leg), ~40+ redundant fetches for a
+    20-strike chain. This computes every cell from the SAME two in-memory fetches.
+
+    Returns {(strike, 'CE'|'PE'): {'tag', 'fair_value', 'ivp'}} — 'tag' is None (never
+    fabricated) wherever the ATM history or that bucket's own history is short of its floor
+    (MIN_SESSIONS / BUCKET_MIN_SESSIONS, G1/G2) — cc#2004's own verify requires this: the dot
+    must render empty/grey, not a guessed colour, when the gate is not met.
+
+    The ATM strike (nearest to spot among `strikes`) is priced from the LEVEL alone (median ATM
+    IV, ranked by its own IVP — the S5 case). Every other requested strike is priced from LEVEL +
+    that bucket's own median skew, ranked by the BUCKET's own skew IVP — cc#1859's ruled method
+    (log 6301/6312), same as strike_fair_tag, just batched for one request."""
+    from deriv_metrics import _bs_price
+    hist = atm_iv_history(cur, symbol)
+    out: Dict[Tuple[float, str], Dict] = {}
+    if len(hist) < MIN_SESSIONS:
+        reason = f"only {len(hist)} session(s) of ATM history, need {MIN_SESSIONS}+"
+        for K in strikes:
+            for cp in ("CE", "PE"):
+                out[(K, cp)] = {"tag": None, "fair_value": None, "ivp": None, "reason": reason}
+        return out
+    window = [h[1] for h in hist[-WINDOW_SESSIONS:]]
+    today_atm_iv = window[-1]
+    median_atm_iv = _median(window)
+    atm_ivp = _percentile_rank(today_atm_iv, window)
+    atm_strike = min(strikes, key=lambda s: abs(s - spot)) if strikes else None
+    buckets = bucket_skew_history(cur, symbol)
+    eclass = "wk" if dte_today <= 10 else "mo"
+    T = dte_today / 365.0
+    for K in strikes:
+        for cp in ("CE", "PE"):
+            if K == atm_strike:
+                fair_value = _bs_price(spot, K, T, median_atm_iv, cp)
+                out[(K, cp)] = {"tag": _band(atm_ivp), "ivp": atm_ivp,
+                                 "fair_value": round(fair_value, 2) if fair_value else None}
+                continue
+            bucket = round((K / spot - 1.0) * 100)
+            series = (buckets.get((eclass, cp, bucket)) or [])[-WINDOW_SESSIONS:]
+            if len(series) < BUCKET_MIN_SESSIONS:
+                out[(K, cp)] = {"tag": None, "fair_value": None, "ivp": None,
+                                 "reason": f"bucket {eclass}/{cp}/{bucket:+d}% has {len(series)} "
+                                           f"session(s), need {BUCKET_MIN_SESSIONS}+"}
+                continue
+            skews = [s[1] for s in series]
+            median_skew = _median(skews)
+            skew_ivp = _percentile_rank(skews[-1], skews)
+            fair_iv = median_atm_iv + median_skew
+            fair_value = _bs_price(spot, K, T, fair_iv, cp) if fair_iv and fair_iv > 0 else None
+            out[(K, cp)] = {"tag": _band(skew_ivp), "ivp": skew_ivp,
+                             "fair_value": round(fair_value, 2) if fair_value else None}
+    return out
+
+
 def strike_fair_tag(cur, symbol: str, spot_today: float, atm_median_iv: float,
                      strike: float, T_years: float, cp: str, dte_today: int) -> Dict:
     """One ATM+-N wing strike: fair IV = ATM median IV (the LEVEL, blended) + this bucket's own

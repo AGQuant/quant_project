@@ -96,27 +96,31 @@ design when the whole market is genuinely cheap, which log 6310 already explaine
 it is quoted here only to show this module reproduces the same known shape Fable already found,
 not a new, unexplained one.
 
-## What is NOT done yet, stated plainly (the next push, fully specified)
+## UPDATE, same day — wired into `strike_chain()` (sha follows)
 
-- **Wiring into `strike_chain()`** — additive, same pattern as cc#1994's `stored_iv_gap` earlier
-  today: call `ivp_and_fair_value`/`strike_fair_tag` per row, attach the tag (never the fair value
-  or the multiplier — S1: tag only in the row).
-- **The S2-S5 tap sheet** — a new UI surface in `scorr_cockpit_card.js` (reuse the existing sheet
-  mechanism and dismiss set, S4 — do not build a new overlay), showing market price, fair value,
-  gap Rs/%, today's IV, the fair IV, the percentile, and the sample size, plain language (S3).
-- **The index option-chain card** — same shared builder (`_price_rows`), so once `strike_chain`
-  carries the tag this should follow with no second implementation (F7/cc#805), to be confirmed
-  once wired.
-- **F6 honest limits on the surface** — event-window suppression via `earnings_calendar` (not yet
-  checked against this build), dispersion (p25-p75) display beside the fair IV.
-- **Stock monthly/weekly coverage reporting on the surface itself** (G2) — the per-symbol usable-
-  bucket counts are already in `reports/CC1859_bucket_coverage.md`; showing them ON the tap sheet
-  is part of the UI push, not this one.
+`option_ivp.chain_tags(cur, symbol, spot, strikes, dte)` added: ONE `atm_iv_history` fetch + ONE
+`bucket_skew_history` fetch per chain REQUEST (not per strike — a naive per-strike call would
+re-fetch each symbol's whole history ~40+ times for a 21-strike chain). Verified against
+`ivp_and_fair_value`'s own single-strike result (byte-identical on the ATM cell) and against a
+correctly-thin synthetic series (wing cells with insufficient bucket history return `tag: None`,
+never a fabricated colour — exactly what cc#2004's own verify requires: *"confirm the tag dot
+renders empty/grey ... for any strike where cc#1859's IVP gate is not met"*). 7/7 unit tests pass.
 
-None of this is blocked — every open item above is fully specified by the ruling trail and ready
-to build directly from this module. Splitting it out is a scope choice (three other cards already
-landed today; this card's own precision bar is high enough that rushing the UI in the same pass
-risked exactly the kind of shortcut this card exists to prevent), not a stall.
+Wired into **both** `strike_chain()` branches (index + stock — the ONE shared builder, F7/cc#805):
+`strikes`/`days` are now resolved *inside* each branch's DB connection block (neither needed a
+second connection — the Fyers-symbol-master cache check and `_resolve_strikes` are both pure
+computation over already-cached data, not a DB call) so `chain_tags` runs on the SAME cursor as
+the cc#1994 read just above it. Each row's `ce`/`pe` dict gets a new `ivp: {tag, fair_value,
+percentile}` sub-object — a **distinct key** from `_price_rows`' own pre-existing `tag` (the
+older RV20-fair-value mechanism this card supersedes) so nothing already reading that field
+silently changes meaning; the migration off the old field is a UI-side decision, not forced here.
+
+**Still not done, and this is now the fully-specified next card (cc#2004, filed by the founder
+right as this landed):** the NSE-style grid layout, max-pain/wall highlighting, the tap-to-detail
+panel, the info toggle and legend — all in `scorr_cockpit_card.js` / the Home derivatives card.
+cc#2004's own spec already says the tag dot must render empty/grey if the pipeline is not live —
+it is now live, so cc#2004 should render real colours once built. F6 (event-window suppression,
+dispersion display) and G2 (coverage counts on-surface) remain UI-side work for that card too.
 
 ## Verify
 
