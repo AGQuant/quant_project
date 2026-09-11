@@ -3,7 +3,9 @@
 Source: cc#1980 (`reports/CC1980_segment_sanity.md`, sha ffd0cbe). Founder ruling 10-Sep 22:30 —
 "Yes" to the 10 proposed moves, "460 also scan". Closes cc#1146.
 
-Run: 11-Sep-2026, 07:45–08:15 IST (server clock, `Scorr:server_now` — not the container's).
+Run: 11-Sep-2026, 07:04–07:25 IST (server clock, `Scorr:server_now` — not the container's, which
+ran ~6h35m slow earlier in this session). An earlier draft of this line said 07:45–08:15; that was
+an estimate I made between server-time checks rather than a reading, and it is corrected here.
 
 ---
 
