@@ -40,6 +40,16 @@ SEGAVG_MIN  = 6.0         # segment mcap-weighted avg GVM floor (stage-1)
 # ONE theme. The 3 NEW themes (Gold & Jewellery / Consumption & Lifestyle / Cement & Industrial
 # Build-out) follow the spec's explicit segment groupings; Castings & Forgings + steel/engineering
 # go to Cement & Industrial per spec (not EV Auto). Segment strings are exact gvm_history values.
+#
+# cc#1999 item 4 (11-Sep-2026, N5_SEGMENT_GATE_V1): "Textiles Smallcap" retired from the
+# Consumption & Lifestyle list below -- cc#1999 item 2 moved its last 4 members out of that segment
+# name entirely (input_raw.gvm_segment), so it no longer occurs anywhere and a name with zero live
+# members has no business staying in a live theme registry. Retirement ONLY -- this push does not
+# add the 3 destination segments those members actually landed in (Synthetic Fibres & Yarn is not
+# listed under any theme; Home Textiles & Technical already was, so ORBTEXP is unaffected). That is
+# a real theme-coverage question for the Small Cap V2 spec owner, not a mechanical grep-and-remove
+# -- flagged as a finding on cc#1199 rather than decided here. "Plastics and Packaging" (the other
+# retired name) never appeared in this file, so there is nothing to remove for it.
 THEME_SEGMENTS = {
     "Energy Transition & Grid": [
         "Electrical Equipment Small", "Electrical Cables", "Capital Goods - Heavy Electrical",
@@ -71,7 +81,7 @@ THEME_SEGMENTS = {
     "Consumption & Lifestyle": [
         "FMCG - Large", "FMCG - Small", "Retail - Large", "Retail - Mid", "Beverages & Spirits",
         "Packaged Foods & Dairy", "Home Textiles & Technical", "Textiles - Large",
-        "Textiles Smallcap", "Footwear", "Consumer Plastics & Others", "Consumer Durables - Large",
+        "Footwear", "Consumer Plastics & Others", "Consumer Durables - Large",
         "Consumer Durables - Small", "Consumer Goods Trading",
     ],
     "Cement & Industrial Build-out": [

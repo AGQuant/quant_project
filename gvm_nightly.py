@@ -33,7 +33,7 @@ import json                            # cc#828: column-drop guard writes a json
 import logging
 from datetime import date, timedelta   # cc#779: timedelta for the trend-verdict window
 from datetime import date as _date     # cc#804: explicit alias — `date` is shadowed by params below
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 import psycopg
 from psycopg.rows import dict_row
@@ -813,6 +813,63 @@ def _peer_averages(df: pd.DataFrame) -> Dict:
     return out
 
 
+# cc#1999 N5_SEGMENT_GATE_V1 (session_log id=44021, founder-set 11-Sep-2026; supersedes the n>=3
+# reading in session_log 44020) -- a segment with too few members benchmarks nothing reliable: a
+# 2-member segment pins the pair at a flat 6.25 relative score (log 6286) because there is no real
+# peer spread to compare against. Picking which segment is "nearest related" for a stand-in
+# benchmark is a business judgement (cc#1999 item 1 itself: "Fable does not pre-pick, you have the
+# taxonomy in front of you") -- this guard does not invent one unasked, so the map starts EMPTY.
+# The real fix for a sub-5 segment is a real move in input_raw (cc#1999 item 2's own pattern, e.g.
+# "Plastics and Packaging" / "Textiles Smallcap" both merged away entirely, 11-Sep-2026) — this map
+# only covers a segment that is temporarily thin and has a genuinely obvious stand-in.
+SEGMENT_FALLBACK_MAP: Dict[str, str] = {}
+MIN_SEGMENT_MEMBERS = 5  # N5_SEGMENT_GATE_V1
+
+
+def _segment_gate(df: pd.DataFrame, peer_avgs: Dict) -> Tuple[Dict, set, List[Dict]]:
+    """N5_SEGMENT_GATE_V1 guard, cc#1999 item 3. A pure post-process over _peer_averages' own
+    output -- _peer_averages itself is NEVER changed (return-shape Dict[str, Dict] is load-bearing
+    for its 3 external callers: gvm_backfill.py:195, gvm_inputs.py:107, plus this module's own use
+    two lines below the call site).
+
+    Every segment under MIN_SEGMENT_MEMBERS is logged as segment_under_5 with its member list --
+    "never a silent score off a sub-5 peer set" (the card's own words). Two outcomes per segment:
+      - SEGMENT_FALLBACK_MAP names a related segment -> that segment's own (already >=5-member)
+        peer averages are substituted in, so the thin segment's members keep scoring normally,
+        benchmarked against a real peer set instead of their own too-small one.
+      - no mapping -> the segment is NOT scored this cycle. recompute_gvm's own loop skips writing
+        a gvm_scores row for these members (logged here, not silently scored off a 2-4 member set).
+
+    Returns (peer_avgs, gated_segments, under5_report) -- peer_avgs is the same dict passed in,
+    mutated in place only for the borrow case; gated_segments is the set of segment names whose
+    members recompute_gvm must skip; under5_report is the full segment_under_5 list for the
+    caller's own return payload (mirrors compute_sector_ratings' excluded/thinned/dominant style).
+    """
+    counts = df.groupby("gvm_segment").size()
+    gated: set = set()
+    under5: List[Dict] = []
+    for seg, n in counts.items():
+        if seg in ("Unknown", "", None) or n >= MIN_SEGMENT_MEMBERS:
+            continue
+        members = sorted(str(x) for x in df.loc[df["gvm_segment"] == seg, "nse_code"])
+        fallback = SEGMENT_FALLBACK_MAP.get(seg)
+        entry = {"segment": str(seg), "count": int(n), "members": members, "fallback": fallback}
+        if fallback and fallback in peer_avgs:
+            peer_avgs[seg] = peer_avgs[fallback]
+            entry["action"] = "scored_against_fallback"
+            log.warning("N5_SEGMENT_GATE_V1: segment_under_5 '%s' (%d members: %s) -- scored "
+                        "against fallback segment '%s' per SEGMENT_FALLBACK_MAP", seg, n,
+                        ", ".join(members), fallback)
+        else:
+            gated.add(seg)
+            entry["action"] = "not_scored"
+            log.warning("N5_SEGMENT_GATE_V1: segment_under_5 '%s' (%d members: %s) -- no fallback "
+                        "mapped, NOT scored this cycle (logged, not silently scored off a "
+                        "%d-member peer set)", seg, n, ", ".join(members), n)
+        under5.append(entry)
+    return peer_avgs, gated, under5
+
+
 def _stock_dict(row, peer_avgs):
     """G + V inputs only (M comes from momentum_scores separately)."""
     seg = row.get("gvm_segment", "Unknown")
@@ -932,10 +989,22 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
                 "momentum": mom_result}
 
     peer_avgs = _peer_averages(df)
+    # cc#1999 N5_SEGMENT_GATE_V1 -- must run AFTER _peer_averages (needs its output to borrow a
+    # fallback's peer stats) and BEFORE the scoring loop below (the loop skips gated segments).
+    peer_avgs, gated_segments, segment_under_5 = _segment_gate(df, peer_avgs)
     history_rows, latest_rows, errors, m_missing = [], [], 0, 0
+    gated_rows: List[Dict] = []
 
     for _, row in df.iterrows():
         try:
+            sym = str(row.get("nse_code", "")).strip()
+            seg = row.get("gvm_segment", "Unknown")
+            if seg in gated_segments:
+                # N5_SEGMENT_GATE_V1: no fallback mapped for this sub-5 segment -- NOT scored this
+                # cycle (already logged by _segment_gate above). No gvm_scores row is written for
+                # this symbol, so a thin segment can never show up under-5 in gvm_scores itself.
+                gated_rows.append({"symbol": sym, "segment": str(seg)})
+                continue
             sd = _stock_dict(row, peer_avgs)
             gres = api_g_score(sd)
             vres = api_v_score(sd)
@@ -957,8 +1026,6 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
             verd = _verdict(total)
             punch = _punchline(verd, _label_growth(g), _label_value(vv),
                                _label_momentum(m), _label_gvm(total))
-            sym = str(row.get("nse_code", "")).strip()
-            seg = row.get("gvm_segment", "Unknown")
             cname = row.get("company_name", sym)
             price = row.get("price")
             mcap = row.get("market_cap")
@@ -1015,6 +1082,11 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
         "sector_ratings": sector_result,
         "cache_sync": cache_result,
         "history_table": "gvm_history (appended)", "latest_table": "gvm_scores (replaced)",
+        # cc#1999 N5_SEGMENT_GATE_V1: segment_under_5 lists EVERY thin segment this cycle (borrowed
+        # or gated); segment_gated_rows is which symbols got no gvm_scores row at all because of it
+        # (empty in the normal case -- only non-empty when a sub-5 segment has no fallback mapped).
+        "segment_under_5": segment_under_5,
+        "segment_gated_rows": gated_rows,
     }
 
 
