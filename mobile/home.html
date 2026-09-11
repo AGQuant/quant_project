@@ -407,37 +407,17 @@ body[data-theme]{
    green/red at a glance, so this one IS explicitly coloured, scoped to just this cell. */
 .brr .br-day.pos{color:var(--grn)}
 .brr .br-day.neg{color:var(--red)}
-/* cc#1936: the TC capsule between SYMBOL and DAY% — "<BUCKET> <score>", best of four at the latest tick
-   today. cc#1958: coloured by TC BAND (STRONG filled green / VALID green / WATCH muted / FAIL red, see
-   the .tcpill.tc-* rules and breadthTcBand); the band is the verdict, side never enters the colour. cc#1937: the pill does not navigate — the row tap opens the C·A·R·D strip
-   in place (below). cc#1946: the capsule column sits at the row centre (symbol and Day% flex:1 each);
-   the strip row under a tapped row takes the single app pill spec from scorr_card_strip.js
-   (28px, 75% of a quarter, centred) with nothing sized locally. Tokens only. */
+/* cc#1974: THE TC CAPSULE IS GONE from this table — the element, its band logic and all of its CSS.
+   The middle column now carries the C·A·R·D strip for that row's symbol, always visible, via the
+   COMPACT shared builder (window.ScorrCardRow -> ScorrCardStripHtml with opts.compact). Nothing
+   about the pill is sized here: the single app spec in scorr_card_strip.js owns it, per cc#789 and
+   cc#1941. Removed with the capsule: .tcpill and its four .tc-* band rules (the colour logic
+   cc#1947 and then cc#1958 tuned — both are moot now the capsule they coloured is deleted), and
+   .brcard / .brcard .scorr-card-strip / .brcard .sum, which styled the expand-under-the-row block.
+   Also removed: .brr{cursor:pointer} and .brr:active — the ROW is no longer a tap target at all
+   (cc#1974 item 5 retires the expand), so a pointer cursor and a press state would both be lies. */
 .brr .br-tc,.brh .h-btc{min-width:96px;display:flex;justify-content:center}
-.brr .br-tc .tcpill{display:inline-block;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-px5);white-space:nowrap;padding:var(--space-2) var(--space-7);border-radius:var(--radius-10);border:var(--bw-1) solid currentColor;line-height:1.3;background:transparent}
-/* cc#1958 (founder 10-Sep: "TC score capsule colour could be more green or red for better
-   visibility"; supersedes cc#1947's continuous ramp): COLOUR BY TC BAND ONLY -- TC_CANON_V2_FINAL
-   (session_log 41629) STRONG >= 84, VALID >= 65, WATCH >= 50, below 50 = fail. Four bands, three
-   colours, one shape: STRONG green FILLED (14% win tint, win border+text, 800); VALID green
-   OUTLINED; WATCH neutral (muted outline, so it reads "not there yet", weight 700); FAIL red
-   OUTLINED, no tint. The side / bucket label is NOT a colour input -- BUY-* and SELL-* at the same
-   score render identically. Tokens only: --win / --loss / --muted through currentColor, the tint a
-   color-mix of the same token. Text, ordering, sort and the score are unchanged. */
-.brr .br-tc .tcpill.tc-strong{color:var(--win);background:color-mix(in srgb, var(--win) 14%, transparent);font-weight:800}
-.brr .br-tc .tcpill.tc-valid{color:var(--win)}
-.brr .br-tc .tcpill.tc-watch{color:var(--muted);font-weight:700}
-.brr .br-tc .tcpill.tc-fail{color:var(--loss)}
-/* cc#1937 (corrects cc#1936 item 4): a row tap opens the SHARED C·A·R·D strip in place under that
-   row — scorr_card_strip.js, ScorrCardStripHtml, cc#789 single source, the same component as the
-   approved-trade card (cc#1934) and the My Portfolio rows (cc#911). No navigation from the table.
-   LAYOUT ONLY (the cc#1070 row): buttons style themselves; this stretches them to the row width
-   and clamps them to the 44px touch minimum. */
-.brr{cursor:pointer}
-.brr:active{background:var(--panel2)}
-.brcard{display:flex;padding:var(--space-8) var(--space-2) var(--space-10);border-bottom:var(--bw-1) solid var(--line)}
-.brcard .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}   /* cc#1948: --space-6 gap per the single spec */
-/* cc#1941/1944: the pill look AND its row share come from the single app spec in scorr_card_strip.js; nothing set here */
-.brcard .sum{color:var(--muted);font-size:var(--type-11)}
+.brr .br-tc .scorr-card-strip{justify-content:center}   /* cc#1974: centre the strip in its column; size stays the shared spec's */
 .brh{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-6) var(--space-2);
   min-height:38px;position:sticky;top:0;z-index:2;background:var(--bg,#0A0F1E);
   border-bottom:var(--bw-1) solid var(--line)}
@@ -2696,11 +2676,14 @@ function renderTape(){
    and tapeNum()/esc()/px()/pct()/cls() reused directly, not retyped. Paint-then-fill: /api/mobile/
    breadth is a real per-symbol query over the whole ~208-name universe, so it is fetched on the
    tap that opens this table, not folded into the home2 payload every page load already pays for. */
-var BREADTH = { rows: [], view: [], loaded: false, loading: false, sel: null, strip: null };   /* cc#1933: sel = tapped sector or null; cc#1937: strip = symbol whose C·A·R·D row is open, or null */
+var BREADTH = { rows: [], view: [], loaded: false, loading: false, sel: null };   /* cc#1933: sel = tapped sector or null. cc#1974: `strip` is GONE with the row-expand behaviour — the C·A·R·D strip is now always visible in the middle column, so there is nothing to expand into. */
 var BREADTH_SORT = { col: 'day', dir: -1 };   // biggest movers first, same default as Tape's own
 var BREADTH_COLS = [
   { key: 'sym',  label: 'Symbol',     cls: 'h-bsym' },
-  { key: 'tc',   label: 'TC',         cls: 'h-btc'  },   /* cc#1936: best-of-four capsule, sortable by score */
+  /* cc#1974: the TC capsule column is REPLACED by the C·A·R·D strip. Header left BLANK deliberately
+     — the four letters are self-labelling and a "CARD" word would only repeat them — and the column
+     is NOT sortable, because cc#1974 item 6 says nothing that sorted by TC survives. */
+  { key: 'card', label: '',           cls: 'h-btc'  },
   { key: 'day',  label: 'Day %',      cls: 'h-bday' }
 ];
 /* cc#1933: the tapped sector's member set — the endpoint's own `members` list on that sector row (the
@@ -2747,6 +2730,9 @@ function breadthHead(){
     var on = BREADTH_SORT.col === c.key;
     /* cc#1933: with a sector tapped the symbol header reads "SYMBOL · <sector> · <n>" */
     var label = (c.key === 'sym' && BREADTH.sel) ? c.label + ' \u00b7 ' + BREADTH.sel + ' \u00b7 ' + BREADTH.view.length : c.label;
+    /* cc#1974: the C·A·R·D column is not a sort control, so it is a plain cell — no button, no
+       aria-label, nothing to tap. Day % stays the only numeric sort besides Symbol. */
+    if (c.key === 'card') return '<span class="' + c.cls + '"></span>';
     return '<button class="' + c.cls + (on ? ' on' : '') + '"'
       + ' aria-label="Sort by ' + esc(c.label) + '"'
       + ' onclick="breadthSort(\'' + c.key + '\')">' + esc(label)
@@ -2758,49 +2744,34 @@ function breadthRow(x){
   // cc#910's own rule, reused: the row carries its direction as a faint tint; a null change gets
   // neither tint nor colour \u2014 unknown is not flat.
   var sgn = (x.day_chg_pct == null) ? '' : (Number(x.day_chg_pct) >= 0 ? ' up' : ' dn');
-  /* cc#1937: the whole row is the tap target; data-scorr-skip keeps cc#898's universal symbol-tap
-     sheet out of the way, exactly as the My Portfolio rows do (cc#911). The strip row renders as
-     the row's sibling, so a tap on C/A/R/D never bubbles into the row toggle. */
+  /* data-scorr-skip stays (cc#1937 -> cc#911): it keeps cc#898's universal symbol-tap sheet off
+     this row, so the only taps inside it are the C·A·R·D letters' own. cc#1974 retired the
+     rest of that comment with the row toggle — the row itself is no longer a tap target. */
   var sym = String(x.symbol || '');
-  var open = BREADTH.strip === sym;
-  return '<div class="brr' + sgn + '" data-scorr-skip="1" role="button" tabindex="0" aria-expanded="' + (open ? 'true' : 'false') + '"'
-    + ' onclick="breadthRowTap(' + JSON.stringify(sym).replace(/"/g, '&quot;') + ')"'
-    + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();breadthRowTap(' + JSON.stringify(sym).replace(/"/g, '&quot;') + ');}">'
+  /* cc#1974: the row is no longer a tap target. The strip it used to expand into is now always
+     visible in the middle column, so role=button, tabindex, aria-expanded, the click and the key
+     handler all go with it. The C·A·R·D letters inside the strip keep their own taps. */
+  return '<div class="brr' + sgn + '" data-scorr-skip="1">'
     + '<span class="br-sym">' + esc(sym) + '</span>'
-    + '<span class="br-tc">' + breadthTcPill(x) + '</span>'
+    + '<span class="br-tc">' + breadthStrip(sym) + '</span>'
     + '<span class="br-day ' + cls(x.day_chg_pct) + '">' + pct(x.day_chg_pct) + '</span>'
-    + '</div>'
-    + (open ? '<div class="brcard">' + breadthStrip(sym) + '</div>' : '');
+    + '</div>';
 }
 /* cc#1937: consumed, never re-implemented — the full-size shared strip (ScorrCardStripHtml), the same
    call as the approved-trade card. Graceful degrade: an honest one-liner, never a dead tap. */
+/* cc#1974: the COMPACT (table-row) variant, because this is a table row — window.ScorrCardRow(sym),
+   which is ScorrCardStripHtml with opts.compact. Still the shared builder, never hand-rolled
+   (cc#789 forward rule). Graceful degrade stays an honest one-liner, never a dead cell. */
 function breadthStrip(sym){
   try {
+    if (typeof window.ScorrCardRow === 'function') return window.ScorrCardRow(sym);
     if (typeof window.ScorrCardStripHtml === 'function') return window.ScorrCardStripHtml(sym, '');
   } catch (e) { /* fall through */ }
-  return '<span class="sum">Card view unavailable</span>';
+  return '<span class="sum">—</span>';
 }
-function breadthRowTap(sym){
-  BREADTH.strip = (BREADTH.strip === sym) ? null : sym;   /* one open at a time; same row again closes */
-  renderBreadth();
-}
-/* cc#1958: the capsule's class is the TC BAND of score100 (already the /100 figure on the payload --
-   never re-derived from score10), and NOTHING else: bucket is read only for the text it already
-   shows. Bands per TC_CANON_V2_FINAL (session_log 41629): STRONG >= 84, VALID >= 65, WATCH >= 50,
-   below 50 = fail. Colour and weight live in the four .tcpill.tc-* rules above (tokens only);
-   nothing is set inline. Supersedes cc#1947's breadthTcColor continuous ramp. */
-function breadthTcBand(sc){
-  var v = Number(sc);
-  return v >= 84 ? 'tc-strong' : (v >= 65 ? 'tc-valid' : (v >= 50 ? 'tc-watch' : 'tc-fail'));
-}
-function breadthTcPill(x){
-  var t = x.tc;
-  if (!t || t.score100 == null || isNaN(Number(t.score100))) return '';   /* no tick today: nothing, never a 0 */
-  var sc = Number(t.score100);
-  /* cc#1937: no href — the pill is part of the row tap, which opens the C·A·R·D strip in place */
-  return '<span class="tcpill ' + breadthTcBand(sc) + '" title="best of four at ' + esc(String(t.ts || '').slice(11, 16)) + ' IST">'
-    + esc(String(t.bucket || '')) + ' ' + sc.toFixed(1) + '</span>';
-}
+/* cc#1974: breadthTcBand() and breadthTcPill() are DELETED with the capsule they built —
+   cc#1936 created them, cc#1947 then cc#1958 tuned their colour, and all three are moot now the
+   element is gone. No caller remains. */
 function renderBreadth(){
   var el = document.getElementById('brbd');
   if (!el) return;
@@ -2889,8 +2860,7 @@ function closeBreadth(){
   document.body.style.overflow = '';
   /* cc#1935 item 5 (founder 10-Sep 15:41): a tapped theme lives only for one open sheet — closing
      clears it, so the next open shows no bordered chip and the full table. */
-  BREADTH.sel = null;
-  BREADTH.strip = null;   /* cc#1937 item 4: an open C·A·R·D row closes with the sheet */
+  BREADTH.sel = null;   /* cc#1974: BREADTH.strip retired with the row-expand */
 }
 
 /* cc#910: a tape chart is now a registered CHART, so it scrubs and switches range exactly like
