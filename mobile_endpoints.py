@@ -507,80 +507,24 @@ def basket_label(slug):
 @router.get("/api/mobile/qb")
 @_json_safe   # cc#887
 def mobile_qb(request: Request):
-    """Quant Baskets — one row per basket, plus its open holdings.
+    """RETIRED by cc#1997 Tier 1. Returns 410, reads nothing.
 
-    TRAP (a): quant_paper_positions.status is LOWERCASE ('open' / 'exited_stop'). Verified live:
-    62 open / 22 exited_stop. An uppercase filter here returns silently nothing, which is the
-    worst kind of wrong — a real book that renders as an empty one.
+    Superseded by the /api/mobile/qb_app/* family (list, holdings) — mobile/qb.html and
+    mobile/qb_holdings.html read those, never this bare path (cc#1984 shortlist). ZERO CALLERS,
+    re-verified boundary-aware across .html/.js/.py/.gs immediately before this push. The
+    TRAP (a) lowercase-status note that used to live in this docstring is now moot — nothing here
+    reads quant_paper_positions any more — and is not carried forward because it no longer applies
+    to anything.
     """
     g = _guard(request)
     if g:
         return g
-    try:
-        now = _ist_now()
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                SELECT basket_name,
-                       COUNT(*)                                   AS positions,
-                       SUM(current_value)                         AS market_value,
-                       SUM(pnl)                                   AS unrealised,
-                       SUM(qty * entry_price)                     AS invested,
-                       MAX(updated_at)                            AS updated_at
-                FROM quant_paper_positions
-                WHERE status = 'open'
-                GROUP BY basket_name
-                ORDER BY SUM(current_value) DESC NULLS LAST
-            """)
-            baskets = _rows(cur)
-            cur.execute("""
-                SELECT basket_name, symbol, qty, entry_price, current_price, pnl, pnl_pct,
-                       current_value, entry_date
-                FROM quant_paper_positions
-                WHERE status = 'open'
-                ORDER BY basket_name, current_value DESC NULLS LAST
-            """)
-            holdings = _rows(cur)
-    except Exception as e:
-        log.exception("mobile qb failed")
-        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "baskets": [], "count": 0}
-
-    def f(v):
-        return float(v) if v is not None else None
-
-    by_basket = {}
-    for h in holdings:
-        by_basket.setdefault(h["basket_name"], []).append({
-            "symbol": h["symbol"], "qty": f(h["qty"]),
-            "entry": f(h["entry_price"]), "cmp": f(h["current_price"]),
-            "pnl": f(h["pnl"]), "pnl_pct": f(h["pnl_pct"]),
-            "value": f(h["current_value"]),
-            "since": h["entry_date"].strftime("%d %b") if h["entry_date"] else None,
-        })
-
-    newest = max([b["updated_at"] for b in baskets if b["updated_at"]], default=None)
-    out = []
-    for b in baskets:
-        inv, mv = f(b["invested"]), f(b["market_value"])
-        out.append({
-            "slug": b["basket_name"], "label": basket_label(b["basket_name"]),
-            "positions": b["positions"], "market_value": mv,
-            "unrealised": f(b["unrealised"]),
-            "invested": inv,
-            "ret_pct": round((mv - inv) / inv * 100.0, 2) if inv else None,
-            "holdings": by_basket.get(b["basket_name"], []),
-        })
-    tot_mv = sum(x["market_value"] or 0 for x in out)
-    tot_un = sum(x["unrealised"] or 0 for x in out)
-    return {
-        "baskets": out,
-        "count": len(out),
-        "total_value": round(tot_mv, 2) if out else None,
-        "total_unrealised": round(tot_un, 2) if out else None,
-        # Baskets are marked once a day, not every 5 minutes — the rail cadence says so rather
-        # than judging a daily job against an intraday clock (the cc#841 false-positive class).
-        "rail": rail_state(newest, 1440, now),
-        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997",
+        "message": "This endpoint is superseded. Use /api/mobile/qb_app/list and "
+                   "/api/mobile/qb_app/holdings.",
+        "use_instead": "/api/mobile/qb_app/list",
+    })
 
 
 @router.get("/m/qb", response_class=HTMLResponse)
@@ -681,88 +625,21 @@ def m_gvm():
 @router.get("/api/mobile/v8")
 @_json_safe   # cc#887
 def mobile_v8(request: Request):
+    """RETIRED by cc#1997 Tier 1. Returns 410, reads nothing.
+
+    Superseded by the v8book / v8funnel / v8_positions family — mobile/v8.html reads those three,
+    never this bare path (cc#1984 shortlist). ZERO CALLERS, re-verified boundary-aware across
+    .html/.js/.py/.gs immediately before this push.
+    """
     g = _guard(request)
     if g:
         return g
-    mood = None
-    try:
-        from v8_endpoints import market_mood
-        mood = market_mood()
-    except Exception as e:
-        log.warning("mobile v8: market_mood unavailable (%s)", e)
-    try:
-        now = _ist_now()
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM futures_universe WHERE is_active")
-            universe = cur.fetchone()[0]
-            # Basket counts come from v8_qualified — what actually signalled today. NEVER from
-            # v8_filter_state (trap d): cc#868 flagged it BLOCKED_SOURCE because all six baskets
-            # read disabled while four were producing signals.
-            cur.execute("""
-                SELECT basket, COUNT(*) AS n, MAX(signal_ts) AS newest
-                FROM v8_qualified
-                WHERE signal_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
-                GROUP BY basket ORDER BY n DESC
-            """)
-            baskets = _rows(cur)
-            # cc#888 item 3: WHICH stocks signalled, not just how many. A count answers a
-            # dashboard question; a retail user wants the names. Capped at 20 per basket in SQL
-            # rather than in Python, so a heavy day never ships 400 rows to a phone to throw most
-            # of them away.
-            # signal_ts is NAIVE IST (verified: timestamp without time zone) — no conversion, and
-            # the format is applied here so the template never parses a timestamp.
-            cur.execute("""
-                SELECT basket, symbol, signal_ts FROM (
-                    SELECT basket, symbol, signal_ts,
-                           ROW_NUMBER() OVER (PARTITION BY basket ORDER BY signal_ts DESC) AS rn
-                    FROM v8_qualified
-                    WHERE signal_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
-                ) s WHERE rn <= 20
-                ORDER BY basket, signal_ts DESC
-            """)
-            sig_rows = _rows(cur)
-            cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN'")
-            open_pos = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) AS n, SUM(pnl) AS pnl FROM v8_paper_trades")
-            led = _rows(cur)[0]
-    except Exception as e:
-        log.exception("mobile v8 failed")
-        return {"error": f"{type(e).__name__}: {str(e)[:200]}", "baskets": []}
-
-    newest = max([b["newest"] for b in baskets if b["newest"]], default=None)
-    return {
-        "universe": universe,
-        # cc#887 follow-up — THE SAME MISTAKE, QUIETER. This read "verdict", "gate_open" and
-        # "as_of"; market_mood() returns NONE of those three. Its actual keys are checked_at,
-        # checks, fails, mood, buy_slots, sell_slots, total_slots, slot_note, breadth_source,
-        # nifty_source, adr_detail. So the gate card has been printing three nulls since cc#874 —
-        # no crash, no error box, just silently empty, which is the worse failure of the two
-        # because nothing ever told anyone.
-        # Found by checking the source of every endpoint this module reuses after the home screen
-        # turned out to have assumed a shape too. `open` is derived: the gate is open when no
-        # check failed. fails is a count, so a falsy 0 means open — written explicitly rather than
-        # with `not fails`, because `not None` would also read as open if the key ever vanished.
-        "gate": {
-            "verdict": (mood or {}).get("mood"),
-            "open": ((mood or {}).get("fails") == 0) if (mood or {}).get("fails") is not None else None,
-            "as_of": (mood or {}).get("checked_at"),
-        } if mood else {"verdict": None, "open": None, "as_of": None},
-        # cc#888 item 3: each basket carries its symbols so the row can expand inline. `truncated`
-        # is stated rather than left implicit — if a basket signalled more than the 20 cap, the
-        # screen says so instead of quietly showing a subset as if it were the whole list.
-        "baskets": [{
-            "slug": b["basket"], "label": basket_label(b["basket"]), "signals": b["n"],
-            "symbols": [{"symbol": s["symbol"],
-                         "at": s["signal_ts"].strftime("%H:%M") if s["signal_ts"] else None}
-                        for s in sig_rows if s["basket"] == b["basket"]],
-            "truncated": max(0, b["n"] - 20),
-        } for b in baskets],
-        "signals_today": sum(b["n"] for b in baskets),
-        "open_positions": open_pos,
-        "ledger": {"trades": led["n"], "gross_pnl": float(led["pnl"]) if led["pnl"] is not None else None},
-        "rail": rail_state(newest, 5, now),
-        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997",
+        "message": "This endpoint is superseded. Use /api/mobile/v8book, /api/mobile/v8funnel "
+                   "or /api/mobile/v8_positions.",
+        "use_instead": "/api/mobile/v8book",
+    })
 
 
 @router.get("/m/v8", response_class=HTMLResponse)
@@ -825,83 +702,22 @@ def m_check():
 @router.get("/api/mobile/home")
 @_json_safe   # cc#887
 def mobile_home(request: Request):
+    """RETIRED by cc#1997 Tier 1. Returns 410, reads nothing.
+
+    Superseded by /api/mobile/home2 — mobile/home.html calls home2 plus the derivatives and
+    approved-trades siblings, never this bare path (confirmed by reading what the page actually
+    fetches, cc#1984 shortlist). ZERO CALLERS, re-verified boundary-aware across .html/.js/.py/.gs
+    immediately before this push, per cc#1997 item 3: nothing but this definition and its own
+    doc mentions matched.
+    """
     g = _guard(request)
     if g:
         return g
-    idx = {}
-    try:
-        from v8_endpoints import domestic_live
-        idx = domestic_live() or {}
-    except Exception as e:
-        log.warning("mobile home: domestic_live unavailable (%s)", e)
-    try:
-        now = _ist_now()
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                -- cc#887: smartgain_holdings.updated_at is TIMESTAMPTZ — the ONLY tz-aware column
-                -- any mobile handler reads. Verified against information_schema: intraday_prices.ts,
-                -- quant_paper_positions.updated_at, earnings_calendar.last_updated and
-                -- v8_paper_positions.entry_ts are all naive. Passing it raw to rail_state, whose
-                -- `now` is naive IST, raises "can't subtract offset-naive and offset-aware
-                -- datetimes". Converted HERE, in SQL, once — the same doctrine the models handler
-                -- already uses for scheduler_master.last_run_at.
-                SELECT COUNT(*) AS n, SUM(mtm) AS mtm, SUM(qty * ltp) AS value,
-                       MAX(updated_at AT TIME ZONE 'Asia/Kolkata') AS updated_at
-                FROM smartgain_holdings
-            """)
-            sg = _rows(cur)[0]
-            cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN'")
-            v8_open = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM quant_paper_positions WHERE status='open'")
-            qb_open = cur.fetchone()[0]
-            cur.execute("""
-                SELECT COUNT(*) FROM v_polished_articles
-                WHERE display_time >= NOW() - INTERVAL '24 hours'
-            """)
-            news_24h = cur.fetchone()[0]
-    except Exception as e:
-        log.exception("mobile home failed")
-        return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
-
-    def f(v):
-        return float(v) if v is not None else None
-    book_empty = not sg["n"]
-    return {
-        # cc#887 follow-up — THE SECOND BUG ON THIS SCREEN, and the one the founder actually saw.
-        # domestic_live() returns a WRAPPER: {"as_of": "<string>", "indices": {"NIFTY50": {...},
-        # "BANKNIFTY": {...}}}. This comprehension iterated the TOP level, so it hit "as_of",
-        # whose value is a str, and called .get on it -> AttributeError: 'str' object has no
-        # attribute 'get'. It also would have labelled the "indices" key itself "Bank Nifty".
-        #
-        # Why it hid behind the timezone crash: on 07-Aug the feed was down, so domestic_live()
-        # raised, the except left idx = {}, and an empty .items() produced no error — leaving
-        # rail_state to raise the TypeError instead. With the feed healthy the wrapper comes back
-        # populated and THIS fires first, because a dict literal evaluates its values in source
-        # order and "indices" is built before "rail". Fixing one revealed the other; that is the
-        # cc#887 guard doing its job, not a regression from it.
-        #
-        # Reading the "indices" key by name also makes the shape explicit, so a future change to
-        # the wrapper is a KeyError-free empty list rather than a crash.
-        "indices": [{
-            "name": "Nifty 50" if k == "NIFTY50" else "Bank Nifty",
-            "close": v.get("close"), "chg_pct": v.get("chg_pct"), "source": v.get("source"),
-        } for k, v in (idx.get("indices") or {}).items() if isinstance(v, dict)],
-        # SOURCED_BUT_EMPTY, per the contract. The source is correct and returns nothing today, so
-        # the screen says the book is flat rather than printing 0.00 as if it were a measurement.
-        "book": {
-            "empty": book_empty,
-            "positions": sg["n"],
-            "mtm": f(sg["mtm"]),
-            "value": f(sg["value"]),
-            "state": "FLAT" if book_empty else "LIVE",
-            "message": ("No positions open." if book_empty else None),
-        },
-        "shortcuts": {"v8_open": v8_open, "qb_open": qb_open, "news_24h": news_24h},
-        "rail": rail_state(sg["updated_at"], 1440, now),
-        "as_of": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "time": now.strftime("%H:%M"),
-        "date": now.strftime("%a %d %b"),
-    }
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997",
+        "message": "This endpoint is superseded. Use /api/mobile/home2.",
+        "use_instead": "/api/mobile/home2",
+    })
 
 
 @router.get("/m/home", response_class=HTMLResponse)

@@ -53,6 +53,7 @@ import requests
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse   # cc#1997: the six retired reads answer with a body, not a bare 410
 
 from fundamentals_scraper import (_fetch, _fetch_soup, UA, THROTTLE, BASE as SCREENER_BASE,
                                    fetch_company as _fh_fetch_company, _write_symbol as _fh_write_symbol,
@@ -1978,17 +1979,14 @@ def _recompute_peer_benchmark(conn):
 
 @router.get("/api/ops_metrics/registry")
 def get_registry(sector: str = ""):
-    with _conn() as conn, conn.cursor() as cur:
-        pass   # cc#879: ensure_* moved to the startup hook
-        if sector:
-            cur.execute("""SELECT sector, metric_name, display_name, unit, direction, tier
-                           FROM sector_kpi_registry WHERE sector=%s ORDER BY tier, metric_name""", (sector,))
-        else:
-            cur.execute("""SELECT sector, metric_name, display_name, unit, direction, tier
-                           FROM sector_kpi_registry ORDER BY sector, tier, metric_name""")
-        rows = [{"sector": r[0], "metric_name": r[1], "display_name": r[2], "unit": r[3],
-                 "direction": r[4], "tier": r[5]} for r in cur.fetchall()]
-    return {"count": len(rows), "sectors": len(ALL_SECTORS), "rows": rows}
+    """RETIRED by cc#1997 Tier 2. Returns 410, reads nothing.
+
+    Ops-metrics is FULLY RETIRED (founder 09-Aug-2026, session_log 18213 -- "do NOT drain ops_metrics_t1_queue, do NOT forward-fill, ignore any ops_metrics_pending signal, cc#768 cancelled, no new ops-metrics tasks"). This read endpoint answered nobody -- ZERO CALLERS, re-verified boundary-aware across .html/.js/.py/.gs immediately before this push (cc#1984 shortlist Tier 2). cc#1997 executes that ruling on the route: retired, not deleted.
+    """
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997", "ruling": "session_log 18213",
+        "message": "Ops-metrics is retired. This endpoint no longer reads live data.",
+    })
 
 
 @router.get("/api/ops_metrics/company/{symbol}")
@@ -2095,29 +2093,26 @@ def get_company_ops_metrics(symbol: str):
 
 @router.get("/api/ops_metrics/guidance/{symbol}")
 def get_guidance_tracker(symbol: str):
-    sym = symbol.strip().upper()
-    with _conn() as conn, conn.cursor() as cur:
-        pass   # cc#879: ensure_* moved to the startup hook
-        cur.execute("""SELECT quarter_guided, quarter_actual, item_text, guided_quote,
-                              actual_outcome, actual_quote, status, computed_at
-                       FROM guidance_tracker WHERE symbol=%s ORDER BY quarter_guided DESC, id ASC""", (sym,))
-        rows = [{"quarter_guided": r[0], "quarter_actual": r[1], "item_text": r[2],
-                 "guided_quote": r[3], "actual_outcome": r[4], "actual_quote": r[5],
-                 "status": r[6], "computed_at": str(r[7]) if r[7] else None} for r in cur.fetchall()]
-        met = sum(1 for r in rows if r["status"] == "MET")
-    return {"symbol": sym, "count": len(rows), "met": met, "items": rows,
-            "track_record": f"{met}/{len(rows)} met" if rows else None}
+    """RETIRED by cc#1997 Tier 2. Returns 410, reads nothing.
+
+    Ops-metrics is FULLY RETIRED (founder 09-Aug-2026, session_log 18213 -- "do NOT drain ops_metrics_t1_queue, do NOT forward-fill, ignore any ops_metrics_pending signal, cc#768 cancelled, no new ops-metrics tasks"). This read endpoint answered nobody -- ZERO CALLERS, re-verified boundary-aware across .html/.js/.py/.gs immediately before this push (cc#1984 shortlist Tier 2). cc#1997 executes that ruling on the route: retired, not deleted.
+    """
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997", "ruling": "session_log 18213",
+        "message": "Ops-metrics is retired. This endpoint no longer reads live data.",
+    })
 
 
 @router.get("/api/ops_metrics/sector_trend")
 def get_sector_trend(sector: str, metric_name: str):
-    with _conn() as conn, conn.cursor() as cur:
-        pass   # cc#879: ensure_* moved to the startup hook
-        cur.execute("""SELECT quarter, median_value, n_companies, computed_at FROM sector_ops_trends
-                       WHERE sector=%s AND metric_name=%s ORDER BY computed_at ASC""", (sector, metric_name))
-        rows = [{"quarter": r[0], "median_value": float(r[1]) if r[1] is not None else None,
-                 "n_companies": r[2]} for r in cur.fetchall()]
-    return {"sector": sector, "metric_name": metric_name, "trend": rows}
+    """RETIRED by cc#1997 Tier 2. Returns 410, reads nothing.
+
+    Ops-metrics is FULLY RETIRED (founder 09-Aug-2026, session_log 18213 -- "do NOT drain ops_metrics_t1_queue, do NOT forward-fill, ignore any ops_metrics_pending signal, cc#768 cancelled, no new ops-metrics tasks"). This read endpoint answered nobody -- ZERO CALLERS, re-verified boundary-aware across .html/.js/.py/.gs immediately before this push (cc#1984 shortlist Tier 2). cc#1997 executes that ruling on the route: retired, not deleted.
+    """
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997", "ruling": "session_log 18213",
+        "message": "Ops-metrics is retired. This endpoint no longer reads live data.",
+    })
 
 
 @router.get("/api/ops_metrics/segment_trends")
@@ -2145,17 +2140,14 @@ def get_segment_trends(segment: str):
 
 @router.get("/api/ops_metrics/concall/{symbol}")
 def get_concall_summary(symbol: str):
-    sym = symbol.strip().upper()
-    with _conn() as conn, conn.cursor() as cur:
-        pass   # cc#879: ensure_* moved to the startup hook
-        cur.execute("""SELECT quarter, summary, key_metrics, guidance, tone, source_docs, computed_at
-                       FROM concall_summaries WHERE symbol=%s ORDER BY quarter DESC LIMIT 1""", (sym,))
-        r = cur.fetchone()
-    if not r:
-        return {"symbol": sym, "found": False}
-    return {"symbol": sym, "found": True, "quarter": r[0], "summary": r[1], "key_metrics": r[2],
-            "guidance": r[3], "tone": r[4], "source_docs": r[5],
-            "computed_at": str(r[6]) if r[6] else None}
+    """RETIRED by cc#1997 Tier 2. Returns 410, reads nothing.
+
+    Ops-metrics is FULLY RETIRED (founder 09-Aug-2026, session_log 18213 -- "do NOT drain ops_metrics_t1_queue, do NOT forward-fill, ignore any ops_metrics_pending signal, cc#768 cancelled, no new ops-metrics tasks"). This read endpoint answered nobody -- ZERO CALLERS, re-verified boundary-aware across .html/.js/.py/.gs immediately before this push (cc#1984 shortlist Tier 2). cc#1997 executes that ruling on the route: retired, not deleted.
+    """
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997", "ruling": "session_log 18213",
+        "message": "Ops-metrics is retired. This endpoint no longer reads live data.",
+    })
 
 
 @router.post("/api/admin/ops_metrics/seed_registry")
@@ -2207,37 +2199,14 @@ def admin_arm_text_fetch(token: str = ""):
 
 @router.get("/api/admin/ops_metrics/status")
 def admin_status():
-    with _conn() as conn, conn.cursor() as cur:
-        pass   # cc#879: ensure_* moved to the startup hook
-        cur.execute("SELECT COUNT(*) FROM sector_kpi_registry")
-        n_registry = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(DISTINCT symbol) FROM doc_registry")
-        n_doc_syms = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM doc_registry WHERE url IS NOT NULL")
-        n_docs = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(DISTINCT symbol) FROM sector_ops_metrics")
-        n_metric_syms = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(DISTINCT symbol) FROM concall_summaries")
-        n_concalls = cur.fetchone()[0]
-        cur.execute("SELECT value FROM app_config WHERE key=%s", (RUN_FLAG_KEY,))
-        r = cur.fetchone()
-        run_flag = r[0] if r else None
-        cur.execute("SELECT value FROM app_config WHERE key=%s", (CURSOR_KEY,))
-        r = cur.fetchone()
-        cursor = r[0] if r else None
-        cur.execute("SELECT COUNT(DISTINCT symbol) FROM doc_texts WHERE text_content IS NOT NULL")
-        n_text_syms = cur.fetchone()[0]
-        cur.execute("SELECT value FROM app_config WHERE key=%s", (TEXT_FETCH_RUN_FLAG_KEY,))
-        r = cur.fetchone()
-        text_fetch_flag = r[0] if r else None
-        cur.execute("SELECT value FROM app_config WHERE key=%s", (TEXT_FETCH_CURSOR_KEY,))
-        r = cur.fetchone()
-        text_fetch_cursor = r[0] if r else None
-    return {"registry_rows": n_registry, "doc_registry_symbols": n_doc_syms, "docs_found": n_docs,
-            "companies_with_metrics": n_metric_syms, "companies_with_concall": n_concalls,
-            "backfill_run_flag": run_flag, "backfill_cursor": cursor,
-            "companies_with_stored_text": n_text_syms,
-            "text_fetch_run_flag": text_fetch_flag, "text_fetch_cursor": text_fetch_cursor}
+    """RETIRED by cc#1997 Tier 2. Returns 410, reads nothing.
+
+    Ops-metrics is FULLY RETIRED (founder 09-Aug-2026, session_log 18213 -- "do NOT drain ops_metrics_t1_queue, do NOT forward-fill, ignore any ops_metrics_pending signal, cc#768 cancelled, no new ops-metrics tasks"). This read endpoint answered nobody -- ZERO CALLERS, re-verified boundary-aware across .html/.js/.py/.gs immediately before this push (cc#1984 shortlist Tier 2). cc#1997 executes that ruling on the route: retired, not deleted.
+    """
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997", "ruling": "session_log 18213",
+        "message": "Ops-metrics is retired. This endpoint no longer reads live data.",
+    })
 
 
 _OPS_METRICS_TABLES = ["sector_kpi_registry", "sector_ops_metrics", "doc_registry",
@@ -2272,7 +2241,14 @@ def measure_storage_delta(conn=None):
 
 @router.get("/api/admin/ops_metrics/storage")
 def admin_storage():
-    return measure_storage_delta()
+    """RETIRED by cc#1997 Tier 2. Returns 410, reads nothing.
+
+    Ops-metrics is FULLY RETIRED (founder 09-Aug-2026, session_log 18213 -- "do NOT drain ops_metrics_t1_queue, do NOT forward-fill, ignore any ops_metrics_pending signal, cc#768 cancelled, no new ops-metrics tasks"). This read endpoint answered nobody -- ZERO CALLERS, re-verified boundary-aware across .html/.js/.py/.gs immediately before this push (cc#1984 shortlist Tier 2). cc#1997 executes that ruling on the route: retired, not deleted.
+    """
+    return JSONResponse(status_code=410, content={
+        "error": "gone", "retired": "cc#1997", "ruling": "session_log 18213",
+        "message": "Ops-metrics is retired. This endpoint no longer reads live data.",
+    })
 
 
 # ── 8. QUARTERLY UPDATE FRAMEWORK (cc#524, OPS_METRICS_FRAMEWORK_V1) ───────────

@@ -429,7 +429,7 @@ SQL is gated, not deleted. Response fields added by cc#1587: `buckets_enabled` (
 
 ## Generated route inventory
 
-**Generated 11-Sep-2026 08:02 IST by `tools/gen_api_reference.py`.** Do not edit this block by hand — it is rewritten from the code on every run, and a hand edit will be lost. Everything outside the two sentinel comments is written by people and is never touched.
+**Generated 11-Sep-2026 08:31 IST by `tools/gen_api_reference.py`.** Do not edit this block by hand — it is rewritten from the code on every run, and a hand edit will be lost. Everything outside the two sentinel comments is written by people and is never touched.
 
 | | count |
 |---|---|
