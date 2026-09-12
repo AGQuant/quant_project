@@ -202,15 +202,33 @@ var _full = false;                // cc#779: fullscreen state
   }
   function _istCross(t) { var o = _istDate(t); return o ? (o.dateOnly ? IST_MONY.format(o.d) : IST_DHMY.format(o.d)) : ""; }
 
+  // cc#2021: same luminance formula/threshold _detectTheme already used on an rgb() triple, applied
+  // to a #hex custom-property value instead (3- or 6-digit, leading # optional). Returns null on
+  // anything that doesn't parse, so the caller can fall through rather than trust a bad read.
+  function _hexLuminance(hex) {
+    hex = (hex || "").trim().replace(/^#/, "");
+    if (hex.length === 3) hex = hex.replace(/./g, function (c) { return c + c; });
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+    var r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+    return r * 0.299 + g * 0.587 + b * 0.114;
+  }
   function _detectTheme() {
     try {
       var b = document.body, r = document.documentElement;
       var dt = (r.getAttribute("data-theme") || b.getAttribute("data-theme") || "").toLowerCase();
       if (dt === "dark") return "dark";
       if (dt === "light") return "light";
-      var bg = getComputedStyle(b).backgroundColor || "";
-      var m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-      if (m) { var lum = (+m[1] * 0.299 + +m[2] * 0.587 + +m[3] * 0.114); return lum < 110 ? "dark" : "light"; }
+      // cc#2021: the two literal checks above only ever match the single theme actually named
+      // "dark" (or one day "light") -- every OTHER live theme (aquawhite, goldnight, silvergold,
+      // ...) used to fall through to a body backgroundColor read that nothing in scorr_themes.css
+      // ever sets. Read the theme's OWN contract key instead -- --panel, falling back to --field if
+      // --panel comes back empty -- registry-derived: every theme in scorr_themes.css already
+      // declares both, so adding or renaming a theme needs no update here, unlike a hardcoded
+      // per-theme-name light/dark list.
+      var cs = getComputedStyle(b);
+      var hex = cs.getPropertyValue("--panel").trim() || cs.getPropertyValue("--field").trim();
+      var lum = _hexLuminance(hex);
+      if (lum != null) return lum < 110 ? "dark" : "light";
     } catch (e) {}
     return "light";
   }
