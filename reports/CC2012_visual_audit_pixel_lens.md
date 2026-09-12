@@ -203,3 +203,44 @@ modes, **without querying the DB first** (checked directly — the auth gate rai
 `encoding=base64` → JSON, `data_base64` decodes to the exact stored bytes, `id/route/theme/viewport/
 mime` correct; `encoding=BASE64` → same (case-insensitive); `encoding=bogus` → falls back to the
 raw path unchanged; a purged/unknown row → 404 in either mode. 12/12 checks.
+
+## cc#2018 (P2) — thumbnail mode: `?w=<int>` and `?crop=top`, composable with `?encoding=base64`
+
+cc#2016 verified live: `encoding=base64` works end to end. The gap it exposed: a full capture's
+base64 text (a 55KB JPEG ≈ 73K chars) is too large for Fable to reliably hand-copy out of its own
+fetch context into a file. This card adds a downscaled/cropped re-encode on the SAME route.
+
+**Pillow's availability — checked, not assumed (item 2's own gate):** `requirements.txt` pins
+`weasyprint>=60,<63`; WeasyPrint's own PyPI metadata for 62.3 (the range's newest release) declares
+`Pillow>=9.1.0` in `requires_dist`, unconditionally (no extra marker) — so `pip install -r
+requirements.txt` already installs Pillow into the web service today, without this card adding a
+new dependency. Item 3's fallback (a worker-side `thumb_bytes` column, gated by cc#351's ALTER
+TABLE block) was therefore **not needed** and not built.
+
+**What landed**, `visual_audit_endpoints.py` only:
+- `?w=<int>` — aspect-preserving downscale to that width, **never upscales** (a `w` ≥ the stored
+  image's width is treated as absent). `?crop=top` — keep only the first 915px of height (matches
+  `visual_audit.py`'s own mobile `VIEWPORTS` entry) before any downscale; a page already ≤915px
+  tall is left alone. Either one triggers a JPEG quality-60 re-encode; both compose (crop first,
+  then downscale). Works in both the raw `image/jpeg` path and `encoding=base64` — in the latter,
+  a produced thumbnail adds `width`/`height` keys to the JSON, present ONLY when a thumbnail was
+  actually produced, so the pre-existing `encoding=base64` (no `w`/`crop`) response is unchanged.
+- **No new column, nothing new stored** — built from `image_bytes` at request time, discarded
+  after the response.
+- **Degrades, never crashes**: a `w` that isn't a parseable positive int, Pillow being
+  unimportable (defensive-only — confirmed present, see above), or stored bytes that fail to
+  decode as an image all fall back silently to the **unchanged full image** rather than a 500.
+  Logged once (not per-request) if Pillow is ever actually missing.
+- Same `_token_ok` gate, same order, before any of the above is even reached — one auth path.
+
+**Verify**, real function + fakes for the DB row, real Pillow-encoded JPEGs (this container, 18/18):
+the full cc#2016 regression suite still passes (wrong token 404s without a DB hit; default path
+byte-for-byte unchanged; `encoding=base64` with no `w`/`crop` has exactly the original five keys,
+no `width`/`height`; purged/unknown row 404s in both modes) — proving cc#2018 changed nothing for
+a request that doesn't ask for a thumbnail. New: `w=206` on a 412×3000 synthetic image → output
+206px wide, height scaled proportionally (1500px, exact ratio); `crop=top` alone → height clamped
+to 915, width untouched; `crop=top&w=206&encoding=base64` together → JSON `width=206`/`height=458`
+(915 scaled by the same ratio as the width), `data_base64` decodes to a valid JPEG, 7,264 bytes —
+comfortably under the ~20KB/16-20K-base64-char target; `w=9999` (bigger than the source) → no
+upscale, width unchanged; `w=-5` and `w=notanumber` → ignored, no crash; Pillow forced unavailable
+→ falls back to the full unchanged image, no crash.

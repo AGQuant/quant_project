@@ -12,6 +12,20 @@ JSON/HTML but cannot render a raw binary image response from an external URL, so
 image/jpeg reply (for a human opening the link) was a dead end for Fable specifically. With
 encoding=base64 the SAME route, SAME auth path, returns JSON {id, route, theme, viewport, mime,
 data_base64} instead. No param (or any value other than "base64") -> unchanged raw-image behavior.
+
+cc#2018: a full capture can be tall and its base64 text too large for Fable to reliably hand-copy
+(cc#2016's own verified follow-up: a 55KB JPEG is ~73K base64 chars). Two more optional params on
+the SAME route, composable with encoding=base64: ?w=<int> downscales (aspect-preserving, never
+upscales) to that width; ?crop=top keeps only the page's top viewport-height (915px, matching
+visual_audit.py's own mobile VIEWPORTS entry) before any downscale. Either param re-encodes the
+result as JPEG quality 60 via Pillow -- CONFIRMED already an installed dependency of this web
+service, not added for this card: weasyprint>=60,<63 (requirements.txt) declares Pillow>=9.1.0 in
+its own requires_dist (checked against PyPI's release metadata, not assumed), so the web service's
+existing `pip install -r requirements.txt` already pulls it in. If Pillow somehow is not importable
+at request time, or the stored bytes do not decode, both params are silently ignored -- the request
+degrades to the unchanged full image/full base64 reply, never a 500. Neither param on its own
+touches the auth path or the database schema; no new column, nothing new is stored.
+
 Both are gated by ONE query-param token compared CONSTANT-TIME (hmac.compare_digest) against the
 web-service env var VISUAL_AUDIT_VIEW_TOKEN. Wrong or missing token -> 404, not 401, so the route
 does not advertise itself. Env var unset -> 404 for every request, fail-closed. CC generates
@@ -32,6 +46,8 @@ restriction is about the Playwright WORKER (visual_audit.py), not these reads.
 
 import base64
 import hmac
+import io
+import logging
 import os
 
 from fastapi import APIRouter, HTTPException
@@ -39,11 +55,65 @@ from fastapi.responses import Response
 
 import deriv_metrics  # reuses the one shared _conn() helper, same convention as option_chain_grid.py
 
+try:
+    from PIL import Image  # cc#2018: confirmed already installed (weasyprint's own requires_dist),
+    _PIL_IMPORT_ERROR = None  # never a new dependency added by this card -- see the module docstring.
+except ImportError as _e:  # pragma: no cover -- defensive only; not expected on this image
+    Image = None
+    _PIL_IMPORT_ERROR = _e
+
+log = logging.getLogger("scorr.visual_audit_endpoints")
 router = APIRouter()
+
+CROP_TOP_PX = 915          # cc#2018 item 5: matches visual_audit.py's mobile VIEWPORTS height
+MAX_THUMB_WIDTH_PX = 2000  # cc#2018: a sanity ceiling on `w`, well above any real viewport used
+_warned_no_pillow = False
 
 
 def _conn():
     return deriv_metrics._conn()
+
+
+def _thumbnail(data: bytes, w_param: str, crop_param: str):
+    """cc#2018: apply ?w=<int> (downscale, aspect-preserving, never upscales) and/or ?crop=top
+    (keep only the first CROP_TOP_PX rows) to the stored JPEG, re-encoding at quality 60. Returns
+    (new_bytes, width, height) when a transform was actually applied, or None when neither param
+    asked for one -- callers fall back to the ORIGINAL bytes/mime unchanged in that case, so the
+    no-param request path never even reaches Pillow. Never raises: an unimportable Pillow, a bad
+    `w` value, or bytes that fail to decode as an image all resolve to None (the full image is
+    still served) rather than a 500 -- a malformed request degrades gracefully, per the card."""
+    global _warned_no_pillow
+    do_crop = crop_param.lower() == "top"
+    try:
+        target_w = int(w_param)
+    except (TypeError, ValueError):
+        target_w = 0
+    if target_w <= 0 or target_w > MAX_THUMB_WIDTH_PX:
+        target_w = 0
+    if not do_crop and not target_w:
+        return None
+    if Image is None:
+        if not _warned_no_pillow:
+            log.warning("cc#2018: w/crop param requested but Pillow is not importable (%s) -- "
+                        "serving the full image instead", _PIL_IMPORT_ERROR)
+            _warned_no_pillow = True
+        return None
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception as e:
+        log.warning("cc#2018: stored bytes did not decode as an image, serving unchanged: %s", e)
+        return None
+    if do_crop and img.height > CROP_TOP_PX:
+        img = img.crop((0, 0, img.width, CROP_TOP_PX))
+    if target_w and target_w < img.width:
+        new_h = max(1, round(img.height * target_w / img.width))
+        img = img.resize((target_w, new_h), Image.Resampling.LANCZOS)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    out = io.BytesIO()
+    img.save(out, format="JPEG", quality=60)
+    return out.getvalue(), img.width, img.height
 
 
 def _token_ok(token: str) -> bool:
@@ -57,7 +127,8 @@ def _token_ok(token: str) -> bool:
 
 
 @router.get("/api/visual-audit/capture/{capture_id}")
-def visual_audit_capture(capture_id: int, token: str = "", encoding: str = ""):
+def visual_audit_capture(capture_id: int, token: str = "", encoding: str = "",
+                          w: str = "", crop: str = ""):
     """cc#2012 item 2: the stored image, served with its stored mime. 404 on bad/missing token, on
     an unknown id, and on a row whose bytes have already been purged by retention -- all three read
     the same from outside, on purpose.
@@ -66,7 +137,14 @@ def visual_audit_capture(capture_id: int, token: str = "", encoding: str = ""):
     original raw-image path -- UNCHANGED) returns the same bytes as JSON instead of image/jpeg, for
     Fable's own fetch tool, which cannot render a raw binary response. Same _token_ok call, same
     order (checked before encoding is even read) -- one auth path, not a second weaker one. The
-    base64 text is built at request time from image_bytes; nothing new is stored."""
+    base64 text is built at request time from image_bytes; nothing new is stored.
+
+    cc#2018: ?w=<int> and/or ?crop=top ask for a downscaled/cropped re-encode (see _thumbnail);
+    composable with encoding=base64. Neither param present -> _thumbnail returns None immediately,
+    without ever touching Pillow or the stored bytes -- the response is byte-for-byte what it was
+    before this card, in EITHER mode. When a thumbnail WAS produced, the base64 JSON gains `width`
+    and `height` keys (informational only) that are absent whenever no thumbnail was requested, so
+    the pre-existing encoding=base64 (no w/crop) response shape is also unchanged."""
     if not _token_ok(token):
         raise HTTPException(404)
     with _conn() as conn, conn.cursor() as cur:
@@ -77,10 +155,18 @@ def visual_audit_capture(capture_id: int, token: str = "", encoding: str = ""):
         raise HTTPException(404)
     route, theme, viewport, data, mime = row
     mime = mime or "image/jpeg"
+    data = bytes(data)
+    thumb = _thumbnail(data, w, crop)
+    if thumb is not None:
+        data, thumb_w, thumb_h = thumb
+        mime = "image/jpeg"
     if encoding.lower() == "base64":
-        return {"id": capture_id, "route": route, "theme": theme, "viewport": viewport,
-                "mime": mime, "data_base64": base64.b64encode(bytes(data)).decode("ascii")}
-    return Response(content=bytes(data), media_type=mime,
+        out = {"id": capture_id, "route": route, "theme": theme, "viewport": viewport,
+               "mime": mime, "data_base64": base64.b64encode(data).decode("ascii")}
+        if thumb is not None:
+            out["width"], out["height"] = thumb_w, thumb_h
+        return out
+    return Response(content=data, media_type=mime,
                     headers={"Cache-Control": "no-store"})
 
 
