@@ -509,21 +509,13 @@ def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str
     for sym, side in pos:
         vr = vol_reads.get(sym, {})
         r_v, p_v, d_v, ad_v = vr.get("vol_r"), vr.get("vol_p"), vr.get("vol_d"), vr.get("vol_ad")
-        r_ok = r_v is not None and r_v >= VOL_R_MIN
-        p_ok = p_v is not None and p_v >= VOL_P_MIN
-        d_ok = d_v is not None and d_v >= VOL_D_MIN
-        # side-aware exactly as tc_v4_dual._vol_checks reads it: Accumulation for LONG, Distribution
-        # for SHORT — this module's `side` is already the position's own side (v8_paper_positions.side).
-        ad_ok = ad_v is not None and ((ad_v <= VOL_AD_MAX_DIST) if side == "SELL" else (ad_v >= VOL_AD_MIN))
-        passed = int(r_ok) + int(p_ok) + int(d_ok) + int(ad_ok)
+        # cc#1978 items 5/6/8 refactor: the four-check tally now lives in _score_activity_one,
+        # extracted verbatim (identical comparisons, identical side-aware AD read) so
+        # evaluate_activity_universe_with_state() below reuses the SAME condition math instead of
+        # a duplicated copy — the same discipline already applied to stars/DMA (sha 616d1b1).
+        passed, checks = _score_activity_one(r_v, p_v, d_v, ad_v, side)
         if passed < 2:
             continue
-        checks = [
-            {"key": "vol_r", "label": "Vol R", "value": r_v, "pass": r_ok},
-            {"key": "vol_p", "label": "Vol P", "value": p_v, "pass": p_ok},
-            {"key": "vol_d", "label": "Vol D", "value": d_v, "pass": d_ok},
-            {"key": "vol_ad", "label": "Vol AD", "value": ad_v, "pass": ad_ok},
-        ]
         # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording. Names every
         # passed check with its value so the tooltip answers "why" (cc#1811 step 3), not just
         # yes/no — same transparency pattern the other markers on this board already use.
@@ -537,6 +529,120 @@ def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str
             "note": " · ".join(facts) + f" ({passed}/4 checks)",
         })
     return out
+
+
+def _score_activity_one(r_v, p_v, d_v, ad_v, side):
+    """cc#1978 items 5/6/8 refactor: the Vol R/P/D/AD four-check tally (cc#1811 canon, >=2-of-4
+    passes), factored out of evaluate_activity()'s own per-position loop verbatim (identical
+    comparisons, identical side-aware AD read — Accumulation for BUY, Distribution for SELL) so a
+    universe-scoped caller reuses the EXACT same rule instead of a duplicated copy
+    (v8_marker_ticks.py's own docstring names this constraint; already applied to stars/DMA in the
+    prior push, sha 616d1b1). evaluate_activity() itself is rewritten above to call this per
+    position — zero change to its own thresholds, side-awareness, or output shape.
+
+    Returns (passed: int, checks: list) — `checks` is the same 4-item list evaluate_activity()
+    already built inline; the >=2-of-4 fire gate stays the CALLER's decision (evaluate_activity()
+    keeps its own `if passed < 2: continue`), so this function makes no judgement about what
+    counts as fired — it only computes the tally, exactly as before this extraction."""
+    from tc_v4_dual import VOL_R_MIN, VOL_P_MIN, VOL_D_MIN, VOL_AD_MIN, VOL_AD_MAX_DIST
+    r_ok = r_v is not None and r_v >= VOL_R_MIN
+    p_ok = p_v is not None and p_v >= VOL_P_MIN
+    d_ok = d_v is not None and d_v >= VOL_D_MIN
+    # side-aware exactly as tc_v4_dual._vol_checks reads it: Accumulation for LONG, Distribution
+    # for SHORT — the caller's `side` is either a position's own side (evaluate_activity) or each
+    # of the two independent readings a universe symbol is scored under
+    # (evaluate_activity_universe_with_state, which has no position side to read).
+    ad_ok = ad_v is not None and ((ad_v <= VOL_AD_MAX_DIST) if side == "SELL" else (ad_v >= VOL_AD_MIN))
+    checks = [
+        {"key": "vol_r", "label": "Vol R", "value": r_v, "pass": r_ok},
+        {"key": "vol_p", "label": "Vol P", "value": p_v, "pass": p_ok},
+        {"key": "vol_d", "label": "Vol D", "value": d_v, "pass": d_ok},
+        {"key": "vol_ad", "label": "Vol AD", "value": ad_v, "pass": ad_ok},
+    ]
+    passed = int(r_ok) + int(p_ok) + int(d_ok) + int(ad_ok)
+    return passed, checks
+
+
+def _fetch_activity_support(cur, syms: List[str]) -> Dict[str, Dict[str, Optional[float]]]:
+    """cc#1978 items 6/8: the BATCHED form of the three reads evaluate_activity()'s own loop makes
+    one symbol at a time (r6_read, deliv_ratio_batch — already batch — and _ad_21d). The cc#1977
+    census measured the per-symbol r6_read/_ad_21d loop at ~50-60s for 208 symbols — unusable on a
+    5-min beat (card item 6's own cost gate). Composes r6_read_batch (r6_volume.py),
+    deliv_ratio_batch (volume_flow_endpoints.py, already batch), and _ad_21d_batch
+    (deriv_metrics.py) — all three verified against their single-symbol originals on real data
+    before this card wired them in (reports/CC1978_marker_ticks_proposal.md). Returns
+    {symbol: {'vol_r','vol_p','vol_d','vol_ad'}}, the same four keys evaluate_activity()'s own
+    vol_reads dict carries, one round trip per underlying table instead of N."""
+    from r6_volume import r6_read_batch
+    from volume_flow_endpoints import deliv_ratio_batch
+    from deriv_metrics import _ad_21d_batch
+    syms = list(syms)
+    if not syms:
+        return {}
+    rv_map = r6_read_batch(cur, syms)
+    deliv = deliv_ratio_batch(cur, syms)
+    ad_map = _ad_21d_batch(cur, syms)
+    out = {}
+    for sym in syms:
+        rv = rv_map.get(sym) or {}
+        ad = ad_map.get(sym) or {}
+        out[sym] = {"vol_r": _f(rv.get("rvol")), "vol_p": _f(rv.get("vol_p")),
+                    "vol_d": _f(deliv.get(sym)), "vol_ad": _f(ad.get("up_vol_pct"))}
+    return out
+
+
+def evaluate_activity_universe_with_state(conn, target_date: Optional[date] = None):
+    """cc#1978 items 6/8: the ACT marker (cc#1811's Vol R/P/D/AD, >=2-of-4) evaluated against the
+    FULL active futures registry, batched. Authorized the same way as evaluate_universe()
+    (FOUNDER_WORD_10SEP_2205_STARS_UNIVERSE covers "the flags" generally, reconfirmed 12-Sep,
+    cc_task_logs 6382). Reuses _score_activity_one verbatim — the identical condition math
+    evaluate_activity() uses — over _fetch_activity_support's batched reads instead of
+    evaluate_activity()'s per-symbol loop.
+
+    UNLIKE evaluate_activity(), a universe symbol carries no position side — futures_universe has
+    no long/short concept, that is v8_paper_positions' own field. So BOTH sides are scored per
+    symbol: the SAME compound-family shape this card already uses for CHAN (chan_sell/chan_buy —
+    one compute, two independent per-tick truths that can co-occur), applied here as
+    act_buy/act_sell by the writer. Every candidate gets BOTH readings every tick, fired or not —
+    evaluate_activity()'s own loop never excludes a symbol for missing data either (a None-valued
+    read just fails its own check inside _score_activity_one); this function keeps that same
+    behaviour rather than inventing a data gate the book-scoped version does not have.
+
+    Returns (fired_rows, all_rows) — both lists of {symbol, side, fired, star_color, glyph,
+    checks_passed, checks, note}; fired_rows is the passed>=2 subset (evaluate_activity()'s own
+    filter), all_rows is every symbol×side pair, which is what the persist writer needs in order
+    to record real fired=false rows."""
+    with conn.cursor() as cur:
+        cur.execute("""SELECT symbol FROM futures_universe WHERE is_active""")
+        syms = [r[0] for r in cur.fetchall()]
+        if not syms:
+            return [], []
+        vol_reads = _fetch_activity_support(cur, syms)
+    all_rows = []
+    for sym in syms:
+        vr = vol_reads.get(sym) or {}
+        r_v, p_v, d_v, ad_v = vr.get("vol_r"), vr.get("vol_p"), vr.get("vol_d"), vr.get("vol_ad")
+        for side in ("BUY", "SELL"):
+            passed, checks = _score_activity_one(r_v, p_v, d_v, ad_v, side)
+            fired = passed >= 2
+            facts = [f"{c['label']} {c['value']:.2f}" for c in checks if c["pass"] and c["value"] is not None]
+            all_rows.append({
+                "symbol": sym, "side": side, "fired": fired,
+                "star_color": "GREEN" if fired else None,
+                "glyph": GLYPH_SIDE.get(side, "star"),
+                "checks_passed": passed, "checks": checks,
+                "note": (" · ".join(facts) + f" ({passed}/4 checks)") if fired else None,
+            })
+    fired_rows = [r for r in all_rows if r["fired"]]
+    return fired_rows, all_rows
+
+
+def evaluate_activity_universe(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """Plain-list contract matching evaluate_activity()'s own shape (only symbol×side pairs that
+    reached >=2/4), over the full registry. Thin filter over
+    evaluate_activity_universe_with_state() — see that function for the full reasoning."""
+    fired_rows, _all = evaluate_activity_universe_with_state(conn, target_date)
+    return [{k: v for k, v in r.items() if k != "fired"} for r in fired_rows]
 
 
 def _ist_market_hours() -> bool:

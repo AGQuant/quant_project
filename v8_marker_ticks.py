@@ -26,7 +26,7 @@ value instead of a schema change (no ALTER TABLE, MAINTENANCE_LOCK_RULE cc#351):
   chan_sell, chan_buy                                  — CHAN's two independent triggers
   tcs_buy_mom, tcs_buy_rev, tcs_sell_mom, tcs_sell_rev  — TCS's four tc_universe_ticks buckets
 
-THIS RELEASE covers two families only, both genuinely zero-new-compute:
+FIVE families, across two builds:
   CHAN  reads v8_channel_5m.compute_channels()'s in-memory `fits` dict — already computed for the
         FULL active-futures universe every 5-min tick. No re-evaluation, no second compute path;
         the caller (v8_channel_5m.run_tick) passes `fits` straight through after its own use.
@@ -36,27 +36,35 @@ THIS RELEASE covers two families only, both genuinely zero-new-compute:
         latest tick's score100 must exceed TC_STRONG_PCT AND exceed the 3-day trailing average of
         that bucket's own daily-last-tick series. One extra read per bucket for the trailing
         average — never a second scorer, never a re-run of Trade Check.
-
-STARS, DMA (card item 5) and ACT (card item 6) are DEFERRED — not silently dropped. See the
-STOPPED note logged on cc#1978 (cc_task_logs task_id=1199) and the FINDING posted there:
-  - v8_pivot_star.evaluate() (stars) is scoped to the OPEN BOOK by EVAL_SCOPE="positions", which
-    session_log 18052 FOUNDER-LOCKED for this exact marker ("18052 locks 'positions'" — the
-    module's own docstring, v8_pivot_star.py:141-144). Flipping that global, as the card's item 5
-    literally describes, would change the live book-scoped marker's behaviour for every existing
-    consumer and would override a locked founder rule without a new explicit instruction naming
-    that override (CLAUDE.md rule 12's supersession bar: permission must be explicit, for that
-    specific rule, logged before it is acted on). v8_pivot_star.evaluate_dma_state() does not even
-    read EVAL_SCOPE — its candidate query is a separate hardcoded open-book SELECT — so "flip one
-    line" does not describe it as the code stands today. Neither function is touched here. A
-    universe-scoped writer for STARS/DMA needs new, separately-scoped evaluation logic (reusing
-    the same condition math via a shared helper, not a flag flip and not a duplicated copy) —
-    proposed on the FINDING, not built, pending the founder's word.
-  - ACT (v8_pivot_star.evaluate_activity) loops r6_read/_ad_21d per symbol; the cc#1977 census
-    measured that at roughly 50-60 seconds for 208 symbols — unusable on a 5-minute beat. Batching
-    those two reads is out of this module's zero-new-compute budget and is not attempted here.
+  STAR  cc#1978 items 5/8 (12-Sep, sha 616d1b1 + this push): v8_pivot_star.EVAL_SCOPE="positions"
+        (session_log 18052) is a FOUNDER LOCK on the book-scoped marker — untouched. The universe
+        reading is authorized separately and explicitly (FOUNDER_WORD_10SEP_2205_STARS_UNIVERSE,
+        quoted verbatim in cc#1978's own spec, reconfirmed 12-Sep log 6382), and lands as NEW
+        functions (evaluate_universe/evaluate_universe_with_state) sharing the book-scoped
+        marker's own condition math via extracted helpers — never a flag flip on EVAL_SCOPE,
+        never a duplicated copy of the rule. persist_star_ticks() below calls the universe path
+        only; evaluate()/EVAL_SCOPE behave exactly as before this card, proven by isolated test.
+  DMA   same authorization, same shared-helper shape: evaluate_dma_state_universe() reuses
+        evaluate_dma_state()'s own extracted helpers (that function never read EVAL_SCOPE to
+        begin with). Unlike STAR, DMA STATE has no "ran, no state" outcome — every symbol with
+        enough closing history gets a definite GREEN or RED every tick, so persist_dma_ticks()
+        writes fired=true for every row it gets; a symbol absent from the universe read (short
+        history, or the rare exact tie) simply gets no row, same as any other family's "did not
+        run" convention.
+  ACT   cc#1978 items 6/8: v8_pivot_star.evaluate_activity() loops r6_read/_ad_21d per symbol —
+        the cc#1977 census measured that at ~50-60s for 208 symbols, unusable on a 5-min beat.
+        Batched via three new functions (r6_read_batch, eod_rvol_pair_batch, _ad_21d_batch — each
+        verified byte-identical to its single-symbol original on real data before use) composed
+        into evaluate_activity_universe_with_state(), which reuses evaluate_activity()'s own
+        extracted _score_activity_one() condition math. A universe symbol carries no position
+        side (that's v8_paper_positions', not futures_universe's), so BOTH sides are scored per
+        symbol — the same compound-family shape CHAN already uses (chan_sell/chan_buy: one
+        compute, two independent per-tick truths that can co-occur): act_buy / act_sell below.
 
 Retention: 30 days rolling, purged on the day's LAST tick each family runs on — same "ship the
-purge with the writer" convention as tc_universe_ticks.py / v8_channel_5m.py.
+purge with the writer" convention as tc_universe_ticks.py / v8_channel_5m.py. One shared _purge()
+covers every family in this table (a plain age-based DELETE, not family-scoped), so no change was
+needed there when STAR/DMA/ACT were added.
 """
 
 import json
@@ -250,6 +258,172 @@ def persist_tcs_ticks(conn=None, purge_now: Optional[bool] = None) -> Dict[str, 
                 pass
 
 
+# ── STAR — cc#1978 items 5/8: reuses v8_pivot_star's universe-scope evaluation layer ────────────
+def persist_star_ticks(conn=None, purge_now: Optional[bool] = None) -> Dict[str, Any]:
+    """cc#1978 items 5/8: STAR marker state for the FULL active futures registry. Calls
+    v8_pivot_star.evaluate_universe_with_state() (sha 616d1b1) — the SAME condition math
+    evaluate()/the book-scoped marker uses, reused via a shared helper, not a duplicated copy
+    (this module's own docstring names that constraint). EVAL_SCOPE and the book-scoped star are
+    untouched by this call — evaluate_universe_with_state() is a completely separate code path
+    from evaluate(), which alone reads EVAL_SCOPE.
+
+    Writes ONE 'star' row per symbol in evaluated_syms per tick: fired=true with the star's own
+    direction/colour/level when a star actually fired, fired=false (direction/colour/level all
+    None) when the symbol cleared every data gate but did not fire. A symbol NOT in evaluated_syms
+    (missing pivot, metrics or a live CMP) gets NO row at all — "never evaluated" stays
+    distinguishable from "evaluated, no star", the same contract the star module's own
+    evaluate_universe_with_state() docstring states."""
+    from v8_pivot_star import evaluate_universe_with_state
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        fired, evaluated_syms = evaluate_universe_with_state(conn)
+        by_sym = {r["symbol"]: r for r in fired}
+        ts = _ist_now()
+        written = 0
+        with conn.cursor() as cur:
+            for sym in evaluated_syms:
+                r = by_sym.get(sym)
+                fired_bool = r is not None
+                detail = ({"pct_from_level": r.get("pct_from_level"), "near_pp": r.get("near_pp"),
+                           "day_1d": r.get("day_1d"), "mom_2d": r.get("mom_2d"),
+                           "dma_50": r.get("dma_50"), "touched_dates": r.get("touched_dates")}
+                          if r else {})
+                cur.execute("""
+                    INSERT INTO v8_marker_ticks
+                      (symbol, ts, family, fired, direction, colour, level_name, level_value, detail)
+                    VALUES (%s,%s,'star',%s,%s,%s,%s,%s,%s::jsonb)
+                    ON CONFLICT (symbol, ts, family) DO NOTHING
+                """, (sym, ts, fired_bool,
+                      r.get("direction") if r else None,
+                      r.get("star_color") if r else None,
+                      r.get("level_name") if r else None,
+                      r.get("level_value") if r else None,
+                      json.dumps(detail, default=str)))
+                written += cur.rowcount
+        conn.commit()
+        do_purge = purge_now if purge_now is not None else _is_last_tick()
+        purged = _purge(conn) if do_purge else None
+        return {"ok": True, "evaluated": len(evaluated_syms), "fired": len(fired),
+                "rows_written": written, "purged": purged, "zero_tick": not evaluated_syms}
+    except Exception as e:
+        log.exception("v8_marker_ticks STAR tick failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+# ── DMA — cc#1978 items 5/8: state, not cross; every row written is fired=true ─────────────────
+def persist_dma_ticks(conn=None, purge_now: Optional[bool] = None) -> Dict[str, Any]:
+    """cc#1978 items 5/8: DMA STATE marker for the FULL active futures registry via
+    v8_pivot_star.evaluate_dma_state_universe() (sha 616d1b1) — the same _fetch_dma_state_support/
+    _score_dma_state helpers evaluate_dma_state() (the book-scoped marker) already uses, so the
+    universe reading is the identical rule over a wider candidate set, never a duplicated copy.
+
+    Unlike CHAN/TCS/STAR, DMA STATE has no "ran, no state" outcome for a symbol with enough
+    history — every returned row is a definite GREEN (DMA_ABOVE) or RED (DMA_BELOW), so every row
+    here is written fired=true. A symbol absent from evaluate_dma_state_universe()'s output
+    (< DMA_SLOW completed closes, or the rare exact tie) gets no row at all — could not be
+    evaluated this tick, the same "no row = did not run" convention every other family in this
+    store uses; there is no meaningful fired=false state to invent for DMA."""
+    from v8_pivot_star import evaluate_dma_state_universe
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        rows = evaluate_dma_state_universe(conn)
+        ts = _ist_now()
+        written = 0
+        with conn.cursor() as cur:
+            for r in rows:
+                detail = {"pp_20dma": r.get("pp"), "day_1d": r.get("day_1d"),
+                          "data_date": str(r["data_date"]) if r.get("data_date") else None}
+                cur.execute("""
+                    INSERT INTO v8_marker_ticks
+                      (symbol, ts, family, fired, direction, colour, level_name, level_value, detail)
+                    VALUES (%s,%s,'dma',%s,%s,%s,%s,%s,%s::jsonb)
+                    ON CONFLICT (symbol, ts, family) DO NOTHING
+                """, (r["symbol"], ts, True, r.get("direction"), r.get("star_color"),
+                      r.get("level_name"), r.get("level_value"), json.dumps(detail, default=str)))
+                written += cur.rowcount
+        conn.commit()
+        do_purge = purge_now if purge_now is not None else _is_last_tick()
+        purged = _purge(conn) if do_purge else None
+        return {"ok": True, "symbols": len(rows), "rows_written": written, "purged": purged,
+                "zero_tick": not rows}
+    except Exception as e:
+        log.exception("v8_marker_ticks DMA tick failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+# ── ACT — cc#1978 items 6/8: batched, no position side so both act_buy/act_sell are written ─────
+def persist_act_ticks(conn=None, purge_now: Optional[bool] = None) -> Dict[str, Any]:
+    """cc#1978 items 6/8: ACT marker (Vol R/P/D/AD, >=2-of-4 canon tally) for the FULL active
+    futures registry, batched (the card's own cost gate — the per-symbol r6_read/_ad_21d loop
+    measured ~50-60s at 208 symbols per the cc#1977 census, unusable on a 5-min beat). Calls
+    v8_pivot_star.evaluate_activity_universe_with_state() (new, this push) — batched reads
+    (r6_read_batch/deliv_ratio_batch/_ad_21d_batch), identical >=2-of-4 condition math
+    evaluate_activity() itself now applies via the shared _score_activity_one() helper.
+
+    A universe symbol carries no position side (that's v8_paper_positions' own field, not
+    futures_universe's) — so BOTH sides are scored per symbol, same compound-family pattern this
+    card's CHAN family already established (chan_sell/chan_buy: one compute, two independent
+    per-tick truths that can co-occur): family='act_buy' tests the Accumulation reading,
+    family='act_sell' tests the Distribution reading. Every symbol in the registry gets BOTH rows
+    every tick, fired true or false — evaluate_activity_universe_with_state() scores every
+    candidate regardless of data completeness (a None-valued read just fails its own check,
+    exactly how the book-scoped evaluate_activity() already treats missing data), so there is no
+    "insufficient data, no row" exclusion for this family the way STAR/DMA have — stated plainly
+    since it is a deliberate difference, not an oversight."""
+    from v8_pivot_star import evaluate_activity_universe_with_state
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        _fired, all_rows = evaluate_activity_universe_with_state(conn)
+        ts = _ist_now()
+        written = 0
+        with conn.cursor() as cur:
+            for r in all_rows:
+                family = "act_buy" if r["side"] == "BUY" else "act_sell"
+                detail = {"checks": r.get("checks"), "checks_passed": r.get("checks_passed")}
+                cur.execute("""
+                    INSERT INTO v8_marker_ticks
+                      (symbol, ts, family, fired, direction, colour, level_name, level_value, detail)
+                    VALUES (%s,%s,%s,%s,%s,%s,'CHECKS_PASSED',%s,%s::jsonb)
+                    ON CONFLICT (symbol, ts, family) DO NOTHING
+                """, (r["symbol"], ts, family, r["fired"], r["side"],
+                      r.get("star_color"), r.get("checks_passed"), json.dumps(detail, default=str)))
+                written += cur.rowcount
+        conn.commit()
+        do_purge = purge_now if purge_now is not None else _is_last_tick()
+        purged = _purge(conn) if do_purge else None
+        fired_ct = sum(1 for r in all_rows if r["fired"])
+        return {"ok": True, "symbols": (len(all_rows) // 2) if all_rows else 0,
+                "rows_written": written, "fired": fired_ct, "purged": purged,
+                "zero_tick": not all_rows}
+    except Exception as e:
+        log.exception("v8_marker_ticks ACT tick failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def read_symbol(conn, symbol: str, families: Optional[List[str]] = None) -> Dict[str, Any]:
     """Latest row per family for one symbol — the distribution read cc#1978 item 9 wants (per-
     symbol, any symbol, not just the open book). Returns {} for a symbol with no rows at all
@@ -284,9 +458,8 @@ def read_symbol(conn, symbol: str, families: Optional[List[str]] = None) -> Dict
 def marker_ticks_symbol(symbol: str):
     """Latest v8_marker_ticks row per family for one symbol. Empty families dict means this
     symbol has no rows in the store yet for the families currently written here (chan_sell,
-    chan_buy, tcs_buy_mom, tcs_buy_rev, tcs_sell_mom, tcs_sell_rev) — never a fabricated state.
-    STARS/DMA/ACT families are not written yet (cc#1978, deferred — see this module's docstring)
-    so they will not appear here until that follow-up ships."""
+    chan_buy, tcs_buy_mom, tcs_buy_rev, tcs_sell_mom, tcs_sell_rev, star, dma, act_buy, act_sell)
+    — never a fabricated state."""
     sym = (symbol or "").strip().upper()
     if not sym:
         return {"symbol": symbol, "families": {}, "error": "symbol required"}
@@ -298,7 +471,8 @@ def marker_ticks_symbol(symbol: str):
         finally:
             conn.close()
         return {"symbol": sym, "families": families,
-                "families_covered": sorted(_BUCKET_FAMILY.values()) + ["chan_sell", "chan_buy"]}
+                "families_covered": sorted(_BUCKET_FAMILY.values())
+                                     + ["chan_sell", "chan_buy", "star", "dma", "act_buy", "act_sell"]}
     except Exception as e:
         log.exception("marker_ticks_symbol failed")
         return {"symbol": sym, "families": {}, "error": f"{type(e).__name__}: {str(e)[:200]}"}

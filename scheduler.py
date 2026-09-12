@@ -4787,7 +4787,14 @@ def _bg_marker_ticks_tcs():
     Trade Check. Same 5-min market-hours beat as _bg_tc_universe_tick (dispatched right after it,
     same block, so it reads that tick's own write on most passes; a one-cycle lag if not is still
     a valid latest-tick read, never a fabricated value). Own scheduler_master row so its cost/
-    timing shows separately (ENGINE_LIVENESS_RULE 13829)."""
+    timing shows separately (ENGINE_LIVENESS_RULE 13829).
+
+    NOTE (found while adding this job's three siblings below, not fixed here — out of this
+    card's scope, flagging plainly rather than silently touching a function outside its own
+    items): this wrapper only log.error's a non-ok result rather than re-raising, unlike
+    _bg_pivot_star/_bg_channel_5m's LOUD-FAILURE convention (cc#996) — a persist_tcs_ticks()
+    failure here would still stamp scheduler_master last_status='ok'. The three new wrappers
+    below use the LOUD-FAILURE form; this one is left exactly as it already was."""
     try:
         import v8_marker_ticks
         conn = v8_marker_ticks._conn()
@@ -4800,6 +4807,62 @@ def _bg_marker_ticks_tcs():
             log.error(f"marker_ticks_tcs: {res}")
     except Exception as e:
         log.error(f"_bg_marker_ticks_tcs: {e}")
+
+
+def _bg_marker_ticks_star():
+    """cc#1978 items 5/8: persist v8_marker_ticks STAR state for the FULL active futures registry
+    (v8_pivot_star.evaluate_universe_with_state(), FOUNDER_WORD_10SEP_2205_STARS_UNIVERSE — cc#1978
+    spec, reconfirmed cc_task_logs 6382). Same cash-continuous 5-min beat as _bg_pivot_star
+    (dispatched right after it, same block below) — the SAME rule at universe scope must use the
+    SAME window the book-scoped marker uses (ends 15:15, not 15:30), or the two could disagree for
+    no reason but which dispatch block picked them up. EVAL_SCOPE/evaluate() untouched by this job
+    — it calls a completely separate function. LOUD-FAILURE (cc#996 convention): a non-ok result
+    is re-raised so scheduler_master records the real error rather than a false 'ok'. Own
+    scheduler_master row (ENGINE_LIVENESS_RULE 13829)."""
+    import v8_marker_ticks
+    conn = v8_marker_ticks._conn()
+    try:
+        v8_marker_ticks.ensure_schema(conn)
+        res = v8_marker_ticks.persist_star_ticks(conn)
+    finally:
+        conn.close()
+    log.info(f"marker_ticks_star: {res}")
+    if not res.get("ok"):
+        raise RuntimeError(f"marker_ticks_star failed: {res.get('error')}")
+
+
+def _bg_marker_ticks_dma():
+    """cc#1978 items 5/8: persist v8_marker_ticks DMA STATE for the FULL active futures registry
+    (v8_pivot_star.evaluate_dma_state_universe()). Same cash-continuous beat and same reasoning as
+    _bg_marker_ticks_star above. LOUD-FAILURE convention. Own scheduler_master row."""
+    import v8_marker_ticks
+    conn = v8_marker_ticks._conn()
+    try:
+        v8_marker_ticks.ensure_schema(conn)
+        res = v8_marker_ticks.persist_dma_ticks(conn)
+    finally:
+        conn.close()
+    log.info(f"marker_ticks_dma: {res}")
+    if not res.get("ok"):
+        raise RuntimeError(f"marker_ticks_dma failed: {res.get('error')}")
+
+
+def _bg_marker_ticks_act():
+    """cc#1978 items 6/8: persist v8_marker_ticks ACT state for the FULL active futures registry,
+    batched (v8_pivot_star.evaluate_activity_universe_with_state() — r6_read_batch/
+    deliv_ratio_batch/_ad_21d_batch, the card's own cost-gate solution for the ~50-60s/208-symbol
+    per-symbol-loop problem the cc#1977 census measured). Same cash-continuous beat as
+    _bg_pivot_star. LOUD-FAILURE convention. Own scheduler_master row."""
+    import v8_marker_ticks
+    conn = v8_marker_ticks._conn()
+    try:
+        v8_marker_ticks.ensure_schema(conn)
+        res = v8_marker_ticks.persist_act_ticks(conn)
+    finally:
+        conn.close()
+    log.info(f"marker_ticks_act: {res}")
+    if not res.get("ok"):
+        raise RuntimeError(f"marker_ticks_act failed: {res.get('error')}")
 
 
 _tc_scanner_eod_ran = None    # cc#1599 P5: the IST date the EOD sweep last completed (restart resets it)
@@ -5008,6 +5071,15 @@ async def _scheduler_loop():
             # scheduler_master observability — the same split _bg_tc_score_tick/_bg_guardian_tick/
             # _bg_v10_tick already use on this identical tick.
             _spawn(_bg_channel_5m)
+            # cc#1978 items 5/6/8: STAR/DMA/ACT universe-scope marker state, same cash-continuous
+            # beat as the book-scoped pivot star right above — same rule, wider candidate set, so
+            # it must share the exact window (not the m%5-only _is_market_hours block below that
+            # _bg_marker_ticks_tcs uses) or the two scopes could read the auction tape differently
+            # for no reason but which dispatch block picked them up. Registry-derived candidate
+            # set inside each (futures_universe.is_active) — nothing hardcoded here.
+            _spawn(_bg_marker_ticks_star)
+            _spawn(_bg_marker_ticks_dma)
+            _spawn(_bg_marker_ticks_act)
             # cc#1540 (amended cadence, log 4292): TC score ticks ride the same 5-min
             # market-hours beat but as their OWN job, so the heavy compute_trade_check sweep
             # is timed separately in scheduler_master and can be silenced independently.
