@@ -144,8 +144,13 @@
     #dcOv .basis .v{font-size:24px;font-weight:800;letter-spacing:-.5px}
     #dcOv .basis .col{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--c-mut)}
     #dcOv .basis .col b{color:var(--c-tx);font-weight:600}
-    #dcOv .chip{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;padding:5px 11px;border-radius:20px;background:var(--c-grnbg);color:var(--c-grn);border:1px solid var(--volt, #17603f);letter-spacing:.5px}
-    #dcOv .chip.dn{background:var(--c-redbg);color:var(--c-red);border-color:var(--heat, #5e2230)} #dcOv .chip.neu{background:var(--c-ambbg);color:var(--c-amb);border-color:var(--amber, #5a4620)}
+    /* cc#2023: the FUTURES BASIS chip used to carry its own .chip/.chip.dn/.chip.neu palette here —
+       a second copy of the same green/red/amber trio .lvv.grn/.lvv.red/.lvv.amb already defines
+       above, in different metrics (11px/5px 11px/radius 20px vs 9.5px/2px 7px/radius 5px) and a
+       separate set of tint declarations that could drift from .lvv's own. The chip markup now
+       carries class="lvv ..." directly (see the JS below) so it renders with the SAME rule section
+       05's own strength capsules use — one palette, moved by one change, not two kept in sync by
+       hand. Nothing here is deleted from .lvv itself; only the chip's own now-unused rules are gone. */
     #dcOv .lv{display:grid;grid-template-columns:1fr 1fr;gap:9px}
     #dcOv .lvc{background:var(--c-panel);border:1px solid var(--c-bd);border-radius:11px;padding:11px 12px}
     #dcOv .lvc .k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--c-mut);letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}
@@ -162,7 +167,8 @@
     #dcOv .oiwrap,#dcOv .basis,#dcOv .volgrid,#dcOv .lv,#dcOv .sym,#dcOv .navrow{max-width:100%}
     #dcOv .oibox,#dcOv .quad,#dcOv .vtile,#dcOv .lvc,#dcOv .basis>*,#dcOv .sym>*{min-width:0}
     #dcOv .vtile .big,#dcOv .quad .v,#dcOv .oibox .d,#dcOv .basis .v,#dcOv .basis .col,#dcOv .lvc .v{overflow-wrap:anywhere;word-break:break-word}
-    #dcOv .basis .chip,#dcOv .chip{flex-shrink:0}
+    #dcOv .basis .lvv{flex-shrink:0}   /* cc#2023: was .basis .chip,#dcOv .chip -- scoped to .basis's own
+                                           chip only, so section 05's other .lvv badges are untouched */
     #dcOv .sym .l h1{overflow-wrap:anywhere}
     #dcOv .dc-skel{height:64px;border-radius:12px;margin:12px 16px;background:linear-gradient(90deg,var(--c-panel) 25%,#16223c 37%,var(--c-panel) 63%);background-size:400% 100%;animation:dcsh 1.2s ease infinite}
     @keyframes dcsh{0%{background-position:100% 0}100%{background-position:-100% 0}}`;
@@ -301,13 +307,16 @@
     let s4='';
     if(b.value!=null||fut!=null){
       const prem=(b.value||0)>=0;
-      // cc#624 item_2: chip color now driven by the server tag_color (grn/red/amb), not the side —
+      // cc#624 item_2: chip color driven by the server tag_color (grn/red/amb), not the side —
       // DISCOUNT can read FADING(green) or DEEP(red); PREMIUM STRONG(green)/WEAK(red)/AVERAGE(amber).
-      const _chipCls=b.tag_color==='grn'?'':b.tag_color==='red'?'dn':b.tag_color==='amb'?'neu':(prem?'':'dn');
+      // cc#2023: relabelled to .lvv's own class names (grn/red/amb) instead of the old chip-only
+      // dn/neu shorthand, so this box renders through section 05's own capsule rule — same colour
+      // decision, same server-driven tag_color, only which CSS class carries it has changed.
+      const _chipCls=b.tag_color==='grn'?'grn':b.tag_color==='red'?'red':b.tag_color==='amb'?'amb':(prem?'grn':'red');
       s4=`<div class="sec"><div class="lbl"><span class="n">04</span> FUTURES BASIS</div>
         <div class="basis"><div class="v ${prem?'up':'dn'}">${b.value!=null?sign(b.value,1):'--'}</div>
           <div class="col">${fut!=null?`FUT <b>${num(fut,1)}</b>`:''}${spot!=null?`${fut!=null?' &middot; ':''}EQ <b>${num(spot,1)}</b>`:''}${b.percentile!=null?`<br>5d percentile <b>${num(b.percentile,0)}%</b>`:''}</div>
-          <div class="chip ${_chipCls}">${prem?'PREMIUM':'DISCOUNT'}${b.tag?(' &middot; '+b.tag):''}</div>
+          <div class="lvv ${_chipCls}">${prem?'PREMIUM':'DISCOUNT'}${b.tag?(' &middot; '+b.tag):''}</div>
         </div></div>`;
     }
 
@@ -467,18 +476,26 @@
       var mpDot = r.is_max_pain ? ' <span style="color:' + MP_AMBER + '" title="Max pain">&#9679;</span>' : '';
       // cc#2019 item 3: every column center-aligned (was OI/CE LTP right, STRIKE center, PE LTP/OI
       // left) so the whole grid reads as one consistent table, not three different alignments.
+      // cc#2023 item 1: the two OI cells only when d.oi_available -- a stock chain has NO OI data
+      // (option_chain is index-only), so these rendered an em-dash on every single row otherwise.
+      var oiCe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>') : '';
+      var oiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>') : '';
       return '<tr onclick="dcChainSelectStrike(\''+sym+'\','+r.strike+')" style="cursor:pointer;'+bg+sel+'">'
-        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>'
+        + oiCe
         + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.ce)+_dcLtpTxt(r.ce)+'</td>'
         + '<td style="'+Bd+';text-align:center;padding:5px 8px;font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx);white-space:nowrap">'+r.strike+(r.atm?' <span style="font-size:8px;color:var(--c-mut)">ATM</span>':'')+mpDot+'</td>'
         + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.pe)+_dcLtpTxt(r.pe)+'</td>'
-        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>'
+        + oiPe
         + '</tr>';
     }).join('');
     var hcol='style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';  // cc#2019: was right-aligned
     var info = st.showInfo ? _dcChainInfoHtml() : '';
     var detail = (st.selStrike!=null) ? _dcChainDetailHtml(d, st.selStrike) : '';
     var oiNote = d.oi_available ? (' &middot; PCR '+(d.pcr!=null?d.pcr:'&mdash;')) : ' &middot; OI/walls: index only';
+    // cc#2023 item 1: same d.oi_available flag the header note above and the legend below already
+    // use -- the two OI header cells, gated identically to the two OI row cells.
+    var hOiCe = d.oi_available ? ('<td '+hcol+'>OI</td>') : '';
+    var hOiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td>') : '';
     box.innerHTML =
         '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'
       +   '<div style="font-size:10px;color:var(--c-dim)">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d)'+oiNote+'</div>'
@@ -486,10 +503,10 @@
       + '</div>'
       + info
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border-radius:8px;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
-      +   '<thead><tr><td '+hcol+'>OI</td><td '+hcol+'>CE LTP</td>'
+      +   '<thead><tr>'+hOiCe+'<td '+hcol+'>CE LTP</td>'
       +     '<td style="'+Bd+';text-align:center;padding:4px 8px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
       +     '<td style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">PE LTP</td>'
-      +     '<td style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td></tr></thead>'
+      +     hOiPe+'</tr></thead>'
       +   '<tbody>'+rows+'</tbody></table></div>'
       + detail
       + _dcChainLegendHtml(d.oi_available);
