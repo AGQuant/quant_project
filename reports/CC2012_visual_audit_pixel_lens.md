@@ -130,6 +130,41 @@ theme, viewport, requested_by) VALUES ('/m/home','aquawhite','mobile','fable');`
 minutes `status='done'` with a `capture_id` → `GET /api/visual-audit/capture/{id}?token=…` returns
 200 `image/jpeg`; wrong token → 404; no token → 404.
 
+## Addendum — app_route_map (Fable, cc_task_logs 6427; second push)
+
+Fable created `public.app_route_map` (42 rows, one per NAV route: label, surface, nav_flag,
+route_group, serving_file, handler, template, nav_position; PK on route). Two asks, both landed:
+
+- **(a) `GET /api/visual-audit/runs/latest`** now `LEFT JOIN app_route_map m ON m.route = c.route`
+  and each capture carries `label`, `route_group`, `serving_file` (null when the map has no row —
+  a capture is never dropped for lacking one). Order is `nav_position`, then route/theme/viewport.
+  `EXPLAIN` on the real DB: nested-loop left join on `app_route_map_pkey`, index scan on
+  `idx_visual_audit_captures_run`.
+- **(b) `sync_route_map(conn, routes, run_id)`** runs at the start of every full crawl, on the SAME
+  `parse_nav_routes()` output the crawl walks. One `INSERT … ON CONFLICT (route) DO UPDATE` per
+  route, updating only what the nav itself carries: `label`, `surface` (flag `m` → mobile, else
+  web — the exact split the table holds), `nav_flag`, `nav_position`. **Fable's columns
+  (`route_group`, `serving_file`, `handler`, `template`) are never overwritten.** A route new to the
+  nav is inserted with the literal sentinel `unmapped` in those four (template NULL),
+  `added_by='visual_audit'`, and a WARNING naming it — Fable fills the mapping, the crawler never
+  guesses a handler. A row whose route has left the nav is NOT deleted (the table is Fable's); it is
+  listed as `stale` in the crawl summary (`route_map` key) and the log. Never raises — a map failure
+  rolls back and the crawl continues.
+- **Label decode fixed on the way:** the NAV sits inside `PWA_JS = """…"""`, a NON-raw Python
+  string, so `'V9 \\u00b7 Pairs'` on disk is two escape layers deep. `parse_nav_routes()` now
+  decodes one layer per pass (Python, then JS) so the label written is `V9 · Pairs` — the text the
+  nav renders and the text Fable's rows already hold. Without this the first crawl would have
+  overwritten Fable's `V9 · Pairs` with the escape sequence.
+
+**Verify:** `ast.parse` clean. Local: 42 routes, `/v9` → `V9 · Pairs` / `◈`, flags m/d/None as in
+the table; dry-run of the real `sync_route_map` with a fake connection (3 nav routes vs 3 existing
+rows) → `upserted=3, new=['/m/home'], stale=['/gone-route']`, COMMIT last; a dead connection →
+`error` set, ROLLBACK, no raise. The three EXACT rendered INSERT statements run on a scratch
+`LIKE app_route_map INCLUDING ALL` table in the real Postgres (created, exercised, dropped): existing
+`/` went `Home OLD`/pos 7 → `Home`/pos 1 with `core/main.py/home/scorr_home.html` untouched; `/v9`
+kept `V9 · Pairs` and its mapping; `/m/home` landed `mobile/m/unmapped×3/visual_audit`;
+`/gone-route` untouched. The live table was not written — that happens on the first real crawl.
+
 ## Fable verification of the other eyes commits (the founder's ask)
 
 On `main` at `9881caa` (github_read against `refs/heads/main`): `visual_audit.py` sha `dbebf4a9`,

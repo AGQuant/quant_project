@@ -120,6 +120,22 @@ def _conn():
 # Item 3: route enumeration, REGISTRY-DERIVED from the live NAV array source.
 # ---------------------------------------------------------------------------
 
+_JS_ESC_RE = re.compile(r"\\u([0-9a-fA-F]{4})|\\(.)")
+
+
+def _unescape_layer(s):
+    return _JS_ESC_RE.sub(lambda m: chr(int(m.group(1), 16)) if m.group(1) else m.group(2), s)
+
+
+def _js_unescape(s):
+    """Decode a NAV entry field to the text the nav actually RENDERS, not the source bytes. The NAV
+    array sits inside `PWA_JS = \"\"\"...\"\"\"` -- a NON-raw Python string -- so the bytes on disk
+    carry two escape layers: Python's (`\\\\u00b7` -> `\\u00b7`) and then the JS literal's
+    (`\\u00b7` -> `·`). One pass per layer, in that order. app_route_map stores the rendered text
+    ('V9 · Pairs'), and the upsert must match it rather than rewrite it back to an escape."""
+    return _unescape_layer(_unescape_layer(s))
+
+
 def parse_nav_routes(pwa_endpoints_path="pwa_endpoints.py"):
     """Extract every [path, icon, label(, flag)] entry from pwa_endpoints.py's own `var NAV = [...]`
     block. Never a hardcoded page list (item 3) -- reads the live source file fresh on every call,
@@ -151,7 +167,7 @@ def parse_nav_routes(pwa_endpoints_path="pwa_endpoints.py"):
                            r"\s*'((?:[^'\\]|\\.)*)'(?:\s*,\s*'((?:[^'\\]|\\.)*)')?\s*\]")
     routes = []
     for em in entry_re.finditer(block):
-        path, icon, label, flag = em.groups()
+        path, icon, label, flag = (_js_unescape(g) if g is not None else None for g in em.groups())
         routes.append({"path": path, "icon": icon, "label": label, "flag": flag})
     # de-dupe on path -- the array should not repeat one (rule 8), but a crawler must not silently
     # capture the same route twice and call it two routes if it ever does.
@@ -473,6 +489,63 @@ def _record_run(conn, status, error=None, duration_ms=None):
         log.warning("scheduler_master record_run failed: %s", e)
 
 
+ROUTE_MAP_UNMAPPED = "unmapped"
+
+
+def sync_route_map(conn, routes, run_id):
+    """Fable's addendum on cc#2012 (cc_task_logs 6427): at the start of every full crawl, upsert
+    app_route_map from the SAME parse_nav_routes output the crawl walks, so the table can never
+    drift from the live nav. Only what the NAV itself carries is written: route, label, nav_flag,
+    nav_position, and surface (flag 'm' = mobile, anything else = web -- the exact split the table
+    holds today). What only Fable knows -- route_group, serving_file, handler, template -- is NEVER
+    overwritten: an existing row keeps its mapping untouched; a route new to the nav lands with the
+    literal sentinel 'unmapped' in those columns plus a WARNING, so Fable fills it in rather than
+    the crawler guessing a handler. Rows whose route has left the nav are NOT deleted (the table is
+    Fable's) -- they are reported as stale in the return value and the log. Never raises: a map
+    failure must not stop the crawl that follows it."""
+    out = {"upserted": 0, "new": [], "stale": []}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT route FROM app_route_map")
+            existing = {r[0] for r in cur.fetchall()}
+            nav_paths = []
+            for pos, r in enumerate(routes, start=1):
+                path = r["path"]
+                nav_paths.append(path)
+                if path not in existing:
+                    out["new"].append(path)
+                cur.execute(
+                    """INSERT INTO app_route_map
+                           (route, label, surface, nav_flag, route_group, serving_file, handler,
+                            template, nav_position, source, added_by)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s, %s, 'visual_audit')
+                       ON CONFLICT (route) DO UPDATE SET
+                           label = EXCLUDED.label,
+                           surface = EXCLUDED.surface,
+                           nav_flag = EXCLUDED.nav_flag,
+                           nav_position = EXCLUDED.nav_position""",
+                    (path, r["label"], "mobile" if r["flag"] == "m" else "web", r["flag"],
+                     ROUTE_MAP_UNMAPPED, ROUTE_MAP_UNMAPPED, ROUTE_MAP_UNMAPPED, pos,
+                     f"pwa_endpoints.py NAV array, visual_audit crawl {run_id}"))
+                out["upserted"] += 1
+            out["stale"] = sorted(existing - set(nav_paths))
+        conn.commit()
+        if out["new"]:
+            log.warning("app_route_map: %d route(s) new to the nav, inserted as '%s' -- Fable to map: %s",
+                        len(out["new"]), ROUTE_MAP_UNMAPPED, out["new"])
+        if out["stale"]:
+            log.warning("app_route_map: %d row(s) no longer in the live nav (left in place): %s",
+                        len(out["stale"]), out["stale"])
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        out["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+        log.warning("app_route_map sync failed (crawl continues): %s", e)
+    return out
+
+
 def run_crawl(page, base_url, conn, routes=None, themes=None, viewports=None):
     """The FULL crawl: every NAV route x theme x viewport. Takes an already-logged-in page and an
     open connection (the worker owns both for its whole lifetime) rather than opening its own, so
@@ -482,7 +555,8 @@ def run_crawl(page, base_url, conn, routes=None, themes=None, viewports=None):
     themes = themes or THEMES
     viewports = viewports or VIEWPORTS
     summary = {"run_id": run_id, "routes_enumerated": len(routes), "captures": 0,
-               "checks_run": 0, "failures_by_check": {}, "worst_routes": {}}
+               "checks_run": 0, "failures_by_check": {}, "worst_routes": {},
+               "route_map": sync_route_map(conn, routes, run_id)}
     t0 = time.time()
     with conn.cursor() as cur:
         for route in routes:

@@ -69,8 +69,11 @@ def visual_audit_capture(capture_id: int, token: str = ""):
 @router.get("/api/visual-audit/runs/latest")
 def visual_audit_runs_latest(token: str = ""):
     """cc#2012 item 2: the latest run as JSON -- run_id, captured_at, and one entry per capture
-    {id, route, theme, viewport, status, fail_count, content_hash}. An on-demand request capture
-    carries a 'req-…' run_id and is not a 'run' in this sense; this reads the latest FULL crawl."""
+    {id, route, theme, viewport, status, fail_count, content_hash, has_image, label, route_group,
+    serving_file}. The last three come from Fable's app_route_map (cc_task_logs 6427) by LEFT JOIN
+    on the route, so a capture of a route the map does not know still lists -- with nulls, never
+    dropped. An on-demand request capture carries a 'req-…' run_id and is not a 'run' in this
+    sense; this reads the latest FULL crawl."""
     if not _token_ok(token):
         raise HTTPException(404)
     with _conn() as conn, conn.cursor() as cur:
@@ -85,14 +88,17 @@ def visual_audit_runs_latest(token: str = ""):
         cur.execute("""SELECT c.id, c.route, c.theme, c.viewport, c.status, c.content_hash,
                               c.image_bytes IS NOT NULL,
                               (SELECT COUNT(*) FROM visual_audit_results r
-                                WHERE r.capture_id = c.id AND r.status = 'FAIL')
+                                WHERE r.capture_id = c.id AND r.status = 'FAIL'),
+                              m.label, m.route_group, m.serving_file
                        FROM visual_audit_captures c
+                       LEFT JOIN app_route_map m ON m.route = c.route
                        WHERE c.run_id = %s
-                       ORDER BY c.route, c.theme, c.viewport""", (run_id,))
+                       ORDER BY COALESCE(m.nav_position, 999999), c.route, c.theme, c.viewport""", (run_id,))
         rows = cur.fetchall()
     return {"run_id": run_id, "captured_at": captured_at.isoformat() if captured_at else None,
             "captures": [{"id": r[0], "route": r[1], "theme": r[2], "viewport": r[3], "status": r[4],
-                          "content_hash": r[5], "has_image": r[6], "fail_count": r[7]} for r in rows]}
+                          "content_hash": r[5], "has_image": r[6], "fail_count": r[7],
+                          "label": r[8], "route_group": r[9], "serving_file": r[10]} for r in rows]}
 
 
 @router.get("/api/visual-audit/failures")
