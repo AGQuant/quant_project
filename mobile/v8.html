@@ -255,6 +255,27 @@ body{ --field:#0A0A0C; }
 #v8p .tbl-note{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
 /* bottom nav: markup is the app's own (do_not_touch); the active tab takes the ref's gold */
 #v8p ~ .bnav .bn.on,.bnav .bn.on{color:var(--gold,#D4AF37);text-shadow:0 0 10px rgba(212,175,55,.35)}
+/* cc#2005 — the Unrealised/Realised/Net swipe deck. Track/dots CSS is a byte-copy of the SAME
+   scroll-snap pattern mobile/home.html's hero deck already uses (.swipe-t/.dots there) — no new
+   swipe mechanism, no touch-event handlers, native scroll-snap + a plain scroll listener. */
+#v8p .v8-swipe{margin-bottom:10px}
+#v8p .v8-swipe-t{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+#v8p .v8-swipe-t::-webkit-scrollbar{display:none}
+#v8p .v8-swipe-t>.c{flex:0 0 100%;scroll-snap-align:center}
+#v8p .v8-dots{display:flex;justify-content:center;gap:6px;margin-top:8px}
+#v8p .v8-dots i{width:5px;height:5px;border-radius:50%;background:var(--line2,var(--line));transition:.2s;display:block;cursor:pointer}
+#v8p .v8-dots i.on{background:var(--gold,#D4AF37);width:16px;border-radius:3px}
+/* the (i) disclosure button: top-right corner of a pane's LEADING box only (one per pane, per
+   the founder's own "small (i) button in the top corner of EACH of the three panes" — read as
+   one per pane, not one per box, since there is one working to show per pane, not per box). */
+#v8p .kw{position:relative}
+#v8p .kw-i{position:absolute;top:4px;right:4px;width:18px;height:18px;line-height:16px;text-align:center;
+  border:1px solid var(--line);border-radius:50%;background:none;color:var(--mute);font-family:var(--mono);
+  font-size:10px;font-weight:800;cursor:pointer;padding:0}
+/* every kpi box becomes a tap target for its chart (item 3) -- cursor + a faint press affordance,
+   no layout change, so this never collides with the (i) button sharing the same box. */
+#v8p .kw[data-kw-chart]{cursor:pointer}
+#v8p .kw[data-kw-chart]:active{background:var(--well)}
 @media (prefers-reduced-motion:reduce){#v8p *{transition:none !important}}
 </style>
 </head>
@@ -275,8 +296,35 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <div class="top"><div class="brand">V<b>8</b></div></div>
   <div class="sect">Market mood <span class="r" id="mood-r"></span></div>
   <section class="pressed hero" id="sec-mood" aria-label="Market mood gate"><div class="empty">Loading the market gate…</div></section>
-  <div class="sect">Open positions <span class="n" id="open-n"></span><span class="r" id="open-r"></span></div>
-  <div class="kpi" id="open-kpi"></div>
+  <!-- cc#2005: Open positions + Closed + a new Net Total became one swipeable "Positions" block —
+       founder addition D, one header for the whole thing, count follows the active pane. The three
+       existing render functions (renderKpi/renderClosed/renderNetKpi) are UNCHANGED targets, just
+       relocated into one deck: renderKpi->#open-kpi (pane 0), renderClosed->#cl-kpi (pane 1, moved
+       here from its old standalone "Closed" section further down — founder addition B), the new
+       renderNetKpi->#net-kpi (pane 2). -->
+  <!-- #open-n: renderOpen() still writes its own count into this (unchanged function, cc#2005
+       relocation only) — hidden because #pos-n now shows the count for the active pane. Same
+       fix as the #cl-n/#cl-r pair inside the swipe track below. -->
+  <div class="sect">Positions <span class="n" id="pos-n"></span><span class="r" id="open-r"></span><span id="open-n" style="display:none"></span></div>
+  <div class="v8-swipe">
+    <div class="v8-swipe-t" id="posTrack">
+      <div class="c"><div class="kpi" id="open-kpi"></div></div>
+      <div class="c">
+        <!-- #cl-n/#cl-r: renderClosed() still writes its own count/caption into these (unchanged
+             function, cc#2005 relocation only) — hidden because the unified "Positions" header
+             (#pos-n) now shows the count for whichever pane is active (founder addition D). -->
+        <span id="cl-n" style="display:none"></span><span id="cl-r" style="display:none"></span>
+        <div class="kpi" id="cl-kpi"></div>
+      </div>
+      <div class="c"><div class="kpi" id="net-kpi"></div></div>
+    </div>
+    <div class="v8-dots" id="posDots"></div>
+  </div>
+  <!-- cc#2005 founder addition A: the active pane drives which filter bar + list render below the
+       deck. Pane 0 -> open filters + open list. Pane 1 -> closed filters (already inside #cl-kpi,
+       see renderClosed) + closed list. Pane 2 -> both lists, one after the other, a divider label
+       between (no filter controls on the combined view — the founder's own wording is a plain
+       concatenation, not a third filtered set). -->
   <!-- cc#1870 (founder 09-Sep-2026, "buttons could be smaller and fixed"): #open-filter-bar is the
        STICKY unit (both chip rows pin together below the page header while the list scrolls under
        them, item 2). Row 1 is a flex row: the horizontal-scrolling side/basket chips (#open-filters)
@@ -285,8 +333,23 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
     <div class="filter-row1"><div class="filters" id="open-filters"></div><button type="button" class="sort-btn" data-open-sort="1" aria-label="Sort positions">⇅</button></div>
     <div class="filters" id="open-markers" style="margin-top:-4px"></div>
   </div>
+  <!-- cc#2005: relocated from the old standalone "Closed" section — same clSeg filter rows
+       (renderClosed still builds them), now their own container instead of living inside #cl-kpi,
+       since #cl-kpi is now the swipeable REALISED/LONG/SHORT headline (item 1's own box shape).
+       Shown only for pane 1 (posPaneChanged). -->
+  <div class="filter-bar" id="cl-filter-bar" style="display:none"></div>
+  <!-- cc#2005: WIN/LOSS + AVG WIN/LOSS, relocated unchanged (still filter-responsive, per
+       CL_SIDE/CL_DUR/CL_BSK) — everything founder addition B says must not be deleted, just no
+       longer part of the swipeable 3-box strip. Shown only for pane 1. -->
+  <div class="kpi" id="cl-extra-kpi" style="display:none"></div>
   <div class="plist" id="sec-open"><div class="slab dense empty">Loading the open book…</div></div>
   <div class="vmore" id="open-more"></div>
+  <div class="tbl-note" id="pos-divider" style="display:none;text-align:center;margin:10px 0">Closed</div>
+  <!-- hidden by default, matching cl-filter-bar/cl-extra-kpi above -- POS_PANE starts effectively
+       at pane 0, so nothing closed-side should flash visible before the first posDots() call
+       (fired from inside renderAll(), after STATE.book loads) sets real pane visibility. -->
+  <div class="plist" id="sec-closed" style="display:none"><div class="slab dense empty">Loading closed trades…</div></div>
+  <div class="vmore" id="cl-more" style="display:none"></div>
   <div class="sect">Sectors <span class="n" id="sec-n"></span><span class="r" id="sec-r"></span></div>
   <div class="seg" id="sec-seg" style="margin-bottom:10px" role="tablist"><button class="on" data-sec-view="all">All futures</button><button data-sec-view="n50">Nifty 50</button></div>
   <div class="stbl-wrap" id="sec-sectors"><div class="slab dense empty">Loading the sector table…</div></div>
@@ -295,10 +358,6 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <div class="sect">Day performance <span class="n" id="day-n"></span><span class="r">net / day</span></div>
   <section class="pressed" id="sec-day" aria-label="Daily net P&L bars"><div class="empty">Loading the day log…</div></section>
   <div class="vmore" id="day-more"></div>
-  <div class="sect">Closed <span class="n" id="cl-n"></span><span class="r" id="cl-r"></span></div>
-  <div class="kpi" id="cl-kpi"></div>
-  <div class="plist" id="sec-closed"><div class="slab dense empty">Loading closed trades…</div></div>
-  <div class="vmore" id="cl-more"></div>
   <div class="sect">Funnel <span class="r">why these, not others</span></div>
   <section class="pressed fn" id="sec-funnel" aria-label="Signal funnel by basket"><div class="empty">Loading the funnel…</div></section>
   <div style="height:18px"></div>
@@ -589,7 +648,21 @@ function openSortSheetOpen(){
     var b = e.target.closest('[data-sort-pick]'); if(b){ openSort = b.getAttribute('data-sort-pick'); el.remove(); renderOpen(); }
   });
 }
-function kpiWell(label, val, cls, sub){ return '<div class="kw well-up"><div class="kl">'+label+'</div><div class="kn '+cls+'">'+val+'</div><div class="ks">'+sub+'</div></div>'; }
+/* cc#2005: opts adds two OPTIONAL, purely additive affordances to any kpiWell box —
+   opts.info='key' puts a small (i) button in the box's corner (kwInfoOpen(key) — one per pane,
+   on its leading/headline box only) and opts.chart='all'|'long'|'short' makes the WHOLE box a
+   tap target for that slice's P&L chart (item 3: "every box... tappable"). Callers that pass
+   neither get byte-identical output to before this card. */
+function kpiWell(label, val, cls, sub, opts){
+  opts = opts || {};
+  /* NOT stopPropagation()'d: #v8p's single delegated click listener checks data-kw-info BEFORE
+     data-kw-chart and returns on a match, so a tap on this button already can't also trigger the
+     surrounding box's chart-open — stopping propagation here would instead break it, since that
+     delegate (on #v8p, an ancestor) is the ONLY place data-kw-info is ever handled. */
+  var info = opts.info ? '<button type="button" class="kw-i" data-kw-info="'+esc(opts.info)+'" aria-label="How '+esc(label)+' is worked out">i</button>' : '';
+  var chartAttr = opts.chart ? ' data-kw-chart="'+esc(opts.chart)+'"' : '';
+  return '<div class="kw well-up"'+chartAttr+'>'+info+'<div class="kl">'+label+'</div><div class="kn '+cls+'">'+val+'</div><div class="ks">'+sub+'</div></div>';
+}
 /* wells read the canon keys straight off the payload (rule 13): unrealised / long / short */
 function renderKpi(bk, rows){
   var el = document.getElementById('open-kpi');
@@ -597,9 +670,9 @@ function renderKpi(bk, rows){
   var L = bk.long||{}, S = bk.short||{};
   var sub = num(bk.unrealised_pct) ? pct(bk.unrealised_pct,1)+(num(bk.deployed)?' on '+inrShort(bk.deployed):'') : (num(bk.deployed)?'on '+inrShort(bk.deployed):'—');
   el.innerHTML =
-    kpiWell('UNREALISED', inr(bk.unrealised), sgn(bk.unrealised), sub) +
-    kpiWell('LONG', inr(L.unrealised), sgn(L.unrealised), (num(L.n)?L.n:0)+' position'+(L.n===1?'':'s')) +
-    kpiWell('SHORT', inr(S.unrealised), sgn(S.unrealised), (num(S.n)?S.n:0)+' position'+(S.n===1?'':'s'));
+    kpiWell('UNREALISED', inr(bk.unrealised), sgn(bk.unrealised), sub, {info:'unrealised', chart:'all'}) +
+    kpiWell('LONG', inr(L.unrealised), sgn(L.unrealised), (num(L.n)?L.n:0)+' position'+(L.n===1?'':'s'), {chart:'long'}) +
+    kpiWell('SHORT', inr(S.unrealised), sgn(S.unrealised), (num(S.n)?S.n:0)+' position'+(S.n===1?'':'s'), {chart:'short'});
 }
 /* chips come from the rows themselves: side counts, then one chip per basket seen in the book */
 function renderFilters(rows){
@@ -795,7 +868,10 @@ function renderOpen(){
      order). */
   var all = bk.positions.slice();
   n.textContent = String(all.length);
-  r.textContent = num(bk.brokerage_per_trade) ? 'net of ₹'+bk.brokerage_per_trade+'/trade' : '';
+  /* cc#2005 cleanup: bk.brokerage_per_trade was never a real payload key (mobile_ext.py ships
+     "brokerage" -- the running total, not a per-trade rate) so this was always empty. 500 is the
+     real, founder-locked constant (rule 13 BROKERAGE_PER_TRADE) -- stated directly, not fabricated. */
+  r.textContent = 'net of ₹500/closed trade';
   renderKpi(bk, all); renderFilters(all);
   var rows = applyFilter(all);
   renderMarkerChips(rows);          // cc#1610: counts over the side/basket-filtered rows
@@ -1118,32 +1194,64 @@ function daylogRetry(){
    inline-fallback-var() pattern as daylogOpen/moodOpen -- this file's OWN established shape for
    a full sheet (every var() carries its own hex fallback, so DOM position never matters), not the
    small-popover class of component that needed the #v8p-child fix (cc#1866/1867/1870). */
-var DL_SERIES = null, DL_FOCUS = 'net';
-function dlSeriesLoad(){
-  if(DL_SERIES) return Promise.resolve(DL_SERIES);
-  return getJ(URLS.daylogSeries).then(function(d){ DL_SERIES = d; return d; });
+var DL_SERIES = {all:null, long:null, short:null}, DL_SLICE = 'all', DL_FOCUS = 'net';
+/* cc#2005: DL_SERIES is now one cache PER SLICE (all/long/short) instead of one global value —
+   v8_daylog_series's new ?side= param (v8_endpoints.py, this card's own backend prerequisite,
+   sha 38d552d) fetched once per slice and reused on every reopen/pill switch, same as before. */
+function dlSeriesLoad(slice){
+  slice = slice || 'all';
+  if(DL_SERIES[slice]) return Promise.resolve(DL_SERIES[slice]);
+  var url = URLS.daylogSeries + (slice === 'all' ? '' : '?side=' + slice.toUpperCase());
+  return getJ(url).then(function(d){ DL_SERIES[slice] = d; return d; });
 }
-function dlChartSvg(d){
+/* cc#2005: the live unrealised total for a slice, straight off STATE.book (already loaded, no new
+   fetch) — item 4's "unrealised marked as the live end-point" on the REALISED cumulative curve. */
+function dlLiveUnreal(slice){
+  var bk = STATE.book; if(!bk) return null;
+  if(slice === 'long') return num((bk.long||{}).unrealised) ? bk.long.unrealised : null;
+  if(slice === 'short') return num((bk.short||{}).unrealised) ? bk.short.unrealised : null;
+  return num(bk.unrealised) ? bk.unrealised : null;
+}
+function dlChartSvg(d, slice){
   var pts = d.points || [], key = DL_FOCUS === 'gross' ? 'gross_cum' : 'net_cum';
   var vs = pts.map(function(p){ return num(p[key]) ? p[key] : 0; });
-  var lo = Math.min.apply(null, vs.concat([0])), hi = Math.max.apply(null, vs.concat([0]));   // 0 is always in range so the zero line always has somewhere to draw
-  var rng = (hi - lo) || 1, n = pts.length;
+  var n = pts.length;
+  /* cc#2005: liveVal is the ONE extra end-point — cumulative-so-far plus the live unrealised
+     total for this slice, i.e. "if everything still open closed right now". null (STATE.book not
+     loaded, or slice unknown) reproduces the pre-cc#2005 chart exactly — same points, same maths,
+     same output — so the original Day Log chart button (which passes no slice) is unaffected
+     unless STATE.book happens to be loaded, which in practice it always is by the time this sheet
+     can open (same Promise.all in load()). */
+  var liveU = slice ? dlLiveUnreal(slice) : null;
+  var liveVal = (liveU != null && n) ? (vs[n - 1] + liveU) : null;
+  var totalN = n + (liveVal != null ? 1 : 0);
+  var lo = Math.min.apply(null, vs.concat([0]).concat(liveVal != null ? [liveVal] : []));
+  var hi = Math.max.apply(null, vs.concat([0]).concat(liveVal != null ? [liveVal] : []));   // 0 is always in range so the zero line always has somewhere to draw
+  var rng = (hi - lo) || 1;
   var W = 320, H = 150, PL = 6, PR = 6, PT = 10, PB = 18;
-  var xs = function(i){ return PL + (n === 1 ? 0 : i / (n - 1) * (W - PL - PR)); };
+  var xs = function(i){ return PL + (totalN <= 1 ? 0 : i / (totalN - 1) * (W - PL - PR)); };
   var ys = function(v){ return PT + (1 - (v - lo) / rng) * (H - PT - PB); };
-  var last = vs[n - 1];
-  var col = last < 0 ? 'var(--down,#FF5C6C)' : 'var(--up,#2FD48B)';   // colour follows the sign of the LATEST cumulative value, same rule the website chart uses
+  var last = liveVal != null ? liveVal : vs[n - 1];
+  var col = last < 0 ? 'var(--down,#FF5C6C)' : 'var(--up,#2FD48B)';   // colour follows the sign of the LATEST cumulative value (incl. live, when shown), same rule the website chart uses
   var line = pts.map(function(p, i){ return xs(i).toFixed(1) + ',' + ys(vs[i]).toFixed(1); }).join(' ');
   var zy = ys(0).toFixed(1);
-  var area = PL + ',' + zy + ' ' + line + ' ' + xs(n - 1).toFixed(1) + ',' + zy;
+  var lastRealX = xs(n - 1).toFixed(1), lastRealY = ys(vs[n - 1]).toFixed(1);
+  var area = PL + ',' + zy + ' ' + line + ' ' + lastRealX + ',' + zy;
   var d0 = dmy(pts[0].date), d1 = dmy(pts[n - 1].date);
+  var liveBits = '';
+  if(liveVal != null){
+    var lx = xs(totalN - 1).toFixed(1), ly = ys(liveVal).toFixed(1);
+    liveBits = '<line x1="' + lastRealX + '" y1="' + lastRealY + '" x2="' + lx + '" y2="' + ly + '" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="3 2"/>'
+      + '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="var(--panel,#0E1526)" stroke="' + col + '" stroke-width="2"/>';
+  }
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + H + 'px;display:block">'
     + (lo < 0 && hi > 0 ? '<line x1="0" y1="' + zy + '" x2="' + W + '" y2="' + zy + '" stroke="var(--line,#22293A)" stroke-width="1" stroke-dasharray="4 3"/>' : '')
     + '<polygon points="' + area + '" fill="' + col + '" opacity=".12"/>'
     + '<polyline points="' + line + '" fill="none" stroke="' + col + '" stroke-width="2"/>'
-    + '<circle cx="' + xs(n - 1).toFixed(1) + '" cy="' + ys(last).toFixed(1) + '" r="3" fill="' + col + '"/>'
+    + '<circle cx="' + lastRealX + '" cy="' + lastRealY + '" r="3" fill="' + col + '"/>'
+    + liveBits
     + '<text x="' + PL + '" y="' + (H - 4) + '" font-family="var(--mono)" font-size="9" fill="var(--dim,#5E6B8F)">' + esc(d0) + '</text>'
-    + '<text x="' + (W - PR) + '" y="' + (H - 4) + '" text-anchor="end" font-family="var(--mono)" font-size="9" fill="var(--dim,#5E6B8F)">' + esc(d1) + '</text>'
+    + '<text x="' + (W - PR) + '" y="' + (H - 4) + '" text-anchor="end" font-family="var(--mono)" font-size="9" fill="var(--dim,#5E6B8F)">' + (liveVal != null ? 'live' : esc(d1)) + '</text>'
     + '</svg>';
 }
 function dlChartPill(k, label){
@@ -1151,27 +1259,38 @@ function dlChartPill(k, label){
   return '<button type="button" data-dlchart-focus="' + k + '" style="border:1px solid var(--line,#22293A);border-radius:999px;padding:3px 12px;font-family:var(--mono);font-size:11px;cursor:pointer;' + (on ? 'background:var(--line,#22293A);color:var(--txt,#fff);font-weight:800' : 'background:none;color:var(--dim,#5E6B8F)') + '">' + label + '</button>';
 }
 function dlChartSheetHtml(d){
-  var head = '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px 0"><div style="font-family:var(--mono);font-size:12px;font-weight:800;letter-spacing:.12em;color:var(--gold,#D4AF37)">P&amp;L CHART</div>'
+  var sliceWord = {all:'', long:' \u2014 LONG', short:' \u2014 SHORT'}[DL_SLICE] || '';
+  var head = '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px 0"><div style="font-family:var(--mono);font-size:12px;font-weight:800;letter-spacing:.12em;color:var(--gold,#D4AF37)">P&amp;L CHART' + esc(sliceWord) + '</div>'
     + '<button type="button" data-dlchart-close="1" aria-label="Close" style="margin-left:auto;background:none;border:1px solid var(--line,#22293A);color:var(--dim,#5E6B8F);border-radius:8px;min-width:32px;min-height:32px;font-size:14px;cursor:pointer">\u2715</button></div>';
   if(!d){
     return head + '<div class="empty" style="margin:14px">Chart failed to load.<br><span class="chip" data-dlchart-retry="1">Retry</span></div>';
   }
   var pts = d.points || [];
-  if(!pts.length){
+  var liveU = dlLiveUnreal(DL_SLICE);
+  if(!pts.length && liveU == null){
     return head + '<div class="empty" style="margin:14px">No closed trades in this era yet. The line starts with the first exit.</div>';
+  }
+  if(!pts.length){
+    // cc#2005: no realised history yet, but a live unrealised figure exists for this slice \u2014
+    // show that fact plainly rather than an empty state that would hide a real, honest number.
+    return head + '<div class="empty" style="margin:14px">No closed trades in this era yet. Live unrealised: <b class="' + sgn(liveU) + '">' + inr(liveU) + '</b></div>';
   }
   var sub = 'Since ' + dmy(d.window_start) + ' \u00b7 ' + (d.trading_days || 0) + ' trading day' + (d.trading_days === 1 ? '' : 's') + ' \u00b7 cumulative by exit date';
   var brokNote = DL_FOCUS === 'net' ? 'Net is after \u20b9500/closed trade brokerage' : 'Gross is before brokerage';
   var pills = '<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">' + dlChartPill('net', 'Net') + dlChartPill('gross', 'Gross') + '<span style="font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F)">' + brokNote + '</span></div>';
   var cagrTxt = d.cagr_pct == null ? 'n/a (window under 7 days)' : pct(d.cagr_pct, 2);
+  var liveNote = liveU != null ? '<div style="padding:0 14px 4px;font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F)">\u25cb live = today\u2019s open positions marked to market, added to the realised line above</div>' : '';
   var foot = '<div style="padding:10px 14px 4px;font-family:var(--mono);font-size:10.5px;color:var(--mute,#8C99BD);display:flex;flex-wrap:wrap;gap:4px 16px">'
     + '<span>Return <b class="' + sgn(d.return_pct) + '">' + pct(d.return_pct, 2) + '</b></span>'
     + '<span>Annualised (CAGR) <b class="' + (d.cagr_pct == null ? '' : sgn(d.cagr_pct)) + '">' + esc(cagrTxt) + '</b></span></div>'
     + '<div style="padding:0 14px 22px;font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F);line-height:1.4">' + esc(d.cagr_note || '') + '</div>';
   return head + '<div style="padding:6px 14px 0;font-family:var(--mono);font-size:10px;color:var(--mute,#8C99BD)">' + esc(sub) + '</div>'
-    + pills + '<div style="padding:10px 14px 0">' + dlChartSvg(d) + '</div>' + foot;
+    + pills + '<div style="padding:10px 14px 0">' + dlChartSvg(d, DL_SLICE) + '</div>' + liveNote + foot;
 }
-function dlChartOpen(){
+function dlChartOpen(slice){
+  DL_SLICE = slice || 'all';   // cc#2005: defaults to 'all', so the pre-existing Day Log chart
+                                // button (which passes no slice) is unaffected in every way except
+                                // now also getting the live end-point when STATE.book is loaded.
   var ov = document.getElementById('v8-dlchart-ov');
   if(!ov){
     ov = document.createElement('div'); ov.id = 'v8-dlchart-ov';
@@ -1179,18 +1298,18 @@ function dlChartOpen(){
     ov.innerHTML = '<div id="v8-dlchart-sheet" role="dialog" aria-modal="true" aria-label="P&amp;L chart" style="width:100%;max-height:88vh;overflow:auto;background:var(--panel,#0E1526);color:var(--txt,#fff);border-top:1px solid var(--line,#22293A);border-radius:16px 16px 0 0"></div>';
     ov.addEventListener('click', function(e){
       if(e.target === ov || e.target.closest('[data-dlchart-close]')){ dlChartClose(); return; }
-      if(e.target.closest('[data-dlchart-retry]')){ DL_SERIES = null; dlChartOpen(); return; }
+      if(e.target.closest('[data-dlchart-retry]')){ DL_SERIES[DL_SLICE] = null; dlChartOpen(DL_SLICE); return; }
       var f = e.target.closest('[data-dlchart-focus]'); if(f){ DL_FOCUS = f.getAttribute('data-dlchart-focus'); dlChartRender(); return; }
     });
     document.body.appendChild(ov);
   }
   ov.style.display = 'flex';
   var sh = document.getElementById('v8-dlchart-sheet');
-  sh.innerHTML = DL_SERIES ? dlChartSheetHtml(DL_SERIES) : '<div class="empty" style="margin:14px">Loading the P&L chart\u2026</div>';   // paint-then-fill: reuse the cache instantly, fetch only on the first open
-  dlSeriesLoad().then(dlChartRender).catch(function(){ DL_SERIES = null; dlChartRender(); });
+  sh.innerHTML = DL_SERIES[DL_SLICE] ? dlChartSheetHtml(DL_SERIES[DL_SLICE]) : '<div class="empty" style="margin:14px">Loading the P&L chart\u2026</div>';   // paint-then-fill: reuse the cache instantly, fetch only on the first open
+  dlSeriesLoad(DL_SLICE).then(dlChartRender).catch(function(){ DL_SERIES[DL_SLICE] = null; dlChartRender(); });
 }
 function dlChartRender(){
-  var sh = document.getElementById('v8-dlchart-sheet'); if(sh) sh.innerHTML = dlChartSheetHtml(DL_SERIES);
+  var sh = document.getElementById('v8-dlchart-sheet'); if(sh) sh.innerHTML = dlChartSheetHtml(DL_SERIES[DL_SLICE]);
 }
 function dlChartClose(){ var ov = document.getElementById('v8-dlchart-ov'); if(ov) ov.style.display = 'none'; }   // the Day Log sheet is always still open beneath this one -- it, not this function, owns body overflow
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ dlChartClose(); daylogClose(); moodClose(); } });
@@ -1274,8 +1393,10 @@ function clSeg(kind, cur, opts, counts){
 }
 function renderClosed(){
   var bk = STATE.book, el = document.getElementById('sec-closed'), nEl = document.getElementById('cl-n'),
-      rEl = document.getElementById('cl-r'), kpi = document.getElementById('cl-kpi'), more = document.getElementById('cl-more');
-  if(!bk || !bk.closed){ nEl.textContent = ''; rEl.textContent = ''; kpi.innerHTML = ''; kpi.className = ''; more.innerHTML = '';
+      rEl = document.getElementById('cl-r'), kpi = document.getElementById('cl-kpi'),
+      fbar = document.getElementById('cl-filter-bar'), extra = document.getElementById('cl-extra-kpi'),
+      more = document.getElementById('cl-more');
+  if(!bk || !bk.closed){ nEl.textContent = ''; rEl.textContent = ''; kpi.innerHTML = ''; fbar.innerHTML = ''; extra.innerHTML = ''; more.innerHTML = '';
     el.innerHTML = '<div class="slab dense" id="cl-empty"></div>'; emptyBox('cl-empty', 'Closed trades are not available right now.'); return; }
   var all = bk.closed, rows = clRows(all, CL_SIDE, CL_DUR, CL_BSK), isAll = (CL_SIDE === 'all' && CL_DUR === 'all' && CL_BSK === 'all');
   var sideCounts = { all: clRows(all, 'all', CL_DUR, CL_BSK).length, long: clRows(all, 'long', CL_DUR, CL_BSK).length, short: clRows(all, 'short', CL_DUR, CL_BSK).length };
@@ -1294,13 +1415,27 @@ function renderClosed(){
   var segs = clSeg('side', CL_SIDE, [['all','ANY SIDE'],['long','LONG'],['short','SHORT']], sideCounts)
            + clSeg('dur', CL_DUR, [['all','ANY WINDOW'],['1w','1W'],['1m','1M']], durCounts)
            + clSeg('bsk', CL_BSK, CL_BASKETS, bskCounts);
-  kpi.className = '';   /* #cl-kpi was the 3-column grid itself; it now wraps the two seg rows + the grid */
+  /* cc#2005: the filter chips move to their own bar (below the swipe deck, pane-1-only) instead
+     of living inside #cl-kpi -- #cl-kpi is now the swipeable REALISED/LONG/SHORT headline, same
+     3-box shape as pane 0/pane 2 (item 1). */
+  fbar.innerHTML = segs.replace(/class="filters"/g, 'class="filters" data-cl-seg="1"');
+  /* REALISED/LONG/SHORT here are the CANON, filter-independent totals -- same convention pane 0's
+     UNREALISED/LONG/SHORT already uses (the headline never moves when the list's own chips do;
+     only the list below does). LONG/SHORT realised are computed the same way st/realised already
+     are (clStats over clRows), just always with side forced and dur/bsk always 'all'. */
+  var lSt = clStats(clRows(all, 'long', 'all', 'all')), sSt = clStats(clRows(all, 'short', 'all', 'all'));
+  var realisedCanon = num(bk.realised) ? bk.realised : clStats(all).net;
+  kpi.innerHTML =
+      kpiWell('REALISED', inr(realisedCanon), sgn(realisedCanon), n+' closed trade'+(n===1?'':'s'), {info:'realised', chart:'all'})
+    + kpiWell('LONG', inr(lSt.net), sgn(lSt.net), lSt.n+' closed trade'+(lSt.n===1?'':'s'), {chart:'long'})
+    + kpiWell('SHORT', inr(sSt.net), sgn(sSt.net), sSt.n+' closed trade'+(sSt.n===1?'':'s'), {chart:'short'});
   /* cc#1856 FABLE APPROVED (09-Sep-2026): each tile's sub carried its own copy of the SAME
      filter/date state line (esc(win)) -- three tiles repeating one fact, plus a <br> that forced
      two lines nobody read. Cut to one line per tile (its own stat only) and print the shared
-     filter/date state ONCE, below the whole row, instead of tripling it. */
-  kpi.innerHTML = segs.replace(/class="filters"/g, 'class="filters" data-cl-seg="1"') + '<div class="kpi">'
-    + kpiWell('REALISED', inr(realised), sgn(realised), 'gross '+inrShort(gross)+' · brk '+inrShort(brk))
+     filter/date state ONCE, below the whole row, instead of tripling it.
+     cc#2005: WIN/LOSS + AVG WIN/LOSS relocated to their own #cl-extra-kpi, still filter-responsive
+     exactly as before -- founder addition B relocates them, does not delete or change them. */
+  extra.innerHTML = '<div class="kpi">'
     + kpiWell('WIN / LOSS', (num(wins)?wins:'—')+' / '+(num(losses)?losses:'—'), '', (num(acc) ? acc.toFixed(1)+'% win rate' : 'no decided trade yet'))
     + kpiWell('AVG WIN / LOSS', '<span class="up">'+(num(st.avgWin) ? pct(st.avgWin, 1) : '—')+'</span><span class="mu" style="font-size:11px"> / </span><span class="dn">'+(num(st.avgLoss) ? pct(st.avgLoss, 1) : '—')+'</span>', 'kn2', 'per decided trade')
     + '</div><div style="font-family:var(--mono);font-size:10px;color:var(--dim);text-align:center;margin-top:-4px">'+esc(win)+'</div>';
@@ -1316,6 +1451,107 @@ function renderClosed(){
   el.innerHTML = h + asofSession(bk.as_of, 'book');
   more.innerHTML = rows.length > CL_LIMIT
     ? '<span class="chip" data-cl-toggle="1">'+(clAll ? 'Fewer closed ▴' : 'All '+rows.length+' closed ▾')+'</span>' : '';
+}
+/* cc#2005: NET TOTAL pane -- unrealised + realised, all/long/short, purely from data already on
+   STATE.book (no new fetch). Same canon-total convention as the other two panes: always the
+   whole-era/whole-book figures, never affected by either list's own filter chips. */
+function renderNetKpi(bk){
+  var el = document.getElementById('net-kpi');
+  if(!bk){ el.innerHTML = ''; return; }
+  var L = bk.long||{}, S = bk.short||{};
+  var realisedCanon = num(bk.realised) ? bk.realised : clStats(bk.closed||[]).net;
+  var lRealised = clStats(clRows(bk.closed||[], 'long', 'all', 'all')).net;
+  var sRealised = clStats(clRows(bk.closed||[], 'short', 'all', 'all')).net;
+  var totNet = (num(bk.unrealised)?bk.unrealised:0) + realisedCanon;
+  var lNet = (num(L.unrealised)?L.unrealised:0) + lRealised;
+  var sNet = (num(S.unrealised)?S.unrealised:0) + sRealised;
+  el.innerHTML =
+      kpiWell('NET TOTAL', inr(totNet), sgn(totNet), 'unrealised + realised', {info:'net', chart:'all'})
+    + kpiWell('LONG', inr(lNet), sgn(lNet), 'unrealised + realised', {chart:'long'})
+    + kpiWell('SHORT', inr(sNet), sgn(sNet), 'unrealised + realised', {chart:'short'});
+}
+/* cc#2005: pane tracking for the swipe deck — same scroll-position index math as home.html's
+   heroDots()/bookDots() (native scroll-snap + a plain scroll listener, no touch handlers), plus
+   bookDots()'s tap-a-dot-to-jump. POS_PANE starts at -1 (not 0) purely so the FIRST posDots()
+   call, which lands on real pane 0, is still detected as a change and fires posPaneChanged() once
+   on load — a real page load is exactly like a real user swipe here, it must run the same wiring. */
+var POS_PANE = -1;
+function posDotsHtml(){ var h=''; for(var i=0;i<3;i++) h += '<i data-pos-dot="'+i+'"></i>'; return h; }
+function posDots(){
+  var tr = document.getElementById('posTrack'), dots = document.getElementById('posDots');
+  if(!tr || !dots) return;
+  if(!dots.children.length) dots.innerHTML = posDotsHtml();
+  var i = Math.round(tr.scrollLeft / Math.max(1, tr.clientWidth));
+  Array.prototype.forEach.call(dots.children, function(el, j){ el.className = (j === i ? 'on' : ''); });
+  if(i !== POS_PANE){ POS_PANE = i; posPaneChanged(); }
+}
+function posDotJump(i){ var tr = document.getElementById('posTrack'); if(tr) tr.scrollTo({left: i*tr.clientWidth, behavior:'smooth'}); }
+/* wired here, not via an inline onscroll="posDots()" attribute -- this whole script is a strict-
+   mode IIFE, so posDots is only visible in THIS closure; an inline HTML attribute handler runs in
+   the global scope and cannot see it (caught by the cc#2005 Playwright structural check: every
+   scroll threw "posDots is not a function" and no pane switch ever actually applied). */
+(function(){ var tr = document.getElementById('posTrack'); if(tr) tr.addEventListener('scroll', posDots); })();
+/* founder addition A: the active pane drives which filter bar + list render below the deck.
+   Pane 0 -> open filters + open list. Pane 1 -> closed filters + WIN/LOSS extra + closed list.
+   Pane 2 -> both lists, open then closed, one small divider between, no filter controls (the
+   founder's own wording reads as a plain concatenation, not a third filtered set — "Fable's
+   assumption, founder may override"). */
+function posPaneChanged(){
+  var bk = STATE.book;
+  var openN = (bk && bk.positions) ? bk.positions.length : 0;
+  var closedN = (bk && num(bk.trades)) ? bk.trades : ((bk && bk.closed) ? bk.closed.length : 0);
+  var hEl = document.getElementById('pos-n');
+  if(hEl) hEl.textContent = POS_PANE===0 ? openN+' open' : POS_PANE===1 ? closedN+' closed' : (openN+closedN)+' total';
+  var show = function(id, on){ var e = document.getElementById(id); if(e) e.style.display = on ? '' : 'none'; };
+  show('open-filter-bar', POS_PANE===0);
+  show('cl-filter-bar', POS_PANE===1);
+  show('cl-extra-kpi', POS_PANE===1);
+  show('sec-open', POS_PANE===0 || POS_PANE===2);
+  show('open-more', POS_PANE===0 || POS_PANE===2);
+  show('pos-divider', POS_PANE===2);
+  show('sec-closed', POS_PANE===1 || POS_PANE===2);
+  show('cl-more', POS_PANE===1 || POS_PANE===2);
+}
+/* cc#2005 founder addition (11-Sep 21:20 IST): ONE (i) button per pane (its leading/headline box
+   only — kpiWell's opts.info), showing that pane's own gross/brokerage/net working in plain
+   words. Same body-level sheet shape openSortSheetOpen() already established in this file. */
+function kwInfoLines(key){
+  var bk = STATE.book || {};
+  if(key === 'unrealised') return {
+    title: 'UNREALISED — HOW THIS IS WORKED OUT',
+    rows: [['P&L on open positions', inr(bk.unrealised)], ['Brokerage charged so far', '₹0'], ['Net', inr(bk.unrealised)]],
+    note: 'A position only pays the ₹500 brokerage when it closes — nothing is owed on it yet, so gross and net are the same number here.'
+  };
+  if(key === 'realised'){
+    var g = num(bk.gross) ? bk.gross : 0, b = num(bk.brokerage) ? bk.brokerage : 0, n = num(bk.trades) ? bk.trades : 0;
+    return {
+      title: 'REALISED — HOW THIS IS WORKED OUT',
+      rows: [['Gross P&L', inr(g)], ['Brokerage ('+n+' closed trade'+(n===1?'':'s')+' × ₹500)', '−'+inr(b)], ['Net', inr(num(bk.realised)?bk.realised:g-b)]],
+      note: 'Net of brokerage is what actually landed after every closed trade paid its ₹500.'
+    };
+  }
+  var u = num(bk.unrealised) ? bk.unrealised : 0, r = num(bk.realised) ? bk.realised : 0;
+  return {
+    title: 'NET TOTAL — HOW THIS IS WORKED OUT',
+    rows: [['Unrealised (net)', inr(u)], ['Realised (net)', inr(r)], ['Combined', inr(u+r)]],
+    note: 'Both halves are already net of brokerage, so the combined figure needs no further adjustment.'
+  };
+}
+function kwInfoHtml(key){
+  var d = kwInfoLines(key);
+  return '<div data-kw-info-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:85"></div>'
+    + '<div role="dialog" aria-modal="true" aria-label="'+esc(d.title)+'" style="position:fixed;left:0;right:0;bottom:0;z-index:86;background:var(--panel);border-top:1px solid var(--line);border-radius:14px 14px 0 0;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px))">'
+    + '<div style="width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px"></div>'
+    + '<div style="font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--gold,#D4AF37);margin-bottom:8px">'+esc(d.title)+'</div>'
+    + d.rows.map(function(r){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:13px"><span style="color:var(--mute)">'+esc(r[0])+'</span><b>'+r[1]+'</b></div>'; }).join('')
+    + '<div style="font-family:var(--mono);font-size:10.5px;color:var(--dim);line-height:1.5;margin-top:10px">'+esc(d.note)+'</div>'
+    + '</div>';
+}
+function kwInfoOpen(key){
+  var old = document.getElementById('kw-info-sheet'); if(old) old.remove();
+  var el = document.createElement('div'); el.id = 'kw-info-sheet'; el.innerHTML = kwInfoHtml(key);
+  document.getElementById('v8p').appendChild(el);   /* cc#1866/1867 lesson: child of #v8p, not document.body */
+  el.addEventListener('click', function(e){ if(e.target.closest('[data-kw-info-close]')) el.remove(); });
 }
 /* ── 6 · FUNNEL ──────────────────────────────────────────────────────────────────────── */
 /* Baskets come from /api/mobile/v8funnel (registry-derived, never a list on the page). Stages
@@ -1417,11 +1653,13 @@ function renderTop(){
   var fn = document.getElementById('foot-note'), dl = STATE.daylog;
   var capTxt = (dl && num(dl.capital_base)) ? ' Capital '+inr(dl.capital_base)+'.' : '';
   var eraTxt = (bk && bk.era_block && bk.era_block.era_label) ? ' '+bk.era_block.era_label+'.' : '';
-  if(bk && num(bk.brokerage_per_trade)) fn.textContent = 'Numbers are the paper book.'+eraTxt+capTxt+' ₹'+bk.brokerage_per_trade+' brokerage per closed trade.';
+  /* cc#2005 cleanup: same dead key as the #open-r fix above (bk.brokerage_per_trade never existed
+     in the payload) -- this branch never fired. 500 is the real, founder-locked constant. */
+  if(bk) fn.textContent = 'Numbers are the paper book.'+eraTxt+capTxt+' ₹500 brokerage per closed trade.';
   else if(capTxt || eraTxt) fn.textContent = 'Numbers are the paper book.'+eraTxt+capTxt;
 }
 /* ── boot + 5-min refresh ─────────────────────────────────────────────────────────────── */
-function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); renderClosed(); renderFunnel(); }
+function renderAll(){ renderTop(); renderMood(); renderOpen(); renderSectors(); renderDay(); renderClosed(); renderNetKpi(STATE.book); renderFunnel(); posDots(); }
 function load(){
   return Promise.all([
     getJ(URLS.mood).catch(function(){ return null; }),
@@ -1467,6 +1705,9 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var cs = e.target.closest('[data-cl-side]'); if(cs){ CL_SIDE = cs.getAttribute('data-cl-side'); clAll = false; renderClosed(); return; }   /* cc#1613 */
   var cd = e.target.closest('[data-cl-dur]'); if(cd){ CL_DUR = cd.getAttribute('data-cl-dur'); clAll = false; renderClosed(); return; }
   var cb = e.target.closest('[data-cl-bsk]'); if(cb){ CL_BSK = cb.getAttribute('data-cl-bsk'); clAll = false; renderClosed(); return; }   /* cc#1626 */
+  var kwi = e.target.closest('[data-kw-info]'); if(kwi){ kwInfoOpen(kwi.getAttribute('data-kw-info')); return; }   /* cc#2005 */
+  var kwc = e.target.closest('[data-kw-chart]'); if(kwc){ dlChartOpen(kwc.getAttribute('data-kw-chart')); return; }   /* cc#2005 */
+  var pd = e.target.closest('[data-pos-dot]'); if(pd){ posDotJump(+pd.getAttribute('data-pos-dot')); return; }   /* cc#2005 */
   var fb = e.target.closest('[data-fn-basket]'); if(fb){ fnBasket = fb.getAttribute('data-fn-basket'); renderFunnel(); return; }
   var fr = e.target.closest('[data-fn-retry]'); if(fr){ delete STATE.pass[fnBasket]; renderFunnel(); return; }
   var fs = e.target.closest('[data-fn-sym]'); if(fs){ location.href = '/m/check#tc?sym=' + encodeURIComponent(fs.getAttribute('data-fn-sym')); return; }   /* cc#1614: row -> Trade Check */
