@@ -102,6 +102,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # CC_CHROMIUM is an OPTIONAL override only: executable_path is passed to launch() if and only if
 # the env var is explicitly set. Leave it unset on the Railway service.
 CHROME = os.environ.get("CC_CHROMIUM") or None
+# cc#2014 bounce, 12-Sep-2026 ~18:45 IST: this line exists only to touch a watched file. Railway showed
+# no build after 2c218db landed; a change here (watchPatterns in railway.visualaudit.json) forces one.
 # cc#2012: no SHOTS_DIR any more -- images go to Postgres as bytes, never to the container's disk.
 
 # item 4: representative dark + light set, both confirmed COMPLETE (theme_validate, 12-Sep) —
