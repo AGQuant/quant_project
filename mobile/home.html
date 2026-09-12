@@ -1792,8 +1792,21 @@ body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
 .pcite{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-15);
   color:var(--txt);text-align:center}
 /* cc#1832: names the PCR basis (whole chain vs ATM+/-5) inline with the headline number, same
-   demoted weight as .preason's footnote role -- a qualifier, not a second focal point. */
-.pcrbasis{font-size:var(--type-11);font-weight:400;color:var(--mut)}
+   demoted weight as .preason's footnote role -- a qualifier, not a second focal point.
+   cc#2006 (founder 12-Sep ~08:20 IST): the plain-text qualifier BECOMES a tappable capsule opening
+   the cc#2003 chain popup -- .pcrbasis is retired (its one caller below now uses .pcrchip), not
+   left orphaned. Shape borrows .tr2 .pill's own recipe (same font/weight/letter-spacing/padding
+   idiom, same color-mix background TECHNIQUE) -- the closest existing "pill" in this file -- rather
+   than a wholly new shape language, recoloured to the spec's own explicit "secondary token colour"
+   (var(--mut), not a long/short green/red) since this pill is neutral/informational, not a
+   direction indicator. Fully rounded (999px) + a hairline border added on top of that borrowed
+   recipe because the spec's own words are "capsule ... rounded, bordered" -- .tr2 .pill itself has
+   neither (radius-5, no border), so this is not a byte-identical reuse, stated rather than implied. */
+.pcrchip{display:inline-flex;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-11);font-weight:800;letter-spacing:var(--track-em9);color:var(--mut);
+  background:color-mix(in srgb, var(--mut) 12%, transparent);border:var(--bw-1) solid var(--line2);
+  border-radius:999px;padding:var(--space-2) var(--space-6);cursor:pointer}
+.pcrchip:active{opacity:.65}
 /* cc#1568: one-line reason under the PCR line (CAUTIOUS cover reading / week unavailable). */
 .preason{font-size:var(--type-11);color:var(--mut);text-align:center;margin-top:var(--space-2)}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
@@ -5328,8 +5341,17 @@ function pcrMood(hero){
        against pcr_daily, the column every other PCR surface reads) -- NOT pcr_atm5, a materially
        different reading of the same instant (whole chain 1.28 vs ATM+/-5 1.80 on the founder's own
        screenshot). do_not_touch forbids switching which number renders; this only names it, so a
-       reader knows which question the figure answers. */
-    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + ' <span class="pcrbasis">(whole chain)</span>' + pcrAsOfSuffix(hero) + '</div>'
+       reader knows which question the figure answers.
+       cc#2006 (founder 12-Sep ~08:20 IST): "(whole chain)" becomes a tappable capsule opening the
+       SAME option-chain popup cc#2003 wires to the Max Pain chart (chainPopupOpen -> the ONE
+       cc#2004 chain-grid component, no second implementation, per this card's own item 3). Symbol
+       hardcoded to NIFTY: this card carries no per-symbol toggle (unlike heroCard3's IBK.sym) and
+       the whole-chain PCR it reads is the market-wide headline reading -- NIFTY, the same index
+       every OTHER "market mood"-style figure on this page (idxFooter, the top ticker) leads with.
+       Stated as a real assumption, not verified against a second underlying in mobile_home2.py's
+       own composer -- a one-line fix if wrong. Parentheses dropped per the spec ("the capsule shape
+       carries the meaning"). */
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + ' <span class="pcrchip" onclick="chainPopupOpen(\'NIFTY\')" role="button" aria-label="Open full option chain, whole chain PCR basis">whole chain</span>' + pcrAsOfSuffix(hero) + '</div>'
     /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
        ("High put cover while Nifty is down 1.4% on the week"); a missing week input says so
        ("week return unavailable"). Both strings are the composer's — nothing is worded here. */
