@@ -888,6 +888,8 @@ from v8_approved_trades import router as v8_approved_trades_router   # cc#1867 H
 app.include_router(v8_approved_trades_router)
 from mobile_home_derivatives import router as mobile_home_derivatives_router   # cc#1875 phase 1: Home 3rd card, DERIVATIVES (index option chain summary), wraps oi_structure.oi_structure() -- no second formula
 app.include_router(mobile_home_derivatives_router)
+from option_chain_grid import router as option_chain_grid_router   # cc#2004: NSE-style chain grid -- merges deriv_metrics.strike_chain() (ltp/iv/tag, stocks+index) with oi_structure/max_pain (OI/wall/max-pain, index-only), one builder for the D-button chain and (via cc#2003/cc#2006) the Home popup
+app.include_router(option_chain_grid_router)
 from ops_control_plane import control_plane_router   # cc#693: ops control plane (registries + job_runs spine + diagnosis)
 app.include_router(control_plane_router)
 app.include_router(performance_router)
