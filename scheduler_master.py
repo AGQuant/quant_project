@@ -160,6 +160,20 @@ _WORKER_JOBS = [
     {"job_name": "fyers_token_relogin", "cadence_human": "event-triggered on auth/token failure",
      "module": "worker/fyers_feed.py", "function": "try_relogin call sites", "service": "worker",
      "category": "worker_watchdog"},
+    # cc#2012 item 7: the visual-audit worker (visual_audit.py, its OWN Railway service, cc#2009's
+    # Dockerfile.visualaudit) is an in-process while-loop exactly like the two feed-worker entries
+    # above -- a 60s poll of visual_audit_requests plus an in-process 03:00 IST daily crawl -- so
+    # the AST enumerator cannot see it either. The cc#759 drift audit keys on THIS list (plus the
+    # scheduler-loop/startup/chained enumerations), NOT on file presence: on 12-Sep it auto-retired
+    # the registry row as "vanished from code" because the row was category='external_job' and
+    # matched none of the enumerations -- and would have kept doing so on every audit no matter what
+    # was on main. Listed here, by name, is the fix. Never hand-flip the row's active flag alone:
+    # the next audit undoes it (cc#1095's own lesson, two entries up).
+    {"job_name": "visual_audit_crawl",
+     "cadence_human": "in-process worker: 60s poll of visual_audit_requests + full crawl daily 03:00 IST (Asia/Kolkata clock inside the process, NOT Railway cron)",
+     "module": "visual_audit.py", "function": "worker", "service": "visual-audit",
+     "category": "worker_watchdog",
+     "notes": "cc#2007/cc#2012. Own Railway service (Dockerfile.visualaudit, railway.visualaudit.json). Never runs in the web process."},
 ]
 
 

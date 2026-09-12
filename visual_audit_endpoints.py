@@ -1,12 +1,34 @@
-"""visual_audit_endpoints.py — cc#2007 item 12: a read endpoint returning only FAILURES for the
-latest visual-audit run, grouped by route, with the capture reference so Fable and the founder can
-look at the specific image. This is a normal lightweight DB-read endpoint in the main web app --
-the do_not_touch restriction on running "inside the web process" is about the Playwright CRAWLER
-(visual_audit.py, its own separate job/service), not this reporting endpoint. See that file's own
-module docstring for the full card context.
+"""visual_audit_endpoints.py — cc#2007 item 12 + cc#2012 items 2/3.
+
+cc#2007: GET /api/visual-audit/failures -- FAILURES only for the latest run, grouped by route.
+Untouched by cc#2012 (its do_not_touch names this route and its auth explicitly).
+
+cc#2012 (the PIXEL LENS): two NEW routes that serve the picture itself --
+  GET /api/visual-audit/capture/{id}?token=...   -> the stored JPEG bytes, with the stored mime
+  GET /api/visual-audit/runs/latest?token=...    -> JSON: run_id, captured_at, per-capture summary
+Both are gated by ONE query-param token compared CONSTANT-TIME (hmac.compare_digest) against the
+web-service env var VISUAL_AUDIT_VIEW_TOKEN. Wrong or missing token -> 404, not 401, so the route
+does not advertise itself. Env var unset -> 404 for every request, fail-closed. CC generates
+nothing: the founder sets the token in the Railway console (>=32 random bytes, hex); it is never
+in this repo, a task log or session_log. A screenshot of a logged-in app shows positions and P&L,
+so the token IS a credential and is treated as one.
+
+Site-auth exclusion, checked rather than assumed (cc#2012's own gate): main.py's auth_gate
+middleware redirects to /login ONLY for paths in the exact-match PROTECTED set or under /preview/.
+These two routes are not in PROTECTED and never will be, so they are outside the site-password gate
+by construction -- the token is their only auth, exactly as the card asks -- and the middleware
+itself needed no change at all. Its post-response HTML injection is also a no-op here: it keys on a
+text/html content-type, and these routes return image/jpeg and application/json.
+
+This is a normal lightweight DB-read router in the main web app -- the "not inside the web process"
+restriction is about the Playwright WORKER (visual_audit.py), not these reads.
 """
 
+import hmac
+import os
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 import deriv_metrics  # reuses the one shared _conn() helper, same convention as option_chain_grid.py
 
@@ -15,6 +37,62 @@ router = APIRouter()
 
 def _conn():
     return deriv_metrics._conn()
+
+
+def _token_ok(token: str) -> bool:
+    """Constant-time compare against VISUAL_AUDIT_VIEW_TOKEN. Unset env var, empty token, or any
+    mismatch -> False. The two branches below deliberately do not short-circuit on the token
+    length: compare_digest handles that, and a plain `==` would leak position of first mismatch."""
+    expected = os.environ.get("VISUAL_AUDIT_VIEW_TOKEN", "")
+    if not expected or not token:
+        return False
+    return hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8"))
+
+
+@router.get("/api/visual-audit/capture/{capture_id}")
+def visual_audit_capture(capture_id: int, token: str = ""):
+    """cc#2012 item 2: the stored image, served with its stored mime. 404 on bad/missing token, on
+    an unknown id, and on a row whose bytes have already been purged by retention -- all three read
+    the same from outside, on purpose."""
+    if not _token_ok(token):
+        raise HTTPException(404)
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT image_bytes, image_mime FROM visual_audit_captures WHERE id=%s", (capture_id,))
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        raise HTTPException(404)
+    data, mime = row
+    return Response(content=bytes(data), media_type=mime or "image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/visual-audit/runs/latest")
+def visual_audit_runs_latest(token: str = ""):
+    """cc#2012 item 2: the latest run as JSON -- run_id, captured_at, and one entry per capture
+    {id, route, theme, viewport, status, fail_count, content_hash}. An on-demand request capture
+    carries a 'req-…' run_id and is not a 'run' in this sense; this reads the latest FULL crawl."""
+    if not _token_ok(token):
+        raise HTTPException(404)
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT run_id, MAX(captured_at) FROM visual_audit_captures
+                       WHERE run_id NOT LIKE 'req-%%'
+                       GROUP BY run_id ORDER BY MAX(captured_at) DESC LIMIT 1""")
+        row = cur.fetchone()
+        if not row:
+            return {"run_id": None, "captured_at": None, "captures": [],
+                    "note": "no full crawl has been recorded yet"}
+        run_id, captured_at = row
+        cur.execute("""SELECT c.id, c.route, c.theme, c.viewport, c.status, c.content_hash,
+                              c.image_bytes IS NOT NULL,
+                              (SELECT COUNT(*) FROM visual_audit_results r
+                                WHERE r.capture_id = c.id AND r.status = 'FAIL')
+                       FROM visual_audit_captures c
+                       WHERE c.run_id = %s
+                       ORDER BY c.route, c.theme, c.viewport""", (run_id,))
+        rows = cur.fetchall()
+    return {"run_id": run_id, "captured_at": captured_at.isoformat() if captured_at else None,
+            "captures": [{"id": r[0], "route": r[1], "theme": r[2], "viewport": r[3], "status": r[4],
+                          "content_hash": r[5], "has_image": r[6], "fail_count": r[7]} for r in rows]}
 
 
 @router.get("/api/visual-audit/failures")
