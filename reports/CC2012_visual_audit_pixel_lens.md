@@ -174,3 +174,32 @@ same commit. DB on real rows: 0 captures, 0 results (never run — correct), reg
 **Verdict:** cc#2007 and cc#2009 LANDED correctly. NOT LIVE: no service provisioned, no first run,
 and the registry row had been auto-retired by cc#759 (root cause above, now fixed in both places).
 cc#2012 supersedes cc#2009's Cron-Job service type and cc#2007's image-on-FAIL storage.
+
+## First live run (12-Sep, after cc#2014 + cc#2015 fixed the boot) and cc#2016
+
+The service came up after the tzdata + chromium-path + playwright-pin fixes (cc#2014, cc#2015).
+Acceptance request (`/m/home`, aquawhite, mobile) went `done`, `capture_id=1`; the catch-up full
+crawl then ran on its own (`last_run_at` was NULL, past 03:00 IST): run `5505ee536a344374`,
+13:57:57–14:08:51 UTC, **168 captures = 42 routes × 2 themes × 2 viewports, 0 errors, 168/168 with
+image bytes** (51 MB total, ~311 kB/JPEG). Full check tallies and the worst routes are in
+`cc_task_logs` on cc#2012 (12-Sep). System is LIVE per rule 9.
+
+**cc#2016 (P2)** — the founder pasted a capture URL with a valid token; Fable's own `web_fetch` can
+read text/JSON/HTML but not a raw binary `image/jpeg` response, so the picture itself was still
+unreachable to Fable even though auth and storage were both proven working. Fix, additive only, in
+`visual_audit_endpoints.py`:
+
+- `GET /api/visual-audit/capture/{id}?token=…&encoding=base64` — same `_token_ok` gate, same order
+  (checked before `encoding` is even read, so there is no second weaker path) — returns
+  `{"id","route","theme","viewport","mime","data_base64"}` instead of the raw image. `encoding`
+  absent, empty, or any value other than `base64` (case-insensitive) is the **original path,
+  unchanged** — a human opening the link still gets a normal image.
+- No new column, no stored base64 copy — encoded from `image_bytes` at request time.
+- `runs/latest`, the worker loop, the checks: untouched, per the card's own do-not-touch.
+
+Verify (real function, fakes for the DB row, run in this container): wrong token → 404 in both
+modes, **without querying the DB first** (checked directly — the auth gate raises before the
+`SELECT`); default (`encoding=""`) → unchanged `Response`, same bytes/mime/`Cache-Control: no-store`;
+`encoding=base64` → JSON, `data_base64` decodes to the exact stored bytes, `id/route/theme/viewport/
+mime` correct; `encoding=BASE64` → same (case-insensitive); `encoding=bogus` → falls back to the
+raw path unchanged; a purged/unknown row → 404 in either mode. 12/12 checks.

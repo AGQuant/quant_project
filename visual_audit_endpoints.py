@@ -6,6 +6,12 @@ Untouched by cc#2012 (its do_not_touch names this route and its auth explicitly)
 cc#2012 (the PIXEL LENS): two NEW routes that serve the picture itself --
   GET /api/visual-audit/capture/{id}?token=...   -> the stored JPEG bytes, with the stored mime
   GET /api/visual-audit/runs/latest?token=...    -> JSON: run_id, captured_at, per-capture summary
+
+cc#2016: /capture/{id} gained an optional ?encoding=base64 -- Fable's own fetch tool reads text/
+JSON/HTML but cannot render a raw binary image response from an external URL, so the default
+image/jpeg reply (for a human opening the link) was a dead end for Fable specifically. With
+encoding=base64 the SAME route, SAME auth path, returns JSON {id, route, theme, viewport, mime,
+data_base64} instead. No param (or any value other than "base64") -> unchanged raw-image behavior.
 Both are gated by ONE query-param token compared CONSTANT-TIME (hmac.compare_digest) against the
 web-service env var VISUAL_AUDIT_VIEW_TOKEN. Wrong or missing token -> 404, not 401, so the route
 does not advertise itself. Env var unset -> 404 for every request, fail-closed. CC generates
@@ -24,6 +30,7 @@ This is a normal lightweight DB-read router in the main web app -- the "not insi
 restriction is about the Playwright WORKER (visual_audit.py), not these reads.
 """
 
+import base64
 import hmac
 import os
 
@@ -50,19 +57,30 @@ def _token_ok(token: str) -> bool:
 
 
 @router.get("/api/visual-audit/capture/{capture_id}")
-def visual_audit_capture(capture_id: int, token: str = ""):
+def visual_audit_capture(capture_id: int, token: str = "", encoding: str = ""):
     """cc#2012 item 2: the stored image, served with its stored mime. 404 on bad/missing token, on
     an unknown id, and on a row whose bytes have already been purged by retention -- all three read
-    the same from outside, on purpose."""
+    the same from outside, on purpose.
+
+    cc#2016: ?encoding=base64 (exact match, case-insensitive; absent or any other value is the
+    original raw-image path -- UNCHANGED) returns the same bytes as JSON instead of image/jpeg, for
+    Fable's own fetch tool, which cannot render a raw binary response. Same _token_ok call, same
+    order (checked before encoding is even read) -- one auth path, not a second weaker one. The
+    base64 text is built at request time from image_bytes; nothing new is stored."""
     if not _token_ok(token):
         raise HTTPException(404)
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT image_bytes, image_mime FROM visual_audit_captures WHERE id=%s", (capture_id,))
+        cur.execute("SELECT route, theme, viewport, image_bytes, image_mime "
+                    "FROM visual_audit_captures WHERE id=%s", (capture_id,))
         row = cur.fetchone()
-    if not row or row[0] is None:
+    if not row or row[3] is None:
         raise HTTPException(404)
-    data, mime = row
-    return Response(content=bytes(data), media_type=mime or "image/jpeg",
+    route, theme, viewport, data, mime = row
+    mime = mime or "image/jpeg"
+    if encoding.lower() == "base64":
+        return {"id": capture_id, "route": route, "theme": theme, "viewport": viewport,
+                "mime": mime, "data_base64": base64.b64encode(bytes(data)).decode("ascii")}
+    return Response(content=bytes(data), media_type=mime,
                     headers={"Cache-Control": "no-store"})
 
 
