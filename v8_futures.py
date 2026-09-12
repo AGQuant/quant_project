@@ -83,8 +83,14 @@ async def upload_futures(req: Request):
 
 
 @router.post("/add")
-async def add_futures(req: Request):
+async def add_futures(req: Request, x_admin_token: str = Header(None)):
     """Add stocks to futures universe."""
+    # security finding (cc#1986 audit, log 6267/6385): this route mutates the live futures
+    # universe and had NO auth check at all -- confirmed no .html/.js caller anywhere in the
+    # repo (grep, 12-Sep), so this is safe to gate without breaking a UI flow. Same check
+    # sync_lots already uses in this file.
+    if x_admin_token != os.getenv("ADMIN_TOKEN"):
+        raise HTTPException(401, "Unauthorized")
     body = await req.json()
     stocks = body.get("stocks", [])
     if not stocks:
@@ -129,8 +135,12 @@ def sync_lots(x_admin_token: str = Header(None)):
 
 
 @router.post("/remove")
-async def remove_futures(req: Request):
+async def remove_futures(req: Request, x_admin_token: str = Header(None)):
     """Deactivate stocks (soft remove)."""
+    # security finding (cc#1986 audit, log 6267/6385): same gap and same fix as add_futures
+    # just above -- no auth check, no .html/.js caller found repo-wide.
+    if x_admin_token != os.getenv("ADMIN_TOKEN"):
+        raise HTTPException(401, "Unauthorized")
     body = await req.json()
     stocks = body.get("stocks", [])
     if not stocks:

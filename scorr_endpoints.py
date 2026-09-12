@@ -4,7 +4,7 @@ Smart routing: Cache (0 tokens) → Anthropic API (only for explanations)
 Monthly cost: $2-3 (vs $100 Max plan)
 """
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, time as dt_time
@@ -28,9 +28,23 @@ router = APIRouter()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
+
+
+def _check_admin(token):
+    """Same check as main.py's _check_admin -- duplicated here (not imported) to avoid a
+    circular import, since main.py mounts this file's router. security finding (cc#1986
+    audit, log 6267/6385): /api/position/open and /api/position/close had NO auth check at
+    all -- confirmed no .html/.js caller anywhere in the repo (grep, 12-Sep), so gating them
+    does not break any live UI flow."""
+    if not ADMIN_TOKEN:
+        return True
+    if token != ADMIN_TOKEN:
+        raise HTTPException(403, "Invalid admin token")
+    return True
 
 
 # ── Request Models ───────────────────────────────────────────────────────────────────────────────
@@ -944,9 +958,10 @@ def _live_fut_ltp(cur, symbol):
 
 
 @router.post("/api/position/open")
-def position_open(payload: dict = Body(...)):
+def position_open(payload: dict = Body(...), x_admin_token: str = Header(None)):
     """Open a Client/Test position. Body: {book: client|test, who, symbol, direction,
     lots|qty, price?}. Server resolves is_dabba + qty + live fut LTP. Returns the full echo."""
+    _check_admin(x_admin_token)
     book = (payload.get("book") or "").lower().strip()
     tables = _book_tables(book)
     if not tables:
@@ -998,10 +1013,11 @@ def position_open(payload: dict = Body(...)):
 
 
 @router.post("/api/position/close")
-def position_close(payload: dict = Body(...)):
+def position_close(payload: dict = Body(...), x_admin_token: str = Header(None)):
     """Close a Client/Test position (full close). Body: {book, who, symbol, direction, price?}.
     Reads qty/entry from the OPEN row, resolves live fut LTP if price omitted, books pnl into
     *_closed and removes the open row. Returns the full echo (qty, entry, exit, pnl)."""
+    _check_admin(x_admin_token)
     book = (payload.get("book") or "").lower().strip()
     tables = _book_tables(book)
     if not tables:
