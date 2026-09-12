@@ -3372,7 +3372,7 @@ FUT_BOOK_CUTOVER_KEY = "v8_fut_book_cutover_ts"
 FUT_SERIES_START_SQL = "SELECT MIN(ts) FROM intraday_prices WHERE source='fyers_fut'"
 
 @router.get("/daylog")
-def v8_daylog(era: str = "fresh", view: str = "equity"):
+def v8_daylog(era: str = "fresh", view: str = "equity", side: str = None):
     """Day-wise aggregated performance table. Capital base Rs.50,00,000. Brokerage Rs.500/closed trade.
     cc#510: defaults to the REBUILT-SUITE era only -- every CTE is restricted to
     entry_ts >= app_config.v8_paper_rebuild_cutover_ts (cc#504's cutover). This excludes the
@@ -3385,7 +3385,25 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
     eligibility is on EXIT, not entry, because that is the leg where the basis changed. The OPENED
     counts keep an entry-side bound instead: the first fyers_fut bar we hold, since a position
     entered before the feed cannot be futures-priced. Both bounds come from data, neither is typed
-    in here."""
+    in here.
+
+    cc#2005: ?side=LONG|SHORT is a NEW, purely ADDITIVE filter on the CLOSED leg only (the
+    v8_paper_trades side of the closed CTE) — every existing caller that omits it (the Day Log tab
+    itself, and every other current caller) gets byte-identical behaviour, since the added WHERE
+    clause is `side IS NULL OR side = %(side)s`. Anything other than the literal strings LONG/SHORT
+    is treated as no filter (never silently returns an empty book on a typo). The OPENED-side
+    counts (long_open/short_open) and which calendar days appear at all (all_dates) are
+    deliberately left UNFILTERED — the Day Log table's own entry-day display is untouched, and the
+    one new caller (v8_daylog_extras.build_series) already skips any day with closed<=0 regardless,
+    so an unfiltered all_dates changes nothing it reads.
+
+    CAVEAT, stated rather than silently left wrong: because `opened`/`all_dates` stay unfiltered
+    while `closed` is filtered, the response's `net_open` (both per-day and in `summary`) is NOT
+    side-consistent when `side` is set — it would read as "all opens minus this side's closes",
+    which is not a real number. This param is scoped to the P&L figures only (gross_pnl, brokerage,
+    net_pnl per day, and the three summary totals) — the only fields cc#2005's caller reads. Do not
+    read `net_open`/`opened`/`long_open`/`short_open` off a side-filtered call."""
+    side = side.upper() if side in ("LONG", "SHORT", "long", "short") else None
     try:
         with _conn() as conn, conn.cursor() as cur:
             # cc#1604 V8_ERA_CUTOVER_ONLY_V1: the full ledger is suspended. era=all is refused
@@ -3458,7 +3476,7 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
                         COUNT(*)*500 AS brokerage,
                         ROUND((SUM(pnl)-COUNT(*)*500)::numeric,2) AS net_pnl
                     FROM v8_paper_trades
-                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(xcut)s::timestamp IS NULL OR COALESCE(exit_ts, closed_at) >= %(xcut)s::timestamp) AND NOT (basket = ANY(%(retired)s))
+                    WHERE (%(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) AND (%(xcut)s::timestamp IS NULL OR COALESCE(exit_ts, closed_at) >= %(xcut)s::timestamp) AND NOT (basket = ANY(%(retired)s)) AND (%(side)s::text IS NULL OR side = %(side)s)
                     GROUP BY COALESCE(closed_at::date, exit_ts::date)
                 ),
                 cumulative AS (
@@ -3483,7 +3501,7 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
                       - SUM(closed) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS net_open,
                     ROUND((net_pnl/5000000.0*100)::numeric,2) AS return_pct
                 FROM cumulative ORDER BY d DESC
-            """, {"cut": cutover_ts, "retired": _retired, "ecut": entry_cut, "xcut": exit_cut})
+            """, {"cut": cutover_ts, "retired": _retired, "ecut": entry_cut, "xcut": exit_cut, "side": side})
             cols = [d[0] for d in cur.description]
             rows = []
             for r in cur.fetchall():
@@ -3515,6 +3533,7 @@ def v8_daylog(era: str = "fresh", view: str = "equity"):
             "era_block": _era_block,            # cc#1604: caption "Since 18-Jul-2026", served
             "rebuild_cutover_ts": str(cutover_ts) if cutover_ts else None,
             "view": "futures" if view == "futures" else "equity",   # cc#994
+            "side": side,   # cc#2005: echoes the applied closed-leg filter; None means unfiltered (every existing caller)
             # cc#1019: both futures bounds, stated so the surface can label what it is showing.
             # Null unless view=futures.
             "fut_cutover_ts": str(exit_cut) if exit_cut else None,      # closed trades: exit_ts >= this

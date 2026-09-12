@@ -81,6 +81,7 @@ def build_series(payload: dict) -> dict:
         "table_start": table_start,          # first row of the Day Log table (first fresh-era entry)
         "era_cutover_ts": payload.get("rebuild_cutover_ts"),
         "view": payload.get("view"),
+        "side": payload.get("side"),   # cc#2005: echoes v8_daylog's applied closed-leg filter (None = all)
         "trading_days": len(days),           # the same count the tab prints ("32 trading days")
         "calendar_days": calendar_days,
         "capital": capital,
@@ -95,12 +96,18 @@ def build_series(payload: dict) -> dict:
 
 
 @router.get("/daylog/series")
-def v8_daylog_series(view: str = "equity"):
+def v8_daylog_series(view: str = "equity", side: str = None):
     """cc#1561: cumulative gross/net P&L by exit date plus the return facts behind the Overall
     Return box. Same window, era, registry and brokerage as /api/v8/daylog because it IS that
-    payload, folded. ?view=futures follows the Day Log tab's futures book the same way."""
+    payload, folded. ?view=futures follows the Day Log tab's futures book the same way.
+
+    cc#2005: ?side=LONG|SHORT is new, additive, and passed straight through to v8_daylog's own
+    same-named param (see that function's docstring for the exact filter and its one caveat —
+    net_open is not meaningful on a side-filtered call, which is fine here since build_series()
+    never reads it). Omitted (the P&L strip's existing callers, and the Day Log chart itself),
+    behaviour is byte-identical to before this card."""
     try:
-        payload = v8_endpoints.v8_daylog(era="fresh", view=view)
+        payload = v8_endpoints.v8_daylog(era="fresh", view=view, side=side)
     except HTTPException:
         raise
     except Exception as e:
