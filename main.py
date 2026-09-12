@@ -295,6 +295,12 @@ PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
 PROTECTED.add("/alerts")   # cc#1536: Alerts, web — gate + no-store
 PROTECTED.add("/intel")    # cc#1754: Intel standalone page — gate + no-store (same as /news, which now 301s to it)
+# cc#2013 P0: three web pages were live with NO gate at all -- served to anyone, no password. Found by
+# set difference of app_route_map (crawl=true) minus PROTECTED, re-derived by CC from the source, not
+# assumed from the card. /quant-basket is the basket page. Gate only; nav/PWA wiring untouched.
+PROTECTED.add("/quant-basket")   # cc#2013: was ungated since v2.9.54
+PROTECTED.add("/v10")            # cc#2013: was ungated (in _PWA_INJECT_PATHS, never in PROTECTED)
+PROTECTED.add("/intraday")       # cc#2013: was ungated since the cc#481 restore
 # cc#1086: the room carries internal engineering discussion and unreleased spec detail. Gated for
 # that reason, not by habit — a logged-out request must reach login, never the thread.
 PROTECTED.add("/room")
@@ -308,6 +314,7 @@ PROTECTED.add("/m/v8"); PROTECTED.add("/m/check"); PROTECTED.add("/m/home")   # 
 PROTECTED.add("/m/digest"); PROTECTED.add("/m/results")   # cc#874 (final three)
 PROTECTED.add("/m/trades")   # cc#991: Wall of Trades, app screen
 PROTECTED.add("/m/v10")      # cc#1069: V10 signal view — gated like every other /m/ screen
+PROTECTED.add("/m/gvm2")     # cc#2013: symbol-card target (v10_page_endpoints.py) was ungated -- same rule as every /m/ screen
 # cc#1506: Alerts feed. PROTECTED only, deliberately NOT _PWA_INJECT_PATHS — the cc#874 rule
 # above: /m/ screens carry their own 5-slot bottom nav, and injecting pwa.js's would put two
 # navigations on one screen. (The card's checklist named both sets; this file's own doctrine

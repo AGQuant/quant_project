@@ -29,6 +29,15 @@ router = APIRouter()
 COOKIE_NAME = "scorr_auth"
 PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/fpc", "/news", "/holdings", "/filters"}
 
+# cc#2013: the HTML routes that are public ON PURPOSE. Today this set is the reference the startup
+# coverage audit below subtracts before it complains -- it does NOT drive the gate yet (the gate is
+# still "in PROTECTED or under /preview/", exact match). It is also the allowlist the card's item 3
+# proposal would gate everything else against; see reports/CC2013_auth_gap.md. /m/login is here for
+# the cc#874 item 7 reason: a login page behind the login gate is a lockout with no way back in.
+# The token-gated visual-audit routes (cc#2012) and /api/* are not HTML pages and never enter the
+# audit -- it only reads app_route_map rows with crawl=true.
+PUBLIC_PATHS = {"/login", "/logout", "/m/login"}
+
 # Fallback password ONLY if SCORR_AUTH_PASSWORD env var is missing (warned). Do not commit a new value.
 _PASSWORD = "556700"
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -245,12 +254,47 @@ def _set_auth_cookie(response, token: str):
     )
 
 
+def audit_gate_coverage() -> list:
+    """cc#2013 item 4 -- the startup assertion. Reads every HTML route the app itself declares as a
+    page (app_route_map WHERE crawl = true, Fable's table, one row per route) and names, at ERROR,
+    every one that is neither in PROTECTED nor in PUBLIC_PATHS. This is the exact check that would
+    have caught /quant-basket on the day it shipped: the gate is an exact-match set, so a new page is
+    ungated BY DEFAULT and nothing else in the app complains. Query strings are stripped before the
+    compare (app_route_map carries '/cio2?model=gvm'; the gate sees the path '/cio2'). Returns the
+    ungated list so a test can assert on it. Never raises -- a DB blip must not become a startup
+    failure -- and logs one line either way, so the absence of the ERROR line is itself evidence."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT route FROM app_route_map WHERE crawl = true")
+            routes = [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        log.warning(f"gate coverage audit skipped (app_route_map unreadable): {e}")
+        return []
+    paths = {r.split("?", 1)[0] for r in routes}
+    ungated = sorted(paths - PROTECTED - PUBLIC_PATHS)
+    if ungated:
+        log.error(f"AUTH GATE GAP (cc#2013): {len(ungated)} page route(s) in app_route_map are served with "
+                  f"NO password gate -- not in PROTECTED, not in PUBLIC_PATHS: {ungated}. "
+                  f"Add each to PROTECTED in main.py (or to PUBLIC_PATHS if it is public on purpose).")
+    else:
+        log.info(f"gate coverage OK (cc#2013): all {len(paths)} crawl routes in app_route_map are "
+                 f"PROTECTED or PUBLIC_PATHS")
+    return ungated
+
+
 @router.on_event("startup")
 async def _startup():
     try:
         _ensure_sessions()
     except Exception as e:
         log.error(f"auth_sessions ensure on startup failed: {e}")
+    # cc#2013 item 4: runs here, not in main.py (rule 4: main.py is wiring only). By the time startup
+    # events fire every module-level PROTECTED.add() in main.py has already run, so this sees the
+    # complete gate set. audit_gate_coverage never raises; the try is belt-and-braces for boot.
+    try:
+        audit_gate_coverage()
+    except Exception as e:
+        log.warning(f"gate coverage audit on startup failed: {e}")
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
