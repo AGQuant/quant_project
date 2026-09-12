@@ -17,11 +17,18 @@ WORKDIR /app
 # already clones for this service.
 COPY . .
 
-# playwright itself ships with this base image; psycopg is the one extra dependency visual_audit.py
-# imports that the image does not already carry.
-RUN pip install --no-cache-dir "psycopg[binary]"
+# playwright itself ships with this base image. Two extras visual_audit.py imports that the image
+# does not carry: psycopg (the DB driver) and tzdata (cc#2014: the jammy image is slim -- no
+# /usr/share/zoneinfo -- so ZoneInfo("Asia/Kolkata") raised ZoneInfoNotFoundError at IMPORT time and
+# the process died before login; tzdata is the stdlib zoneinfo's documented fallback source, PEP 615).
+# The code keeps Asia/Kolkata as the canon (CLAUDE.md: all times IST) -- no hardcoded +05:30 offset.
+RUN pip install --no-cache-dir "psycopg[binary]" tzdata
 
 # Reads its config from environment variables (DATABASE_URL, VISUAL_AUDIT_BASE_URL,
-# SCORR_AUTH_PASSWORD -- see the report for the complete list); no flags needed for the scheduled
-# run. Runs once and exits -- built to be this service's Cron Job command, not a long-lived process.
+# SCORR_AUTH_PASSWORD, optional VISUAL_AUDIT_POLL_SECONDS and CC_CHROMIUM -- see
+# reports/CC2012_visual_audit_pixel_lens.md item 8 for the complete list); no flags needed.
+# cc#2012: this is an ALWAYS-ON worker, not a Cron Job -- one browser, one login, one DB
+# connection for the life of the process; it polls visual_audit_requests every 60s and runs the
+# full crawl itself at 03:00 IST (decided in-process; Railway cron is UTC-only). Railway restarts
+# it ON_FAILURE (railway.visualaudit.json). --once exists for a manual smoke test.
 CMD ["python3", "visual_audit.py"]

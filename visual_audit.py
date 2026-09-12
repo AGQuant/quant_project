@@ -36,9 +36,9 @@ WHAT DID NOT CHANGE, cc#2007's own original notes below still apply
     This is the LIVE-SITE counterpart to tools/render_check.py (cc#1133 "CC EYES"), which renders
     the repo TEMPLATE standalone and says so in its own docstring: "There is no route to scorr.in
     from the CC container." This module runs as its own process against a REAL deployed instance,
-    logged in as a real session. It reuses render_check.py's Playwright-launch idiom (same CHROME
-    env var, same executable_path) and its proven overflow/clipping DOM-probe logic (credited
-    inline in CHECKS_JS) rather than re-deriving either.
+    logged in as a real session. It launches Playwright's own bundled browser (cc#2014: no default executable_path;
+    CC_CHROMIUM is an optional override only) and reuses render_check.py's proven
+    overflow/clipping DOM-probe logic (credited inline in CHECKS_JS) rather than re-deriving it.
 
     do_not_touch item 1 (cc#2007's own words, still true under cc#2012): "this job must not run
     inside [the web process] or add latency to any user request." So this still does NOT register
@@ -95,7 +95,13 @@ MAX_ACTION_STEPS = 10
 log = logging.getLogger("scorr.visual_audit")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-CHROME = os.environ.get("CC_CHROMIUM", "/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+# cc#2014: NO default browser path. Inside the official Playwright image the library resolves its
+# own bundled browser (v1.48.0-jammy ships chromium revision 1140 -- read from the wheel's
+# browsers.json, not guessed); the old hardcoded chromium-1194 path was copied from CC's own
+# container, did not exist in the image, and made launch() raise before login on every boot.
+# CC_CHROMIUM is an OPTIONAL override only: executable_path is passed to launch() if and only if
+# the env var is explicitly set. Leave it unset on the Railway service.
+CHROME = os.environ.get("CC_CHROMIUM") or None
 # cc#2012: no SHOTS_DIR any more -- images go to Postgres as bytes, never to the container's disk.
 
 # item 4: representative dark + light set, both confirmed COMPLETE (theme_validate, 12-Sep) —
@@ -642,6 +648,26 @@ def daily_crawl_due(conn, now_ist=None):
     return last.astimezone(IST).date() < now_ist.date()
 
 
+def launch_browser(p):
+    """cc#2014 item 2 -- boot-time preflight, BEFORE login. Launch the browser Playwright resolves
+    itself (or CC_CHROMIUM if explicitly set), log the resolved browser version so the Deploy Logs
+    prove the process got past the launch, and hand the browser back. If launch fails, log the
+    reason and the path it tried at ERROR and exit non-zero -- the 12-Sep crash was visible only in
+    Railway's Deploy Logs, with nothing in the app naming the cause. Raises SystemExit(1) on failure
+    so Railway's ON_FAILURE restart policy takes over."""
+    kwargs = {"headless": True}
+    if CHROME:
+        kwargs["executable_path"] = CHROME
+    where = f"CC_CHROMIUM={CHROME}" if CHROME else "Playwright's bundled browser (no executable_path)"
+    try:
+        browser = p.chromium.launch(**kwargs)
+    except Exception as e:
+        log.error("browser launch FAILED using %s: %s: %s", where, type(e).__name__, str(e).strip()[:600])
+        raise SystemExit(1)
+    log.info("browser ready: chromium %s via %s", browser.version, where)
+    return browser
+
+
 def worker(base_url, password, poll_seconds=60, once=False):
     """The long-running process (cc#2012 item 4). One browser, one login, one DB connection, held
     for the life of the process. Every `poll_seconds`: drain pending on-demand requests, then run the
@@ -652,7 +678,7 @@ def worker(base_url, password, poll_seconds=60, once=False):
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROME, headless=True)
+        browser = launch_browser(p)       # cc#2014 preflight: logs the version, or exits non-zero
         context = browser.new_context()
         page = context.new_page()
         login(page, base_url, password)   # raises -> fatal -> exit, per cc#2007's own gate
