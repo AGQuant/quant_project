@@ -607,6 +607,81 @@ $('ic-main').addEventListener('click', function(e){
    fields that no threshold edit can stale (data source, why it matters); the condition itself is
    always the engine's own `required` string, never a copy. */
 var DEFS = {"R1":{"s":"adr_daily.adr + live Nifty day/week/month","w":"A weak-breadth tape lowers the odds of any single-name setup following through."},"R2":{"s":"v8_metrics.sector_week / sector_month","w":"A stock swims with its sector — trade with the segment tide, not against it."},"R3":{"s":"gvm_scores.segment ⋈ v8_metrics.day_1d","w":"Confirmation from peers means the move is a segment theme, not a lone tick."},"R4":{"s":"v8_metrics.dma_20 / dma_50 / dma_200","w":"Trend alignment across timeframes; more MAs on-side = stronger structural backing."},"R5":{"s":"raw_prices close & volume (21 sessions)","w":"Volume leaning to the trade direction shows real participation, not drift."},"R6":{"s":"intraday volume_ratio (r6_volume)","w":"Fresh demand showing up today, not just historically."},"R7":{"s":"v8_metrics.rsi_weekly / rsi_month; REV: true weekly RSI + daily RSI","w":"Momentum wants RSI on-side; reversal wants a stretched-then-turning sandwich."},"R8":{"s":"v8_metrics.week_return / month_return","w":"The name should already be going your way on its own return."},"R9":{"s":"intraday_prices 5m VWAP, range position, 2-day recovery","w":"Where price sits vs VWAP intraday tells you who is winning the session."},"R10":{"s":"v8_metrics.mom_2d, week_index_52; derived recovery","w":"A style-specific fitness check: not too extended (MOM), a real but not-broken dip (REV)."},"R11":{"s":"v8_paper_pivots.pp / r1 / s1","w":"Enter where there is room to run, not into a level that caps the move."},"R12":{"s":"v8_metrics.day_1d, futures_basis.oi_chg","w":"Positioning confirms conviction behind the price move."},"R13":{"s":"futures_basis.basis_pct (newest vs prior)","w":"Basis widening in your favour flags smart-money positioning ahead of spot."},"R14":{"s":"raw_prices OHLC + intraday day hi/lo","w":"Expansion confirms the move has energy, not a quiet drift."},"R15":{"s":"derived: v8 week/month return − Nifty week/month","w":"Outperforming the index is the cleanest read on genuine leadership."},"R16":{"s":"last ~63 raw_prices high/low (3M swing)","w":"Where price sits in its own range sets the reward-to-risk for the style being scored."},"R17":{"s":"gvm_scores.v_score (latest)","w":"Entering at a sane valuation sets the margin of safety independent of the momentum read."},"R18":{"s":"gvm_scores.m_score + mcap-weighted segment avg m_score","w":"Momentum confirmed at both the stock and sector level is a higher-conviction trend than either alone."},"R19":{"s":"raw_prices 63d return: stock vs mcap-weighted segment vs NIFTY50","w":"Beating both the sector and the index is the cleanest read on genuine relative leadership."},"R20":{"s":"gvm_history (nearest score_date on/before today−180d)","w":"A rising quality score confirms the thesis is strengthening; a falling one warns it is fading."},"R25":{"s":"gvm_history m_score: now vs the snapshot on/before today−30d (dM1) and today−91d (dM3)","w":"Momentum that is still building over one and three months is a trend with fuel left; momentum already rolling over is a trend that is spending it."},"R26":{"s":"raw_prices: mean of the last 5 closes vs the last 20","w":"Price above its own short-term average is the simplest read that the recent bid is real, not a single day."},"LOCK_VOLUME":{"s":"derived vol_ratio_today","w":"A break needs participation behind it; a quiet break is a drift."},"LOCK_MOOD":{"s":"mood gate fail count","w":"A short into an all-bullish tape is fighting the market."},"LOCK_ENTRYDAY_FALL":{"s":"v8_metrics.day_1d","w":"SELL-MOM is an ignition short: the break happens on the day you enter."},"LOCK_WEEK_FALLING_BAND":{"s":"v8_metrics.week_return","w":"Falling but not exhausted. A stock already down 8% on the week has had its move."},"LOCK_MOM_2D":{"s":"v8_metrics.mom_2d","w":"The slide should already be underway when the ignition candle prints."},"LOCK_ALT_IGNITION":{"s":"v8_metrics.mom_2d, conditional on the entry-day fall credit","w":"The same ignition can arrive as one candle or as two days of selling; the score should not miss the second shape, and should not pay twice for the first."},"LOCK_52W_INDEX":{"s":"v8_metrics.week_index_52","w":"A short wants a name that is not near its highs."},"LOCK_MA_NOT_DEEP":{"s":"v8_metrics.ma9_vs_ma21","w":"Far below the slower mean is a move already spent, not one starting."},"LOCK_GVM":{"s":"gvm_scores.gvm_score","w":"Quality names bounce; a short wants the ones that do not."},"LOCK_FALL_FRESHNESS":{"s":"v8_metrics.month_return","w":"A stock already down 15% on the month is a crowded short. The edge is in the fresh break."},"LOCK_TRIO_52W":{"s":"v8_metrics.week_index_52","w":"Continuation shorts start from the lows, not from a rally into resistance."},"LOCK_TRIO_RSI":{"s":"true weekly RSI","w":"An already-overbought name is a crowded fade. The winning setups sat at RSI 30-42."},"LOCK_TRIO_MOM2D":{"s":"v8_metrics.mom_2d","w":"The two-day move should already be down when the position opens."},"LOCK_WEEK_FALLING":{"s":"v8_metrics.week_return","w":"This bucket shorts a stock that is already falling, and keeps falling."},"LOCK_5M_WEAK":{"s":"v8_metrics.day_1d","w":"The session should be going your way on the day you enter it."},"LOCK_MA_SHALLOW":{"s":"v8_metrics.ma9_vs_ma21","w":"An early break beats an exhausted one. A wide gap either way means the move has run."},"LOCK_QUALITY_FADE":{"s":"gvm_scores.gvm_score","w":"A continuation short wants a name whose quality is fading, not one that will be bought."},"LOCK_SECTOR_WEAK":{"s":"v8_metrics.sector_month","w":"A falling sector carries the trade; a rising one fights it."}};
+/* cc#2002 (founder 11-Sep ~20:47 IST): a 2-line plain-English "what this rule checks" description,
+   own row above the FULL/HALF/NONE grid (or above the volume rows for R5/R5V) -- NOT auto-generated
+   from `required` (that stays formula-speak, this is explanation). SEPARATE from the dormant DEFS
+   map above (source + why-it-matters, for a different, not-yet-wired feature) -- do not conflate
+   the two or repurpose DEFS for this.
+   The 11 SELL-REV entries are copied VERBATIM from the web Check page's own TC_WEB_RULE_LINES
+   (scorr_check.html, cc#1808) so the SAME rule reads identically on both surfaces rather than two
+   independently-drifting descriptions of one condition. The remaining 28 ids (SELL-MOM's own +
+   every BUY-MOM/BUY-REV id) are new, written directly from tc_v4_dual.py's own `required` strings
+   (verified rule-by-rule against a live enumeration of card_maxes()/_rules()/_sell_rules(), not the
+   stale rule-count comments elsewhere in that file). Shared ids across BUY-MOM/BUY-REV (e.g. R2)
+   get ONE description, same convention NAMES/TPL/RULEKEYS above already use (keyed by id only,
+   never id+bucket) -- the two variants test the same underlying idea, only the exact threshold
+   differs per bucket. Missing == show nothing (never a placeholder, never the raw condition) --
+   logged via ruleDescMissing() below, not shipped silently. */
+var RULE_DESC = {
+  // -- SELL-REV (11), verbatim from scorr_check.html's TC_WEB_RULE_LINES --
+  LOCK_MOOD: ['Checks whether the overall market mood is bearish.', 'A short works better when the wider market is not fighting against it.'],
+  LOCK_5M_WEAK: ['Checks whether the stock is down on the day itself.', 'A simple same-day confirmation that the setup is live right now.'],
+  LOCK_TRIO_52W: ['Checks where the price sits versus its own 52-week range.', 'A low position confirms the stock is genuinely weak, not just having a bad week.'],
+  LOCK_TRIO_RSI: ['Checks weekly RSI, a momentum reading from 0 to 100.', 'A weak-but-not-oversold band means the fall likely has more room before buyers step in.'],
+  LOCK_MA_SHALLOW: ['Checks how far the 9-day average has pulled away from the 21-day average.', 'A shallow gap means the down move is still early, not already stretched out.'],
+  LOCK_TRIO_MOM2D: ['Checks the price move over the last two trading days.', 'Confirms the weakness is showing up right now, not just in the past.'],
+  LOCK_SECTOR_WEAK: ["Checks whether the stock's sector is falling this month too.", 'A weak sector removes one obvious reason the stock could bounce back quickly.'],
+  LOCK_QUALITY_FADE: ["Checks the stock's underlying GVM quality score.", 'Weak fundamentals make a continued fall more believable than a strong-quality name falling temporarily.'],
+  LOCK_WEEK_FALLING: ["Checks the stock's return over the last week.", 'Makes sure the down move has held for more than a single bad day.'],
+  R5V: ["Checks four separate volume signals together — today's pace, yesterday's, delivery, and distribution.", 'Confirms real trading interest is behind the move, not a quiet, low-volume drift.'],
+  LOCK_FALL_FRESHNESS: ['Checks how far the stock has already fallen this month.', 'A stock down too much is a crowded short — this favours a fall that is still fresh, not exhausted.'],
+  // -- SELL-MOM's own (7, new) --
+  LOCK_ENTRYDAY_FALL: ['Checks whether the stock is already down at least 2% today.', 'Same-day weakness is fresh confirmation the sell setup is live right now, not stale.'],
+  LOCK_WEEK_FALLING_BAND: ['Checks that the stock has fallen over the past week, but not so far that the move looks exhausted.', 'A fall that has already gone too deep often means the easy downside is gone.'],
+  LOCK_MOM_2D: ["Checks the stock's price move over the last two trading days.", 'Confirms the slide is showing up in the most recent sessions, not further back.'],
+  LOCK_ALT_IGNITION: ['An alternate check for a sharp two-day slide, used only when the same-day fall above found nothing.', 'Catches a stock whose slide ignited a day or two ago even if today itself is quiet.'],
+  LOCK_52W_INDEX: ["Checks where today's price sits inside the stock's own 52-week high-low range.", 'A position in the lower half of the range supports a genuine downtrend, not a stock near its highs.'],
+  LOCK_MA_NOT_DEEP: ['Checks that the 9-day average has not already pulled too far below the 21-day average.', 'A gap that is already very wide often means the fall is late-stage, not early.'],
+  LOCK_GVM: ["Checks the stock's underlying GVM quality score is below a set cap.", 'A weaker-quality name makes a continued fall more believable than a strong business falling temporarily.'],
+  // -- shared across BOTH BUY-MOM and BUY-REV (18, new) --
+  R1: ['Checks how many of the standard market-mood checks are reading bearish right now.', 'A calm overall market gives a single-stock buy setup a better chance of following through.'],
+  R2: ["Checks whether the stock's sector has been rising.", "A rising sector adds a tailwind; a falling one means the stock is swimming against its own group."],
+  R3: ['Checks whether other stocks in the same peer group are also moving up.', 'Peers moving together suggests a real group move, not one stock acting alone.'],
+  R4: ["Checks that the stock's key moving averages are trending upward.", 'Rising averages across different time windows confirm the uptrend is not just a short-lived blip.'],
+  R5: ["Checks four separate volume signals together — today's pace, yesterday's, delivery, and distribution.", 'Real buying interest behind a move needs volume to back it up, not just a quiet drift higher.'],
+  R7: ["Checks that the stock's RSI, a momentum reading from 0 to 100, sits in a healthy zone.", 'Too low means momentum has not turned yet; too high risks buying a move that is already stretched.'],
+  R9: ["Checks the stock's intraday price action against its volume-weighted average price (VWAP) for the day.", "Trading above VWAP shows today's buyers are in control, not just yesterday's story."],
+  R10: ["Checks the stock's very recent price action for a genuine turn.", 'Confirms the move is happening now, in the last day or two, not something that already played out.'],
+  R11: ["Checks that the stock's price sits at a favourable spot with room to run before the next resistance level.", 'Buying with room to move gives the setup space to work before hitting a level that could stall it.'],
+  R12: ['Checks the futures market for this stock — open interest and basis — for a lean in the same direction as the trade.', "When the derivatives market agrees with the trade's direction, it adds independent confirmation."],
+  R16: ["Checks where the price sits against a standard Fibonacci retracement of the last three months' range.", 'Certain zones in this framework have historically marked good continuation or bounce points.'],
+  R17: ["Checks that the stock's own valuation score clears a minimum bar.", 'Buying quality at a reasonable valuation reduces the risk of paying too much for the move.'],
+  R18: ["Checks that the stock's own momentum score and its sector's momentum score both clear a bar.", 'Momentum working at both the stock and sector level is a stronger signal than either alone.'],
+  R19: ["Checks the stock's relative strength against both its sector and the Nifty over the last 63 trading days.", 'A stock outperforming both benchmarks is showing genuine leadership, not just riding the market up.'],
+  R20: ["Checks whether the stock's GVM quality score has been improving over the last six months.", 'An improving trend is a better sign than a static or worsening score, even at the same level today.'],
+  R25: ["Checks whether the stock's momentum score has been rising, or at least holding steady, over the last one and three months.", 'A momentum score moving the right way adds more confidence than one that is only flat or fading.'],
+  R26: ["Checks whether the stock's 5-day average price is above its 20-day average.", 'The short average crossing above the longer one is a simple, standard signal that a fresh uptrend has begun.'],
+  R23: ["Checks that the stock's GVM quality score clears a minimum floor.", 'Sets a quality baseline so the setup is not built on a weak underlying business.'],
+  // -- BUY-REV only (1, new) --
+  R8: ["Checks that the stock's return over the past month sits in a moderate range, not a deep fall or a big rally already.", 'A reversal setup works best on a stock that has drifted, not one that has already crashed or already run up.'],
+  // -- BUY-MOM only (2, new) -- gated `if BUY and MOM` in tc_v4_dual.py --
+  R21: ["Checks how far the price sits above its own 50-day moving average, as a percentage.", 'Too close offers little confirmation; too far risks chasing a move that has already run.'],
+  R22: ["Checks where today's price sits inside the stock's own 52-week high-low range.", 'A position near the top of the range confirms real strength, not a stock still stuck near its lows.']
+};
+/* item 4: a rule id with no mapped description shows NOTHING (descHtml() below returns '' for it) --
+   this just makes that gap visible in the console/log rather than a silent, unexplained blank, per
+   the card's own "log it as missing" instruction. Fires at most once per id per page session. */
+var _ruleDescWarned = {};
+function ruleDescMissing(id){
+  if (_ruleDescWarned[id]) return;
+  _ruleDescWarned[id] = true;
+  try { console.warn('cc#2002: no RULE_DESC entry for rule id', id); } catch (e) {}
+}
+function descHtml(r){
+  var d = RULE_DESC[r.rule];
+  if (!d){ ruleDescMissing(r.rule); return ''; }
+  return '<div class="c-desc"><div>' + esc(d[0]) + '</div><div>' + esc(d[1]) + '</div></div>';
+}
 var KEYNAMES = { mom_2d:'2-DAY MOVE', mom2d:'2-DAY MOVE', week_return:'WEEK', wk:'WEEK', mo:'MONTH', day:'DAY', today:'TODAY x', vol1M:'MONTH UP/DOWN',
   ratio:'RATIO', mRSI:'MONTHLY RSI', trueWk:'WEEKLY RSI', vwap:'VWAP', rangePos:'RANGE POS', low_5d:'5-DAY LOW', high_5d:'5-DAY HIGH', s1:'S1', r1:'R1',
   abovePP:'ABOVE PIVOT', room:'ROOM %', oi_chg:'OI CHANGE %', basis_now:'BASIS NOW %', basis_prev:'BASIS PREV %', pos:'SWING POS %', zone:'ZONE',
@@ -730,7 +805,7 @@ function ruleSheet(c, r){
       var val = x == null ? '—' : (k[2] === '%' ? tv(x, 0) + '%' : xs(x));
       return '<div class="c-vrow"><span class="k">' + esc(k[1]) + (key === 'vol_r' && v.early_slot ? ' (before 09:30: half)' : '') + '</span><span class="v">' + val + '</span><span class="t ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '✗') + '</span><span class="p' + (pts ? '' : ' z') + '">' + ptsFmt(pts == null ? 0 : pts) + ' / ' + ptsFmt(mx == null ? 0 : mx) + '</span></div>';
     }).join('');
-    return head + '<div class="c-vrows">' + rows + '</div>' + ruleFoot(r, st);   /* cc#1990 footer */
+    return head + descHtml(r) + '<div class="c-vrows">' + rows + '</div>' + ruleFoot(r, st);   /* cc#1990 footer; cc#2002 description */
   }
   var lad = ladderText(r.required), hasHalf = (lad.half && lad.half !== 'no half tier');
   var on = st.cls === 'pass' ? 'full' : (st.cls === 'watch' ? 'half' : (st.cls === 'fail' ? 'none' : ''));
@@ -744,7 +819,7 @@ function ruleSheet(c, r){
      The boxes are the locked TC_RULE_SHEET_SIMPLE_V1 shape (session_log 39720) and they carry the
      LADDER — what would have earned full vs half — which the rows do not. Removing them to make
      room would lose that, so this is additive. Flagged in the forum for Fable to rule on. */
-  return head + ruleRows(r) + boxes + '<div class="c-nums">' + esc(line2) + '</div>' + ruleFoot(r, st);
+  return head + descHtml(r) + ruleRows(r) + boxes + '<div class="c-nums">' + esc(line2) + '</div>' + ruleFoot(r, st);   /* cc#2002 description */
 }
 $('c-sheet-x').addEventListener('click', closeSheet);
 $('c-scrim').addEventListener('click', closeSheet);

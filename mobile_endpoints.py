@@ -2365,6 +2365,9 @@ h1.lgt::after{content:'\\25BE';font-size:11px;color:var(--dim);margin-left:6px;v
 .c-sheet .c-bx.on.half{border-color:var(--amber);background:color-mix(in srgb, var(--amber) 14%, var(--well))}.c-sheet .c-bx.on.half b{color:var(--amber)}
 .c-sheet .c-bx.on.none{border-color:var(--down);background:color-mix(in srgb, var(--down) 14%, var(--well))}.c-sheet .c-bx.on.none b{color:var(--down)}
 .c-sheet .c-nums{margin-top:var(--space-12);font-size:var(--type-115);color:var(--mute);text-align:center;line-height:1.5}
+.c-sheet .c-desc{margin:0 0 var(--space-12);padding-left:var(--space-9);border-left:var(--bw-1) solid var(--line);font-size:var(--type-115);line-height:1.5}
+.c-sheet .c-desc div:first-child{color:var(--chalk);margin-bottom:var(--space-4)}
+.c-sheet .c-desc div:last-child{color:var(--mute)}
 .c-sheet .c-vrows{margin-top:var(--space-2)}
 .c-sheet .c-vrow{display:grid;grid-template-columns:1fr auto auto auto;gap:var(--space-10);align-items:center;padding:var(--space-9) var(--space-2);border-bottom:var(--bw-1) solid var(--line);font-size:var(--type-125)}
 .c-sheet .c-vrow:last-child{border-bottom:0}
