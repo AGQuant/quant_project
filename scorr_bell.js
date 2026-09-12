@@ -155,7 +155,12 @@
     var ov = document.createElement('div'); ov.id = 'scorr-bell-ov';
     ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(4,8,18,.55)';
     ov.innerHTML = '<div id="scorr-bell-box" role="dialog" aria-modal="true" aria-label="Custom alerts" style="position:absolute;top:' + anchor.top + 'px;right:' + anchor.right + 'px;width:min(380px,calc(100vw - 24px));background:var(--panel,#17171B);color:var(--chalk,var(--muted,#F5F2EA));border:1px solid var(--line,var(--edge,#2A2A31));border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.55);overflow:hidden"></div>';
-    ov.addEventListener('click', function(e){ if(e.target === ov || e.target.closest('[data-bell-close]')) close(); });
+    // cc#2025: a click on an anchor INSIDE the sheet (Open Alerts, + New alert, an alert row, the
+    // history footer link) must close this popover too, not just the veil/× -- otherwise, on a
+    // same-page hash navigation (already on /m/alerts, no reload), the popover is left sitting
+    // dead over the New-Alert sheet that opens underneath it. Never preventDefault: the anchor's
+    // own navigation or hash change must still happen: close() runs alongside it, not instead.
+    ov.addEventListener('click', function(e){ if(e.target === ov || e.target.closest('[data-bell-close]') || e.target.closest('#scorr-bell-box a')) close(); });
     document.body.appendChild(ov); state.open = true; render();
     // cc#1717: mark what is on screen as seen FIRST, then refresh — the GET must read the flags
     // the POST just wrote, never race ahead of it and flip the badge back to 1.

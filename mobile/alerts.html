@@ -506,8 +506,21 @@ function alSubmit(){
       fail(e.message);
     });
 }
-/* cc#1634: the bell's "+ New alert" opens the same New Alert flow this page owns */
-if (location.hash === '#new'){ location.hash = ''; setTimeout(alOpen, 0); }
+/* cc#1634 / cc#2025: the bell's "+ New alert" opens the same New Alert flow this page owns.
+   A named function, run both on initial load (cross-page arrival, e.g. Home's Custom Alert
+   tile) AND from a hashchange listener -- the bell popover mounts ON /m/alerts itself, so its
+   #new link is a SAME-DOCUMENT hash change: the browser never reloads for that, so the old
+   one-shot check below (which only ran once, at parse time) never saw it and nothing opened.
+   Guarded so clearing the hash here cannot re-enter itself and open a second sheet. */
+var _newHashBusy = false;
+function checkNewHash(){
+  if (location.hash !== '#new' || _newHashBusy) return;
+  _newHashBusy = true;
+  location.hash = '';
+  setTimeout(function(){ alOpen(); _newHashBusy = false; }, 0);
+}
+checkNewHash();
+window.addEventListener('hashchange', checkNewHash);
 </script>
 </body>
 </html>
