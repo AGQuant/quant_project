@@ -5350,8 +5350,14 @@ function pcrMood(hero){
        every OTHER "market mood"-style figure on this page (idxFooter, the top ticker) leads with.
        Stated as a real assumption, not verified against a second underlying in mobile_home2.py's
        own composer -- a one-line fix if wrong. Parentheses dropped per the spec ("the capsule shape
-       carries the meaning"). */
-    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + ' <span class="pcrchip" onclick="chainPopupOpen(\'NIFTY\')" role="button" aria-label="Open full option chain, whole chain PCR basis">whole chain</span>' + pcrAsOfSuffix(hero) + '</div>'
+       carries the meaning").
+       cc#2019 (founder 12-Sep): the capsule's own text, "whole chain", duplicated what the popup it
+       opens already states -- the very next thing the user sees. Replaced with a short tap hint
+       ("so the user knows if he clicks the card he gets a detailed option chain") using the SAME
+       aria-label wording home.html already uses for the Max Pain chart's own tap target into this
+       identical popup (line ~3292, "Open full option chain") rather than inventing new copy for the
+       same action. Span class, onclick and the tap affordance are untouched -- text only. */
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + ' <span class="pcrchip" onclick="chainPopupOpen(\'NIFTY\')" role="button" aria-label="Open full option chain">full chain &rarr;</span>' + pcrAsOfSuffix(hero) + '</div>'
     /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
        ("High put cover while Nifty is down 1.4% on the week"); a missing week input says so
        ("week return unavailable"). Both strings are the composer's — nothing is worded here. */

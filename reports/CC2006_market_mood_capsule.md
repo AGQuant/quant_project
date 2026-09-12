@@ -64,3 +64,41 @@ The gauge rendering, PCR computation, mood-label thresholds, the (i) explainer a
 button are all untouched, per do_not_touch. No change to PCR maths or the whole-chain vs near-month
 definition, per out_of_scope. Founder glass-check still outstanding — this session's synthetic-data
 structural verification is as far as it can go. Card not done — Fable verifies.
+
+## cc#2019 addendum (12-Sep, Sonnet 5 seat) — capsule text, LTP decimals, grid alignment
+
+Founder direction on the Home option-chain popup (screenshots, NIFTY and BANKNIFTY, ~09:28 IST):
+the capsule's own text duplicated what the popup it opens already says; LTP rendered at 2 decimals;
+the strike-chain table mixed three different column alignments.
+
+**Capsule text (`mobile/home.html`, `pcrMood()`).** The `.pcrchip` span's visible text changes from
+`whole chain` to `full chain &rarr;` — a tap hint, not a PCR-basis qualifier (that duplication was
+the whole reason for the change: "the popup this opens already states it is the whole chain").
+`aria-label` changes from `"Open full option chain, whole chain PCR basis"` to `"Open full option
+chain"` — reusing, verbatim, the aria-label this same file already gives the Max Pain chart's own
+tap target into the identical popup (`.oib`, line ~3292), rather than inventing new wording for the
+same action. Span class, `onclick="chainPopupOpen('NIFTY')"`, and the tap affordance: untouched.
+
+**LTP at one decimal (`scorr_cockpit_card.js`).** `_dcLtpTxt(leg)` now returns
+`Number(leg.ltp).toFixed(1)` instead of the raw stored value; the Premium line in
+`_dcChainDetailHtml`'s per-leg `leg()` closure gets the identical `Number(o.ltp).toFixed(1)`, so LTP
+reads at one decimal everywhere in this component — the grid and the tap-to-detail panel alike.
+Display-only: `deriv_metrics._price_rows()`'s own 2-decimal rounding is untouched, per do_not_touch.
+
+**Grid alignment (`scorr_cockpit_card.js`, `_dcRenderChainGrid`).** Every header cell (`hcol` for
+OI/CE LTP, the inline STRIKE/PE LTP/OI header cells) and every row `<td>` (OI, CE LTP, STRIKE, PE
+LTP, OI) is now `text-align:center` — was right/right/center/left/left. Markup and cell content
+unchanged; column order unchanged.
+
+**Verify, this session:**
+- `node --check scorr_cockpit_card.js` — clean.
+- `grep` inside `_dcRenderChainGrid`'s own header + row templates (lines 458–491): zero remaining
+  `text-align:left` / `text-align:right` — every one is `center`.
+- The real, shipped `_dcLtpTxt` — extracted from the file itself and run in Node, not
+  re-implemented: `279.75` → `"279.8"`, `0` → `"0.0"`, a `null`/absent leg → `"&mdash;"` (all
+  correct `toFixed(1)` rounding on the actual function).
+- Exact-string match confirms the Premium line's formatting call landed as written.
+- `github_read` against `main` post-push resolves both changed files (`PUSH_IS_NOT_DEPLOY_V1`).
+
+**Not done here (the card's own FOUNDER-ONLY item):** a live screenshot of the Home popup —
+`CC's container is network-blocked from scorr.in`, stated in the card itself, not worked around.

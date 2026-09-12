@@ -379,7 +379,10 @@
     return '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+col+';margin-right:4px" title="'+tag+'"></span>';
   }
   function _dcOiTxt(leg){ return (leg && leg.oi!=null) ? Number(leg.oi).toLocaleString('en-IN') : '&mdash;'; }
-  function _dcLtpTxt(leg){ return (leg && leg.ltp!=null) ? leg.ltp : '&mdash;'; }
+  // cc#2019: one decimal place everywhere an LTP renders in this component (grid + detail panel),
+  // display-only -- deriv_metrics._price_rows() already rounds to 2 decimals server-side; this is
+  // formatting the same stored value, not a second, different round.
+  function _dcLtpTxt(leg){ return (leg && leg.ltp!=null) ? Number(leg.ltp).toFixed(1) : '&mdash;'; }
   // cc#2004 founder_revision_12sep: max-pain/call-wall/put-wall are FULL-ROW background colours,
   // not edge borders. A row can be at most one of the three (they are three different strikes in
   // the ordinary case; if the founder's own data ever makes two coincide, max pain wins visually
@@ -434,7 +437,7 @@
       var ivpTag=o.ivp&&o.ivp.tag, ivpFair=o.ivp&&o.ivp.fair_value, ivpPct=o.ivp&&o.ivp.percentile;
       return '<div style="flex:1;min-width:140px">'
         + '<div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div>'
-        + '<div>Premium <b>'+(o.ltp!=null?o.ltp:'&mdash;')+'</b></div>'
+        + '<div>Premium <b>'+(o.ltp!=null?Number(o.ltp).toFixed(1):'&mdash;')+'</b></div>'
         + '<div>IV <b>'+(o.iv!=null?o.iv+'%':'&mdash;')+'</b></div>'
         + '<div>IVP <b>'+(ivpPct!=null?ivpPct+'pct '+(ivpTag||''):'&mdash;')+'</b></div>'
         + '<div>Fair (BS &sigma;=RV20) <b>'+(o.fair!=null?o.fair:'&mdash;')+'</b></div>'
@@ -462,15 +465,17 @@
     var rows=d.strikes.map(function(r){
       var bg=_dcChainRowBg(r), sel=(st.selStrike===r.strike)?';box-shadow:inset 0 0 0 1px var(--c-tx)':'';
       var mpDot = r.is_max_pain ? ' <span style="color:' + MP_AMBER + '" title="Max pain">&#9679;</span>' : '';
+      // cc#2019 item 3: every column center-aligned (was OI/CE LTP right, STRIKE center, PE LTP/OI
+      // left) so the whole grid reads as one consistent table, not three different alignments.
       return '<tr onclick="dcChainSelectStrike(\''+sym+'\','+r.strike+')" style="cursor:pointer;'+bg+sel+'">'
-        + '<td style="'+Bd+';text-align:right;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>'
-        + '<td style="'+Bd+';text-align:right;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.ce)+_dcLtpTxt(r.ce)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.ce)+_dcLtpTxt(r.ce)+'</td>'
         + '<td style="'+Bd+';text-align:center;padding:5px 8px;font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx);white-space:nowrap">'+r.strike+(r.atm?' <span style="font-size:8px;color:var(--c-mut)">ATM</span>':'')+mpDot+'</td>'
-        + '<td style="'+Bd+';text-align:left;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.pe)+_dcLtpTxt(r.pe)+'</td>'
-        + '<td style="'+Bd+';text-align:left;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.pe)+_dcLtpTxt(r.pe)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>'
         + '</tr>';
     }).join('');
-    var hcol='style="'+Bd+';text-align:right;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';
+    var hcol='style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';  // cc#2019: was right-aligned
     var info = st.showInfo ? _dcChainInfoHtml() : '';
     var detail = (st.selStrike!=null) ? _dcChainDetailHtml(d, st.selStrike) : '';
     var oiNote = d.oi_available ? (' &middot; PCR '+(d.pcr!=null?d.pcr:'&mdash;')) : ' &middot; OI/walls: index only';
@@ -483,8 +488,8 @@
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border-radius:8px;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
       +   '<thead><tr><td '+hcol+'>OI</td><td '+hcol+'>CE LTP</td>'
       +     '<td style="'+Bd+';text-align:center;padding:4px 8px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
-      +     '<td style="'+Bd+';text-align:left;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">PE LTP</td>'
-      +     '<td style="'+Bd+';text-align:left;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td></tr></thead>'
+      +     '<td style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">PE LTP</td>'
+      +     '<td style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td></tr></thead>'
       +   '<tbody>'+rows+'</tbody></table></div>'
       + detail
       + _dcChainLegendHtml(d.oi_available);
