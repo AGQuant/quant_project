@@ -231,81 +231,75 @@ def ensure_schema(conn):
 
 
 # ── evaluation ────────────────────────────────────────────────────────────────────────────────
-def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
-    """Return today's stars. PURE READ — this function writes nothing."""
-    d = target_date or _ist_now().date()
-    with conn.cursor() as cur:
-        # Candidate set. Under the card's scope this is v8_qualified for today; the universe branch
-        # exists only so the founder's feasibility reading is reproducible without a code rewrite.
-        if EVAL_SCOPE == "universe":
-            cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
-        elif EVAL_SCOPE == "positions":
-            # cc#932: the OPEN paper book. Same era scope the book itself uses everywhere else
-            # (cc#504 cutover, retired baskets excluded via the cc#970 registry), so this marks the ones
-            # is actually looking at and cannot mark a row the book does not show.
-            _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
-            cur.execute("""
-                SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
-                FROM v8_paper_positions p
-                LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
-                WHERE p.status = 'OPEN'
-                  AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
-                  AND NOT (p.basket = ANY(%(retired)s))
-                ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
-        else:
-            cur.execute("""SELECT DISTINCT ON (symbol) symbol, basket
-                           FROM v8_qualified WHERE signal_date=%s
-                           ORDER BY symbol, id DESC""", (d,))
-        cands = [(r[0], r[1]) for r in cur.fetchall()]
-        if not cands:
-            return []
-        syms = [c[0] for c in cands]
+def _fetch_star_support(cur, d, syms):
+    """cc#1978 items 5/8 refactor: the batched supporting reads the star condition needs (pivots,
+    live CMP, EOD close, v8_metrics, the touch-test CTE) — factored out of evaluate() so a
+    universe-scoped caller (evaluate_universe(), below) reads the identical way over a different
+    candidate set, not a second copy of this SQL. Pure extraction — every query here is
+    byte-identical to what evaluate() ran inline before this refactor."""
+    cur.execute("""SELECT symbol, s1, r1, pp FROM v8_paper_pivots
+                   WHERE pivot_date=%s AND symbol = ANY(%s)""", (d, syms))
+    piv = {r[0]: (_f(r[1]), _f(r[2]), _f(r[3])) for r in cur.fetchall()}
 
-        # Today's pivots.
-        cur.execute("""SELECT symbol, s1, r1, pp FROM v8_paper_pivots
-                       WHERE pivot_date=%s AND symbol = ANY(%s)""", (d, syms))
-        piv = {r[0]: (_f(r[1]), _f(r[2]), _f(r[3])) for r in cur.fetchall()}
+    # Live CMP through the SHARED resolver (cc#811/#835) — never a private price path. Falls
+    # back to the last close so an out-of-hours run still evaluates rather than returning empty.
+    live = {}
+    try:
+        import cmp_resolver
+        live = cmp_resolver.resolve_cmp_many(cur, syms)
+    except Exception as e:
+        log.warning("cc#856 live CMP unavailable, using last close: %s", e)
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
+                   WHERE symbol = ANY(%s) AND close > 0 ORDER BY symbol, price_date DESC""", (syms,))
+    eod = {r[0]: _f(r[1]) for r in cur.fetchall()}
 
-        # Live CMP through the SHARED resolver (cc#811/#835) — never a private price path. Falls
-        # back to the last close so an out-of-hours run still evaluates rather than returning empty.
-        live = {}
-        try:
-            import cmp_resolver
-            live = cmp_resolver.resolve_cmp_many(cur, syms)
-        except Exception as e:
-            log.warning("cc#856 live CMP unavailable, using last close: %s", e)
-        cur.execute("""SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
-                       WHERE symbol = ANY(%s) AND close > 0 ORDER BY symbol, price_date DESC""", (syms,))
-        eod = {r[0]: _f(r[1]) for r in cur.fetchall()}
+    # cc#932: mom_2d joins day_1d — both are needed for the V2 stability band.
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, dma_50, day_1d, mom_2d FROM v8_metrics
+                   WHERE symbol = ANY(%s) AND score_date <= %s
+                   ORDER BY symbol, score_date DESC""", (syms, d))
+    met = {r[0]: (_f(r[1]), _f(r[2]), _f(r[3])) for r in cur.fetchall()}
 
-        # cc#932: mom_2d joins day_1d — both are needed for the V2 stability band.
-        cur.execute("""SELECT DISTINCT ON (symbol) symbol, dma_50, day_1d, mom_2d FROM v8_metrics
-                       WHERE symbol = ANY(%s) AND score_date <= %s
-                       ORDER BY symbol, score_date DESC""", (syms, d))
-        met = {r[0]: (_f(r[1]), _f(r[2]), _f(r[3])) for r in cur.fetchall()}
+    # THE TOUCH TEST — CLOSED SESSIONS ONLY (card item 6). Each prior session's low/high is
+    # compared against THAT SESSION'S OWN pivot, never today's: a pivot is only meaningful for
+    # the day it was computed for, and comparing an old low to a new S1 would invent touches.
+    cur.execute("""
+        WITH sess AS (
+            SELECT DISTINCT price_date FROM raw_prices
+            WHERE price_date < %s ORDER BY price_date DESC LIMIT %s)
+        SELECT rp.symbol,
+               ARRAY_AGG(rp.price_date ORDER BY rp.price_date) FILTER (WHERE rp.low  <= pv.s1) AS s1_dates,
+               ARRAY_AGG(rp.price_date ORDER BY rp.price_date) FILTER (WHERE rp.high >= pv.r1) AS r1_dates
+        FROM raw_prices rp
+        JOIN sess ON sess.price_date = rp.price_date
+        JOIN v8_paper_pivots pv ON pv.symbol = rp.symbol AND pv.pivot_date = rp.price_date
+        WHERE rp.symbol = ANY(%s)
+        GROUP BY rp.symbol
+    """, (d, TOUCH_SESSIONS, syms))
+    touch = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
 
-        # THE TOUCH TEST — CLOSED SESSIONS ONLY (card item 6). Each prior session's low/high is
-        # compared against THAT SESSION'S OWN pivot, never today's: a pivot is only meaningful for
-        # the day it was computed for, and comparing an old low to a new S1 would invent touches.
-        cur.execute("""
-            WITH sess AS (
-                SELECT DISTINCT price_date FROM raw_prices
-                WHERE price_date < %s ORDER BY price_date DESC LIMIT %s)
-            SELECT rp.symbol,
-                   ARRAY_AGG(rp.price_date ORDER BY rp.price_date) FILTER (WHERE rp.low  <= pv.s1) AS s1_dates,
-                   ARRAY_AGG(rp.price_date ORDER BY rp.price_date) FILTER (WHERE rp.high >= pv.r1) AS r1_dates
-            FROM raw_prices rp
-            JOIN sess ON sess.price_date = rp.price_date
-            JOIN v8_paper_pivots pv ON pv.symbol = rp.symbol AND pv.pivot_date = rp.price_date
-            WHERE rp.symbol = ANY(%s)
-            GROUP BY rp.symbol
-        """, (d, TOUCH_SESSIONS, syms))
-        touch = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+    return piv, live, eod, met, touch
 
+
+def _score_stars(cands, piv, live, eod, met, touch):
+    """cc#1978 items 5/8 refactor: the star CONDITION math itself, pure (no DB access) — factored
+    out of evaluate() so evaluate_universe() reuses the EXACT same rule rather than a duplicated
+    copy (the constraint v8_marker_ticks.py's own docstring names for this exact refactor). Every
+    line below (through the star check) is byte-identical to evaluate()'s own former inline loop —
+    nothing about the star definition changed by this extraction.
+
+    Returns (fired, evaluated_syms) — `fired` is the ORIGINAL single-list contract (only symbols
+    that got a star), unchanged, so evaluate()/evaluate_universe() keep their existing return
+    shape exactly. `evaluated_syms` is additive: the set of symbols that cleared the DATA gates
+    (had a pivot, metrics, and a cmp) and so were genuinely put through the star check, whether or
+    not one fired — this is what v8_marker_ticks.persist_star_ticks needs to write real
+    fired=false rows (a symbol skipped for MISSING data never reached a real check, so it is
+    correctly excluded from this set too — no row, matching "did not run" for that tick, the same
+    convention persist_chan_ticks already uses for a symbol compute_channels() has no fit for)."""
     def _band(v, lo_hi):
         return v is not None and lo_hi[0] <= v <= lo_hi[1]
 
     out = []
+    evaluated_syms = set()
     for sym, basket in cands:
         p = piv.get(sym)
         m = met.get(sym)
@@ -321,6 +315,7 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
         # rather than being treated as passing.
         if cmp_v is None or day_1d is None or mom_2d is None:
             continue
+        evaluated_syms.add(sym)   # cleared every data gate above -- a real check happens below
         s1_dates, r1_dates = touch.get(sym, (None, None))
 
         # near_pp is COMPUTED AND STORED but never rendered and never part of the star condition
@@ -360,7 +355,88 @@ def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
             "glyph": GLYPH["BUY" if colour == "BLUE" else "SELL"],
             "touched_dates": [str(x) for x in (tdates or [])],
         })
-    return out
+    return out, evaluated_syms
+
+
+def evaluate(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """Return today's stars. PURE READ — this function writes nothing.
+
+    cc#1978 items 5/8 refactor (unchanged behaviour): the candidate-set query below is exactly
+    what it was before this refactor — EVAL_SCOPE stays "positions", session_log 18052's lock is
+    untouched, every existing consumer of this function sees identical output. Only the supporting
+    fetch and the condition math moved into _fetch_star_support/_score_stars, shared with the new
+    evaluate_universe() below rather than duplicated for it."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        # Candidate set. Under the card's scope this is v8_qualified for today; the universe branch
+        # exists only so the founder's feasibility reading is reproducible without a code rewrite.
+        if EVAL_SCOPE == "universe":
+            cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
+        elif EVAL_SCOPE == "positions":
+            # cc#932: the OPEN paper book. Same era scope the book itself uses everywhere else
+            # (cc#504 cutover, retired baskets excluded via the cc#970 registry), so this marks the ones
+            # is actually looking at and cannot mark a row the book does not show.
+            _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
+            cur.execute("""
+                SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
+                FROM v8_paper_positions p
+                LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+                WHERE p.status = 'OPEN'
+                  AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+                  AND NOT (p.basket = ANY(%(retired)s))
+                ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
+        else:
+            cur.execute("""SELECT DISTINCT ON (symbol) symbol, basket
+                           FROM v8_qualified WHERE signal_date=%s
+                           ORDER BY symbol, id DESC""", (d,))
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+        piv, live, eod, met, touch = _fetch_star_support(cur, d, syms)
+    fired, _evaluated = _score_stars(cands, piv, live, eod, met, touch)
+    return fired
+
+
+def evaluate_universe(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """cc#1978 items 5/8: the star marker evaluated against the FULL active futures registry, not
+    the open book. Authorized explicitly and separately from the book-scoped lock: founder word
+    10-Sep 22:05 (FOUNDER_WORD_10SEP_2205_STARS_UNIVERSE, quoted verbatim on cc#1978's own spec —
+    "just like TC score, calculate the flags also for all the future symbols and distribute
+    everywhere"), an explicit dated override of session_log 18052's EVAL_SCOPE="positions" lock
+    for this one purpose, reconfirmed 12-Sep (cc_task_logs 6382, "continue items 2-9 of the
+    card"). Does NOT touch EVAL_SCOPE or evaluate() — the book-scoped marker and every page that
+    reads it behave exactly as before this function exists. Reuses _fetch_star_support/
+    _score_stars verbatim, the identical condition math evaluate() uses (v8_marker_ticks.py's own
+    docstring names "a shared helper, not a duplicated copy" as the required shape). PURE READ."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+        piv, live, eod, met, touch = _fetch_star_support(cur, d, syms)
+    fired, _evaluated = _score_stars(cands, piv, live, eod, met, touch)
+    return fired
+
+
+def evaluate_universe_with_state(conn, target_date: Optional[date] = None):
+    """cc#1978 item 8: same as evaluate_universe() but also returns which symbols cleared the
+    data gates (evaluated_syms) regardless of whether a star fired — v8_marker_ticks.
+    persist_star_ticks needs this to write real fired=false rows (the card's own verify V2:
+    "fired=false rows must exist and outnumber fired=true"). evaluate_universe() itself keeps its
+    plain single-list contract for any other caller; this variant exists so that need does not
+    force a signature change on the plain one. Returns (fired: List[Dict], evaluated_syms: set)."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return [], set()
+        syms = [c[0] for c in cands]
+        piv, live, eod, met, touch = _fetch_star_support(cur, d, syms)
+    return _score_stars(cands, piv, live, eod, met, touch)
 
 
 def evaluate_activity(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
@@ -580,59 +656,45 @@ def evaluate_dma_cross(conn, target_date: Optional[date] = None) -> List[Dict[st
 # SMA math as evaluate_dma_cross above; the only real difference is dropping yesterday's SMA pair
 # (a state test needs none) and lowering the history floor from DMA_SLOW+1 to DMA_SLOW, since
 # there is no "yesterday" comparison left to need the extra day.
-def evaluate_dma_state(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
-    """GREEN/RED square STATE markers on the OPEN book (cc#1682). PURE READ.
+def _fetch_dma_state_support(cur, d, syms):
+    """cc#1978 items 5/8 refactor: the batched supporting reads the DMA state needs (close
+    history + dates, live CMP, day_1d) — factored out of evaluate_dma_state() so
+    evaluate_dma_state_universe() (below) reads the identical way over a different candidate set.
+    Pure extraction — byte-identical to what evaluate_dma_state() ran inline before this refactor."""
+    ceiling_op = "<" if _ist_market_hours() else "<="
+    cur.execute(f"""
+        SELECT symbol, price_date, close FROM (
+            SELECT symbol, price_date, close,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+            FROM raw_prices
+            WHERE symbol = ANY(%s) AND close > 0 AND price_date {ceiling_op} %s
+        ) x WHERE rn <= %s
+        ORDER BY symbol, rn""", (syms, d, DMA_FETCH))
+    closes: Dict[str, List[float]] = {}
+    dates: Dict[str, List[date]] = {}
+    for sym, pdate, close in cur.fetchall():
+        closes.setdefault(sym, []).append(float(close))
+        dates.setdefault(sym, []).append(pdate)
 
-    Unlike evaluate_dma_cross, this reports the CURRENT relationship regardless of whether it is
-    fresh. `data_date` on each returned row is the date of the LATEST close actually used, which
-    during market hours is yesterday's close (today's raw_prices row is a partial candle and is
-    excluded, same ceiling_op gate as the cross evaluator) — this is what lets an intraday tick and
-    the post-close pass both call this function and each stamp the correct star_date without
-    guessing: the caller inserts under row['data_date'], not blindly under target_date. Fewer than
-    DMA_SLOW completed closes skips the symbol — insufficient history, never a guessed state."""
-    d = target_date or _ist_now().date()
-    with conn.cursor() as cur:
-        _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
-        cur.execute("""
-            SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
-            FROM v8_paper_positions p
-            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
-            WHERE p.status = 'OPEN'
-              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
-              AND NOT (p.basket = ANY(%(retired)s))
-            ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
-        cands = [(r[0], r[1]) for r in cur.fetchall()]
-        if not cands:
-            return []
-        syms = [c[0] for c in cands]
+    live = {}
+    try:
+        import cmp_resolver
+        live = cmp_resolver.resolve_cmp_many(cur, syms)
+    except Exception as e:
+        log.warning("cc#1682 live CMP unavailable, using last close: %s", e)
 
-        ceiling_op = "<" if _ist_market_hours() else "<="
-        cur.execute(f"""
-            SELECT symbol, price_date, close FROM (
-                SELECT symbol, price_date, close,
-                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
-                FROM raw_prices
-                WHERE symbol = ANY(%s) AND close > 0 AND price_date {ceiling_op} %s
-            ) x WHERE rn <= %s
-            ORDER BY symbol, rn""", (syms, d, DMA_FETCH))
-        closes: Dict[str, List[float]] = {}
-        dates: Dict[str, List[date]] = {}
-        for sym, pdate, close in cur.fetchall():
-            closes.setdefault(sym, []).append(float(close))
-            dates.setdefault(sym, []).append(pdate)
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, day_1d FROM v8_metrics
+                   WHERE symbol = ANY(%s) AND score_date <= %s
+                   ORDER BY symbol, score_date DESC""", (syms, d))
+    met = {r[0]: _f(r[1]) for r in cur.fetchall()}
 
-        live = {}
-        try:
-            import cmp_resolver
-            live = cmp_resolver.resolve_cmp_many(cur, syms)
-        except Exception as e:
-            log.warning("cc#1682 live CMP unavailable, using last close: %s", e)
+    return closes, dates, live, met
 
-        cur.execute("""SELECT DISTINCT ON (symbol) symbol, day_1d FROM v8_metrics
-                       WHERE symbol = ANY(%s) AND score_date <= %s
-                       ORDER BY symbol, score_date DESC""", (syms, d))
-        met = {r[0]: _f(r[1]) for r in cur.fetchall()}
 
+def _score_dma_state(cands, closes, dates, live, met):
+    """cc#1978 items 5/8 refactor: the DMA-state CONDITION math itself, pure (no DB access) —
+    factored out of evaluate_dma_state() so evaluate_dma_state_universe() reuses the exact same
+    rule. Byte-identical to evaluate_dma_state()'s own former inline loop."""
     out = []
     for sym, basket in cands:
         c = closes.get(sym) or []          # newest first
@@ -665,6 +727,57 @@ def evaluate_dma_state(conn, target_date: Optional[date] = None) -> List[Dict[st
             "note": f"5DMA {sma5_t:,.2f} {rel} 20DMA {sma20_t:,.2f} (as of {data_date.strftime('%d-%b')})",
         })
     return out
+
+
+def evaluate_dma_state(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """GREEN/RED square STATE markers on the OPEN book (cc#1682). PURE READ.
+
+    Unlike evaluate_dma_cross, this reports the CURRENT relationship regardless of whether it is
+    fresh. `data_date` on each returned row is the date of the LATEST close actually used, which
+    during market hours is yesterday's close (today's raw_prices row is a partial candle and is
+    excluded, same ceiling_op gate as the cross evaluator) — this is what lets an intraday tick and
+    the post-close pass both call this function and each stamp the correct star_date without
+    guessing: the caller inserts under row['data_date'], not blindly under target_date. Fewer than
+    DMA_SLOW completed closes skips the symbol — insufficient history, never a guessed state.
+
+    cc#1978 items 5/8 refactor (unchanged behaviour): this candidate query never read EVAL_SCOPE
+    (v8_marker_ticks.py's own docstring notes exactly this — "a separate hardcoded open-book
+    SELECT"), so there is no lock to override here; the fetch and condition math moved into
+    _fetch_dma_state_support/_score_dma_state, shared with evaluate_dma_state_universe() below."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
+        cur.execute("""
+            SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
+            FROM v8_paper_positions p
+            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+            WHERE p.status = 'OPEN'
+              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+              AND NOT (p.basket = ANY(%(retired)s))
+            ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+        closes, dates, live, met = _fetch_dma_state_support(cur, d, syms)
+    return _score_dma_state(cands, closes, dates, live, met)
+
+
+def evaluate_dma_state_universe(conn, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """cc#1978 items 5/8: DMA state evaluated against the FULL active futures registry. Same
+    authorization as evaluate_universe() above (FOUNDER_WORD_10SEP_2205_STARS_UNIVERSE covers
+    "the flags" generally, not just the star marker — reconfirmed 12-Sep, cc_task_logs 6382).
+    Does NOT touch evaluate_dma_state() — the book-scoped state marker behaves exactly as before.
+    Reuses _fetch_dma_state_support/_score_dma_state verbatim. PURE READ."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        cur.execute("""SELECT symbol, NULL::text AS basket FROM futures_universe WHERE is_active""")
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+        closes, dates, live, met = _fetch_dma_state_support(cur, d, syms)
+    return _score_dma_state(cands, closes, dates, live, met)
 
 
 # ── cc#1540 TC_STRONG_V1 (founder direct 31-Aug; cadence amended same day, log 4292) ──────────
