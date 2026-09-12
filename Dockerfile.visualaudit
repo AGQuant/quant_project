@@ -1,0 +1,27 @@
+# cc#2009: dedicated build for the visual-audit crawler (visual_audit.py, cc#2007). Used ONLY by
+# the separate Railway service this card documents (see reports/CC2009_visual_audit_service.md for
+# the exact console settings) -- does NOT touch nixpacks.toml or the web service's own build in any
+# way. Root nixpacks.toml (Nixpacks, no Chromium) is what the web service keeps using; this image
+# exists specifically because a headless-Chromium crawl needs a browser + its full native-library
+# chain, which Nixpacks would need hand-assembled apt packages to reproduce -- Microsoft's own
+# Playwright image already carries exactly the right ones for the exact Playwright version pinned
+# in requirements below, which is the whole reason cc#2009's own spec asks for a Dockerfile here
+# rather than extending nixpacks.toml.
+FROM mcr.microsoft.com/playwright/python:v1.48.0-jammy
+
+WORKDIR /app
+
+# The crawler reads pwa_endpoints.py's own NAV array as TEXT at runtime (visual_audit.py's
+# parse_nav_routes -- item 3, never a hardcoded page list), so it needs the real repo checkout
+# alongside it, not just visual_audit.py in isolation. Copies the whole build context Railway
+# already clones for this service.
+COPY . .
+
+# playwright itself ships with this base image; psycopg is the one extra dependency visual_audit.py
+# imports that the image does not already carry.
+RUN pip install --no-cache-dir "psycopg[binary]"
+
+# Reads its config from environment variables (DATABASE_URL, VISUAL_AUDIT_BASE_URL,
+# SCORR_AUTH_PASSWORD -- see the report for the complete list); no flags needed for the scheduled
+# run. Runs once and exits -- built to be this service's Cron Job command, not a long-lived process.
+CMD ["python3", "visual_audit.py"]
