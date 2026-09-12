@@ -81,7 +81,7 @@
     + '.scorr-card-strip.scorr-cs-app .scorr-cs-b{box-sizing:border-box;flex:0 0 auto;width:var(--space-20,20px);height:var(--space-20,20px);min-width:0;max-width:none;'
     + 'padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;font-size:var(--type-10,10px);font-weight:800;letter-spacing:0;'
     + 'border-radius:var(--radius-6,6px);background:var(--hi,var(--surface2,#1a2233));border:var(--bw-1,1px) solid var(--edge,var(--line2,#2a2a32));'
-    + 'color:var(--brand,var(--txt,#d4af37));box-shadow:none;min-height:0;position:relative}'   /* cc#1956: 20px square */
+    + 'color:var(--brand,var(--txt,#d4af37));box-shadow:none;min-height:0!important;position:relative}'   /* cc#1956: 20px square */
     /* cc#1973 (do_not_touch LIFTED for these two declarations, Fable log 6224). THE BUG, measured:
        the served mobile.css has, inside @media(max-width:767px), a multi-line selector
        `button,a.btn,.btn,.chip,.tab,.toggle,select,th[onclick],[role=button],...{min-height:44px}`.
@@ -96,7 +96,25 @@
        Vertical has no neighbour in the row, so 44px tall is free. Horizontal is therefore capped at
        the gap midpoint: 20 + 3 + 3 = 26px, the widest that cannot steal a neighbour's tap.
        Reported rather than bodged, per the ruling — 44x44 needs wider pills or a wider gap, which
-       is a design decision and not mine to take. */
+       is a design decision and not mine to take.
+       cc#2022 (founder screenshot, D-cockpit sheet: C/A/R render tall, D — the active letter, a
+       <span> — renders the correct square). cc#1973's plain `min-height:0` above beat mobile.css's
+       `button{min-height:44px}` (0 IDs — pure class-count already won, 3 classes beats 1 element,
+       whatever the source order), but that was never the only competing rule. MEASURED, real
+       Chromium, 390px, the pill inside body.mcards #dcOv (the exact D-cockpit DOM shape): a bare
+       <button> pill computed to 20x44 (min-height 44px winning), the <span> pill to 20x20 (min-height
+       0px) — because scorr_card_common.js's OWN sheet CSS carries
+       `body.mcards #dcOv button{min-height:44px}`, and an ID selector (#dcOv) OUTRANKS any number of
+       stacked classes by the CSS specificity algorithm itself, independent of !important or source
+       order — no amount of adding classes to OUR selector could ever have beaten it. `!important` is
+       the only construct that can, which is why it is now on this declaration and this declaration
+       alone (measurement showed only min-height inflated; width/min-width were already correct in
+       both the button and the span, so neither needed it) — the same idiom this codebase's own
+       #scorrChartClose/#scorrAnaX rule already uses one file over for an identical ID-vs-class fight.
+       Confirmed the same fix and the same numbers apply with the pill inside #scorrChartOv/
+       #scorrAnaOv too (no equivalent bare `button` rule scoped to those two overlays exists today,
+       so they were not currently broken, but !important makes the pill un-inflatable there and by
+       ANY future per-overlay rule as well, matching item 4's cross-surface requirement). */
     + '.scorr-card-strip.scorr-cs-app .scorr-cs-b::after{content:"";position:absolute;left:-3px;right:-3px;top:-12px;bottom:-12px;border-radius:inherit}'
     + '.scorr-card-strip.scorr-cs-app .scorr-cs-b:active{background:var(--panel,#131316)}'
     /* current letter: brand fill, field-coloured glyph -- the same "you are here" the web strip
