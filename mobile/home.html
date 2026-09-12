@@ -1333,28 +1333,6 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
    matches. This page only stretches the pills across the row. */
 /* cc#1944: the pill's row share (flex-basis 18.75%, row centred) now lives in the same single spec;
    nothing about the pill is set here any more. */
-/* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
-   Index option chain summary only (option_chain has NIFTY + BANKNIFTY, nothing else); the
-   is-index-only line says so on the card itself, not just in a tooltip. Same visual language as
-   the cc#1867 Approved Trades card just above it (panel/panel2/line2 tokens, 12px radius, no
-   gradient, no glow) — a new card family was not needed for one more summary block. */
-.deriv-card{margin-bottom:var(--space-9)}
-.deriv-card .hdr{display:flex;align-items:center;gap:var(--space-10);margin-bottom:var(--space-6)}
-.deriv-card .eyebrow{font-size:var(--type-11);font-weight:700;letter-spacing:var(--track-px16);color:var(--txt);text-transform:uppercase}
-.deriv-card .rule{flex:1;height:1px;background:var(--line2)}
-.deriv-card .idxnote{font-size:var(--type-9);color:var(--dim);margin-bottom:var(--space-8)}
-.deriv-row{background:var(--panel);border:var(--bw-1) solid var(--line2);border-radius:var(--radius-12);padding:var(--space-14);margin-bottom:var(--space-9);cursor:pointer}
-.deriv-row:last-child{margin-bottom:0}
-.deriv-row .dr-top{display:flex;align-items:baseline;justify-content:space-between}
-.deriv-row .dr-sym{font-size:var(--type-14);font-weight:800;color:var(--txt)}
-.deriv-row .dr-pcr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-13);font-weight:700;color:var(--txt)}
-.deriv-row .dr-pcr .lbl{font-size:var(--type-85);color:var(--dim);font-weight:400;margin-right:var(--space-4)}
-.deriv-row .dr-meta{font-size:var(--type-9);color:var(--dim);margin-top:var(--space-2)}
-.deriv-row .dr-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4) var(--space-10);margin-top:var(--space-10);font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-105)}
-.deriv-row .dr-grid .lbl{font-size:var(--type-85);letter-spacing:var(--track-px8);color:var(--dim);text-transform:uppercase;display:block;font-family:inherit}
-.deriv-row .dr-grid .val{color:var(--txt);margin-top:var(--space-2)}
-.deriv-row .dr-foot{display:flex;justify-content:space-between;margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--line2);font-size:var(--type-9);color:var(--dim)}
-.deriv-row .dr-foot .stale{color:var(--amber,#F5B94A)}
 /* cc#1888 P4 (APP_GRID_FRAMEWORK_V1): the new DASHBOARD section — a row-list, same tokens/idiom
    the .deriv-card/.approved-slider header (eyebrow+rule) and .tool grid tile (panel/border/radius,
    icon span with the brand glow) already use on this page, scoped under its own class per this
@@ -3292,8 +3270,13 @@ function oiCard(name, oi, mp, bare){
     ? '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">' + stamp + ib + '</div>'
     : '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
       + '<span style="display:inline-flex;align-items:center;gap:8px">' + stamp + ib + '</span></div>';
+  /* cc#2003 (founder 12-Sep-2026 ~08:15 IST): the chart area itself is now a SECOND, larger tap
+     target opening the full option chain as a popup overlay (chainPopupOpen -> scorr_cockpit_card.js
+     -> the SAME cc#2004 chain-grid component the D-button uses, one implementation). Additive: the
+     (i) button above (oiRead) and the INDEX INTEL link elsewhere on this card are untouched, per
+     do_not_touch. name === IBK.sym at every call site (renderIbkDeck() passes IBK.sym in). */
   var body = header
-    + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    + '<div class="oib" onclick="chainPopupOpen(\'' + esc(name) + '\')" role="button" aria-label="Open full option chain" style="cursor:pointer">' + cols + spotLine + tags + '</div>'
     + spotLb
     + xs
     + story
@@ -3696,117 +3679,6 @@ function loadApprovedTrades(){
     if (body){ body.className = 'ap-empty'; body.textContent = 'Could not load approved trades right now.'; }
   });
 }
-/* ══ cc#1875 phase 1: DERIVATIVES — Home 3rd card, additive (existing home cards untouched).
-   GET /api/mobile/home/derivatives — ONE call, both underlyings — wraps oi_structure.oi_structure()
-   (cc#1575, the SAME composer Home's own Max Pain (i) card and the web Index Intel card already
-   read); nothing here recomputes PCR, OI totals, walls or max pain. The PCR by OI shown here is
-   that composer's own chain-wide ratio — a DIFFERENT (also pre-existing) number from the home
-   tape's pcr_mood.latest_pcr() banded reading; full reconciliation is in
-   mobile_home_derivatives.py's own docstring. Paint-then-fill, same pattern as Approved Trades
-   just above it: derivShellHtml() paints immediately, loadDerivatives() fills it after.
-   Phase 2 (IV percentile) is NOT built here — gated on cc#1863 tonight. */
-function oiShort(v){
-  if (v == null || isNaN(Number(v))) return '--';
-  var a = Math.abs(Number(v));
-  if (a >= 1e7) return (a / 1e7).toFixed(a >= 1e8 ? 1 : 2) + 'Cr';
-  if (a >= 1e5) return (a / 1e5).toFixed(a >= 1e6 ? 1 : 2) + 'L';
-  if (a >= 1e3) return (a / 1e3).toFixed(1) + 'k';
-  return String(Math.round(a));
-}
-function derivExpiryTxt(iso, dte){
-  if (!iso) return '--';
-  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso));
-  if (!m) return esc(iso);
-  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return parseInt(m[3], 10) + ' ' + MON[parseInt(m[2], 10) - 1] + (dte != null ? ' (' + dte + 'd)' : '');
-}
-var DERIV = { data: null };
-function derivRowHtml(u){
-  var pcrTxt = u.pcr != null ? Number(u.pcr).toFixed(2) : '--';
-  var st = window.scorrAsofStamp ? scorrAsofStamp(u.as_of) : {txt: u.as_of || '', amber: false};
-  return '<div class="deriv-row" onclick="derivSheetOpen(\'' + u.underlying + '\')">'
-    + '<div class="dr-top"><span class="dr-sym">' + esc(u.underlying) + '</span>'
-    + '<span class="dr-pcr"><span class="lbl">PCR</span>' + pcrTxt + '</span></div>'
-    + '<div class="dr-meta">Spot ' + esc(u.spot != null ? px(u.spot) : '--') + ' · Expiry ' + esc(derivExpiryTxt(u.expiry, u.days_to_expiry)) + '</div>'
-    + '<div class="dr-grid">'
-    + '<div><span class="lbl">Call OI</span><span class="val">' + esc(oiShort(u.ce_oi)) + '</span></div>'
-    + '<div><span class="lbl">Put OI</span><span class="val">' + esc(oiShort(u.pe_oi)) + '</span></div>'
-    + '<div><span class="lbl">Call wall</span><span class="val">' + (u.call_wall != null ? esc(px(u.call_wall) + ' (' + oiShort(u.call_wall_oi) + ')') : '--') + '</span></div>'
-    + '<div><span class="lbl">Put wall</span><span class="val">' + (u.put_wall != null ? esc(px(u.put_wall) + ' (' + oiShort(u.put_wall_oi) + ')') : '--') + '</span></div>'
-    + '</div>'
-    + '<div class="dr-foot"><span' + (st.amber ? ' class="stale"' : '') + '>' + esc(st.txt || '') + '</span><span>Tap for full chain →</span></div>'
-    + '</div>';
-}
-function derivShellHtml(){
-  return '<div class="deriv-card"><div class="hdr"><span class="eyebrow">DERIVATIVES</span><div class="rule"></div></div>'
-    + '<div class="idxnote">Index options only — NIFTY &amp; BANKNIFTY. No stock options in this table.</div>'
-    + '<div id="derivBody">Loading…</div></div>';
-}
-function loadDerivatives(){
-  fetchWithTimeout('/api/mobile/home/derivatives').then(function(r){ return r.json(); }).then(function(d){
-    DERIV.data = d;
-    var body = document.getElementById('derivBody'); if (!body) return;
-    var rows = d.underlyings || [];
-    if (!rows.length){ body.textContent = 'Derivatives data is not available right now.'; return; }
-    body.innerHTML = rows.map(function(u){
-      if (u.status && u.status !== 'ok'){
-        return '<div class="deriv-row" style="cursor:default"><div class="dr-top"><span class="dr-sym">' + esc(u.underlying) + '</span></div>'
-          + '<div class="dr-meta">' + esc(u.note || 'Option chain data pending.') + '</div></div>';
-      }
-      return derivRowHtml(u);
-    }).join('');
-  }).catch(function(){
-    var body = document.getElementById('derivBody');
-    if (body) body.textContent = 'Could not load derivatives right now.';
-  });
-}
-function derivSheetOv(){
-  var ov = document.getElementById('derivSheetOv');
-  if (!ov){
-    ov = document.createElement('div'); ov.id = 'derivSheetOv'; ov.className = 'deriv-sheet-ov';
-    ov.innerHTML = '<div class="deriv-sheet" id="derivSheet"></div>';
-    ov.addEventListener('click', function(e){ if (e.target === ov) derivSheetClose(); });
-    document.body.appendChild(ov);
-  }
-  return ov;
-}
-function derivSheetClose(){
-  var ov = document.getElementById('derivSheetOv');
-  if (ov) ov.classList.remove('open');
-  document.body.style.overflow = '';
-}
-/* cc#1875 item 5: "Tapping the card opens the fuller option chain view" — every strike of the
-   near expiry, CE/PE OI, from the SAME `chain` array the summary payload already carried (no
-   second fetch). ATM = the strike closest to spot; wall rows (call_wall / put_wall, already
-   computed server-side) are highlighted, not recomputed here. */
-function derivSheetOpen(underlying){
-  var ov = derivSheetOv();
-  var rows = (DERIV.data && DERIV.data.underlyings) || [];
-  var u = null;
-  for (var i = 0; i < rows.length; i++){ if (rows[i].underlying === underlying){ u = rows[i]; break; } }
-  var sh = document.getElementById('derivSheet');
-  var head = '<div class="dsh-hd"><span>' + esc(underlying) + (u && u.expiry ? ' · ' + esc(derivExpiryTxt(u.expiry, u.days_to_expiry)) : '') + '</span><button type="button" class="dsh-close" onclick="derivSheetClose()">✕</button></div>';
-  if (!u || !u.chain || !u.chain.length){
-    sh.innerHTML = head + '<div style="padding:18px">No chain data right now.</div>';
-    ov.classList.add('open'); document.body.style.overflow = 'hidden'; return;
-  }
-  var spot = u.spot;
-  var atmStrike = null;
-  if (spot != null){
-    var best = Infinity;
-    u.chain.forEach(function(r){ var d = Math.abs(r.strike - spot); if (d < best){ best = d; atmStrike = r.strike; } });
-  }
-  var rowsHtml = u.chain.map(function(r){
-    var isWall = (u.call_wall != null && r.strike === u.call_wall) || (u.put_wall != null && r.strike === u.put_wall);
-    var rcls = (isWall ? 'wall ' : '') + (r.strike === atmStrike ? 'atm' : '');
-    return '<tr class="' + rcls.trim() + '"><td>' + px(r.strike) + '</td><td>' + esc(oiShort(r.ce_oi)) + '</td><td>' + esc(oiShort(r.pe_oi)) + '</td></tr>';
-  }).join('');
-  sh.innerHTML = head
-    + '<div style="padding:10px 14px 0;font-size:var(--type-9);color:var(--dim)">Spot ' + esc(spot != null ? px(spot) : '--') + ' · ' + u.chain.length + ' strikes · highlighted row = OI wall</div>'
-    + '<div style="padding:10px 14px 18px"><table><thead><tr><th>Strike</th><th>Call OI</th><th>Put OI</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
-  ov.classList.add('open'); document.body.style.overflow = 'hidden';
-}
-document.addEventListener('keydown', function(e){ if (e.key === 'Escape') derivSheetClose(); });
 function loadIndexBook(){
   function leg(symbol){
     return Promise.all([
@@ -6101,15 +5973,13 @@ function renderHome(d, pv){
      (bottom nav). bookFace2(), rateCell() and the bk payload read stay intact; hide, never delete. */
   // h += '<div class="sect">THE BOOK</div>' + bookFace2();
 
-  /* cc#1875 phase 1 (founder 09-Sep-2026): HOME 3rd CARD — DERIVATIVES, additive, right after THE
-     BOOK and before MY PORTFOLIO. Nothing above or below this line changes. */
-  /* cc#1981 (founder 10-Sep-2026 19:45, "unhide derivatives and option chain on Home"): the
-     cc#1918 item 2 hide is REVERSED here. THE BOOK (cc#1918 item 1) and MY PORTFOLIO (item 3)
-     stay hidden — this is a partial reversal, not a rollback of cc#1918. The card returns exactly
-     as cc#1875 shipped it: PHASE 1, index-only, expiry named, as-of = max(ts) of option_chain.
-     No new fields. IV percentile (cc#1875 phase 2 / cc#1859) is still blocked on history depth
-     and is NOT part of this card. */
-  h += derivShellHtml();
+  /* cc#1875/cc#1918/cc#1981 (09/10-Sep-2026): the DERIVATIVES card that lived here — built, then
+     hidden, then un-hidden — is REMOVED entirely per cc#2003 (founder direction 12-Sep-2026 ~08:15
+     IST, "this is not required"). Not hidden this time: deleted. oiShort/derivExpiryTxt/DERIV/
+     derivRowHtml/derivShellHtml/loadDerivatives/derivSheetOv/derivSheetClose/derivSheetOpen and
+     their keydown listener are gone with it — nothing left importing them. The Max Pain card above
+     (oiCard(), cc#1382) now carries the equivalent "see the full chain" affordance itself: its
+     chart area opens the cc#2004 chain grid as a popup (see oiCard()'s own .oib tap handler). */
 
   /* 3 · MY PORTFOLIO — cc#911: rendered by renderPortfolio() into #pfblock, so a row tap can
      redraw just this card instead of the whole page. */
@@ -6127,7 +5997,6 @@ function renderHome(d, pv){
   moodStart();        /* cc#1135: the .mlt letters only exist after this paint */
   loadIndexBook();    /* cc#1382: #heroCard3Body only exists after this paint, same as the mood letters */
   loadApprovedTrades();  /* cc#1867: #apTrBody only exists after this paint, same reason */
-  loadDerivatives();  /* cc#1875: #derivBody only exists after this paint — cc#1981: restored with the card */
   loadHeroPositions(); /* cc#1386: #heroPositionsBody, same reason */
   heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
   glitterSync();          /* cc#1378: sets the initial active-face class, same reason */

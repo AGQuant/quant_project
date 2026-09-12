@@ -384,10 +384,23 @@
   // not edge borders. A row can be at most one of the three (they are three different strikes in
   // the ordinary case; if the founder's own data ever makes two coincide, max pain wins visually
   // since it renders last — stated, not hidden).
+  // cc#2003 fix: theme_mobile.css's #dcOv bridge (the family every var(--c-*) name here reads)
+  // covers only bg/panel/bd/tx/mut/dim/grn/red/blu -- confirmed by reading the bridge itself, no
+  // --gold or --teal name exists in it. The two names below were invented for cc#2004 with a hex
+  // fallback that, absent a real custom property, is not a fallback at all -- it is the permanent
+  // value on every theme. Call wall / put wall now read bridged tokens with ZERO fallback, matching
+  // the colours home.html's own Max Pain chart already uses for the identical roles (home.html:764
+  // .oiwall.cw = var(--red), :765 .oiwall.pw = var(--grn)). Max pain has no bridged equivalent
+  // anywhere in this family (brand/gold belongs to a DIFFERENT #gvp/#ckp/#v8p-only bridge #dcOv is
+  // not part of) -- MP_AMBER reuses, byte for byte, the one literal home.html's own chart already
+  // hardcodes for this exact role (home.html:766 .oiwall.mpw), itself a documented, accepted
+  // exception (home.html:787: "the amber role ... has NO token") -- not a new gap, the same one,
+  // named once here instead of typed twice.
+  var MP_AMBER = '#FF9F45';
   function _dcChainRowBg(r){
-    if(r.is_max_pain) return 'background:color-mix(in srgb, var(--c-gold, #D4AF37) 20%, transparent)';
+    if(r.is_max_pain) return 'background:color-mix(in srgb, ' + MP_AMBER + ' 20%, transparent)';
     if(r.is_call_wall) return 'background:color-mix(in srgb, var(--c-red) 16%, transparent)';
-    if(r.is_put_wall) return 'background:color-mix(in srgb, var(--c-teal, #2FD48B) 16%, transparent)';
+    if(r.is_put_wall) return 'background:color-mix(in srgb, var(--c-grn) 16%, transparent)';
     return '';
   }
   function _dcChainLegendHtml(oiAvailable){
@@ -395,9 +408,9 @@
       ['var(--c-grn)', 'Cheap'], ['var(--c-mut)', 'Fair'], ['var(--c-red)', 'Expensive']
     ].map(function(p){ return '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+p[0]+'"></span>'+p[1]+'</span>'; }).join('');
     var marks = oiAvailable ? (
-      '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-gold, #D4AF37) 40%, transparent);border-radius:2px;display:inline-block"></span>Max pain</span>'
+      '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="width:8px;height:8px;background:color-mix(in srgb, ' + MP_AMBER + ' 40%, transparent);border-radius:2px;display:inline-block"></span>Max pain</span>'
       + '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-red) 35%, transparent);border-radius:2px;display:inline-block"></span>Call wall</span>'
-      + '<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-teal, #2FD48B) 35%, transparent);border-radius:2px;display:inline-block"></span>Put wall</span>'
+      + '<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-grn) 35%, transparent);border-radius:2px;display:inline-block"></span>Put wall</span>'
     ) : '<span style="color:var(--c-dim)">OI / wall / max pain: index only — not available for a stock chain</span>';
     return '<div style="font-size:9px;color:var(--c-mut);margin-top:8px;line-height:1.8">'+dots+(oiAvailable?'<br>':'')+marks+'</div>';
   }
@@ -448,7 +461,7 @@
     var Bd='border:1px solid var(--c-grid)';   // item 2: full inside borders, every cell
     var rows=d.strikes.map(function(r){
       var bg=_dcChainRowBg(r), sel=(st.selStrike===r.strike)?';box-shadow:inset 0 0 0 1px var(--c-tx)':'';
-      var mpDot = r.is_max_pain ? ' <span style="color:var(--c-gold, #D4AF37)" title="Max pain">&#9679;</span>' : '';
+      var mpDot = r.is_max_pain ? ' <span style="color:' + MP_AMBER + '" title="Max pain">&#9679;</span>' : '';
       return '<tr onclick="dcChainSelectStrike(\''+sym+'\','+r.strike+')" style="cursor:pointer;'+bg+sel+'">'
         + '<td style="'+Bd+';text-align:right;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>'
         + '<td style="'+Bd+';text-align:right;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.ce)+_dcLtpTxt(r.ce)+'</td>'
