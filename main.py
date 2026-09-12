@@ -890,6 +890,8 @@ from mobile_home_derivatives import router as mobile_home_derivatives_router   #
 app.include_router(mobile_home_derivatives_router)
 from option_chain_grid import router as option_chain_grid_router   # cc#2004: NSE-style chain grid -- merges deriv_metrics.strike_chain() (ltp/iv/tag, stocks+index) with oi_structure/max_pain (OI/wall/max-pain, index-only), one builder for the D-button chain and (via cc#2003/cc#2006) the Home popup
 app.include_router(option_chain_grid_router)
+from visual_audit_endpoints import router as visual_audit_router   # cc#2007: /api/visual-audit/failures -- reads what the SEPARATE visual_audit.py crawler job wrote; this router is the only piece of that card that runs in the web process, per its own do_not_touch
+app.include_router(visual_audit_router)
 from ops_control_plane import control_plane_router   # cc#693: ops control plane (registries + job_runs spine + diagnosis)
 app.include_router(control_plane_router)
 app.include_router(performance_router)

@@ -19,3 +19,7 @@ screener.csv
 # cc#1133 CC EYES — render-check screenshots are container-local evidence, never repo content.
 tools/shots/
 *.render.png
+
+# cc#2007 visual-audit harness — captured images are evidence for a FAILING check, purged after
+# 7 days by the job itself; never repo content (same reasoning as tools/shots/ above).
+visual_audit_shots/
