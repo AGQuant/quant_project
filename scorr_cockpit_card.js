@@ -357,9 +357,14 @@
      rows (strike_chain() is that endpoint's own first step, untouched), now also carrying
      per-strike OI + wall/max-pain flags when the symbol is an index. do_not_touch (card item 11):
      this stays the D-button's own section 06, never routed through Index Intel. */
-  var _DC_CHAIN = {};   // sym -> {data, selStrike, showInfo} — module state, cleared on a fresh fetch
+  // sym -> {data, selStrike, showInfo, boxId}. boxId (cc#2003/cc#2006) lets a SECOND, independent
+  // render target (a standalone chain popup, added below) reuse every function here without a
+  // DOM-id collision against the D-cockpit's own #dcStrikeChain — the two containers can now
+  // never fight over which one a given symbol's re-render (from a tap-to-select or the (i)
+  // toggle, neither of which take a boxId argument through their onclick=) actually updates.
+  var _DC_CHAIN = {};
   function _dcChainState(sym){
-    if(!_DC_CHAIN[sym]) _DC_CHAIN[sym] = {data:null, selStrike:null, showInfo:false};
+    if(!_DC_CHAIN[sym]) _DC_CHAIN[sym] = {data:null, selStrike:null, showInfo:false, boxId:'dcStrikeChain'};
     return _DC_CHAIN[sym];
   }
   // cc#2004 item 4: the tag DOT reads cc#1859's OWN ivp.tag (CHEAP/FAIR/EXPENSIVE, percentile-
@@ -438,8 +443,8 @@
     _dcRenderChainGrid(sym);
   }
   function _dcRenderChainGrid(sym){
-    var box=document.getElementById('dcStrikeChain'); if(!box) return;
     var st=_dcChainState(sym), d=st.data; if(!d) return;
+    var box=document.getElementById(st.boxId); if(!box) return;
     var Bd='border:1px solid var(--c-grid)';   // item 2: full inside borders, every cell
     var rows=d.strikes.map(function(r){
       var bg=_dcChainRowBg(r), sel=(st.selStrike===r.strike)?';box-shadow:inset 0 0 0 1px var(--c-tx)':'';
@@ -475,16 +480,44 @@
   // of the old /api/deriv/strike-chain/ call -- same underlying rows (strike_chain() is that new
   // endpoint's own first step, byte-identical for the ltp/iv/fair/tag fields), now also carrying
   // per-strike OI + wall/max-pain flags when the symbol is an index oi_structure covers.
-  async function dcFetchStrikes(sym){
-    var box=document.getElementById('dcStrikeChain'); if(!box)return;
-    box.innerHTML='<div style="padding:10px 0;color:var(--c-mut)">Fetching live strikes for '+sym+'&hellip;</div>';
+  async function dcFetchStrikes(sym, boxId){
     var st=_dcChainState(sym);
+    if(boxId) st.boxId=boxId;   // cc#2003/cc#2006: a standalone popup passes its own container id
+    var box=document.getElementById(st.boxId); if(!box)return;
+    box.innerHTML='<div style="padding:10px 0;color:var(--c-mut)">Fetching live strikes for '+sym+'&hellip;</div>';
     var d;
     try{d=await getJSON('/api/deriv/chain-grid/'+encodeURIComponent(sym));}
     catch(e){box.innerHTML='<div style="color:var(--c-red);padding:8px 0">Strike chain unavailable ('+((e&&e.message)||e)+').</div>';return;}
     if(!d||d.error||!(d.strikes&&d.strikes.length)){box.innerHTML='<div style="color:var(--c-mut);padding:8px 0">'+((d&&d.error)||'No strikes returned.')+'</div>';return;}
     st.data=d; st.selStrike=null;   // a fresh fetch clears any prior row selection
     _dcRenderChainGrid(sym);
+  }
+
+  /* ── cc#2003/cc#2006: a STANDALONE chain-grid popup for Home ─────────────────────────────
+     "the popup embeds THIS card component" (cc#2003's own wording) — reuses the SAME #dcOv/
+     #dcSheet overlay, the SAME #dcStrikeChain container id and the SAME dcFetchStrikes/
+     _dcRenderChainGrid this file's D-cockpit section 06 already uses. NOT the full D-cockpit
+     sheet — no volume/OI/futures-basis/levels sections, just the chain, its (i) toggle and its
+     tap-to-detail panel, exactly as built for cc#2004. A user cannot have the D-cockpit's own
+     chain and this popup open at once (both use the one #dcOv overlay), so there is no state
+     collision between the two entry points — same reasoning as any other #dcOv open/close. */
+  function _chainPopupSheetHtml(sym){
+    return '<div style="display:flex;align-items:center;padding:14px 16px 4px">'
+      + '<div style="font-weight:800;letter-spacing:.04em;color:var(--c-tx)">'+sym+' &middot; OPTION CHAIN</div>'
+      + '<button onclick="_dcClose()" aria-label="Close" style="margin-left:auto;background:none;border:1px solid var(--c-bd);color:var(--c-mut);border-radius:8px;min-width:32px;min-height:32px;font-size:14px;cursor:pointer">&#10005;</button>'
+      + '</div>'
+      + '<div id="dcStrikeChain" style="padding:8px 16px 16px;font-size:11px;color:var(--c-mut)">Loading&hellip;</div>';
+  }
+  async function chainPopupOpen(sym){
+    sym=(sym||'').trim().toUpperCase(); if(!sym) return;
+    _dcInjectStyle();
+    let ov=document.getElementById('dcOv');
+    if(!ov){ov=document.createElement('div');ov.id='dcOv';ov.innerHTML='<div class="dc-sheet" id="dcSheet"></div>';document.body.appendChild(ov);
+      ov.addEventListener('click',e=>{if(e.target===ov)_dcClose();});}
+    const sheet=document.getElementById('dcSheet');
+    sheet.innerHTML=_chainPopupSheetHtml(sym);
+    ov.classList.add('open');
+    await dcFetchStrikes(sym);   // same fetch + render the D-button uses -- one implementation
   }
   // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
   // Date()/timezone drift (the server stamp is already IST).
@@ -524,7 +557,10 @@
     return openDerivCockpit(sym, side, qty, entry, cmp);
   }
 
-  window.ScorrCockpitCard = { open: open, close: _dcClose };
+  // cc#2003/cc#2006: openChain is the public entry point a HOST PAGE calls (Home's Max Pain card,
+  // the Market Mood capsule) — distinct from open() (the full D-cockpit). Same chain-grid render,
+  // a minimal standalone sheet instead of the whole cockpit.
+  window.ScorrCockpitCard = { open: open, close: _dcClose, openChain: chainPopupOpen };
 
   /* Guarded bare globals — see the header note. Never clobber a name a host page already defines. */
   var G = {
@@ -533,7 +569,10 @@
     _dcFetchBasketStatus: _dcFetchBasketStatus, dcFetchStrikes: dcFetchStrikes,
     // cc#2004: the grid's own row-tap and (i)-toggle, called from inline onclick= same as
     // dcFetchStrikes above — must be global for the same reason.
-    dcChainSelectStrike: dcChainSelectStrike, dcChainToggleInfo: dcChainToggleInfo
+    dcChainSelectStrike: dcChainSelectStrike, dcChainToggleInfo: dcChainToggleInfo,
+    // cc#2003/cc#2006: the standalone popup opener, in case a host page prefers an inline
+    // onclick="chainPopupOpen('NIFTY')" over window.ScorrCockpitCard.openChain(...).
+    chainPopupOpen: chainPopupOpen
   };
   Object.keys(G).forEach(function (k) { if (typeof window[k] !== 'function') window[k] = G[k]; });
 })();
