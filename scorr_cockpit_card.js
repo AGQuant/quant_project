@@ -350,48 +350,141 @@
     return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+s1+s2+s3+s4+s5+s6+foot;
   }
 
-  /* ── strike chain + timestamp (verbatim, v8_dashboard.html) ────────────────────────── */
-  // cc#666 part_3: fetch + render the ATM±10 strike chain (live ltp vs BS fair). Reuses the deployed
-  // /api/deriv/strike-chain endpoint; live pricing verified at Monday open (sandbox fyers egress blocked).
+  /* ── cc#2004 OPTION_CHAIN_GRID_V1: NSE-style grid, tag dots, wall/max-pain rows, tap-detail ──
+     Founder direction 11-Sep 20:52-21:15 IST, approved mockup 4, refined 12-Sep to full-row
+     colours + spot+-10. Reads /api/deriv/chain-grid/{symbol} (option_chain_grid.py, cc#2004
+     backend push) instead of the old /api/deriv/strike-chain/ call — SAME strikes/ltp/iv/fair
+     rows (strike_chain() is that endpoint's own first step, untouched), now also carrying
+     per-strike OI + wall/max-pain flags when the symbol is an index. do_not_touch (card item 11):
+     this stays the D-button's own section 06, never routed through Index Intel. */
+  var _DC_CHAIN = {};   // sym -> {data, selStrike, showInfo} — module state, cleared on a fresh fetch
+  function _dcChainState(sym){
+    if(!_DC_CHAIN[sym]) _DC_CHAIN[sym] = {data:null, selStrike:null, showInfo:false};
+    return _DC_CHAIN[sym];
+  }
+  // cc#2004 item 4: the tag DOT reads cc#1859's OWN ivp.tag (CHEAP/FAIR/EXPENSIVE, percentile-
+  // banded) — a DIFFERENT mechanism from this row's older `tag` field (EXPENSIVE/REASONABLE/CHEAP,
+  // Black-Scholes premium-vs-fair, ATM+-5 only) which the detail panel still shows separately
+  // (labelled "BS fair", not silently dropped). No tag yet (outside cc#1859's 60-session floor,
+  // or the IVP sanity gate) draws an EMPTY dot slot, never a fabricated colour.
+  function _dcTagDot(leg){
+    var tag = leg && leg.ivp && leg.ivp.tag;
+    var col = tag==='EXPENSIVE' ? 'var(--c-red)' : tag==='CHEAP' ? 'var(--c-grn)' : tag==='FAIR' ? 'var(--c-mut)' : null;
+    if(!col) return '<span style="display:inline-block;width:6px;height:6px;margin-right:4px"></span>';
+    return '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+col+';margin-right:4px" title="'+tag+'"></span>';
+  }
+  function _dcOiTxt(leg){ return (leg && leg.oi!=null) ? Number(leg.oi).toLocaleString('en-IN') : '&mdash;'; }
+  function _dcLtpTxt(leg){ return (leg && leg.ltp!=null) ? leg.ltp : '&mdash;'; }
+  // cc#2004 founder_revision_12sep: max-pain/call-wall/put-wall are FULL-ROW background colours,
+  // not edge borders. A row can be at most one of the three (they are three different strikes in
+  // the ordinary case; if the founder's own data ever makes two coincide, max pain wins visually
+  // since it renders last — stated, not hidden).
+  function _dcChainRowBg(r){
+    if(r.is_max_pain) return 'background:color-mix(in srgb, var(--c-gold, #D4AF37) 20%, transparent)';
+    if(r.is_call_wall) return 'background:color-mix(in srgb, var(--c-red) 16%, transparent)';
+    if(r.is_put_wall) return 'background:color-mix(in srgb, var(--c-teal, #2FD48B) 16%, transparent)';
+    return '';
+  }
+  function _dcChainLegendHtml(oiAvailable){
+    var dots = [
+      ['var(--c-grn)', 'Cheap'], ['var(--c-mut)', 'Fair'], ['var(--c-red)', 'Expensive']
+    ].map(function(p){ return '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+p[0]+'"></span>'+p[1]+'</span>'; }).join('');
+    var marks = oiAvailable ? (
+      '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-gold, #D4AF37) 40%, transparent);border-radius:2px;display:inline-block"></span>Max pain</span>'
+      + '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-red) 35%, transparent);border-radius:2px;display:inline-block"></span>Call wall</span>'
+      + '<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-teal, #2FD48B) 35%, transparent);border-radius:2px;display:inline-block"></span>Put wall</span>'
+    ) : '<span style="color:var(--c-dim)">OI / wall / max pain: index only — not available for a stock chain</span>';
+    return '<div style="font-size:9px;color:var(--c-mut);margin-top:8px;line-height:1.8">'+dots+(oiAvailable?'<br>':'')+marks+'</div>';
+  }
+  // cc#2004 item 8: the (i) explainer — plain language, own toggle, not a separate screen.
+  function _dcChainInfoHtml(){
+    return '<div style="font-size:10px;color:var(--c-mut);line-height:1.6;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:8px;padding:8px 10px;margin:6px 0">'
+      + '<div><b style="color:var(--c-tx)">Dot colour</b> — how this option\'s live price compares with its own fair value, over the last 120 sessions: green = cheap, grey = fair, coral = expensive.</div>'
+      + '<div style="margin-top:4px"><b style="color:var(--c-tx)">Max pain</b> — the strike where option writers, as a whole, would lose the least money at expiry.</div>'
+      + '<div style="margin-top:4px"><b style="color:var(--c-tx)">Call wall / put wall</b> — the strikes carrying the heaviest call / put open interest, often acting as a level the price gravitates toward or resists.</div>'
+      + '<div style="margin-top:4px;color:var(--c-dim)">Not a trading signal — a descriptive read only.</div></div>';
+  }
+  // cc#2004 item 7: tap a row -> inline detail panel (not a full sheet), both legs where present.
+  // Every field is either a real value or an explicit "not tracked" line — none is fabricated.
+  // Two distinct "fair value" concepts exist (Black-Scholes sigma=RV20, and cc#1859's own IVP fair
+  // value) and are shown labelled separately rather than guessing which one the card meant.
+  function _dcChainDetailHtml(d, strike){
+    var row = (d.strikes||[]).filter(function(r){ return r.strike===strike; })[0];
+    if(!row) return '';
+    var leg=function(o,label){
+      if(!o) return '<div style="flex:1;min-width:140px"><div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div><div style="color:var(--c-dim)">no data</div></div>';
+      var ivpTag=o.ivp&&o.ivp.tag, ivpFair=o.ivp&&o.ivp.fair_value, ivpPct=o.ivp&&o.ivp.percentile;
+      return '<div style="flex:1;min-width:140px">'
+        + '<div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div>'
+        + '<div>Premium <b>'+(o.ltp!=null?o.ltp:'&mdash;')+'</b></div>'
+        + '<div>IV <b>'+(o.iv!=null?o.iv+'%':'&mdash;')+'</b></div>'
+        + '<div>IVP <b>'+(ivpPct!=null?ivpPct+'pct '+(ivpTag||''):'&mdash;')+'</b></div>'
+        + '<div>Fair (BS &sigma;=RV20) <b>'+(o.fair!=null?o.fair:'&mdash;')+'</b></div>'
+        + '<div>Fair (IVP) <b>'+(ivpFair!=null?ivpFair:'&mdash;')+'</b></div>'
+        + '<div>OI <b>'+_dcOiTxt(o)+'</b></div>'
+        + '<div style="color:var(--c-dim)">OI change: not tracked (no baseline tick defined yet)</div>'
+        + '<div style="color:var(--c-dim)">Bid/ask: not captured by the live feed today</div>'
+        + '</div>';
+    };
+    return '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:8px;padding:10px;margin-top:6px">'
+      + leg(row.ce,'CALL '+strike) + leg(row.pe,'PUT '+strike)
+      + '<div style="width:100%;font-size:9px;color:var(--c-dim);margin-top:2px">as of '+(d.oi_asof||d.chain_tick||d.stored_iv_asof||'&mdash;')+'</div>'
+      + '</div>';
+  }
+  function dcChainToggleInfo(sym){ var st=_dcChainState(sym); st.showInfo=!st.showInfo; _dcRenderChainGrid(sym); }
+  function dcChainSelectStrike(sym, strike){
+    var st=_dcChainState(sym); strike=Number(strike);
+    st.selStrike = (st.selStrike===strike) ? null : strike;   // tap the same row again to close it
+    _dcRenderChainGrid(sym);
+  }
+  function _dcRenderChainGrid(sym){
+    var box=document.getElementById('dcStrikeChain'); if(!box) return;
+    var st=_dcChainState(sym), d=st.data; if(!d) return;
+    var Bd='border:1px solid var(--c-grid)';   // item 2: full inside borders, every cell
+    var rows=d.strikes.map(function(r){
+      var bg=_dcChainRowBg(r), sel=(st.selStrike===r.strike)?';box-shadow:inset 0 0 0 1px var(--c-tx)':'';
+      var mpDot = r.is_max_pain ? ' <span style="color:var(--c-gold, #D4AF37)" title="Max pain">&#9679;</span>' : '';
+      return '<tr onclick="dcChainSelectStrike(\''+sym+'\','+r.strike+')" style="cursor:pointer;'+bg+sel+'">'
+        + '<td style="'+Bd+';text-align:right;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>'
+        + '<td style="'+Bd+';text-align:right;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.ce)+_dcLtpTxt(r.ce)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:5px 8px;font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx);white-space:nowrap">'+r.strike+(r.atm?' <span style="font-size:8px;color:var(--c-mut)">ATM</span>':'')+mpDot+'</td>'
+        + '<td style="'+Bd+';text-align:left;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.pe)+_dcLtpTxt(r.pe)+'</td>'
+        + '<td style="'+Bd+';text-align:left;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>'
+        + '</tr>';
+    }).join('');
+    var hcol='style="'+Bd+';text-align:right;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';
+    var info = st.showInfo ? _dcChainInfoHtml() : '';
+    var detail = (st.selStrike!=null) ? _dcChainDetailHtml(d, st.selStrike) : '';
+    var oiNote = d.oi_available ? (' &middot; PCR '+(d.pcr!=null?d.pcr:'&mdash;')) : ' &middot; OI/walls: index only';
+    box.innerHTML =
+        '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'
+      +   '<div style="font-size:10px;color:var(--c-dim)">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d)'+oiNote+'</div>'
+      +   '<button onclick="dcChainToggleInfo(\''+sym+'\')" style="margin-left:auto;width:18px;height:18px;line-height:16px;text-align:center;border-radius:50%;border:1px solid var(--c-bd);background:none;color:var(--c-mut);font-size:10px;font-weight:800;cursor:pointer;padding:0" aria-label="What do these mean?">i</button>'
+      + '</div>'
+      + info
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border-radius:8px;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
+      +   '<thead><tr><td '+hcol+'>OI</td><td '+hcol+'>CE LTP</td>'
+      +     '<td style="'+Bd+';text-align:center;padding:4px 8px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
+      +     '<td style="'+Bd+';text-align:left;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">PE LTP</td>'
+      +     '<td style="'+Bd+';text-align:left;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td></tr></thead>'
+      +   '<tbody>'+rows+'</tbody></table></div>'
+      + detail
+      + _dcChainLegendHtml(d.oi_available);
+  }
+  // cc#2004: fetch + render. Reuses /api/deriv/chain-grid/{symbol} (option_chain_grid.py) instead
+  // of the old /api/deriv/strike-chain/ call -- same underlying rows (strike_chain() is that new
+  // endpoint's own first step, byte-identical for the ltp/iv/fair/tag fields), now also carrying
+  // per-strike OI + wall/max-pain flags when the symbol is an index oi_structure covers.
   async function dcFetchStrikes(sym){
-    const box=document.getElementById('dcStrikeChain'); if(!box)return;
+    var box=document.getElementById('dcStrikeChain'); if(!box)return;
     box.innerHTML='<div style="padding:10px 0;color:var(--c-mut)">Fetching live strikes for '+sym+'&hellip;</div>';
-    let d;
-    try{d=await getJSON('/api/deriv/strike-chain/'+encodeURIComponent(sym));}
+    var st=_dcChainState(sym);
+    var d;
+    try{d=await getJSON('/api/deriv/chain-grid/'+encodeURIComponent(sym));}
     catch(e){box.innerHTML='<div style="color:var(--c-red);padding:8px 0">Strike chain unavailable ('+((e&&e.message)||e)+').</div>';return;}
     if(!d||d.error||!(d.strikes&&d.strikes.length)){box.innerHTML='<div style="color:var(--c-mut);padding:8px 0">'+((d&&d.error)||'No strikes returned.')+'</div>';return;}
-    const tagCol=t=>t==='EXPENSIVE'?'var(--c-red)':t==='CHEAP'?'var(--c-grn)':'var(--c-mut)';
-    const B='text-align:right;padding:5px 6px;border-top:1px solid var(--c-grid);white-space:nowrap';
-    const cell=o=>{
-      if(!o||o.ltp==null)return '<td style="'+B+'">&mdash;</td><td style="'+B+'">&mdash;</td><td style="'+B+'">&mdash;</td><td style="'+B+'">&mdash;</td>';
-      return '<td style="'+B+';font-weight:700">'+o.ltp+'</td>'
-        +'<td style="'+B+'">'+(o.iv!=null?o.iv+'%':'&mdash;')+'</td>'
-        +'<td style="'+B+';color:var(--c-mut)">'+(o.fair!=null?o.fair:'&mdash;')+'</td>'
-        +'<td style="'+B+'"><span style="font-size:9px;font-weight:800;color:'+tagCol(o.tag)+'">'+(o.tag||'&mdash;')+(o.ratio!=null?' '+o.ratio+'&times;':'')+'</span></td>';
-    };
-    // cc#1994 FOUNDER_RULING_11SEP: put/call IV asymmetry is real market structure, surfaced as a
-    // plain stored fact (own as-of, own row label) — never blended into the live ce/pe iv above.
-    const gapLbl=r=>{
-      const g=r.stored_iv_gap; if(!g)return '';
-      const sign=g.gap_vol_pts>=0?'+':'';
-      return '<div title="Stored (bhavcopy): put IV '+g.put_iv+'% minus call IV '+g.call_iv+'%, as of '+(d.stored_iv_asof||'?')+'" '
-        +'style="font-size:8.5px;font-weight:700;color:var(--c-mut);margin-top:2px;cursor:help">&Delta;IV '+sign+g.gap_vol_pts+'</div>';
-    };
-    const rows=d.strikes.map(r=>{
-      const hl=r.atm?' style="background:var(--c-blubg)"':'';
-      return '<tr'+hl+'>'+cell(r.ce)
-        +'<td style="text-align:center;padding:5px 8px;border-top:1px solid var(--c-grid);font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx)">'+r.strike+(r.atm?'&nbsp;ATM':'')+gapLbl(r)+'</td>'
-        +cell(r.pe)+'</tr>';
-    }).join('');
-    const hcol='style="text-align:right;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';
-    const asofLbl=d.stored_iv_asof?(' &middot; stored IV as of '+d.stored_iv_asof):'';
-    box.innerHTML='<div style="font-size:10px;color:var(--c-dim);margin-bottom:6px">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d) &middot; RV20 '+(d.rv20!=null?d.rv20+'%':'&mdash;')+' &middot; '+d.quoted+' contracts quoted'+asofLbl+'</div>'
-      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
-      +'<thead><tr><td '+hcol+'>CE ltp</td><td '+hcol+'>IV</td><td '+hcol+'>fair</td><td '+hcol+'>tag</td>'
-      +'<td style="text-align:center;padding:4px 8px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
-      +'<td '+hcol+'>PE ltp</td><td '+hcol+'>IV</td><td '+hcol+'>fair</td><td '+hcol+'>tag</td></tr></thead>'
-      +'<tbody>'+rows+'</tbody></table></div>'
-      +'<div style="font-size:9px;color:var(--c-dim);margin-top:6px">Fair = Black-Scholes (&sigma;=RV20, r=7%). Tag: EXPENSIVE &gt;+25% &middot; REASONABLE 0..+25% &middot; CHEAP &lt;0% (ltp vs fair). &Delta;IV = stored put IV minus call IV at that strike (nightly bhavcopy capture, not this table\'s own live IV) &mdash; shown only where both legs solved cleanly.</div>';
+    st.data=d; st.selStrike=null;   // a fresh fetch clears any prior row selection
+    _dcRenderChainGrid(sym);
   }
   // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
   // Date()/timezone drift (the server stamp is already IST).
@@ -437,7 +530,10 @@
   var G = {
     openDerivCockpit: open, _dcClose: _dcClose, _dcInjectStyle: _dcInjectStyle, _dcHeader: _dcHeader,
     _dcRender: _dcRender, _dcQd: _dcQd, _dcFmtDate: _dcFmtDate, _dcFmtTs: _dcFmtTs,
-    _dcFetchBasketStatus: _dcFetchBasketStatus, dcFetchStrikes: dcFetchStrikes
+    _dcFetchBasketStatus: _dcFetchBasketStatus, dcFetchStrikes: dcFetchStrikes,
+    // cc#2004: the grid's own row-tap and (i)-toggle, called from inline onclick= same as
+    // dcFetchStrikes above — must be global for the same reason.
+    dcChainSelectStrike: dcChainSelectStrike, dcChainToggleInfo: dcChainToggleInfo
   };
   Object.keys(G).forEach(function (k) { if (typeof window[k] !== 'function') window[k] = G[k]; });
 })();
