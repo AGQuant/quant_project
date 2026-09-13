@@ -546,15 +546,19 @@ var _full = false;                // cc#779: fullscreen state
       var b = document.createElement("button");
       b.textContent = TF_LABEL[k] || k; b.setAttribute("data-tf", k);   // cc#990: label, not key
       var is5 = (k === "5m");
-      var futOk = _futCache[_sym] !== false;   // undefined (not probed) or true => allow; false => grey
+      var futOk = _futCache[_sym] !== false;   // undefined (not probed) or true => allow; false => on-demand Yahoo path
       var y3 = (k === "3Y") ? _3yCache[_sym] : null;   // cc#1566: null = not probed yet => allow
-      var disabled = (is5 && !futOk) || !!(y3 && y3.ok === false);
+      // cc#2043 UNIVERSAL RULE: 1D is no longer disabled for a non-futures symbol -- _load() below
+      // routes it through the canonical Yahoo on-demand fetch instead of the Fyers-backed
+      // /api/intraday/ endpoint (which is empty for anything outside futures_universe). futOk still
+      // decides WHICH source _load() calls, just never whether the pill is clickable.
+      var disabled = !!(y3 && y3.ok === false);
       var on = (k === _tf);
       b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
         ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) +
         (disabled ? ";opacity:.4;cursor:not-allowed" : "");
-      if (disabled) b.title = is5 ? "1D (5-min intraday) is available for F&O (futures) stocks"
-                                  : ((y3 && y3.reason) || TF_3Y_REASON);   // cc#1566: the reason IS the tooltip
+      if (disabled) b.title = (y3 && y3.reason) || TF_3Y_REASON;   // cc#1566: the reason IS the tooltip
+      else if (is5 && !futOk) b.title = "1D (5-min) via Yahoo Finance -- this symbol is not on the live futures feed";
       if (!disabled) b.onclick = function () { _load(k); };
       host.appendChild(b);
     });
@@ -1227,8 +1231,14 @@ var _full = false;                // cc#779: fullscreen state
        Captured here, checked at every point the callback would write anything. */
     var wantSym = _sym, wantTf = tf;
     var stale = function () { return _sym !== wantSym || _tf !== wantTf; };
+    // cc#2043 UNIVERSAL RULE: a symbol not on the live futures feed gets its 1D view from the one
+    // canonical Yahoo on-demand endpoint instead of /api/intraday/ (which is empty for anything
+    // outside futures_universe by design — that endpoint is Fyers-feed-backed only). Never Fyers
+    // for this path, never a DB write — chart_oneday_endpoints.py's own docstring states why.
+    var viaYahoo = isIntraday && _futCache[_sym] === false;
     var url = isIntraday
-      ? "/api/intraday/" + encodeURIComponent(_sym) + "?sessions=5"
+      ? (viaYahoo ? "/api/chart/oneday/" + encodeURIComponent(_sym)
+                  : "/api/intraday/" + encodeURIComponent(_sym) + "?sessions=5")
       : "/api/candles/" + encodeURIComponent(_sym) + "?days=" + TF[tf] + (tf === "3Y" ? "&tf=3Y" : "");   // cc#1566: 3Y carries the depth gate
     _getJSON(url).then(function (rows) {
       if (stale()) return;                       // a response for a symbol/timeframe we left
@@ -1242,6 +1252,13 @@ var _full = false;                // cc#779: fullscreen state
         msg.textContent = "3Y unavailable for " + wantSym + " — " + (rows.reason || TF_3Y_REASON) + ".";
         _setHL([]); return;
       }
+      // cc#2043: chart_oneday_endpoints.py returns {symbol,source,session_date,bars,note}, not a
+      // bare array — unwrap it here so the SAME row->candle mapping below (already correct for
+      // /api/intraday/'s own bare-array shape) handles both sources without forking.
+      var yahooNote = null;
+      if (viaYahoo && rows && !Array.isArray(rows) && rows.bars) {
+        yahooNote = rows.note; rows = rows.bars;
+      }
       if (isIntraday) {
         data = (rows || []).map(function (r) {
           return { time: Math.floor(new Date(String(r.ts).replace(" ", "T") + "+05:30").getTime() / 1000), open: +r.open, high: +r.high, low: +r.low, close: +r.close, volume: +r.volume, _day: String(r.ts).slice(0, 10) };   // cc#755: volume + session date for VWAP
@@ -1252,7 +1269,12 @@ var _full = false;                // cc#779: fullscreen state
       }
       /* the empty-data message names the symbol it was FETCHED for, not whatever _sym happens to
          be now — the same class of mistake one line down from the guard above. */
-      if (!data.length) { msg.textContent = "No " + (isIntraday ? "5-min" : tf) + " data for " + wantSym + "."; _setHL([]); return; }
+      if (!data.length) {
+        // cc#2043: an honest, stated gap (Yahoo genuinely had nothing) rather than a generic
+        // "no data" line indistinguishable from the Fyers-backed path's own empty case.
+        msg.textContent = (viaYahoo && yahooNote) ? yahooNote : ("No " + (isIntraday ? "5-min" : tf) + " data for " + wantSym + ".");
+        _setHL([]); return;
+      }
       var p = _pal();
       var c = LightweightCharts.createChart(box, {
         width: box.clientWidth, height: 412,
