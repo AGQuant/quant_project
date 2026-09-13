@@ -452,6 +452,7 @@ _MOBILE_HEAD = (
     # dependency), so its position is not load-bearing, but it must precede its consumers.
     + b'<script src="/scorr_card_common.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared card primitives (must precede every consumer)
     + b'<script src="/scorr_bell.js?v=' + _BUILD_B + b'" defer></script>'   # cc#1634: shared notification bell (self-contained, mounts on [data-scorr-bell])
+    + b'<script src="/scorr_alert_create.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2030: the bell's own Set Alert button opens this (cc#1831, relocated off Wall of Trades by cc#2029) -- every app page now needs it loaded, not just the two pages that used to carry it inline
     + b'<script src="/scorr_mobile_cards.js?v=' + _BUILD_B + b'" defer></script>'  # cc#859 Part A: shared mobile section card (cc#862/#863 import it, never redefine it)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
     + b'<script src="/scorr_segment_results.js?v=' + _BUILD_B + b'" defer></script>'  # cc#1191: SEGMENT RESULTS popout — AFTER the strip, which it calls per row

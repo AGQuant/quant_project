@@ -823,6 +823,15 @@ PWA_JS = """
       } else if (window.ScorrBell) {
         window.ScorrBell.mount();   // script already present (e.g. a preview iframe) \u2014 just mount here too
       }
+      // cc#2030: the bell's own Set Alert button opens window.ScorrAlertCreate (cc#1831) -- a web
+      // page carrying the shared nav needs the module loaded too, same guard-against-double-
+      // injection pattern as the bell tag just above (a page that already carries it inline, e.g.
+      // trade_alerts_web.html, is left alone -- the module itself no-ops a second load anyway).
+      if (!document.querySelector('script[src*="/scorr_alert_create.js"]')) {
+        var sac = document.createElement('script');
+        sac.src = '/scorr_alert_create.js';
+        document.head.appendChild(sac);
+      }
     }
 
     // cc#1203 push 4: the shared Theme pill, far right of the same bar.

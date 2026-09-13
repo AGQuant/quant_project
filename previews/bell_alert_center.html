@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bell · Alert Center preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   SCORR — BELL / ALERT CENTER preview (cc#2030, design-first per this project's
+   preview-then-promote convention). Founder layout, verbatim, 13-Sep-2026:
+     1) TRIGGERED FEED (top, default view) — most recently triggered alerts,
+        newest first, notification-feed style. Top 4-5, "View more" reveals
+        the rest.
+     2) SET ALERT (bottom-left) — opens the create flow relocated from Wall of
+        Trades (cc#2029, window.ScorrAlertCreate) — parameters TBD, founder
+        deferred the full field set to a later card.
+     3) VIEW ALERTS (bottom-right) — the set-but-not-yet-triggered (pending)
+        alerts.
+   ISOLATION RULE (founder, CRITICAL): this panel is PURELY user-level. Every
+   row shown is a manual alert (source_engine IS NULL) — never a Wall of
+   Trades / engine-signal row of any kind. Verified against the real schema
+   before this preview was drawn: `kind` does NOT distinguish manual vs engine
+   (both use kind='entry') — the real, verified discriminator is
+   source_engine IS NULL, which is what the live build filters on.
+
+   Tokens verbatim from scorr_bell.js's own inline styles (goldnight palette) —
+   this preview does not invent a new visual language, it lays out the SAME
+   component's existing look into the new three-part structure.
+
+   ALL VALUES ARE DUMMY — no fetch, nothing here is a real alert or a real
+   price. The live build reads /api/alerts/list exactly as the bell does today.
+============================================================================= */
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0A0A0C;color:#F5F2EA;font-family:'Sora',-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;padding:24px 12px;min-height:100vh}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.note{max-width:380px;margin:0 auto 14px;font-size:11px;color:#8A8A93;line-height:1.5;
+  border:1px dashed #2A2A31;border-radius:10px;padding:10px 12px}
+.note b{color:#D4AF37}
+#scorr-bell-box{position:relative;width:min(380px,calc(100vw - 24px));margin:0 auto;
+  background:#17171B;color:#F5F2EA;border:1px solid #2A2A31;border-radius:14px;
+  box-shadow:0 14px 40px rgba(0,0,0,.55);overflow:hidden}
+.hd{display:flex;justify-content:space-between;align-items:center;padding:12px 12px 10px;
+  border-bottom:1px solid #2A2A31}
+.hd .t{font:800 13px/1.2 inherit;color:#F5F2EA}
+.hd .s{margin-top:3px;font:10px/1.2 'IBM Plex Mono';letter-spacing:1.2px;color:#8A8A93;text-transform:uppercase}
+.x{width:32px;height:32px;border-radius:8px;border:1px solid #2A2A31;background:transparent;
+  color:#F5F2EA;font-size:16px}
+.feed{max-height:min(60vh,420px);overflow-y:auto}
+.row{display:block;padding:10px 12px;border-bottom:1px solid #2A2A31;text-decoration:none;color:inherit}
+.row .top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.row b{font-size:14px}
+.chip{font:700 10px/1 'IBM Plex Mono';letter-spacing:1px;padding:4px 7px;border-radius:6px;border:1px solid currentColor}
+.chip.up{color:#2FD48B}.chip.dn{color:#FF5C6C}
+.row .when{margin-top:4px;font:12px/1.4 'IBM Plex Mono';color:#F5F2EA}
+.row .when .d{color:#8A8A93}
+.more{display:block;width:100%;text-align:center;padding:9px 12px;border:0;border-top:1px solid #2A2A31;
+  background:#17171B;color:#8A8A93;font:700 10.5px/1 'IBM Plex Mono';letter-spacing:.6px}
+.foot{padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.foot button{padding:11px;border-radius:10px;font:800 11.5px/1 'IBM Plex Mono';letter-spacing:.5px;cursor:pointer;border:1px solid #2A2A31}
+.foot .set{background:#D4AF37;color:#131316;border-color:#D4AF37}
+.foot .view{background:transparent;color:#F5F2EA}
+.pending{border-top:1px solid #2A2A31;padding:4px 0}
+.pending .row .when{color:#8A8A93}
+.empty{padding:24px 12px;text-align:center;color:#8A8A93;font-size:12.5px}
+h2{max-width:380px;margin:26px auto 8px;font-size:12px;color:#8A8A93;text-transform:uppercase;letter-spacing:1px}
+</style>
+</head>
+<body>
+
+<div class="note"><b>Preview — dummy data, nothing here is fetched.</b> The bell opened with items
+already triggered. Isolation rule: every row is a manual alert (source_engine IS NULL) — this panel
+never shows a Wall of Trades / engine-signal row.</div>
+
+<div id="scorr-bell-box" role="dialog" aria-label="Custom alerts">
+  <div class="hd">
+    <div><div class="t">Custom alerts</div><div class="s">2 triggered · 1 pending</div></div>
+    <button class="x">×</button>
+  </div>
+  <div class="feed">
+    <a class="row" href="#">
+      <div class="top"><b>RELIANCE</b><span class="chip up">BUY</span></div>
+      <div class="when"><span class="d">triggered</span> 13 Sep · 09:42 IST — crossed ABOVE ₹1,450.00</div>
+    </a>
+    <a class="row" href="#">
+      <div class="top"><b>TATASTEEL</b><span class="chip dn">SELL</span></div>
+      <div class="when"><span class="d">approved</span> 12 Sep · 14:10 IST @ ₹168.40</div>
+    </a>
+  </div>
+  <button class="more">− VIEW MORE (3 EARLIER)</button>
+  <div class="foot">
+    <button class="set">＋ SET ALERT</button>
+    <button class="view">VIEW ALERTS (1)</button>
+  </div>
+</div>
+
+<h2>View Alerts expanded (pending, not yet triggered)</h2>
+<div id="scorr-bell-box" style="margin-top:0">
+  <div class="hd">
+    <div><div class="t">Pending alerts</div><div class="s">1 set, waiting to cross</div></div>
+    <button class="x">×</button>
+  </div>
+  <div class="pending">
+    <a class="row" href="#">
+      <div class="top"><b>NATURALGAS</b><span class="chip dn">SELL</span></div>
+      <div class="when"><span class="d">waits for cross</span> ≤ ₹245.00 (live ₹251.20)</div>
+    </a>
+  </div>
+</div>
+
+<h2>Empty state (nothing has triggered yet — honest, not hidden)</h2>
+<div id="scorr-bell-box" style="margin-top:0">
+  <div class="hd">
+    <div><div class="t">Custom alerts</div><div class="s">0 triggered · 0 pending</div></div>
+    <button class="x">×</button>
+  </div>
+  <div class="empty">No alerts have triggered yet.</div>
+  <div class="foot">
+    <button class="set">＋ SET ALERT</button>
+    <button class="view">VIEW ALERTS</button>
+  </div>
+</div>
+
+</body>
+</html>
