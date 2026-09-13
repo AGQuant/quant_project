@@ -34,6 +34,10 @@ METHODOLOGY, STATED PLAINLY (this is a first look at real NSE UDiFF columns -- n
     - NEAR-MONTH per underlying's OPTIONS = the option rows' own earliest XpryDt on/after the trade
       date, independently selected per underlying (may not always equal the future's expiry, though
       it should for standard monthly names).
+      cc#2020 (founder ruling 12-Sep-2026): CHANGED to the current MONTHLY contract -- the latest
+      expiry inside the soonest listed expiry-month (see _monthly_expiry). For NIFTY the old rule
+      picked the weekly on 250/250 backfilled sessions; the live option_chain feed is monthly-only,
+      and weekly vs monthly implied vol genuinely differ, so history now matches the feed.
     - ATM +-10 = the 21 strikes (by count, not by rupee spacing) nearest the spot proxy for that
       underlying's near-month expiry, CE and PE both kept at each strike -- matching the card's own
       "21 strikes x 2 option types = 42 rows per symbol per day" sizing basis.
@@ -107,9 +111,24 @@ def _is_future_row(row) -> bool:
     return fit in ("STF", "IDF")
 
 
+def _monthly_expiry(expiries):
+    """cc#2020: the CURRENT MONTHLY contract from one symbol's full set of listed expiries on/after
+    the trade date. Group by (year, month); take the SOONEST month (the current expiry cycle);
+    within that one month select the LATEST date -- by NSE convention the final expiry to fall in a
+    month IS the monthly contract, any earlier expiries that month are its weeklies. A month with
+    a single listed expiry (every single stock; NIFTY/BANKNIFTY right after a roll before that
+    month's weeklies list) gives min == max == that one date, identical to the old plain min().
+    Data-driven on purpose: no hardcoded weekday, no external expiry calendar -- each day's own
+    bhavcopy already lists every live expiry, weekly and monthly together. Founder ruling 12-Sep:
+    the live feed (worker/fyers_feed.py) tracks the monthly contract, so history must too."""
+    soonest = min(expiries)
+    return max(e for e in expiries if (e.year, e.month) == (soonest.year, soonest.month))
+
+
 def select_atm_window(reader, d: date):
     """cc#1858 SHARED SELECTION (ONE_REGISTRY_ONE_DERIVATION_V1): the near-month-future spot
-    proxy, each underlying's near-month OPTION expiry, and its ATM +-10 strike set (21 nearest
+    proxy, each underlying's CURRENT MONTHLY option expiry (cc#2020, _monthly_expiry -- was the
+    bare nearest-listed expiry, i.e. the weekly for NIFTY), and its ATM +-10 strike set (21 nearest
     strikes by count) -- computed ONCE here and consumed by both run_diagnostic() (measurement)
     and option_iv_history.py's forward-storage ingest, so the two paths can never define "ATM
     window" two different ways. `reader` is the list of DictReader rows from one bhavcopy CSV.
@@ -130,7 +149,7 @@ def select_atm_window(reader, d: date):
             fut_best[sym] = (exp, nse._f(row.get("ClsPric")))
     spot_by_sym = {s: c for s, (e, c) in fut_best.items() if c}
 
-    opt_near_expiry = {}   # symbol -> expiry
+    opt_expiries = {}   # symbol -> set(expiry) -- every listed expiry on/after the trade date
     option_rows_total = 0
     underlyings_with_options = set()
     for row in reader:
@@ -144,9 +163,8 @@ def select_atm_window(reader, d: date):
         exp = _parse_date(row.get("XpryDt"))
         if not exp or exp < d:
             continue
-        cur_exp = opt_near_expiry.get(sym)
-        if cur_exp is None or exp < cur_exp:
-            opt_near_expiry[sym] = exp
+        opt_expiries.setdefault(sym, set()).add(exp)
+    opt_near_expiry = {sym: _monthly_expiry(exps) for sym, exps in opt_expiries.items()}
 
     strikes_by_sym = {}   # sym -> set(strike) seen at near-month expiry
     for row in reader:

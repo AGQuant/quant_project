@@ -80,6 +80,7 @@ import io
 import csv
 import logging
 import threading
+import time
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -125,6 +126,16 @@ def _ensure_tables(cur):
         status TEXT NOT NULL DEFAULT 'pending',   -- pending | done | error
         rows_written INT, error TEXT,
         started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ)""")
+    # cc#2020: per-(symbol, trade_date) evidence for the expiry correction -- what the old rows'
+    # expiry was, what the corrected one is, how many rows existed before, how many were written,
+    # how many old rows were deleted (or kept, with the reason). CREATE TABLE only, never ALTER.
+    cur.execute("""CREATE TABLE IF NOT EXISTS option_iv_expiry_fix_log (
+        trade_date DATE NOT NULL, symbol TEXT NOT NULL,
+        old_expiry DATE, new_expiry DATE NOT NULL,
+        rows_before INT NOT NULL, rows_written INT NOT NULL, rows_deleted INT NOT NULL,
+        action TEXT NOT NULL,   -- deleted_old | kept_old_implausible_drop
+        at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (trade_date, symbol))""")
 
 
 # ── vectorised Black-Scholes -- SAME formula as deriv_metrics._bs_price/_bs_iv, array-wise ──────
@@ -165,6 +176,57 @@ def _ist_now():
 def _hard_abort_hit(now=None) -> bool:
     now = now or _ist_now()
     return (now.hour, now.minute) >= (HARD_ABORT_HOUR, HARD_ABORT_MINUTE)
+
+
+def _retire_superseded_expiry_rows(cur, d: date, syms, expiries):
+    """cc#2020 STAGE 3 (gate_destructive_step): option_iv_daily's primary key includes `expiry`, so
+    a corrected re-ingest for a date whose expiry choice CHANGED (NIFTY: weekly -> monthly) writes
+    NEW rows beside the old ones instead of replacing them. Those old rows must go, or every reader
+    that assumes one expiry per (symbol, trade_date) (option_ivp.atm_iv_history, cc#1994's
+    _stored_iv_gap_map) silently mixes the two.
+
+    Runs INSIDE ingest_date()'s transaction, AFTER the corrected rows are in the upsert and BEFORE
+    commit -- so a date either lands with its corrected rows and without its stale ones, or
+    (rollback) keeps exactly what it had. Never a hole. Per SYMBOL, not per table:
+      - only symbols that actually got rows written this run are touched;
+      - the sanity floor: if the corrected write is under HALF that symbol's existing row count
+        for the date, the old rows are KEPT and the case logged (kept_old_implausible_drop) --
+        a stale-but-present row is safer than a hole (the card's own words);
+      - an unchanged expiry deletes nothing (the upsert overwrote in place; expiry<>new is empty).
+    Every (symbol, date) writes one option_iv_expiry_fix_log row: before/written/deleted counts.
+    Returns (rows_deleted_total, [symbols kept])."""
+    written = {}
+    new_exp = {}
+    for sym, exp in zip(syms, expiries):
+        written[sym] = written.get(sym, 0) + 1
+        new_exp[sym] = exp
+    deleted_total, kept = 0, []
+    for sym, n_new in written.items():
+        exp = new_exp[sym]
+        cur.execute("""SELECT COUNT(*), MIN(expiry) FROM option_iv_daily
+                       WHERE symbol=%s AND trade_date=%s AND expiry<>%s""", (sym, d, exp))
+        n_old, old_exp = cur.fetchone()
+        n_old = int(n_old or 0)
+        if n_old == 0:
+            continue   # expiry unchanged (or first load) -- nothing superseded, nothing to log
+        if n_new * 2 < n_old:
+            action, n_del = "kept_old_implausible_drop", 0
+            kept.append(sym)
+            log.warning(f"cc#2020 {d} {sym}: corrected write {n_new} rows vs {n_old} existing -- old rows KEPT")
+        else:
+            cur.execute("""DELETE FROM option_iv_daily
+                           WHERE symbol=%s AND trade_date=%s AND expiry<>%s""", (sym, d, exp))
+            action, n_del = "deleted_old", cur.rowcount
+            deleted_total += n_del
+        cur.execute("""INSERT INTO option_iv_expiry_fix_log
+                       (trade_date, symbol, old_expiry, new_expiry, rows_before, rows_written, rows_deleted, action)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (trade_date, symbol) DO UPDATE SET old_expiry=EXCLUDED.old_expiry,
+                         new_expiry=EXCLUDED.new_expiry, rows_before=EXCLUDED.rows_before,
+                         rows_written=EXCLUDED.rows_written, rows_deleted=EXCLUDED.rows_deleted,
+                         action=EXCLUDED.action, at=NOW()""",
+                    (d, sym, old_exp, exp, n_old, n_new, n_del, action))
+    return deleted_total, kept
 
 
 def ingest_date(d: date) -> dict:
@@ -245,8 +307,9 @@ def ingest_date(d: date) -> dict:
             ON CONFLICT (symbol, trade_date, expiry, strike, option_type) DO UPDATE SET
                 close=EXCLUDED.close, oi=EXCLUDED.oi, spot=EXCLUDED.spot, iv=EXCLUDED.iv,
                 is_settlement=EXCLUDED.is_settlement, loaded_at=NOW()""")
+        deleted, kept = _retire_superseded_expiry_rows(cur, d, syms, expiries)
         conn.commit()
-        return {"ok": True, "rows_written": len(rows)}
+        return {"ok": True, "rows_written": len(rows), "rows_deleted": deleted, "kept_old_symbols": kept}
     except Exception as e:
         conn.rollback()
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -279,6 +342,15 @@ def run_backfill() -> dict:
     dates remain or the 08:30 IST hard abort fires. Runs in a daemon thread (see _maybe_start),
     never inside a request or a CC session."""
     processed, total_rows, errors = 0, 0, 0
+    # cc#2020: the flag is claimed at DEPLOY time, and a deploy can land after 08:30 IST (this
+    # correction was pushed at ~23:30 IST). Rather than burn the claim on an instant abort, wait
+    # for the next 00:00 IST and run then -- the wall-clock test inside the loop is unchanged.
+    if _hard_abort_hit():
+        now = _ist_now()
+        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=30, microsecond=0)
+        wait = (midnight - now).total_seconds()
+        log.info(f"option_iv_history backfill deferred {wait:.0f}s to {midnight} (past {HARD_ABORT_HOUR}:{HARD_ABORT_MINUTE} IST)")
+        time.sleep(wait)
     started = _ist_now()
     log.info("option_iv_history backfill started")
     try:
@@ -318,6 +390,7 @@ def run_backfill() -> dict:
         elapsed = (_ist_now() - started).total_seconds()
         log.info(f"option_iv_history backfill run ended: {processed} dates, {total_rows} rows, "
                  f"{errors} errors, {elapsed:.0f}s")
+        _mark_flag_done()
         return {"ok": True, "processed": processed, "rows_written": total_rows, "errors": errors}
     except Exception as e:
         log.error(f"option_iv_history backfill crashed: {e}")
@@ -365,10 +438,26 @@ def run_forward_tick() -> dict:
     return {"ok": bool(res.get("ok")), "trade_date": str(d), **res}
 
 
-def _claim_flag() -> bool:
+def _mark_flag_done():
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT value FROM app_config WHERE key=%s AND value='pending' FOR UPDATE", (FLAG_KEY,))
+            cur.execute("UPDATE app_config SET value='done', updated_at=NOW() WHERE key=%s AND value='claimed'", (FLAG_KEY,))
+            conn.commit()
+    except Exception as e:
+        log.error(f"option_iv_history flag done-mark failed: {e}")
+
+
+def _claim_flag() -> bool:
+    # cc#2020: a 'claimed' flag older than 10 min with no run marked done means the claiming
+    # container was replaced by a later deploy (the daemon thread died with it). Re-claim it, so a
+    # push landing while the run is deferred to 00:00 IST cannot strand the correction. Harmless if
+    # the old container is still alive: dates are claimed FOR UPDATE SKIP LOCKED and ingest is
+    # idempotent, so two loops simply share the pending list.
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT value FROM app_config WHERE key=%s
+                           AND (value='pending' OR (value='claimed' AND updated_at < NOW() - INTERVAL '10 minutes'))
+                           FOR UPDATE""", (FLAG_KEY,))
             r = cur.fetchone()
             if r:
                 cur.execute("UPDATE app_config SET value='claimed', updated_at=NOW() WHERE key=%s", (FLAG_KEY,))
