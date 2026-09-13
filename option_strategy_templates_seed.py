@@ -41,6 +41,7 @@ import json
 import os
 
 import psycopg
+from psycopg.types.json import Json
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 GOLDEN_PATH = os.path.join(os.path.dirname(__file__), "reports", "CC2035_ref", "golden_30.json")
@@ -109,7 +110,7 @@ def build_rows():
         description = next((v for k, v in DESCRIPTIONS.items() if base_name.startswith(k)), None)
         rows.append({
             "name": base_name, "view": t["view"], "sub_view": sub_view,
-            "legs": json.dumps(legs), "risk_profile": t.get("risk_profile"),
+            "legs": Json(legs), "risk_profile": t.get("risk_profile"),
             "description": description, "source": source, "sort_order": i,
         })
     return rows
