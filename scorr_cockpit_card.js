@@ -171,7 +171,18 @@
                                            chip only, so section 05's other .lvv badges are untouched */
     #dcOv .sym .l h1{overflow-wrap:anywhere}
     #dcOv .dc-skel{height:64px;border-radius:12px;margin:12px 16px;background:linear-gradient(90deg,var(--c-panel) 25%,#16223c 37%,var(--c-panel) 63%);background-size:400% 100%;animation:dcsh 1.2s ease infinite}
-    @keyframes dcsh{0%{background-position:100% 0}100%{background-position:-100% 0}}`;
+    @keyframes dcsh{0%{background-position:100% 0}100%{background-position:-100% 0}}
+    /* cc#2044: the strike-detail panel must read as something that POPPED UP when a row is tapped,
+       not more list content -- CC's chosen mechanism (option b of the card's own two): scrollIntoView
+       the moment it renders (see _dcRenderChainGrid) + this elevated look, in place of the plain
+       var(--c-bd) border every other panel in this sheet uses. */
+    #dcOv .dc-detail-pop{border:1.5px solid var(--c-blu);box-shadow:0 10px 28px rgba(0,0,0,.22);animation:dcDetailPop .2s ease-out}
+    @keyframes dcDetailPop{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+    /* cc#2044 item 2: breathing room between the detail panel's stacked field lines (Premium/IV/Fair
+       value/OI/.../Greeks) -- was plain stacked divs with no margin at all. Scoped two levels under
+       .dc-detail-pop so it reaches each leg()'s field divs without touching the DTE footer line
+       (a direct child of .dc-detail-pop itself, one level up) or anything outside this panel. */
+    #dcOv .dc-detail-pop>div>div{margin-bottom:5px}`;
     const st=document.createElement('style');st.id='dc-style';st.textContent=css;document.head.appendChild(st);
   }
   function _dcClose(){const o=document.getElementById('dcOv');if(o)o.classList.remove('open');}
@@ -447,16 +458,17 @@
   }
   // cc#2004 item 7: tap a row -> inline detail panel (not a full sheet), both legs where present.
   // Every field is either a real value or an explicit "not tracked" line — none is fabricated.
-  // Two distinct "fair value" concepts exist (Black-Scholes sigma=RV20, and cc#1859's own IVP fair
-  // value) and are shown labelled separately rather than guessing which one the card meant.
+  // Two distinct "fair value" concepts exist server-side (Black-Scholes sigma=RV20, and cc#1859's
+  // own IVP fair value) -- cc#2044 (13-Sep-2026) removed the BS/RV20 line from display per founder
+  // instruction (see below); o.fair itself is untouched in the API payload, display-only removal.
   // cc#2034 POPUP LAYOUT (founder-specified 13-Sep): two visually separated sections per leg --
   // section 1 is the key read (LTP/IV/fair value+tag, DTE at the shared footer below), section 2
   // is headed literally "Option Greeks" and holds all four, never interleaved with section 1's
   // numbers. "Fair value" is cc#1859's own IVP fair_value/tag (chain_tags' output, per the card's
-  // own instruction) as the headline concrete rupee number; the older BS/sigma=RV20 fair value is
-  // kept as a clearly-separate, distinctly-labelled line (do not conflate the two, same discipline
-  // this function already followed before this card) rather than dropped, since it is a real,
-  // already-computed, non-fabricated number CC judged still worth showing.
+  // own instruction) as the headline concrete rupee number; the older BS/sigma=RV20 fair value line
+  // is REMOVED as of cc#2044 (founder does not want that methodology commentary surfaced) -- was
+  // kept as a clearly-separate, distinctly-labelled line in cc#2034, now dropped entirely per the
+  // founder's own explicit instruction, display-only (o.fair stays computed server-side, unused).
   function _dcChainDetailHtml(d, strike){
     var row = (d.strikes||[]).filter(function(r){ return r.strike===strike; })[0];
     if(!row) return '';
@@ -481,14 +493,19 @@
         + '<div>Premium <b>'+(o.ltp!=null?Number(o.ltp).toFixed(1):'&mdash;')+'</b></div>'
         + '<div>IV <b>'+(o.iv!=null?o.iv+'%':'&mdash;')+'</b></div>'
         + fairLine
-        + '<div style="color:var(--c-dim)">Fair (Black-Scholes, &sigma;=20d realised vol) '+(o.fair!=null?o.fair:'&mdash;')+'</div>'
+        // cc#2044 item 3: the Black-Scholes/realised-vol commentary line is removed from display --
+        // founder does not want it surfaced. o.fair stays untouched in the API payload (display-only
+        // removal); cc#1859's own Fair value/tag line above (fairLine) is the number that stays.
         + '<div>OI <b>'+_dcOiTxt(o)+'</b></div>'
         + '<div style="color:var(--c-dim)">OI change: not tracked (no baseline tick defined yet)</div>'
         + '<div style="color:var(--c-dim)">Bid/ask: not captured by the live feed today</div>'
         + greeks
         + '</div>';
     };
-    return '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:8px;padding:10px;margin-top:6px">'
+    // cc#2044 item 1: id (scrollIntoView target) + dc-detail-pop class (elevated border/shadow/
+    // pop-in, defined in _dcInjectStyle) replace the plain var(--c-bd) border -- see the caller in
+    // _dcRenderChainGrid for the scroll trigger itself.
+    return '<div id="dcChainDetail" class="dc-detail-pop" style="display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;background:var(--c-panel);border-radius:8px;padding:10px;margin-top:6px">'
       + leg(row.ce,'CALL '+strike) + leg(row.pe,'PUT '+strike)
       + '<div style="width:100%;font-size:9px;color:var(--c-dim);margin-top:2px">DTE '+(d.days_to_expiry!=null?d.days_to_expiry+'d':'&mdash;')+' &middot; as of '+(d.oi_asof||d.chain_tick||d.stored_iv_asof||'&mdash;')+'</div>'
       + '</div>';
@@ -510,24 +527,24 @@
       // left) so the whole grid reads as one consistent table, not three different alignments.
       // cc#2023 item 1: the two OI cells only when d.oi_available -- a stock chain has NO OI data
       // (option_chain is index-only), so these rendered an em-dash on every single row otherwise.
-      var oiCe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>') : '';
-      var oiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>') : '';
+      var oiCe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:9px 11px;white-space:nowrap">'+_dcOiTxt(r.ce)+'</td>') : '';
+      var oiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:9px 11px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>') : '';
       return '<tr onclick="dcChainSelectStrike(\''+sym+'\','+r.strike+')" style="cursor:pointer;'+bg+sel+'">'
         + oiCe
-        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcLtpTxt(r.ce)+'</td>'
-        + '<td style="'+Bd+';text-align:center;padding:5px 8px;font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx);white-space:nowrap">'+r.strike+(r.atm?' <span style="font-size:8px;color:var(--c-mut)">ATM</span>':'')+mpDot+'</td>'
-        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcLtpTxt(r.pe)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:9px 11px;white-space:nowrap;font-weight:700">'+_dcLtpTxt(r.ce)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:9px 12px;font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx);white-space:nowrap">'+r.strike+(r.atm?' <span style="font-size:8px;color:var(--c-mut)">ATM</span>':'')+mpDot+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:9px 11px;white-space:nowrap;font-weight:700">'+_dcLtpTxt(r.pe)+'</td>'
         + oiPe
         + '</tr>';
     }).join('');
-    var hcol='style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700"';  // cc#2019: was right-aligned
+    var hcol='style="'+Bd+';text-align:center;padding:9px 11px;font-size:9px;color:var(--c-mut);font-weight:700"';  // cc#2019: was right-aligned
     var info = st.showInfo ? _dcChainInfoHtml() : '';
     var detail = (st.selStrike!=null) ? _dcChainDetailHtml(d, st.selStrike) : '';
     var oiNote = d.oi_available ? (' &middot; PCR '+(d.pcr!=null?d.pcr:'&mdash;')) : ' &middot; OI/walls: index only';
     // cc#2023 item 1: same d.oi_available flag the header note above and the legend below already
     // use -- the two OI header cells, gated identically to the two OI row cells.
     var hOiCe = d.oi_available ? ('<td '+hcol+'>OI</td>') : '';
-    var hOiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td>') : '';
+    var hOiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:9px 11px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td>') : '';
     box.innerHTML =
         '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'
       +   '<div style="font-size:10px;color:var(--c-dim)">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d)'+oiNote+'</div>'
@@ -540,12 +557,27 @@
       + info
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border-radius:8px;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
       +   '<thead><tr>'+hOiCe+'<td '+hcol+'>CE LTP</td>'
-      +     '<td style="'+Bd+';text-align:center;padding:4px 8px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
-      +     '<td style="'+Bd+';text-align:center;padding:4px 6px;font-size:9px;color:var(--c-mut);font-weight:700">PE LTP</td>'
+      +     '<td style="'+Bd+';text-align:center;padding:9px 12px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'
+      +     '<td style="'+Bd+';text-align:center;padding:9px 11px;font-size:9px;color:var(--c-mut);font-weight:700">PE LTP</td>'
       +     hOiPe+'</tr></thead>'
       +   '<tbody>'+rows+'</tbody></table></div>'
       + detail
       + _dcChainLegendHtml(d.oi_available);
+    // cc#2044 item 1: bring the just-opened detail panel into view the moment it renders, so it
+    // reads as popping out rather than silent content the user has to scroll down to find (the
+    // founder's own complaint -- the panel used to land below the fold on a long chain). Gated on
+    // st._dcLastPop so an UNRELATED re-render with the same strike still selected (e.g. toggling
+    // the (i) info panel) does not re-trigger an unwanted scroll jump; reset to null on close so
+    // re-opening the same strike later still pops again.
+    if(st.selStrike!=null && st.selStrike!==st._dcLastPop){
+      st._dcLastPop=st.selStrike;
+      requestAnimationFrame(function(){
+        var dEl=document.getElementById('dcChainDetail');
+        if(dEl) dEl.scrollIntoView({behavior:'smooth', block:'nearest'});
+      });
+    } else if(st.selStrike==null){
+      st._dcLastPop=null;
+    }
   }
   // cc#2004: fetch + render. Reuses /api/deriv/chain-grid/{symbol} (option_chain_grid.py) instead
   // of the old /api/deriv/strike-chain/ call -- same underlying rows (strike_chain() is that new
