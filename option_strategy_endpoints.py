@@ -331,19 +331,36 @@ def options_payoff(req: PayoffRequest):
     return price_strategy(req.spot, engine_legs, req.lot_size)
 
 
-# ─────────────────────────── placeholder pages (real templates: cc#2038/cc#2039) ───────────────────────────
-_PLACEHOLDER = """<!doctype html><html><head><meta charset="utf-8">
+# ─────────────────────────── pages ───────────────────────────
+# cc#2038: /options now serves the real page (main.py's own _HTML_CACHE/_page() pattern, read once
+# at first request and cached -- a fresh deploy is a fresh process, so it reloads naturally).
+_HTML_CACHE: dict = {}
+
+
+def _page(filename: str) -> str:
+    html = _HTML_CACHE.get(filename)
+    if html is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+        with open(path, "r", encoding="utf-8") as f:
+            html = f.read()
+        _HTML_CACHE[filename] = html
+    return html
+
+
+@router.get("/options", response_class=HTMLResponse)
+def options_web_page():
+    return _page("scorr_options.html")
+
+
+# cc#2039 still owns /m/options's real page (mobile/options.html via the TEMPLATE_DIR convention) --
+# this placeholder is unchanged from cc#2037 until that card lands.
+_APP_PLACEHOLDER = """<!doctype html><html><head><meta charset="utf-8">
 <title>Option Strategy Builder</title></head><body style="font-family:sans-serif;padding:40px;color:#333">
-<h1>Option Strategy Builder</h1><p>The real page ships in {card}. This router (cc#2037) is live:
+<h1>Option Strategy Builder</h1><p>The real app page ships in cc#2039. This router (cc#2037) is live:
 /api/options/meta, /api/options/chain, /api/options/templates, /api/options/resolve,
 /api/options/payoff.</p></body></html>"""
 
 
-@router.get("/options", response_class=HTMLResponse)
-def options_web_placeholder():
-    return _PLACEHOLDER.format(card="cc#2038")
-
-
 @router.get("/m/options", response_class=HTMLResponse)
 def options_app_placeholder():
-    return _PLACEHOLDER.format(card="cc#2039")
+    return _APP_PLACEHOLDER

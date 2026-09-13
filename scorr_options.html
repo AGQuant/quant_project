@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- cc#2038 OPT sprint 3/5 — Web /options page, built from Fable's design ref
+     (previews/option_strategy_builder.html @ ac7cc21) + the DOM/API contract (session_log 45192).
+
+     TOKENS: the ref's own :root fallback (--field/--ink/--muted/--brand/--win/--loss/goldnight)
+     is REMOVED per this card's own item 1, not kept as a translated copy. WEB_THEME_TOKEN_LOCK_V1
+     (session_log 29075, founder ruling) is explicit and locked: "APP IS NOT WEB ... Nothing here
+     touches them" — gold/black is the app's own contract (mobile/**), navy-dark/white-light via
+     scorr_web_tokens.css is THE one web contract, and nothing in this card names 29075 as
+     superseded. Session_log 45192's "contract tokens (--ink --muted --panel --edge --hi --brand
+     --win --loss...)" line is read as this FEATURE's geometry/role vocabulary, not literally scoped
+     to override the locked web palette — so every COLOUR role below maps onto scorr_web_tokens.css's
+     real names (--bg/--panel/--panel2/--txt/--mut/--dim/--line/--line2/--grn/--red/--blu), auto-
+     injected by main.py's middleware once /options is in _PWA_INJECT_PATHS (added by this card) —
+     no <link> or :root colour block of this page's own. Only the SPACING/TYPE/RADIUS scale below is
+     this page's own (pure geometry, not a colour the lock governs), kept from the ref so the layout
+     this founder already approved is reproduced exactly, just re-skinned. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Option Strategy</title>
+<style>
+:root{
+  --space-2:2px;--space-3:3px;--space-4:4px;--space-6:6px;--space-8:8px;--space-10:10px;
+  --space-12:12px;--space-14:14px;--space-16:16px;--space-20:20px;--space-24:24px;--space-80:80px;
+  --type-9:9px;--type-10:10px;--type-11:11px;--type-115:11.5px;--type-12:12px;--type-125:12.5px;
+  --type-13:13px;--type-14:14px;--type-15:15px;--type-22:22px;--type-34:34px;
+  --radius-8:8px;--radius-10:10px;--radius-12:12px;--radius-14:14px;--radius-16:16px;--radius-20:20px;
+  --bw-1:1px;--bw-2:2px;--bw-3:3px;--track-em8:.08em;--track-em12:.12em;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--font)}
+.wrap{max-width:640px;margin:0 auto;padding:0 var(--space-16) var(--space-80)}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-14) 0 var(--space-6)}
+.hdr .t{font-size:var(--type-15);font-weight:800}
+.asof{padding:0 0 var(--space-8);font-size:var(--type-10);color:var(--mut)}.asof b{color:var(--txt);font-weight:600}
+.note-top{margin:0 0 var(--space-8);padding:var(--space-8) var(--space-10);border:var(--bw-1) dashed var(--line2);
+  border-radius:var(--radius-10);font-size:var(--type-10);color:var(--mut);display:none}
+.note-top.on{display:block}
+
+.top{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:0 0 var(--space-8)}
+.sel{background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:var(--radius-12);padding:var(--space-8) var(--space-12)}
+.sel .k{font-size:var(--type-9);color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:var(--track-em8)}
+.sel select{width:100%;background:transparent;border:0;color:var(--txt);font:inherit;font-size:var(--type-14);font-weight:800;margin-top:var(--space-2);padding:0;appearance:none}
+.spot{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline}
+.spot .v{font-size:var(--type-22);font-weight:800}.spot .lot{font-size:var(--type-11);color:var(--mut)}.spot .lot b{color:var(--txt)}
+
+.seg{display:flex;gap:var(--space-4);margin:var(--space-12) 0 0;background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-115);font-weight:700;color:var(--mut);padding:var(--space-8);border-radius:var(--radius-16);cursor:pointer}
+.seg span.on{background:var(--panel);color:var(--blu)}
+
+.legs{margin:var(--space-10) 0 0;background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:var(--radius-14);overflow:hidden}
+.lh,.leg{display:grid;grid-template-columns:52px 52px 1fr 90px 52px 24px;gap:var(--space-6);align-items:center;padding:var(--space-8) var(--space-10)}
+.lh{font-size:var(--type-9);color:var(--mut);font-weight:700;border-bottom:var(--bw-1) solid var(--line)}
+.leg{border-bottom:var(--bw-1) solid var(--line);position:relative;font-size:var(--type-12)}
+.leg::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--line2)}
+.leg.b::before{background:var(--grn)}.leg.s::before{background:var(--red)}
+.pill{display:inline-block;font-size:var(--type-10);font-weight:800;padding:var(--space-3) var(--space-6);border-radius:var(--radius-8);
+  background:var(--panel2);border:var(--bw-1) solid var(--line);text-align:center;cursor:pointer;user-select:none}
+.pill.b{color:var(--grn)}.pill.s{color:var(--red)}.pill.k{color:var(--txt)}
+.in{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-8);padding:var(--space-6) var(--space-8);
+  color:var(--txt);font:inherit;font-size:var(--type-12);font-weight:700;text-align:right;width:100%}
+.in.pf{color:var(--blu)}
+.leg .x{color:var(--mut);text-align:center;cursor:pointer}
+.tiny{font-size:var(--type-9);color:var(--mut);font-weight:600}
+.add{display:flex;justify-content:space-between;align-items:center;padding:var(--space-10) var(--space-12);font-size:var(--type-11);color:var(--mut)}
+.add button{background:none;border:0;color:var(--blu);font-weight:800;font:inherit;cursor:pointer;padding:0}
+.add button:disabled{color:var(--mut);cursor:default}
+.go{display:block;margin:var(--space-12) 0 0;width:100%;padding:var(--space-12);border-radius:var(--radius-12);
+  font:inherit;font-size:var(--type-13);font-weight:800;background:var(--blu);color:var(--on-accent);border:none;cursor:pointer}
+
+.chips{display:flex;gap:var(--space-6);padding:var(--space-10) 0 0;overflow-x:auto}
+.chip{flex:none;font-size:var(--type-11);font-weight:700;color:var(--mut);padding:var(--space-6) var(--space-12);
+  border-radius:var(--radius-20);border:var(--bw-1) solid var(--line);background:var(--panel);cursor:pointer}
+.chip.on{color:var(--blu);background:color-mix(in srgb,var(--blu) 14%,var(--panel));border-color:color-mix(in srgb,var(--blu) 55%,transparent)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:var(--space-10) 0 0}
+.tpl{background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:var(--radius-14);padding:var(--space-10) var(--space-12);
+  min-height:88px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer}
+.tpl .n{font-size:var(--type-125);font-weight:800;line-height:1.3}
+.tpl .d{font-size:var(--type-10);color:var(--mut);margin-top:var(--space-4);line-height:1.45}
+.tpl .rp{display:flex;gap:var(--space-4);margin-top:var(--space-8);flex-wrap:wrap}
+.tpl .rp i{font-style:normal;font-size:var(--type-9);font-weight:800;padding:var(--space-2) var(--space-6);border-radius:var(--radius-8);background:var(--panel2);color:var(--mut)}
+
+.res{margin:var(--space-10) 0 0;background:var(--panel);border:var(--bw-1) solid var(--line);border-radius:var(--radius-16);
+  padding:var(--space-14);position:relative;overflow:hidden}
+.res::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--blu),transparent)}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-4)}
+.cell{background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-10);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);color:var(--mut);font-weight:700}.cell .v{font-size:var(--type-14);font-weight:800;margin-top:var(--space-3)}
+.cell .v small{display:block;font-size:var(--type-9);color:var(--mut);font-weight:600;margin-top:var(--space-2)}
+.subst{cursor:pointer;color:var(--blu)}
+.chart{margin-top:var(--space-12);background:var(--panel2);border:var(--bw-1) solid var(--line);border-radius:var(--radius-12);padding:var(--space-8)}
+.chart svg{width:100%;height:150px;display:block}
+.tbl{margin-top:var(--space-10);font-size:var(--type-11);overflow-x:auto}
+.tr{display:grid;grid-template-columns:1fr repeat(auto-fit,minmax(56px,1fr));padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--line);text-align:right;gap:var(--space-4)}
+.tr:first-child{color:var(--mut);font-size:var(--type-9);font-weight:700}.tr span:first-child{text-align:left;font-weight:700}
+.tr .w{color:var(--grn)}.tr .l{color:var(--red)}.tr.be{background:color-mix(in srgb,var(--blu) 8%,transparent)}
+.stale{margin:var(--space-8) 0 0;padding:var(--space-6) var(--space-10);border:var(--bw-1) solid var(--line2);
+  border-radius:var(--radius-8);font-size:var(--type-10);color:var(--red);background:color-mix(in srgb,var(--red) 8%,transparent)}
+.footnote{margin:var(--space-20) 0 0;padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--line2);
+  border-radius:var(--radius-12);font-size:var(--type-11);color:var(--mut);line-height:1.65}.footnote b{color:var(--txt)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="scorr-nav"></div>
+<div class="wrap" id="opt">
+  <div class="hdr"><span class="t">Option Strategy</span><span></span></div>
+  <div class="asof">Chain <b id="optChainLbl">NIFTY</b> &middot; premiums as of <b id="optSpotAsof">&mdash;</b></div>
+  <div id="optStale" class="stale" hidden></div>
+
+  <div class="top">
+    <div class="sel"><div class="k">Underlying</div>
+      <select id="optUnder"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option></select>
+    </div>
+    <div class="sel"><div class="k">Expiry</div><select id="optExpiry"></select></div>
+    <div class="sel spot"><div><div class="k">Spot</div><div class="v" id="optSpot">&mdash;</div></div>
+      <div class="lot">ATM <b id="optAtm">&mdash;</b> &middot; lot <b id="optLot">&mdash;</b></div></div>
+  </div>
+
+  <div class="seg" id="optTabs"><span class="on" data-tab="build">Build your own</span><span data-tab="ready">Readymade</span></div>
+
+  <div id="optBuildPane">
+    <div class="legs">
+      <div class="lh"><span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span>Lots</span><span></span></div>
+      <div id="optLegs"></div>
+      <div class="add"><span class="tiny">Blue premium = from chain, editable. Blank = no chain row.</span><button id="optAddLeg" type="button">+ Add leg (0 of 10)</button></div>
+    </div>
+    <button class="go" id="optGo" type="button">Calculate payoff</button>
+  </div>
+
+  <div id="optReadyPane" hidden>
+    <div class="chips" id="optViews">
+      <span class="chip on" data-view="bullish">Bullish</span>
+      <span class="chip" data-view="bearish">Bearish</span>
+      <span class="chip" data-view="neutral">Neutral</span>
+    </div>
+    <div class="chips" id="optSubs">
+      <span class="chip" data-sub="range">Range</span>
+      <span class="chip" data-sub="breakout">Breakout</span>
+    </div>
+    <div class="grid" id="optGrid"></div>
+    <div class="add" style="padding-left:0"><span class="tiny">Tap a card &rarr; strikes set around ATM, premiums pulled from chain, payoff runs. Edit any leg after.</span></div>
+  </div>
+
+  <div class="res" id="optRes" hidden>
+    <div class="kg">
+      <div class="cell"><div class="k">Break-even</div><div class="v" id="optBE">&mdash;</div></div>
+      <div class="cell"><div class="k">Max profit</div><div class="v" id="optMaxP">&mdash;</div></div>
+      <div class="cell"><div class="k">Max loss</div><div class="v" id="optMaxL">&mdash;</div></div>
+    </div>
+    <div class="chart"><svg id="optChart" viewBox="0 0 400 150" preserveAspectRatio="none"></svg></div>
+    <div class="tbl" id="optTbl"></div>
+  </div>
+
+  <div class="footnote"><b>What this page is.</b> Payoff at expiry for NIFTY and BANKNIFTY options. Premiums come from the live chain and show their time; edit any of them. A strategy with no floor except the index going to zero shows <b>Substantial</b> instead of a rupee figure &mdash; tap to see it. Research, not advice.</div>
+</div>
+<script src="/static/option_strategy.js"></script>
+</body>
+</html>

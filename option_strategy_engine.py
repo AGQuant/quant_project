@@ -153,33 +153,40 @@ def bounded_by_zero(legs: List[Leg], lot: int) -> dict:
     }
 
 
-def curve(spot: Number, legs: List[Leg], lot: int, pct: float = 0.15, step: int = 50) -> List[Tuple[float, float]]:
-    """[(S, net_payoff)] across spot +/-pct at the given strike step. session_log 45180: range is
-    spot +/-15%, step = the underlying's own strike interval (50 NIFTY, 100 BANKNIFTY)."""
+def _grid_points(spot: Number, pct: float, step: int, extra=None) -> List[float]:
+    """The shared S-axis curve()/curve_per_leg() both walk: the regular spot+/-pct grid at `step`,
+    UNION any `extra` values that fall inside that range (cc#2038: a leg's own strike or an exact
+    breakeven is very often NOT on the regular grid -- e.g. a breakeven of 23,323.3 vs a 50-wide
+    grid anchored on multiples of 50 -- so a caller that snapped to the nearest grid point instead
+    of asking for the exact one would show a "breakeven" row whose net is not actually zero. Adding
+    the real point here means every row a caller asks for is a genuinely computed value, never an
+    approximation dressed up as one)."""
     import math
     lo_s = math.floor(spot * (1 - pct) / step) * step
     hi_s = math.ceil(spot * (1 + pct) / step) * step
+    points = set()
     S = lo_s
-    out = []
     while S <= hi_s:
-        out.append((S, round(net_payoff(S, legs, lot), 2)))
+        points.add(S)
         S += step
-    return out
+    for e in (extra or []):
+        if e is not None and lo_s <= e <= hi_s:
+            points.add(round(e, 2))
+    return sorted(points)
 
 
-def curve_per_leg(spot: Number, legs: List[Leg], lot: int, pct: float = 0.15, step: int = 50) -> List[list]:
-    """[[S, leg1_payoff, leg2_payoff, ...]] over the SAME S-range curve() walks (session_log 45192's
-    per_leg contract) -- reuses curve()'s own range math rather than re-deriving lo_s/hi_s a second
-    time, so the two curves can never disagree on their S axis."""
-    import math
-    lo_s = math.floor(spot * (1 - pct) / step) * step
-    hi_s = math.ceil(spot * (1 + pct) / step) * step
-    S = lo_s
-    out = []
-    while S <= hi_s:
-        out.append([S] + [round(leg_payoff(S, l, lot), 2) for l in legs])
-        S += step
-    return out
+def curve(spot: Number, legs: List[Leg], lot: int, pct: float = 0.15, step: int = 50, extra=None) -> List[Tuple[float, float]]:
+    """[(S, net_payoff)] across spot +/-pct at the given strike step (plus any `extra` exact points
+    merged in -- see _grid_points). session_log 45180: range is spot +/-15%, step = the
+    underlying's own strike interval (50 NIFTY, 100 BANKNIFTY)."""
+    return [(S, round(net_payoff(S, legs, lot), 2)) for S in _grid_points(spot, pct, step, extra)]
+
+
+def curve_per_leg(spot: Number, legs: List[Leg], lot: int, pct: float = 0.15, step: int = 50, extra=None) -> List[list]:
+    """[[S, leg1_payoff, leg2_payoff, ...]] over the SAME S-axis curve() walks (session_log 45192's
+    per_leg contract) -- reuses _grid_points() rather than re-deriving it a second time, so the two
+    curves can never disagree on their S axis."""
+    return [[S] + [round(leg_payoff(S, l, lot), 2) for l in legs] for S in _grid_points(spot, pct, step, extra)]
 
 
 def net_premium(legs: List[Leg], lot: int) -> float:
@@ -195,12 +202,21 @@ def net_premium(legs: List[Leg], lot: int) -> float:
 def price_strategy(spot: Number, legs: List[Leg], lot: int) -> dict:
     """The full session_log 45192 POST /api/options/payoff contract in one call -- the shape
     cc#2037's endpoint hands back verbatim (plus whatever request-echo fields the endpoint itself
-    adds, e.g. underlying)."""
+    adds, e.g. underlying).
+
+    cc#2038: `curve`/`per_leg` also force-include every leg's own strike and every breakeven as
+    exact points (via _grid_points' `extra`) -- the web/app per-leg table (session_log 45192's own
+    "show 7 rows: range ends, each strike, each BE") needs a REAL row at each of those, not the
+    nearest regular-grid neighbour. Backward compatible: this only adds points to the two arrays,
+    it does not remove or change any point already there, so nothing already consuming the regular
+    grid (nothing does yet) is affected."""
     mp, ml = max_profit_loss(legs, lot)
+    bes = breakevens(legs, lot)
+    extra = list(bes) + [l.strike for l in legs if l.kind in ("CE", "PE")]
     return {
-        "curve": [list(pt) for pt in curve(spot, legs, lot)],
-        "per_leg": curve_per_leg(spot, legs, lot),
-        "breakevens": breakevens(legs, lot),
+        "curve": [list(pt) for pt in curve(spot, legs, lot, extra=extra)],
+        "per_leg": curve_per_leg(spot, legs, lot, extra=extra),
+        "breakevens": bes,
         "max_profit": mp,
         "max_loss": ml,
         "bounded_by_zero": bounded_by_zero(legs, lot),

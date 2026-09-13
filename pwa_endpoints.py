@@ -401,6 +401,14 @@ PWA_JS = """
     // "More" sheet), so a single entry appears in both automatically — a second entry would double
     // it, not extend it. Rebased on cc#822's trim: Digest / TC Scanner / Holdings stay removed.
     ['/screeners', '\\u2637', 'Screeners'],
+    // cc#2038 (OPT sprint 3/5): Option Strategy Builder, a new standing research surface —
+    // grouped here next to Screeners/Invest Scan (the card's own "Tools/research" grouping);
+    // app_route_map.route_group='research' to match (checked live: Wall of Trades' OWN row is
+    // actually route_group='engine', in_nav=false — the card's "match Wall of Trades" aside does
+    // not hold against the real data, so 'research' — the group every other standalone tool page
+    // here actually uses — is followed instead, stated rather than silently picked either way).
+    // Unflagged: renders on both the desktop top bar and the mobile More sheet, same as Screeners.
+    ['/options', '\\u25c8', 'Option Strategy'],
     // cc#846 (founder 04-Aug): Daily Digest V3 is now a REAL PAGE (/digest), not the V8 tab it was.
     // cc#822 removed 'Digest' from this array on the explicit grounds that it was "a V8 tab, not a
     // page" — that rationale no longer holds, and rule 8 (NAV-COMPLETE, id=2987) requires a page to
@@ -2813,6 +2821,22 @@ except Exception:
 @router.get("/static/scorr_appshell.js")
 def pwa_scorr_appshell_js():
     return Response(SCORR_APPSHELL_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+# cc#2038: the OPT sprint's shared web+app logic (session_log 45192's dom_ids_shared_web_and_app) --
+# one file, read from disk the same way scorr_appshell.js is, so scorr_options.html (web, cc#2038)
+# and mobile/options.html (app, cc#2039) load the identical behaviour rather than each carrying a
+# copy that can drift.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "option_strategy.js"), "r", encoding="utf-8") as _osj:
+        OPTION_STRATEGY_JS = _osj.read()
+except Exception:
+    OPTION_STRATEGY_JS = ""
+
+
+@router.get("/static/option_strategy.js")
+def pwa_option_strategy_js():
+    return Response(OPTION_STRATEGY_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scrub_layer.js")

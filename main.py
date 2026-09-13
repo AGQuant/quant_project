@@ -277,6 +277,7 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/digest",      # cc#846
                      "/trades",      # cc#991: Wall of Trades (web renderer)
                      "/alerts",      # cc#1536: Alerts (web renderer, the approve surface)
+                     "/options",     # cc#2038: Option Strategy Builder (web renderer)
                      "/adaptive",   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
                      "/room",       # cc#1086: Fable Room viewer
                      # cc#1670 P0: home (/) was never in this set, so do_pwa was False there and
@@ -294,6 +295,7 @@ PROTECTED.add("/inv-scanner")   # cc#1286: gate + no-store
 PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
 PROTECTED.add("/alerts")   # cc#1536: Alerts, web — gate + no-store
+PROTECTED.add("/options")  # cc#2038: Option Strategy Builder, web — gate + no-store
 PROTECTED.add("/intel")    # cc#1754: Intel standalone page — gate + no-store (same as /news, which now 301s to it)
 # cc#2013 P0: three web pages were live with NO gate at all -- served to anyone, no password. Found by
 # set difference of app_route_map (crawl=true) minus PROTECTED, re-derived by CC from the source, not
@@ -720,7 +722,7 @@ async def auth_gate(request: Request, call_next):
         # founder deploys a theme row and does not see one.
         # This is a REAL cause of "deploys do not reach my phone" and it is NOT the service
         # worker — see the cc#1066 result for why the SW was already correct.
-        for _sjs in (b"scorr_appshell.js",):
+        for _sjs in (b"scorr_appshell.js", b"option_strategy.js"):   # cc#2038: same cc#1066 fix, this file's own new /static/ JS
             body = body.replace(b'src="/static/' + _sjs + b'"',
                                 b'src="/static/' + _sjs + b'?v=' + _BUILD_B + b'"')
         # cc#327: shared mobile design system into <head> (fallback: end of document)
@@ -1595,6 +1597,7 @@ NAV_REGISTRY = {
     "/check":        ("Check · V8 tab row (slot 7); page kept for the tab's iframe embed + typed URL", "v8-tab"),
     "/dashboard#check": ("Check (V8 tab)", "tab"),   # cc#1747 rule id=2987
     "/screeners":    ("Screeners",            "nav"),   # cc#824
+    "/options":      ("Option Strategy Builder", "nav"),   # cc#2038: OPT sprint 3/5, web renderer
     "/intraday":     ("(-> /dashboard#tcscan · TC Scanner tab; page kept for the tab's iframe embed)", "typed-url"),   # cc#740
     "/dashboard#tcscan": ("TC Scanner · V8 tab — reachable via the V8 tab bar / deep link", "typed-url"),   # cc#740; cc#822 removed from nav
     "/sector":       ("Sector",               "nav"),
