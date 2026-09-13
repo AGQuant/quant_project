@@ -46,6 +46,12 @@ def _f(x) -> Optional[float]:
         return None
 
 
+def _r(x, n) -> Optional[float]:
+    """cc#2034: None-safe round — every _bs_* Greek already returns None on bad/missing input;
+    this just carries that through instead of round()ing a None."""
+    return None if x is None else round(x, n)
+
+
 def _safe(label, fn, default=None):
     """cc#449: per-field graceful degradation. Any single cockpit field that throws (a symbol
     lacking some datum, a null in a join) falls back to `default` and logs — it NEVER kills the
@@ -126,6 +132,60 @@ def _bs_iv(price, S, K, T, cp) -> Optional[float]:
         else:
             lo = mid
     return round((lo + hi) / 2.0, 4)
+
+
+# ── cc#2034: OPTION GREEKS — additive only, _bs_price/_bs_iv above stay byte-for-byte unchanged
+# (other surfaces read them; do_not_touch). Same d1/d2 machinery as _bs_price (one pricer family),
+# same R_FREE for discounting. Standard closed-form (Hull): delta_CE=N(d1), delta_PE=N(d1)-1;
+# gamma/vega identical for CE and PE; theta differs by leg. Verified before shipping by FINITE-
+# DIFFERENCE against this module's own _bs_price (delta=dPrice/dS, gamma=d2Price/dS2,
+# vega=dPrice/dsigma, theta=-dPrice/dT) across index-scale and stock-scale, ATM/OTM/ITM scenarios
+# — all agree to ~1e-6, not a remembered textbook figure (which turned out to be misremembered
+# during this card's own verification and was replaced by the self-consistency check instead).
+def _norm_pdf(x: float) -> float:
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def _bs_d1_d2(S, K, T, sigma):
+    d1 = (math.log(S / K) + (R_FREE + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    return d1, d2
+
+
+def _bs_delta(S, K, T, sigma, cp) -> Optional[float]:
+    if not (S and K and T and sigma) or S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return None
+    d1, _d2 = _bs_d1_d2(S, K, T, sigma)
+    return _norm_cdf(d1) if cp == "CE" else _norm_cdf(d1) - 1.0
+
+
+def _bs_gamma(S, K, T, sigma, cp=None) -> Optional[float]:
+    """Identical for CE and PE (cp accepted, unused, so every _bs_* Greek shares one call shape)."""
+    if not (S and K and T and sigma) or S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return None
+    d1, _d2 = _bs_d1_d2(S, K, T, sigma)
+    return _norm_pdf(d1) / (S * sigma * math.sqrt(T))
+
+
+def _bs_vega(S, K, T, sigma, cp=None) -> Optional[float]:
+    """Identical for CE and PE. Reported PER 1% VOL MOVE (raw vega / 100) — market convention."""
+    if not (S and K and T and sigma) or S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return None
+    d1, _d2 = _bs_d1_d2(S, K, T, sigma)
+    return S * _norm_pdf(d1) * math.sqrt(T) / 100.0
+
+
+def _bs_theta(S, K, T, sigma, cp) -> Optional[float]:
+    """Reported PER CALENDAR DAY (annualised theta / 365) — market convention."""
+    if not (S and K and T and sigma) or S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return None
+    d1, d2 = _bs_d1_d2(S, K, T, sigma)
+    term1 = -(S * _norm_pdf(d1) * sigma) / (2.0 * math.sqrt(T))
+    if cp == "CE":
+        theta_annual = term1 - R_FREE * K * math.exp(-R_FREE * T) * _norm_cdf(d2)
+    else:
+        theta_annual = term1 + R_FREE * K * math.exp(-R_FREE * T) * _norm_cdf(-d2)
+    return theta_annual / 365.0
 
 
 # ── section builders ───────────────────────────────────────────────────────────
@@ -444,6 +504,20 @@ def _options_block(cur, sym, cmp_px) -> Dict[str, Any]:
             "ce_ltp": ce_ltp, "ce_bid": _f(ce[4]) if ce else None, "ce_ask": _f(ce[5]) if ce else None,
             "pe_ltp": pe_ltp, "pe_bid": _f(pe[4]) if pe else None, "pe_ask": _f(pe[5]) if pe else None,
             "gap": gap, "expiry": str(expiry) if expiry else None,   # cc#516: options-cost meaning line needs this
+            # cc#2034 (also_applies_to: derivative_cockpit): SAME _bs_delta/_bs_gamma/_bs_vega/
+            # _bs_theta functions the option-chain popup uses, applied to this ATM CE/PE pair --
+            # S=cmp_px, K=atm strike, T from the expiry calc just above, sigma=atm_iv already
+            # computed above (the CE/PE-averaged inversion) -- not a second Greeks implementation.
+            # None throughout when atm_iv/T could not be computed (never fabricated).
+            "greeks": ({"ce": {"delta": _r(_bs_delta(cmp_px, atm, T, atm_iv, "CE"), 4),
+                               "gamma": _r(_bs_gamma(cmp_px, atm, T, atm_iv), 6),
+                               "theta": _r(_bs_theta(cmp_px, atm, T, atm_iv, "CE"), 4),
+                               "vega": _r(_bs_vega(cmp_px, atm, T, atm_iv), 4)},
+                        "pe": {"delta": _r(_bs_delta(cmp_px, atm, T, atm_iv, "PE"), 4),
+                               "gamma": _r(_bs_gamma(cmp_px, atm, T, atm_iv), 6),
+                               "theta": _r(_bs_theta(cmp_px, atm, T, atm_iv, "PE"), 4),
+                               "vega": _r(_bs_vega(cmp_px, atm, T, atm_iv), 4)}}
+                       if (atm_iv and T) else None),
         },
         "options_cost": cost,
     }
@@ -1587,10 +1661,21 @@ def _price_rows(strikes, spot, T, rv20, px_of):
                 ratio = round(px / fair, 2)
             else:
                 prem = tag = ratio = None
+            # cc#2034: Greeks use THIS LEG'S OWN solved iv (the raw fraction, before the *100/round
+            # below) — the option's own market-implied vol, not rv20 (a realised-vol proxy used only
+            # for the "fair" BS benchmark above) — the standard convention, and already in hand for
+            # this exact cell. None (never fabricated) when there is no quote/solved iv to begin with.
+            greeks = None
+            if iv:
+                greeks = {"delta": _r(_bs_delta(spot, s, T, iv, ot), 4),
+                          "gamma": _r(_bs_gamma(spot, s, T, iv), 6),
+                          "theta": _r(_bs_theta(spot, s, T, iv, ot), 4),
+                          "vega": _r(_bs_vega(spot, s, T, iv), 4)}
             row[key] = {"ltp": round(px, 2) if px else None,
                         "iv": round(iv * 100, 1) if iv else None,
                         "fair": round(fair, 2) if fair else None,
-                        "prem_pct": prem, "tag": tag, "ratio": ratio}
+                        "prem_pct": prem, "tag": tag, "ratio": ratio,
+                        "greeks": greeks}
         rows.append(row)
     return rows
 

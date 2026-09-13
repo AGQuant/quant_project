@@ -376,18 +376,25 @@
     if(!_DC_CHAIN[sym]) _DC_CHAIN[sym] = {data:null, selStrike:null, showInfo:false, boxId:'dcStrikeChain'};
     return _DC_CHAIN[sym];
   }
-  // cc#2004 item 4: the tag DOT reads cc#1859's OWN ivp.tag (CHEAP/FAIR/EXPENSIVE, percentile-
-  // banded) — a DIFFERENT mechanism from this row's older `tag` field (EXPENSIVE/REASONABLE/CHEAP,
-  // Black-Scholes premium-vs-fair, ATM+-5 only) which the detail panel still shows separately
-  // (labelled "BS fair", not silently dropped). No tag yet (outside cc#1859's 60-session floor,
-  // or the IVP sanity gate) draws an EMPTY dot slot, never a fabricated colour.
-  function _dcTagDot(leg){
-    var tag = leg && leg.ivp && leg.ivp.tag;
-    var col = tag==='EXPENSIVE' ? 'var(--c-red)' : tag==='CHEAP' ? 'var(--c-grn)' : tag==='FAIR' ? 'var(--c-mut)' : null;
-    if(!col) return '<span style="display:inline-block;width:6px;height:6px;margin-right:4px"></span>';
-    return '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+col+';margin-right:4px" title="'+tag+'"></span>';
-  }
+  // cc#2034 (founder 13-Sep, supersedes the earlier ask to relocate the dot legend): the per-row
+  // CHEAP/FAIR/EXPENSIVE dot next to CE/PE LTP is REMOVED entirely -- too many dots on screen at
+  // once read as noise, not signal, per the founder's own words. The SAME cc#1859 ivp.tag/
+  // fair_value this dot used to encode now surfaces as words + a concrete rupee number in the
+  // tap-detail panel below (_dcChainDetailHtml), where a reader can actually act on it.
   function _dcOiTxt(leg){ return (leg && leg.oi!=null) ? Number(leg.oi).toLocaleString('en-IN') : '&mdash;'; }
+  // cc#2034: local, dependency-free number formatting for the detail panel's new Greeks lines --
+  // matches this file's own existing style (_dcLtpTxt's inline null-check + toFixed), not a new
+  // shared helper (no confirmed global `num()` reaches every page this component mounts on).
+  function _dcNum(v,d){ return v==null ? '&mdash;' : Number(v).toFixed(d); }
+  // cc#2034 item 3: fair value must be "a concrete rupee number", never only a word -- the value
+  // is already rounded server-side (option_ivp.py's own round(fair_value,2)), so this only adds
+  // the currency mark, matching the app's existing rupee-sign convention elsewhere (e.g.
+  // scorr_bell.js's px()) rather than the plain unmarked numbers this one panel's OTHER fields
+  // (Premium, Fair BS) already show and are left exactly as they were.
+  function _dcRupee(v){ return v==null ? '&mdash;' : ('&#8377;'+v); }
+  // cc#2034: the IVP tag in plain words -- CHEAP/FAIR/EXPENSIVE are the internal values; a founder
+  // reading the panel sees the same words the dot's own title attribute used to carry.
+  function _dcTagWord(tag){ return {CHEAP:'Cheap', FAIR:'Fair value', EXPENSIVE:'Expensive'}[tag] || ''; }
   // cc#2019: one decimal place everywhere an LTP renders in this component (grid + detail panel),
   // display-only -- deriv_metrics._price_rows() already rounds to 2 decimals server-side; this is
   // formatting the same stored value, not a second, different round.
@@ -415,21 +422,25 @@
     if(r.is_put_wall) return 'background:color-mix(in srgb, var(--c-grn) 16%, transparent)';
     return '';
   }
+  // cc#2034: the Cheap/Fair/Expensive DOT legend is removed with the dots themselves -- there is
+  // no colour left on the row to explain. The wall/max-pain row-colour legend is untouched (do not
+  // touch: those full-row colours are unaffected by this card).
   function _dcChainLegendHtml(oiAvailable){
-    var dots = [
-      ['var(--c-grn)', 'Cheap'], ['var(--c-mut)', 'Fair'], ['var(--c-red)', 'Expensive']
-    ].map(function(p){ return '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+p[0]+'"></span>'+p[1]+'</span>'; }).join('');
     var marks = oiAvailable ? (
       '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="width:8px;height:8px;background:color-mix(in srgb, ' + MP_AMBER + ' 40%, transparent);border-radius:2px;display:inline-block"></span>Max pain</span>'
       + '<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-red) 35%, transparent);border-radius:2px;display:inline-block"></span>Call wall</span>'
       + '<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:color-mix(in srgb, var(--c-grn) 35%, transparent);border-radius:2px;display:inline-block"></span>Put wall</span>'
     ) : '<span style="color:var(--c-dim)">OI / wall / max pain: index only — not available for a stock chain</span>';
-    return '<div style="font-size:9px;color:var(--c-mut);margin-top:8px;line-height:1.8">'+dots+(oiAvailable?'<br>':'')+marks+'</div>';
+    return '<div style="font-size:9px;color:var(--c-mut);margin-top:8px;line-height:1.8">'+marks+'</div>';
   }
   // cc#2004 item 8: the (i) explainer — plain language, own toggle, not a separate screen.
+  // cc#2034: the "Dot colour" paragraph is replaced -- the dot it described is gone this card, so
+  // leaving that text would describe a control that no longer exists. The bhavcopy-lag/window
+  // disclosure the founder separately asked for (once cc#2031 lands) is its own future card, per
+  // this card's own out_of_scope note -- not folded in here, only the now-stale line is fixed.
   function _dcChainInfoHtml(){
     return '<div style="font-size:10px;color:var(--c-mut);line-height:1.6;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:8px;padding:8px 10px;margin:6px 0">'
-      + '<div><b style="color:var(--c-tx)">Dot colour</b> — how this option\'s live price compares with its own fair value, over the last 120 sessions: green = cheap, grey = fair, coral = expensive.</div>'
+      + '<div><b style="color:var(--c-tx)">Tap a strike</b> — see its fair value, IV and Greeks, worked out from how this option\'s live price compares with its own fair value over the last 120 sessions.</div>'
       + '<div style="margin-top:4px"><b style="color:var(--c-tx)">Max pain</b> — the strike where option writers, as a whole, would lose the least money at expiry.</div>'
       + '<div style="margin-top:4px"><b style="color:var(--c-tx)">Call wall / put wall</b> — the strikes carrying the heaviest call / put open interest, often acting as a level the price gravitates toward or resists.</div>'
       + '<div style="margin-top:4px;color:var(--c-dim)">Not a trading signal — a descriptive read only.</div></div>';
@@ -438,27 +449,48 @@
   // Every field is either a real value or an explicit "not tracked" line — none is fabricated.
   // Two distinct "fair value" concepts exist (Black-Scholes sigma=RV20, and cc#1859's own IVP fair
   // value) and are shown labelled separately rather than guessing which one the card meant.
+  // cc#2034 POPUP LAYOUT (founder-specified 13-Sep): two visually separated sections per leg --
+  // section 1 is the key read (LTP/IV/fair value+tag, DTE at the shared footer below), section 2
+  // is headed literally "Option Greeks" and holds all four, never interleaved with section 1's
+  // numbers. "Fair value" is cc#1859's own IVP fair_value/tag (chain_tags' output, per the card's
+  // own instruction) as the headline concrete rupee number; the older BS/sigma=RV20 fair value is
+  // kept as a clearly-separate, distinctly-labelled line (do not conflate the two, same discipline
+  // this function already followed before this card) rather than dropped, since it is a real,
+  // already-computed, non-fabricated number CC judged still worth showing.
   function _dcChainDetailHtml(d, strike){
     var row = (d.strikes||[]).filter(function(r){ return r.strike===strike; })[0];
     if(!row) return '';
     var leg=function(o,label){
-      if(!o) return '<div style="flex:1;min-width:140px"><div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div><div style="color:var(--c-dim)">no data</div></div>';
-      var ivpTag=o.ivp&&o.ivp.tag, ivpFair=o.ivp&&o.ivp.fair_value, ivpPct=o.ivp&&o.ivp.percentile;
-      return '<div style="flex:1;min-width:140px">'
+      if(!o) return '<div style="flex:1;min-width:150px"><div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div><div style="color:var(--c-dim)">no data</div></div>';
+      var ivpTag=o.ivp&&o.ivp.tag, ivpFair=o.ivp&&o.ivp.fair_value;
+      // cc#2034 item 4: a strike/bucket below cc#1859's own session floor carries tag=None/
+      // fair_value=None -- say so in plain words, never a blank line or a guessed number.
+      var fairLine = (ivpFair!=null)
+        ? ('<div>Fair value <b>'+_dcRupee(ivpFair)+'</b> <span style="color:var(--c-mut)">('+_dcTagWord(ivpTag)+')</span></div>')
+        : '<div style="color:var(--c-dim)">Not enough history yet to rate this strike</div>';
+      var g = o.greeks;
+      var greeks = '<div style="font-weight:800;color:var(--c-tx);margin:8px 0 4px;padding-top:8px;border-top:1px solid var(--c-bd)">Option Greeks</div>'
+        + (g
+          ? ('<div>Delta <b>'+_dcNum(g.delta,4)+'</b></div>'
+             + '<div>Gamma <b>'+_dcNum(g.gamma,6)+'</b></div>'
+             + '<div>Theta <b>'+_dcNum(g.theta,2)+'</b> / day</div>'
+             + '<div>Vega <b>'+_dcNum(g.vega,2)+'</b> / 1% IV</div>')
+          : '<div style="color:var(--c-dim)">Not available — no live quote to solve IV from</div>');
+      return '<div style="flex:1;min-width:150px">'
         + '<div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div>'
         + '<div>Premium <b>'+(o.ltp!=null?Number(o.ltp).toFixed(1):'&mdash;')+'</b></div>'
         + '<div>IV <b>'+(o.iv!=null?o.iv+'%':'&mdash;')+'</b></div>'
-        + '<div>IVP <b>'+(ivpPct!=null?ivpPct+'pct '+(ivpTag||''):'&mdash;')+'</b></div>'
-        + '<div>Fair (BS &sigma;=RV20) <b>'+(o.fair!=null?o.fair:'&mdash;')+'</b></div>'
-        + '<div>Fair (IVP) <b>'+(ivpFair!=null?ivpFair:'&mdash;')+'</b></div>'
+        + fairLine
+        + '<div style="color:var(--c-dim)">Fair (Black-Scholes, &sigma;=20d realised vol) '+(o.fair!=null?o.fair:'&mdash;')+'</div>'
         + '<div>OI <b>'+_dcOiTxt(o)+'</b></div>'
         + '<div style="color:var(--c-dim)">OI change: not tracked (no baseline tick defined yet)</div>'
         + '<div style="color:var(--c-dim)">Bid/ask: not captured by the live feed today</div>'
+        + greeks
         + '</div>';
     };
     return '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:8px;padding:10px;margin-top:6px">'
       + leg(row.ce,'CALL '+strike) + leg(row.pe,'PUT '+strike)
-      + '<div style="width:100%;font-size:9px;color:var(--c-dim);margin-top:2px">as of '+(d.oi_asof||d.chain_tick||d.stored_iv_asof||'&mdash;')+'</div>'
+      + '<div style="width:100%;font-size:9px;color:var(--c-dim);margin-top:2px">DTE '+(d.days_to_expiry!=null?d.days_to_expiry+'d':'&mdash;')+' &middot; as of '+(d.oi_asof||d.chain_tick||d.stored_iv_asof||'&mdash;')+'</div>'
       + '</div>';
   }
   function dcChainToggleInfo(sym){ var st=_dcChainState(sym); st.showInfo=!st.showInfo; _dcRenderChainGrid(sym); }
@@ -482,9 +514,9 @@
       var oiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap">'+_dcOiTxt(r.pe)+'</td>') : '';
       return '<tr onclick="dcChainSelectStrike(\''+sym+'\','+r.strike+')" style="cursor:pointer;'+bg+sel+'">'
         + oiCe
-        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.ce)+_dcLtpTxt(r.ce)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcLtpTxt(r.ce)+'</td>'
         + '<td style="'+Bd+';text-align:center;padding:5px 8px;font-weight:800;font-family:\'IBM Plex Mono\',ui-monospace,monospace;color:var(--c-tx);white-space:nowrap">'+r.strike+(r.atm?' <span style="font-size:8px;color:var(--c-mut)">ATM</span>':'')+mpDot+'</td>'
-        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcTagDot(r.pe)+_dcLtpTxt(r.pe)+'</td>'
+        + '<td style="'+Bd+';text-align:center;padding:5px 6px;white-space:nowrap;font-weight:700">'+_dcLtpTxt(r.pe)+'</td>'
         + oiPe
         + '</tr>';
     }).join('');
@@ -501,6 +533,10 @@
       +   '<div style="font-size:10px;color:var(--c-dim)">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d)'+oiNote+'</div>'
       +   '<button onclick="dcChainToggleInfo(\''+sym+'\')" style="margin-left:auto;width:18px;height:18px;line-height:16px;text-align:center;border-radius:50%;border:1px solid var(--c-bd);background:none;color:var(--c-mut);font-size:10px;font-weight:800;cursor:pointer;padding:0" aria-label="What do these mean?">i</button>'
       + '</div>'
+      // cc#2034 item 2: the dots are gone (item 1) -- this one-liner replaces them as the read-at-
+      // a-glance cue, plain language, no jargon (no IVP/percentile/skew here -- that is the (i)
+      // button's and the tap-detail panel's job).
+      + '<div style="font-size:10px;color:var(--c-mut);margin-bottom:6px">Tap a strike for fair value &amp; Greeks</div>'
       + info
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border-radius:8px;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
       +   '<thead><tr>'+hOiCe+'<td '+hcol+'>CE LTP</td>'
