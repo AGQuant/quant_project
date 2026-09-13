@@ -36,7 +36,7 @@ body{margin:0;background:var(--field);color:var(--ink);font-family:Sora,-apple-s
 .sel .k{font-size:var(--type-9);color:var(--muted);font-weight:700}
 .sel select{width:100%;background:transparent;border:0;color:var(--ink);font:inherit;font-size:var(--type-14);font-weight:800;margin-top:var(--space-2);padding:0;appearance:none}
 .spot{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline}
-.spot .v{font-size:var(--type-22);font-weight:800}.spot .lot{font-size:var(--type-11);color:var(--muted)}.spot .lot b{color:var(--ink)}
+.spot .optv{font-size:var(--type-22);font-weight:800}.spot .lot{font-size:var(--type-11);color:var(--muted)}.spot .lot b{color:var(--ink)}
 
 .seg{display:flex;gap:var(--space-4);margin:var(--space-12) var(--space-16) 0;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
 .seg span{flex:1;text-align:center;font-size:var(--type-115,var(--type-12));font-weight:700;color:var(--muted);padding:var(--space-8);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
@@ -77,7 +77,7 @@ button.in.strike-btn{cursor:pointer}
 .res::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
 .kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8)}
 .cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-10)}
-.cell .k{font-size:var(--type-9);color:var(--muted);font-weight:700}.cell .v{font-size:var(--type-13,14px);font-weight:800;margin-top:var(--space-3)}
+.cell .k{font-size:var(--type-9);color:var(--muted);font-weight:700}.cell .optv{font-size:var(--type-13,14px);font-weight:800;margin-top:var(--space-3)}
 .cell .v small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600;margin-top:var(--space-2)}
 .subst{color:var(--brand)}
 .chart{margin-top:var(--space-12);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-8)}
@@ -118,7 +118,7 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
       <select id="optUnder"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option></select>
     </div>
     <div class="sel"><div class="k">Expiry</div><select id="optExpiry"></select></div>
-    <div class="sel spot"><div><div class="k">Spot</div><div class="v" id="optSpot">&mdash;</div></div>
+    <div class="sel spot"><div><div class="k">Spot</div><div class="optv" id="optSpot">&mdash;</div></div>
       <div class="lot">ATM <b id="optAtm">&mdash;</b> &middot; lot <b id="optLot">&mdash;</b></div></div>
   </div>
 
@@ -149,9 +149,9 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
 
   <div class="res" id="optRes" hidden style="margin-left:var(--space-16);margin-right:var(--space-16)">
     <div class="kg">
-      <div class="cell"><div class="k">Break-even</div><div class="v" id="optBE">&mdash;</div></div>
-      <div class="cell"><div class="k">Max profit</div><div class="v" id="optMaxP">&mdash;</div></div>
-      <div class="cell"><div class="k">Max loss</div><div class="v" id="optMaxL">&mdash;</div></div>
+      <div class="cell"><div class="k">Break-even</div><div class="optv" id="optBE">&mdash;</div></div>
+      <div class="cell"><div class="k">Max profit</div><div class="optv" id="optMaxP">&mdash;</div></div>
+      <div class="cell"><div class="k">Max loss</div><div class="optv" id="optMaxL">&mdash;</div></div>
     </div>
     <div class="chart"><svg id="optChart" viewBox="0 0 400 150" preserveAspectRatio="none"></svg></div>
     <div class="tbl" id="optTbl"></div>

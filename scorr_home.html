@@ -188,6 +188,7 @@
   .t-scanners{--accent:#7c3aed} .t-qb{--accent:#2563eb} .t-v10{--accent:#db2777}
   .t-intel{--accent:var(--cyan)} .t-holdings{--accent:var(--grn)} .t-screener{--accent:#7F77DD}
   .t-v13{--accent:#37D3E8}
+  .t-options{--accent:#D4AF37}   /* cc#2040: Option Strategy Builder -- unclaimed gold, distinct from the palette above */
 
   .logout-wrap{margin-top:28px;text-align:center}
   .logout-link{display:inline-block;padding:8px 22px;font-size:11.5px;font-weight:600;
@@ -379,6 +380,16 @@
         <span class="ic">&#10003;</span>
         <div class="nm">Check</div>
         <div class="ds">Trade Check &middot; LONG / SHORT &middot; screener + intraday</div>
+      </a>
+
+      <!-- cc#2040 (OPT sprint 5/5): same block, same markup pattern as the tile above (the
+           card's own instruction names Wall of Trades as the sibling to match, but WoT has no
+           tile in this block at all -- checked before writing anything -- so Check, the tile
+           that actually IS here, is the pattern followed). -->
+      <a class="tile t-options" href="/options">
+        <span class="ic">&#177;</span>
+        <div class="nm">Option Strategy</div>
+        <div class="ds">Payoff builder &middot; readymade strategies &middot; NIFTY + BANKNIFTY</div>
       </a>
 
       <a class="tile t-screener" href="/v12">

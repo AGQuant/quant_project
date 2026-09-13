@@ -2013,6 +2013,12 @@ var G_GROUPS = [
       svg: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 13.5l2-2.5 1.5 1.5 2.5-3"/></svg>' },
     { href: '/m/check', label: 'Trade Check', web: false,
       svg: '<svg viewBox="0 0 24 24"><path class="f" d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
+    // cc#2040 (OPT sprint 5/5): Option Strategy Builder -- placed directly after Trade Check per
+    // this card's own instruction; glyph is a simple payoff-tent line (the shape most of this
+    // feature's own strategies actually trace), matching sibling glyphs' plain-stroke style
+    // (no .f fill needed -- 'V8 Signals' right below is the same unfilled-path convention).
+    { href: '/m/options', label: 'Option Strategy', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path d="M3 17h4l4-9h6l4 9h4"/></svg>' },
     { href: '/m/v8', label: 'V8 Signals', web: false,
       svg: '<svg viewBox="0 0 24 24"><path d="M4 17l5-6 4 3 7-8"/><path d="M15 6h5v5"/></svg>' },
     { href: '/m/mf', label: 'Mutual Funds', web: false,
