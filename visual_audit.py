@@ -317,20 +317,54 @@ CHECKS_JS = r"""
   if (!seenBoxes.length) push('theme_leak', 'PASS', document.body, `page lum=${luminance(bodyBg).toFixed(2)}`, `data-theme="${theme}"`, 'no inverted-background element found');
 
   // ==== 8. OVERFLOW AND CLIPPING ====
+  // cc#2017: redesigned so the per-element loop emits ONE row per element PER SUB-CONDITION
+  // evaluated -- PASS or FAIL -- matching the pattern contrast/tap_target already use. Before this,
+  // the loop only ever pushed a FAIL (no matching PASS), across two different sub-conditions, which
+  // made PASS counts stay flat near one page-level row while FAIL scaled into the tens of thousands
+  // -- an instrumentation artifact, not a real defect-density signal.
   const de = document.documentElement;
   const docOverflow = de.scrollWidth - de.clientWidth;
   push('overflow_clipping', docOverflow > 1 ? 'FAIL' : 'PASS', de, docOverflow + 'px', '<=1px', 'document horizontal scroll');
+  const inScrollableAncestor = (el) => {
+    // by-design horizontal scrollers this codebase uses throughout (.chips, .rtab, .tw, .model-nav,
+    // .dt .tabs, .vswipe-t, #scorrPeerScroll, .hscroll, ...) -- content wider than its container
+    // here is reachable by scroll/swipe, not clipped. Walks ancestors because the scrollable shell
+    // and the wide content are often different elements (an outer overflow-x:auto wrapper around an
+    // inner flex/track row of chips, tabs or cards).
+    for (let p = el; p && p !== document.documentElement; p = p.parentElement) {
+      if (/auto|scroll/.test(getComputedStyle(p).overflowX)) return true;
+    }
+    return false;
+  };
+  const parkedOffCanvas = (el) => {
+    // a drawer / off-canvas menu / modal stashed OUTSIDE the viewport on purpose (a transform, or a
+    // fixed-position ancestor) is not "clipped" -- that word means content straddling the edge,
+    // partly visible and partly cut off with no way to reach the rest. ENTIRELY off-screen (never
+    // merely straddling) is the by-design signal.
+    const r = el.getBoundingClientRect();
+    if (r.right <= 0 || r.left >= window.innerWidth) return true;
+    for (let p = el; p && p !== document.documentElement; p = p.parentElement) {
+      if (getComputedStyle(p).position === 'fixed') return true;
+    }
+    return false;
+  };
   for (const el of document.body.querySelectorAll('*')) {
     if (!vis(el)) continue;
+    if (inScrollableAncestor(el)) continue;  // by-design scroller content -- excluded, not counted either way
     const cs = getComputedStyle(el);
-    const excess = el.scrollWidth - el.clientWidth;
-    if (excess > 2 && !/auto|scroll/.test(cs.overflowX)) {
-      const kids = [...el.children].filter(k => (k.textContent || '').trim());
-      if (kids.length) push('overflow_clipping', 'FAIL', el, excess + 'px', '0px (or a scrollable container)', 'content clipped, no way to scroll to it');
+    const kids = [...el.children].filter(k => (k.textContent || '').trim());
+    if (kids.length) {
+      const excess = el.scrollWidth - el.clientWidth;
+      const clipped = excess > 2 && !/auto|scroll/.test(cs.overflowX);
+      push('overflow_clipping', clipped ? 'FAIL' : 'PASS', el, excess + 'px', '0px (or a scrollable container)',
+           clipped ? 'content clipped, no way to scroll to it' : 'content fits, or is reachable via a scrollable container');
     }
+    if (parkedOffCanvas(el)) continue;  // by-design off-screen (drawer/off-canvas menu/modal) -- excluded, not counted either way
     const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.right > window.innerWidth + 2 && cs.position !== 'fixed') {
-      push('overflow_clipping', 'FAIL', el, Math.round(r.right) + 'px', window.innerWidth + 'px (viewport width)', 'element extends past the right edge of the viewport');
+    if (r.width > 0) {
+      const overflows = r.right > window.innerWidth + 2;
+      push('overflow_clipping', overflows ? 'FAIL' : 'PASS', el, Math.round(r.right) + 'px', window.innerWidth + 'px (viewport width)',
+           overflows ? 'element extends past the right edge of the viewport' : 'element stays within the viewport width');
     }
   }
 
@@ -357,13 +391,18 @@ CHECKS_JS = r"""
   // that silently rendered nothing. Heuristic, stated as such: not every empty container is a bug
   // (e.g. a genuinely empty state already renders its OWN "nothing here" text, which is why this
   // only fires on TRULY empty -- zero characters, not "renders an honest empty-state sentence").
+  // cc#2017: emits a PASS row for every container WITH text too, not just a FAIL for the empty
+  // ones -- matching contrast/tap_target's own one-row-per-element-evaluated pattern.
   const containerSel = '.card, .c, .sect, .oib, .vpage, .oic, .deriv-row, .apf-note';
   for (const el of document.body.querySelectorAll(containerSel)) {
     if (!vis(el)) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 20 || r.height < 20) continue;
     const text = (el.innerText || '').trim();
-    if (text.length === 0) push('empty_broken', 'FAIL', el, '0 characters of text', '>0 characters, or an explicit empty-state message', 'content container rendered with no text at all');
+    const empty = text.length === 0;
+    push('empty_broken', empty ? 'FAIL' : 'PASS', el, text.length + ' characters of text',
+         '>0 characters, or an explicit empty-state message',
+         empty ? 'content container rendered with no text at all' : 'container has visible text content');
   }
 
   return out;
