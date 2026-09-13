@@ -1,0 +1,170 @@
+<!doctype html>
+<!-- ══ previews/option_strategy_builder.html — DESIGN REF R1 for cc#2035 (Fable, 13-Sep-2026).
+     Dummy data = the real NIFTY chain at 11-Sep 15:35 (reports/CC2035_ref/golden_30.json), Iron Condor sample.
+     Three states on one page for review: [A] Custom Builder with legs, [B] Readymade grid, [C] Payoff result.
+     Contract tokens only. The :root fallback block below exists ONLY so this preview renders outside the app;
+     the built page loads /static/scorr_themes.css and must NOT carry it. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Option Strategy · Scorr — design ref R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* preview-only fallback (goldnight). DELETE in the built page. */
+:root{--field:#0A0A0C;--panel:#131316;--hi:#1B1B20;--edge:#2A2A31;--ink:#F3F1EA;--muted:#8E8C86;--brand:#D4AF37;--win:#3DBE7A;--loss:#E0524D;
+--space-2:2px;--space-3:3px;--space-4:4px;--space-6:6px;--space-8:8px;--space-10:10px;--space-12:12px;--space-14:14px;--space-16:16px;--space-20:20px;--space-24:24px;--space-80:80px;
+--type-9:9px;--type-10:10px;--type-11:11px;--type-115:11.5px;--type-12:12px;--type-125:12.5px;--type-13:13px;--type-14:14px;--type-15:15px;--type-22:22px;--type-34:34px;
+--radius-8:8px;--radius-10:10px;--radius-12:12px;--radius-14:14px;--radius-16:16px;--radius-20:20px;--bw-1:1px;--bw-2:2px;--bw-3:3px;--track-em8:.08em;--track-em12:.12em}
+body{margin:0;background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif}
+.wrap{max-width:480px;margin:0 auto;padding-bottom:var(--space-80)}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-14) var(--space-16) var(--space-6)}
+.hdr .wm{font-weight:800;letter-spacing:var(--track-em12);font-size:var(--type-13)}.hdr .wm i{color:var(--brand);font-style:normal}
+.hdr .t{font-size:var(--type-13);font-weight:700}
+.asof{padding:0 var(--space-16) var(--space-8);font-size:var(--type-10);color:var(--muted)}.asof b{color:var(--ink);font-weight:600}
+.state{margin:var(--space-24) var(--space-16) var(--space-8);font-size:var(--type-10);color:var(--brand);font-weight:800;letter-spacing:var(--track-em12)}
+
+/* underlying + expiry + spot strip */
+.top{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:0 var(--space-16)}
+.sel{background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-8) var(--space-12)}
+.sel .k{font-size:var(--type-9);color:var(--muted);font-weight:700}.sel .v{font-size:var(--type-14);font-weight:800;margin-top:var(--space-2)}
+.sel .v small{font-size:var(--type-10);color:var(--muted);font-weight:600;margin-left:var(--space-4)}
+.spot{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline}
+.spot .v{font-size:var(--type-22)}.spot .lot{font-size:var(--type-11);color:var(--muted)}.spot .lot b{color:var(--ink)}
+
+/* tabs */
+.seg{display:flex;gap:var(--space-4);margin:var(--space-12) var(--space-16) 0;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.seg span{flex:1;text-align:center;font-size:var(--type-115);font-weight:700;color:var(--muted);padding:var(--space-8);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+
+/* legs table */
+.legs{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.lh,.leg{display:grid;grid-template-columns:44px 52px 1fr 80px 44px 24px;gap:var(--space-6);align-items:center;padding:var(--space-8) var(--space-10)}
+.lh{font-size:var(--type-9);color:var(--muted);font-weight:700;border-bottom:var(--bw-1) solid var(--hi)}
+.leg{border-bottom:var(--bw-1) solid var(--hi);position:relative;font-size:var(--type-12)}
+.leg::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--edge)}
+.leg.b::before{background:var(--win)}.leg.s::before{background:var(--loss)}
+.pill{display:inline-block;font-size:var(--type-10);font-weight:800;padding:var(--space-3) var(--space-6);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);text-align:center}
+.pill.b{color:var(--win)}.pill.s{color:var(--loss)}.pill.k{color:var(--ink)}
+.in{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-8);padding:var(--space-6) var(--space-8);color:var(--ink);font:inherit;font-size:var(--type-12);font-weight:700;text-align:right}
+.in.pf{color:var(--brand)}
+.leg .x{color:var(--muted);text-align:center}
+.tiny{font-size:var(--type-9);color:var(--muted);font-weight:600}
+.add{display:flex;justify-content:space-between;align-items:center;padding:var(--space-10) var(--space-12);font-size:var(--type-11);color:var(--muted)}
+.add a{color:var(--brand);font-weight:800;text-decoration:none}
+.go{display:block;margin:var(--space-12) var(--space-16) 0;width:calc(100% - 32px);padding:var(--space-12);border-radius:var(--radius-12);font:inherit;font-size:var(--type-13);font-weight:800;background:var(--brand);color:var(--field);border:none}
+
+/* readymade */
+.chips{display:flex;gap:var(--space-6);padding:var(--space-10) var(--space-16) 0;overflow-x:auto;scrollbar-width:none}
+.chip{flex:none;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6) var(--space-12);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel)}
+.chip.on{color:var(--brand);background:color-mix(in srgb,var(--brand) 14%,var(--panel));border-color:color-mix(in srgb,var(--brand) 55%,transparent)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:var(--space-10) var(--space-16) 0}
+.tpl{background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-10) var(--space-12);min-height:96px;display:flex;flex-direction:column;justify-content:space-between}
+.tpl .n{font-size:var(--type-125);font-weight:800;line-height:1.3}
+.tpl .d{font-size:var(--type-10);color:var(--muted);margin-top:var(--space-4);line-height:1.45}
+.tpl .rp{display:flex;gap:var(--space-4);margin-top:var(--space-8)}
+.tpl .rp i{font-style:normal;font-size:var(--type-9);font-weight:800;padding:var(--space-2) var(--space-6);border-radius:var(--radius-8);background:var(--hi)}
+.tpl .rp i.p{color:var(--win)}.tpl .rp i.l{color:var(--loss)}.tpl .rp i.u{color:var(--brand)}
+.tpl svg{width:100%;height:28px;margin-top:var(--space-6)}
+
+/* result */
+.res{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.res::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.res .nm{font-size:var(--type-14);font-weight:800}.res .sub{font-size:var(--type-10);color:var(--muted);margin-top:var(--space-2)}
+.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-10)}
+.cell .k{font-size:var(--type-9);color:var(--muted);font-weight:700}.cell .v{font-size:var(--type-14);font-weight:800;margin-top:var(--space-3)}
+.cell .v.w{color:var(--win)}.cell .v.l{color:var(--loss)}.cell .v.u{color:var(--brand)}
+.cell .v small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600;margin-top:var(--space-2)}
+.chart{margin-top:var(--space-12);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-8)}
+.chart svg{width:100%;height:150px;display:block}
+.tbl{margin-top:var(--space-10);font-size:var(--type-11)}
+.tr{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1.2fr;padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--hi);text-align:right}
+.tr:first-child{color:var(--muted);font-size:var(--type-9);font-weight:700}.tr span:first-child{text-align:left;font-weight:700}
+.tr .w{color:var(--win)}.tr .l{color:var(--loss)}.tr.be{background:color-mix(in srgb,var(--brand) 8%,transparent)}
+.note{margin:var(--space-20) var(--space-16) 0;padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
+</style>
+</head>
+<body data-theme="goldnight">
+<div class="wrap">
+<div class="hdr"><span class="wm">SC<i>O</i>RR</span><span class="t">Option Strategy</span><span></span></div>
+<div class="asof">Chain <b>NIFTY · 29 Sep expiry</b> · premiums as of <b>11 Sep 15:35</b> · lot <b>65</b></div>
+
+<div class="top">
+  <div class="sel"><div class="k">Underlying</div><div class="v">NIFTY <small>▾</small></div></div>
+  <div class="sel"><div class="k">Expiry</div><div class="v">29 Sep <small>monthly ▾</small></div></div>
+  <div class="sel spot"><div><div class="k">Spot</div><div class="v">23,488 <small>parity · 15:35</small></div></div><div class="lot">ATM <b>23,500</b> · step <b>50</b></div></div>
+</div>
+
+<!-- ═══════════ STATE A — Custom Builder ═══════════ -->
+<div class="state">A · CUSTOM BUILDER</div>
+<div class="seg"><span class="on">Build your own</span><span>Readymade</span></div>
+<div class="legs">
+  <div class="lh"><span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span>Lots</span><span></span></div>
+  <div class="leg b"><span class="pill b">BUY</span><span class="pill k">PE</span><span class="in">23,300 ▾</span><span class="in pf">156.25</span><span class="in">1</span><span class="x">×</span></div>
+  <div class="leg s"><span class="pill s">SELL</span><span class="pill k">PE</span><span class="in">23,400 ▾</span><span class="in pf">191.55</span><span class="in">1</span><span class="x">×</span></div>
+  <div class="leg s"><span class="pill s">SELL</span><span class="pill k">CE</span><span class="in">23,600 ▾</span><span class="in pf">171.95</span><span class="in">1</span><span class="x">×</span></div>
+  <div class="leg b"><span class="pill b">BUY</span><span class="pill k">CE</span><span class="in">23,700 ▾</span><span class="in pf">130.55</span><span class="in">1</span><span class="x">×</span></div>
+  <div class="add"><span><span class="tiny">Gold premium = from chain, editable. Blank = no chain row.</span></span><a href="#">+ Add leg</a> <span class="tiny">4 of 10</span></div>
+</div>
+<button class="go">Calculate payoff</button>
+
+<!-- ═══════════ STATE B — Readymade ═══════════ -->
+<div class="state">B · READYMADE</div>
+<div class="seg"><span>Build your own</span><span class="on">Readymade</span></div>
+<div class="chips"><span class="chip">Bullish · 10</span><span class="chip">Bearish · 10</span><span class="chip on">Neutral · 10</span><span class="chip on" style="opacity:.75">Range</span><span class="chip">Breakout</span></div>
+<div class="grid">
+  <div class="tpl"><div><div class="n">Iron Condor</div><div class="d">Sell a call and a put near spot, buy wings further out. Earn if NIFTY stays in a band.</div></div>
+    <svg viewBox="0 0 100 28"><path d="M2,22 L22,22 L38,6 L62,6 L78,22 L98,22" fill="none" stroke="var(--brand)" stroke-width="2"/><line x1="0" y1="14" x2="100" y2="14" stroke="var(--edge)" stroke-width="1"/></svg>
+    <div class="rp"><i class="p">Limited profit</i><i class="l">Limited loss</i></div></div>
+  <div class="tpl"><div><div class="n">Short Strangle</div><div class="d">Sell an OTM call and an OTM put. Keeps the premium if the index goes nowhere.</div></div>
+    <svg viewBox="0 0 100 28"><path d="M2,2 L30,6 L70,6 L98,2" fill="none" stroke="var(--brand)" stroke-width="2"/><line x1="0" y1="14" x2="100" y2="14" stroke="var(--edge)" stroke-width="1"/></svg>
+    <div class="rp"><i class="p">Limited profit</i><i class="u">Unlimited loss</i></div></div>
+  <div class="tpl"><div><div class="n">Iron Butterfly</div><div class="d">Straddle sold at ATM, wings bought either side. Tighter band, bigger credit.</div></div>
+    <svg viewBox="0 0 100 28"><path d="M2,22 L30,22 L50,4 L70,22 L98,22" fill="none" stroke="var(--brand)" stroke-width="2"/><line x1="0" y1="14" x2="100" y2="14" stroke="var(--edge)" stroke-width="1"/></svg>
+    <div class="rp"><i class="p">Limited profit</i><i class="l">Limited loss</i></div></div>
+  <div class="tpl"><div><div class="n">Long Call Butterfly</div><div class="d">Buy 1 ITM, sell 2 ATM, buy 1 OTM call. Small cost, pays if pinned at ATM.</div></div>
+    <svg viewBox="0 0 100 28"><path d="M2,18 L30,18 L50,4 L70,18 L98,18" fill="none" stroke="var(--brand)" stroke-width="2"/><line x1="0" y1="14" x2="100" y2="14" stroke="var(--edge)" stroke-width="1"/></svg>
+    <div class="rp"><i class="p">Limited profit</i><i class="l">Limited loss</i></div></div>
+</div>
+<div class="add" style="margin:0 var(--space-16)"><span class="tiny">Tap a card → strikes set around ATM, premiums pulled from chain, payoff runs. Edit any leg after.</span></div>
+
+<!-- ═══════════ STATE C — Result ═══════════ -->
+<div class="state">C · PAYOFF RESULT (Iron Condor, real chain numbers)</div>
+<div class="res">
+  <div class="nm">Iron Condor · NIFTY 29 Sep</div>
+  <div class="sub">4 legs · net credit ₹4,985 · premiums as of 11 Sep 15:35</div>
+  <div class="kg">
+    <div class="cell"><div class="k">Break-even</div><div class="v">23,323<small>and 23,677</small></div></div>
+    <div class="cell"><div class="k">Max profit</div><div class="v w">₹4,985<small>23,400 – 23,600</small></div></div>
+    <div class="cell"><div class="k">Max loss</div><div class="v l">₹1,515<small>below 23,300 / above 23,700</small></div></div>
+  </div>
+  <div class="chart">
+    <svg viewBox="0 0 400 150" preserveAspectRatio="none">
+      <!-- x: 23,000 → 24,000 mapped to 0→400 ; y: +6000 → -3000 mapped to 10→140 -->
+      <rect x="0" y="10" width="400" height="76" fill="color-mix(in srgb,var(--win) 7%,transparent)"/>
+      <rect x="0" y="86" width="400" height="54" fill="color-mix(in srgb,var(--loss) 7%,transparent)"/>
+      <line x1="0" y1="86" x2="400" y2="86" stroke="var(--edge)" stroke-width="1"/>
+      <line x1="195" y1="10" x2="195" y2="140" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
+      <path d="M0,108 L120,108 L160,22 L240,22 L280,108 L400,108" fill="none" stroke="var(--brand)" stroke-width="2.5"/>
+      <circle cx="129" cy="86" r="3.5" fill="var(--field)" stroke="var(--brand)" stroke-width="2"/>
+      <circle cx="271" cy="86" r="3.5" fill="var(--field)" stroke="var(--brand)" stroke-width="2"/>
+      <text x="4" y="148" font-size="9" fill="var(--muted)" font-family="Sora">23,000</text>
+      <text x="184" y="148" font-size="9" fill="var(--muted)" font-family="Sora">spot</text>
+      <text x="368" y="148" font-size="9" fill="var(--muted)" font-family="Sora">24,000</text>
+      <text x="200" y="20" font-size="9" fill="var(--win)" font-family="Sora" text-anchor="middle">+4,985</text>
+      <text x="60" y="122" font-size="9" fill="var(--loss)" font-family="Sora" text-anchor="middle">−1,515</text>
+    </svg>
+  </div>
+  <div class="tbl">
+    <div class="tr"><span>NIFTY at expiry</span><span>23300 PE</span><span>23400 PE</span><span>23600 CE</span><span>23700 CE</span><span>Net</span></div>
+    <div class="tr"><span>23,000</span><span class="w">+9,344</span><span class="l">−13,549</span><span class="w">+11,177</span><span class="l">−8,486</span><span class="l">−1,515</span></div>
+    <div class="tr be"><span>23,323</span><span class="l">−10,156</span><span class="w">+7,465</span><span class="w">+11,177</span><span class="l">−8,486</span><span>0</span></div>
+    <div class="tr"><span>23,500</span><span class="l">−10,156</span><span class="w">+12,451</span><span class="w">+11,177</span><span class="l">−8,486</span><span class="w">+4,985</span></div>
+    <div class="tr be"><span>23,677</span><span class="l">−10,156</span><span class="w">+12,451</span><span class="w">+6,191</span><span class="l">−8,486</span><span>0</span></div>
+    <div class="tr"><span>24,000</span><span class="l">−10,156</span><span class="w">+12,451</span><span class="l">−14,823</span><span class="w">+11,014</span><span class="l">−1,515</span></div>
+  </div>
+</div>
+
+<div class="note"><b>What this page is.</b> Payoff at expiry for NIFTY and BANKNIFTY options. Premiums come from the live chain and show their time; edit any of them. A strategy with no floor except the index going to zero shows <b>Substantial</b> instead of a rupee figure — tap to see it. Research, not advice.</div>
+</div>
+</body></html>
