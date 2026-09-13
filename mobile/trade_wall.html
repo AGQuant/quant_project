@@ -55,6 +55,14 @@
 .ab.ap{background:var(--brand);color:var(--field);border:none}.ab.ap[disabled]{opacity:.35}.ab.dm{background:var(--hi);color:var(--muted);border:var(--bw-1) solid var(--edge)}
 .am{font-size:var(--type-9);color:var(--muted)}
 .btn2{display:block;width:100%;text-align:center;padding:var(--space-10);border-radius:var(--radius-12);font:inherit;font-size:var(--type-115);font-weight:800;background:var(--hi);color:var(--brand);border:var(--bw-1) solid var(--edge)}
+.ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.55);z-index:9998;align-items:flex-end;justify-content:center}
+.ov.open{display:flex}
+.ov-box{background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16) var(--radius-16) 0 0;width:100%;max-width:480px;padding:var(--space-16);padding-bottom:calc(var(--space-16) + env(safe-area-inset-bottom))}
+.ov-box h2{font-size:var(--type-14);margin:0 0 var(--space-4)}
+.ov-box .s{font-size:var(--type-11);color:var(--muted);margin-bottom:var(--space-12)}
+.ov-row{display:flex;justify-content:space-between;align-items:center;padding:var(--space-10) 0;border-bottom:var(--bw-1) solid var(--hi);font-size:var(--type-125)}
+.ov-row:last-of-type{border-bottom:none}
+.ov-in{width:120px;text-align:right;padding:var(--space-6) var(--space-8);border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--ink);font:inherit;font-size:var(--type-125)}
 .lr{display:grid;grid-template-columns:1fr 84px 80px;gap:var(--space-8);align-items:center;padding:var(--space-8) var(--space-12);border-bottom:var(--bw-1) solid var(--hi)}.lr:last-child{border-bottom:none}
 .lr .nm{font-size:var(--type-115);font-weight:800}.lr .nm small{color:var(--muted);font-weight:600;font-size:var(--type-9)}.lr .v{text-align:right;font-size:var(--type-115);font-weight:800}
 </style>
@@ -76,6 +84,21 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <a class="bn on" href="/m/trades"><span class="i">☷︎</span>WoT</a>
   <a class="bn" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
+
+<!-- cc#2027 (founder voice 13-Sep): approving ANY trade always confirms a target and stop loss
+     first -- pre-filled when the engine stores a real per-row price, blank and editable when it
+     does not. A bottom sheet, matching this page's own idiom (the button row / nav are the only
+     other chrome here), not the web wall's centred dialog. -->
+<div class="ov" id="apLvlOv" onclick="if(event.target===this)apLvlClose()">
+  <div class="ov-box">
+    <h2>Approve <span id="apLvlSym"></span></h2>
+    <div class="s" id="apLvlMsg">Set a target and stop loss before this approval completes. Edit or leave blank.</div>
+    <div class="ov-row"><span>Target price</span><input class="ov-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlTarget" placeholder="optional"></div>
+    <div class="ov-row"><span>Stop loss</span><input class="ov-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlStop" placeholder="optional"></div>
+    <button class="btn2" id="apLvlGo" onclick="apLvlConfirm()" style="margin-top:var(--space-12)">Confirm approval</button>
+    <button class="btn2" onclick="apLvlClose()" style="margin-top:var(--space-8);background:transparent">Cancel</button>
+  </div>
+</div>
 <script>
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -127,7 +150,67 @@ function draw(d, append){
   var seg=function(id,fn){ var el=document.getElementById(id); if(!el) return; el.addEventListener('click', function(ev){ var s=ev.target.closest('[data-v]'); if(!s) return; fn(s.getAttribute('data-v')); }); };
   seg('st', function(v){ Q.status=v; Q.eng=''; load(); }); seg('inst', function(v){ Q.inst=v; load(); }); seg('eng', function(v){ Q.eng=v; draw({events:[],status_counts:sc,by_engine:eng,counts:ic,instruments:d.instruments,scope:d.scope,approval_counts:ac,closed_summary:d.closed_summary,approval_window:Q.aw,has_more:!!Q.cursor,next_cursor:Q.cursor}, true); });
   var m=document.getElementById('more'); if(m) m.addEventListener('click', function(){ load(true); });
-  document.querySelectorAll('.ab').forEach(function(b){ b.addEventListener('click', function(){ act(b.getAttribute('data-act'), b.closest('.act').getAttribute('data-id'), b); }); });
+  document.querySelectorAll('.ab').forEach(function(b){ b.addEventListener('click', function(){
+    var a=b.getAttribute('data-act'), id=b.closest('.act').getAttribute('data-id');
+    if(a==='approve'){ apLvlOpen(id,b); return; }   /* cc#2027: approve always confirms target/SL first */
+    act(a, id, b);
+  }); });
+}
+/* ══ cc#2027: target/SL confirmation sheet on Approve, app surface — same two-call sequence as
+   trade_wall_web.html (approve_signal, then approved/levels only if a level was entered), same
+   pre-fill source. Dismiss is untouched — no sheet, same act() path as before this card. */
+var AP_LVL={id:null,btn:null};
+function apLvlOpen(id,btn){
+  var e=find(id); if(!e) return;
+  if(!(Q.aw&&Q.aw.open)){ var m=document.getElementById('am-'+id); if(m) m.textContent='not recorded: '+((Q.aw&&Q.aw.reason)||'approvals 09:15–15:15 IST'); return; }
+  AP_LVL.id=id; AP_LVL.btn=btn;
+  document.getElementById('apLvlSym').textContent=e.symbol+' · '+dir(e);
+  document.getElementById('apLvlTarget').value=''; document.getElementById('apLvlStop').value='';
+  document.getElementById('apLvlGo').disabled=false; document.getElementById('apLvlGo').textContent='Confirm approval';
+  document.getElementById('apLvlMsg').textContent='checking '+e.engine+' for a stored level…';
+  document.getElementById('apLvlOv').classList.add('open');
+  fetch('/api/tradewall/prefill-levels?engine='+encodeURIComponent(e.engine||'')+'&symbol='+encodeURIComponent(e.symbol)+'&entry_ts='+encodeURIComponent((e.entry&&e.entry.ts)||''),{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(AP_LVL.id!==id) return;
+      if(d&&d.target_price!=null) document.getElementById('apLvlTarget').value=d.target_price;
+      if(d&&d.stop_loss!=null) document.getElementById('apLvlStop').value=d.stop_loss;
+      document.getElementById('apLvlMsg').textContent=(d&&(d.target_price!=null||d.stop_loss!=null))?('Pre-filled from '+e.engine+' — edit or leave as is.'):'No stored level for this engine — enter manually or leave blank.';
+    }).catch(function(){ if(AP_LVL.id===id) document.getElementById('apLvlMsg').textContent='No stored level for this engine — enter manually or leave blank.'; });
+}
+function apLvlClose(){ document.getElementById('apLvlOv').classList.remove('open'); AP_LVL.id=null; AP_LVL.btn=null; }
+function apLvlConfirm(){
+  var id=AP_LVL.id, btn=AP_LVL.btn, e=id&&find(id); if(!e){ apLvlClose(); return; }
+  if(!(Q.aw&&Q.aw.open)){ document.getElementById('apLvlMsg').textContent='not recorded: '+((Q.aw&&Q.aw.reason)||'approvals 09:15–15:15 IST'); return; }
+  var tRaw=String(document.getElementById('apLvlTarget').value||'').trim(), sRaw=String(document.getElementById('apLvlStop').value||'').trim();
+  if(tRaw!==''&&!(parseFloat(tRaw)>0)){ document.getElementById('apLvlMsg').textContent='target must be a positive number'; return; }
+  if(sRaw!==''&&!(parseFloat(sRaw)>0)){ document.getElementById('apLvlMsg').textContent='stop loss must be a positive number'; return; }
+  var go=document.getElementById('apLvlGo'); go.disabled=true; go.textContent='Approving…';
+  document.getElementById('apLvlMsg').textContent='approving at live price…';
+  var wrap=btn&&btn.parentNode; if(wrap) wrap.querySelectorAll('button').forEach(function(b){b.disabled=true;});
+  var body={source_engine:e.engine, source_ref:ref(e), symbol:e.symbol, direction:dir(e), kind:'entry', approved_via:'app-wall'};
+  fetch('/api/alerts/approve_signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin'})
+    .then(function(r){return r.json().then(function(d){return {ok:r.ok,status:r.status,d:d};});}).then(function(res){
+      var d=res.d||{};
+      if(!res.ok||d.error||!d.alert){
+        document.getElementById('apLvlMsg').textContent='not recorded: '+(d.detail||d.error||('HTTP '+res.status));
+        go.disabled=false; go.textContent='Confirm approval';
+        if(wrap) wrap.querySelectorAll('button').forEach(function(b){b.disabled=false;});
+        return;
+      }
+      var a=d.alert; e.state=a.status; e.approval={id:a.id,approved_price:a.approved_price,approved_at:a.approved_at,approved_via:a.approved_via,notes:a.notes};
+      var finish=function(rowWarn){ apLvlClose(); load(); if(rowWarn){ var m=document.getElementById('am-'+id); if(m) m.textContent=rowWarn; } };
+      var lvl={alert_id:a.id, via:'app-wall'}, has=false;
+      if(tRaw!==''){ lvl.target_price=parseFloat(tRaw); has=true; }
+      if(sRaw!==''){ lvl.stop_loss=parseFloat(sRaw); has=true; }
+      if(!has){ finish(); return; }
+      fetch('/api/tradewall/approved/levels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lvl),credentials:'same-origin'})
+        .then(function(r2){return r2.json();}).then(function(d2){ finish(d2&&d2.error?('approved — target/SL not saved: '+d2.error+' (set it on the web Approved tab)'):null); })
+        .catch(function(){ finish('approved — target/SL not saved: network (set it on the web Approved tab)'); });
+    }).catch(function(err){
+      document.getElementById('apLvlMsg').textContent='not recorded: '+(err&&err.message?err.message:'network');
+      go.disabled=false; go.textContent='Confirm approval';
+      if(wrap) wrap.querySelectorAll('button').forEach(function(b){b.disabled=false;});
+    });
 }
 function find(id){ for(var i=0;i<Q.events.length;i++) if(String(Q.events[i].id)===String(id)) return Q.events[i]; return null; }
 function act(kind,id,btn){

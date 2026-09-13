@@ -1362,6 +1362,50 @@ def tradewall_engine_rules(request: Request):
         return wall_engine_rules(cur)
 
 
+@router.get("/api/tradewall/prefill-levels")
+@_json_safe
+def tradewall_prefill_levels(request: Request, engine: str = "", symbol: str = "", entry_ts: str = ""):
+    """cc#2027: pre-fill target/stop for the Approve popup -- DIRECT COLUMN VALUES ONLY, never a
+    computed or guessed number. v8_paper_positions and tc_scanner_holds already store the engine's
+    OWN price levels per open position (verified against real rows: 22/22 open V8 positions carry
+    both target and stop_loss); this endpoint reads them as-is, matched on the SAME (symbol,
+    entry_ts) key twRef()/ref() already build client-side as source_ref, against the SAME naive-IST
+    entry_ts string format the wall's own UNION query already serializes (trade_wall_endpoints.py's
+    _EVENTS_SQL comment: "entry_ts/exit_ts NAIVE IST -- read raw", stamped "%Y-%m-%d %H:%M:%S").
+    Every other bucket returns null, not a guess: Index Intel's stop/target are POINTS off a moving
+    SuperTrend close (dynamic, no fixed per-row price exists to read -- v10_trades carries no
+    target/stop_loss column at all, confirmed); Investment Scanner has no target leg at all (its
+    own engine-rules text says so); Screeners has no separate exit threshold in config; QB Basket
+    carries no Approve button in the first place. A null here means the popup leaves that field
+    blank and editable, per the card's own instruction -- it is never filled with an inferred price."""
+    g = _guard(request)
+    if g:
+        return g
+    eng = (engine or "").strip()
+    sym = (symbol or "").strip().upper()
+    ts = (entry_ts or "").strip()
+    target = stop = None
+    if sym and ts:
+        with _conn() as conn, conn.cursor() as cur:
+            if eng == "V8":
+                cur.execute("SELECT target, stop_loss FROM v8_paper_positions "
+                            "WHERE symbol = %s AND entry_ts = %s AND status = 'OPEN'", (sym, ts))
+                r = cur.fetchone()
+                if r:
+                    target = float(r[0]) if r[0] is not None else None
+                    stop = float(r[1]) if r[1] is not None else None
+            elif eng == "TC Scanner":
+                cur.execute("SELECT target, sl FROM tc_scanner_holds "
+                            "WHERE symbol = %s AND entry_ts = %s AND exit_ts IS NULL", (sym, ts))
+                r = cur.fetchone()
+                if r:
+                    target = float(r[0]) if r[0] is not None else None
+                    stop = float(r[1]) if r[1] is not None else None
+            # Index Intel / Investment Scanner / Screeners / QB Basket: no fixed per-row price
+            # level exists to read -- target/stop stay null, deliberately, not computed.
+    return {"engine": eng, "symbol": sym, "target_price": target, "stop_loss": stop}
+
+
 @router.get("/m/trades", response_class=HTMLResponse)
 def m_trades():
     return _page("trade_wall")

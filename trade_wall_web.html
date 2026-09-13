@@ -124,6 +124,11 @@
           border-bottom:1px solid var(--line2);font-size:12.5px}
   .ov-row:last-child{border-bottom:none}
   .ov-close{margin-top:14px;width:100%}
+  /* cc#2027: the Approve target/SL popup reuses .ov/.ov-box/.ov-row verbatim (the "Other engines"
+     sheet's own pattern) -- only the two input fields and the cancel button are new. */
+  .aplvl-in{width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--line);
+      background:var(--panel2,var(--panel));color:var(--txt);font:inherit;font-size:12.5px}
+  .aplvl-cancel{margin-top:8px;width:100%;background:transparent}
   /* cc#1525 built an Approve/Alert cluster here; cc#1537 (founder confirmed 31-Aug) removed it —
      the wall is pure display, /alerts is the sole approve surface. What survives is the
      read-only APPROVED badge (a GET off approved_map, showing a decision already taken). */
@@ -237,6 +242,20 @@
     <div class="s">Engines with a real trade book that are not one of the 5 primary buckets above.</div>
     <div id="otherBody">Loading…</div>
     <button class="tw-btn ov-close" onclick="closeOther()">Close</button>
+  </div>
+</div>
+
+<!-- cc#2027 (founder voice 13-Sep): approving ANY trade always confirms a target and stop loss
+     first -- pre-filled from the engine when a real per-row price exists, blank and editable when
+     it does not. Same .ov/.ov-box shell "Other engines" already uses. -->
+<div class="ov" id="apLvlOv" onclick="if(event.target===this)apLvlClose()">
+  <div class="ov-box">
+    <h2>Approve <span id="apLvlSym"></span></h2>
+    <div class="s" id="apLvlMsg">Set a target and stop loss before this approval completes. Edit or leave blank.</div>
+    <div class="ov-row"><span>Target price</span><input class="aplvl-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlTarget" placeholder="optional"></div>
+    <div class="ov-row"><span>Stop loss</span><input class="aplvl-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlStop" placeholder="optional"></div>
+    <button class="tw-btn ov-close" id="apLvlGo" onclick="apLvlConfirm()">Confirm approval</button>
+    <button class="tw-btn aplvl-cancel" onclick="apLvlClose()">Cancel</button>
   </div>
 </div>
 
@@ -1157,7 +1176,7 @@ function openWallInfo(){
   });
 }
 document.addEventListener('keydown', function(e){
-  if (e.key === 'Escape') closeOther();
+  if (e.key === 'Escape'){ closeOther(); apLvlClose(); }
 });
 
 /* ══ cc#1525 put Approve + Alert clusters on open engine-signal rows; cc#1537 (founder explicit,
@@ -1265,8 +1284,95 @@ function twAct(act, id, btn){
 }
 document.addEventListener('click', function(ev){
   var b = ev.target.closest && ev.target.closest('.twa-btn'); if (!b) return;
-  twAct(b.getAttribute('data-act'), b.getAttribute('data-rowid'), b);
+  var act = b.getAttribute('data-act'), id = b.getAttribute('data-rowid');
+  if (act === 'approve'){ apLvlOpen(id, b); return; }   /* cc#2027: approve always confirms target/SL first */
+  twAct(act, id, b);
 });
+/* ══ cc#2027: target/SL confirmation popup on Approve — founder voice 13-Sep-2026: "approving ANY
+   trade, equity or futures, always pops a target and stop-loss confirmation... before the approval
+   completes". Two calls in one confirm action: the existing /api/alerts/approve_signal (unchanged,
+   same body twAct always sent), then — only if the founder entered at least one level —
+   /api/tradewall/approved/levels (cc#1735) with the alert id the approve call just returned.
+   Dismiss is untouched: no popup, same twAct path as before this card. */
+var AP_LVL = { id: null, btn: null };
+function apLvlOpen(id, btn){
+  var e = twFind(id); if (!e) return;
+  if (!(STATE.approvalWindow && STATE.approvalWindow.open)){
+    /* belt and braces, same as twAct's own check — the button is already disabled in this state,
+       so reaching here means the window closed while the page sat open */
+    var rowMsg = document.getElementById('twa-msg-' + id);
+    if (rowMsg) rowMsg.textContent = 'not recorded: ' + ((STATE.approvalWindow && STATE.approvalWindow.reason) || 'approvals open 09:15-15:15 IST on trading days');
+    return;
+  }
+  AP_LVL.id = id; AP_LVL.btn = btn;
+  document.getElementById('apLvlSym').textContent = e.symbol + ' · ' + twDirection(e);
+  document.getElementById('apLvlTarget').value = '';
+  document.getElementById('apLvlStop').value = '';
+  document.getElementById('apLvlGo').disabled = false; document.getElementById('apLvlGo').textContent = 'Confirm approval';
+  document.getElementById('apLvlMsg').textContent = 'checking ' + e.engine + ' for a stored level…';
+  document.getElementById('apLvlOv').classList.add('open');
+  fetchWithTimeout('/api/tradewall/prefill-levels?engine=' + encodeURIComponent(e.engine || '')
+      + '&symbol=' + encodeURIComponent(e.symbol) + '&entry_ts=' + encodeURIComponent((e.entry && e.entry.ts) || ''))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (AP_LVL.id !== id) return;   /* popup moved to a different row while this was in flight */
+      if (d && d.target_price != null) document.getElementById('apLvlTarget').value = d.target_price;
+      if (d && d.stop_loss != null) document.getElementById('apLvlStop').value = d.stop_loss;
+      document.getElementById('apLvlMsg').textContent = (d && (d.target_price != null || d.stop_loss != null))
+        ? 'Pre-filled from ' + e.engine + ' — edit or leave as is.'
+        : 'No stored level for this engine — enter manually or leave blank.';
+    })
+    .catch(function(){ if (AP_LVL.id === id) document.getElementById('apLvlMsg').textContent = 'No stored level for this engine — enter manually or leave blank.'; });
+}
+function apLvlClose(){
+  document.getElementById('apLvlOv').classList.remove('open');
+  AP_LVL.id = null; AP_LVL.btn = null;
+}
+function apLvlConfirm(){
+  var id = AP_LVL.id, btn = AP_LVL.btn, e = id && twFind(id);
+  if (!e){ apLvlClose(); return; }
+  if (!(STATE.approvalWindow && STATE.approvalWindow.open)){
+    document.getElementById('apLvlMsg').textContent = 'not recorded: ' + ((STATE.approvalWindow && STATE.approvalWindow.reason) || 'approvals open 09:15-15:15 IST on trading days');
+    return;
+  }
+  var tRaw = String(document.getElementById('apLvlTarget').value || '').trim();
+  var sRaw = String(document.getElementById('apLvlStop').value || '').trim();
+  if (tRaw !== '' && !(parseFloat(tRaw) > 0)){ document.getElementById('apLvlMsg').textContent = 'target must be a positive number'; return; }
+  if (sRaw !== '' && !(parseFloat(sRaw) > 0)){ document.getElementById('apLvlMsg').textContent = 'stop loss must be a positive number'; return; }
+  var go = document.getElementById('apLvlGo'); go.disabled = true; go.textContent = 'Approving…';
+  document.getElementById('apLvlMsg').textContent = 'approving at live price…';
+  var wrap = btn && btn.parentNode; if (wrap) [].forEach.call(wrap.querySelectorAll('button'), function(b){ b.disabled = true; });
+  var body = { source_engine: e.engine, source_ref: twRef(e), symbol: e.symbol, direction: twDirection(e), kind: 'entry', approved_via: 'web-wall' };
+  fetchWithTimeout('/api/alerts/approve_signal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, status: r.status, d: d }; }); })
+    .then(function(res){
+      var d = res.d || {};
+      if (!res.ok || d.error || !d.alert){
+        var why = d.detail || d.error || ('HTTP ' + res.status);
+        document.getElementById('apLvlMsg').textContent = 'not recorded: ' + why;
+        go.disabled = false; go.textContent = 'Confirm approval';
+        if (wrap) [].forEach.call(wrap.querySelectorAll('button'), function(b){ b.disabled = false; });
+        return;
+      }
+      var a = d.alert;
+      e.state = a.status;
+      e.approval = { id: a.id, approved_price: a.approved_price, approved_at: a.approved_at, approved_via: a.approved_via, notes: a.notes };
+      var finish = function(rowWarn){ apLvlClose(); render(); if (rowWarn){ var m = document.getElementById('twa-msg-' + id); if (m) m.textContent = rowWarn; } };
+      var levelsBody = { alert_id: a.id, via: 'web-wall' }, hasLevel = false;
+      if (tRaw !== ''){ levelsBody.target_price = parseFloat(tRaw); hasLevel = true; }
+      if (sRaw !== ''){ levelsBody.stop_loss = parseFloat(sRaw); hasLevel = true; }
+      if (!hasLevel){ finish(); return; }   /* founder left both blank — nothing to save, approval alone stands */
+      fetchWithTimeout('/api/tradewall/approved/levels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(levelsBody) })
+        .then(function(r2){ return r2.json(); })
+        .then(function(d2){ finish(d2 && d2.error ? ('approved — target/SL not saved: ' + d2.error + ' (set it on the Approved tab)') : null); })
+        .catch(function(){ finish('approved — target/SL not saved: network (set it on the Approved tab)'); });
+    })
+    .catch(function(err){
+      document.getElementById('apLvlMsg').textContent = 'not recorded: ' + (err && err.message ? err.message : 'network');
+      go.disabled = false; go.textContent = 'Confirm approval';
+      if (wrap) [].forEach.call(wrap.querySelectorAll('button'), function(b){ b.disabled = false; });
+    });
+}
 function twLoadApproved(){
   if (STATE.status !== 'open') return;
   (BUCKETS[STATE.instrument] || []).forEach(function(eng){
