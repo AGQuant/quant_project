@@ -88,7 +88,12 @@ back with an **identical `content_hash`** (`c7d6005cf99f75b8`), which looked lik
 failure until `scorr_theme_boot.js` (the actual web-theme script) was read directly: its own
 `ALLOWED` set is `{dark: 1, light: 1}` — "goldnight"/"aquawhite" are meaningless to a web page and
 silently fall back to the default (`dark`), so both requests rendered identically **by design**,
-not by bug. Re-queued correctly (`theme='light'`, id 230) rather than reported as a false finding.
+not by bug. Re-queuing with the correct name (`theme='light'`, id 230) surfaced a SECOND, genuine
+tool limitation instead: `visual_audit.py`'s own `THEMES` constant is hardcoded to
+`["goldnight", "aquawhite"]` — the crawler itself has never been able to request a WEB page's own
+`light`/`dark` names at all (`ValueError: unknown theme 'light'`). This is a pre-existing gap in
+the crawler (app-themes-only), not something introduced or fixable by this card — noted for the
+record, not chased further here.
 
 **One request found a real, confirmed defect, now fixed.** `/m/options` under `aquawhite`
 (capture 565) came back `has_check_fail=true` with a genuine near-invisible contrast failure on
@@ -106,10 +111,16 @@ harness never caught it — a real gap in that harness's fidelity, stated here r
 over. **Fixed**: renamed the class to `.optv` (namespaced like every other id on this page) in all
 four places; re-verified `theme_validator.count_raw` still 0 and cc#2039's own 19-check harness
 still all-met after the rename. The collision (background/border/padding/cursor) is conclusively
-fixed by this rename; the *exact* mechanism behind the specific `rgb(234,240,250)` text-colour
-reading is not fully reproduced from this container (the rule that collided sets no `color` of its
-own) — re-queued (`/m/options`, both app themes, ids 231-232) against the fix to confirm, and this
-is flagged for Fable's own live-page check as this sprint's one open item, not silently marked done.
+fixed by this rename. **Re-queued against the deployed fix and re-checked (ids 231-232, captures
+566-567) before this report's own final word**: under `goldnight` (the app's actual default theme)
+the page now comes back **`has_check_fail=false` — completely clean**. Under `aquawhite`
+specifically, `#optSpot`'s exact same contrast reading (`1.02:1`, identical rgb values) persists
+**unchanged** — conclusive proof the `.v`/`.optv` rename was not the cause of that one specific
+symptom (the collided rule set no `color`, as suspected), so it is not something this card's own
+fix reaches. **Left open, stated as exactly that**: the default (`goldnight`) experience every user
+actually sees is confirmed clean; the `aquawhite` variant's `#optSpot` contrast is a real,
+reproduced-twice finding this container cannot root-cause further (no live DOM/devtools access),
+flagged for Fable's own live-page follow-up rather than claimed fixed or quietly dropped.
 
 One of the four original requests (id 228, `/m/options` + `goldnight`) hit a 20s navigation
 timeout with no image; its sibling request on the identical route (id 229, `aquawhite`, moments
