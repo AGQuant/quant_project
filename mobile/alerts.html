@@ -258,7 +258,9 @@ function matches(c){
    more (matches() excludes it by construction), so cardHead()/cardBody() only ever see live/closed. */
 function cardHead(c){
   var done = c.status === 'closed';
-  var appr = 'approved <b>' + esc(c.approved_at_ist || '—') + '</b> @ <b>' + fmtPx(c.approved_price) + '</b>' + (c.via ? ' · via ' + esc(c.via) : '');
+  // cc#2045: the approved-date/price/via-source line is removed from the card header per founder
+  // decluttering ask -- .ia-appr's CSS rule is left in place (unused, harmless) per the card's own
+  // call.
   var rib = done ? '<div class="ia-rib done">CLOSED</div>' : '<div class="ia-rib live">LIVE</div>';
   var px = done ? (c.closed && c.closed.price) : c.cmp;
   var ch = '<div class="ia-live"><div class="l">' + (done ? 'CLOSED' : (c.cmp_live === false ? 'LAST' : 'NOW')) + '</div><div class="px">' + fmtPx(px) + '</div><div class="ch ' + pctCls(c.since_pct) + '">' + pctS(c.since_pct) + '</div></div>';
@@ -267,7 +269,7 @@ function cardHead(c){
     + '<span class="ia-tag gd">' + esc(c.origin_tag || 'EXPERT HANDPICKED') + '</span>'
     + (c.style ? '<span class="ia-tag mu">' + esc(c.style) + '</span>' : '')
     + '<span class="ia-tag mu">' + esc(c.instrument || 'EQ') + '</span></div>'
-    + '<div class="ia-appr">' + appr + '</div></div>'
+    + '</div>'
     + '<div>' + rib + ch + '</div></div>';
 }
 /* P4: the plan. Engine ideas: TARGET · STOP · TO TARGET (FINAL on a closed card) tiles and the
@@ -285,13 +287,19 @@ function track(c){
     + '<span class="lab" style="left:0">stop ' + fmtPx(c.stop) + '</span><span class="lab" style="right:0">target ' + fmtPx(c.target) + '</span></div>';
 }
 function foot(c, tight){
-  var p = ['held <b>' + esc(c.held || '—') + '</b>'];
+  // cc#2045: the 'held ...' prefix, the FUT-instrument expiry line, and R:R at entry are all
+  // removed per founder decluttering ask. Net effect (stated in the card, matched exactly): a
+  // closed card still shows its close line; a live FUT card gets no line from this branch at all
+  // (kept as an explicit no-op so it does NOT fall through to the final 'cash equity' else); an
+  // OPT card still shows 'option leg'; any other (equity) card still shows 'cash equity'; a manual
+  // 'Price level' trigger still adds 'handpicked · founder' (now a standalone check, since its
+  // previous else-if hung off the rr_at_entry check being removed).
+  var p = [];
   if (c.status === 'closed' && c.closed) p.push('closed <b>' + esc(c.closed.at_ist || '—') + '</b>' + (c.closed.reason ? ' · ' + esc(c.closed.reason) : ''));
-  else if (c.instrument === 'FUT' && c.expiry) p.push(esc(c.expiry.label) + ' · <b>' + (c.expiry.days != null ? c.expiry.days + ' days' : '—') + '</b>');
+  else if (c.instrument === 'FUT') { /* expiry line removed -- no push for a live FUT card */ }
   else if (c.instrument === 'OPT') p.push('option leg');
   else p.push('cash equity');
-  if (c.rr_at_entry != null) p.push('R:R at entry <b>' + Number(c.rr_at_entry).toFixed(1) + '</b>');
-  else if (c.style === 'Price level') p.push('handpicked · founder');
+  if (c.style === 'Price level') p.push('handpicked · founder');
   return '<div class="ia-ft' + (tight ? ' tight' : '') + '">' + p.map(function(x){ return '<span>' + x + '</span>'; }).join('') + '</div>';
 }
 /* cc#2024 item 4: waitBody() -- the whole waiting-card body (distance track + Approve/Dismiss
@@ -321,8 +329,10 @@ function spark(c){
   var poly = pts.map(function(v, i){ return x(i) + ',' + y(v); }).join(' ');
   return '<svg class="ia-spark ' + cls + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
     + (base != null ? '<line class="base" x1="' + L + '" y1="' + y(base) + '" x2="' + R + '" y2="' + y(base) + '"/>' : '')
-    + '<polyline class="ln" points="' + poly + '"/><circle class="dot" cx="' + x(pts.length - 1) + '" cy="' + y(pts[pts.length - 1]) + '" r="3.5"/></svg>'
-    + '<div class="ia-sparkn">' + sp.n + (sp.tf === '1d' ? ' daily bars' : ' × 5-min bars') + ' since approval · dotted = entry</div>';
+    + '<polyline class="ln" points="' + poly + '"/><circle class="dot" cx="' + x(pts.length - 1) + '" cy="' + y(pts[pts.length - 1]) + '" r="3.5"/></svg>';
+  // cc#2045: the caption below the sparkline ("N × 5-min bars since approval · dotted = entry") is
+  // removed per founder decluttering ask -- the SVG itself (polyline/dot/baseline above) is
+  // untouched. .ia-sparkn's CSS rule is left in place (unused, harmless) per the card's own call.
 }
 // cc#2024 item 6: why() and its .ia-why block are removed from the card -- founder choice, the
 // prose narrative line goes; the card keeps its real numbers (sparkline, plan tiles, track, foot).
