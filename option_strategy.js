@@ -81,6 +81,12 @@
     }).join('');
   }
 
+  // cc#2039: a shell that ships a #optStrikeSheet bottom sheet (the app) gets a tappable button
+  // that opens it; a shell without one (the web page) keeps the plain native <select> already
+  // verified in cc#2038 -- same function, same file, branching on what the PAGE provides rather
+  // than forking the file per shell.
+  function hasStrikeSheet() { return !!document.getElementById('optStrikeSheet'); }
+
   function legRowHtml(l, i) {
     var sideCls = l.side === 'BUY' ? 'b' : 's';
     if (l.kind === 'FUT') {
@@ -92,10 +98,13 @@
         + '<input class="in lots" data-i="' + i + '" type="number" min="1" max="50" value="' + l.qty + '">'
         + '<span class="x" data-i="' + i + '">×</span></div>';
     }
+    var strikeCtl = hasStrikeSheet()
+      ? ('<button type="button" class="in strike-btn" data-i="' + i + '">' + (l.strike != null ? fmtNum(l.strike, 0) : 'pick') + ' ▾</button>')
+      : ('<select class="in strike" data-i="' + i + '">' + strikeOptionsHtml(l.strike) + '</select>');
     return '<div class="leg ' + sideCls + '" data-i="' + i + '">'
       + '<span class="pill ' + sideCls.toLowerCase() + ' side" data-i="' + i + '">' + l.side + '</span>'
       + '<span class="pill k kind" data-i="' + i + '">' + l.kind + '</span>'
-      + '<select class="in strike" data-i="' + i + '">' + strikeOptionsHtml(l.strike) + '</select>'
+      + strikeCtl
       + '<input class="in premium' + (l.pf ? ' pf' : '') + '" data-i="' + i + '" type="number" step="0.05" placeholder="no chain row" value="' + (l.premium != null ? l.premium : '') + '">'
       + '<input class="in lots" data-i="' + i + '" type="number" min="1" max="50" value="' + l.qty + '">'
       + '<span class="x" data-i="' + i + '">×</span></div>';
@@ -114,15 +123,55 @@
 
   var KIND_CYCLE = { CE: 'PE', PE: 'FUT', FUT: 'CE' };
 
+  // ── strike bottom sheet (app shell only -- see hasStrikeSheet()) ──────────────────────────
+  var _sheetLegIndex = null;
+  function openStrikeSheet(i) {
+    var sheet = $('#optStrikeSheet'); if (!sheet) return;
+    _sheetLegIndex = i;
+    var list = $('#optStrikeSheetList');
+    if (list) {
+      list.innerHTML = state.chainRows.map(function (r) {
+        return '<button type="button" class="sheet-row" data-strike="' + r.strike + '">' + fmtNum(r.strike, 0) + '</button>';
+      }).join('');
+    }
+    sheet.classList.add('open');
+  }
+  function closeStrikeSheet() { var sheet = $('#optStrikeSheet'); if (sheet) sheet.classList.remove('open'); _sheetLegIndex = null; }
+  function wireStrikeSheet() {
+    var sheet = $('#optStrikeSheet');
+    if (!sheet || sheet._wired) return;
+    sheet._wired = true;
+    sheet.addEventListener('click', function (e) {
+      if (e.target === sheet) { closeStrikeSheet(); return; }
+      var row = e.target.closest('.sheet-row');
+      if (row && _sheetLegIndex != null) {
+        var strike = Number(row.getAttribute('data-strike'));
+        var i = _sheetLegIndex;
+        state.legs[i].strike = strike;
+        if (state.legs[i].kind !== 'FUT') {
+          var p = chainPremium(strike, state.legs[i].kind);
+          state.legs[i].premium = p; state.legs[i].pf = p != null;
+        }
+        closeStrikeSheet();
+        renderLegs();
+      }
+    });
+    var closeBtn = $('#optStrikeSheetClose');
+    if (closeBtn) closeBtn.addEventListener('click', closeStrikeSheet);
+  }
+
   function wireLegEvents() {
     var box = $('#optLegs');
     if (!box || box._wired) return;
     box._wired = true;
+    wireStrikeSheet();
     box.addEventListener('click', function (e) {
       var side = e.target.closest('.side'); var kind = e.target.closest('.kind'); var x = e.target.closest('.x');
+      var strikeBtn = e.target.closest('.strike-btn');
       if (side) { var i = +side.getAttribute('data-i'); state.legs[i].side = state.legs[i].side === 'BUY' ? 'SELL' : 'BUY'; renderLegs(); }
       else if (kind) { var j = +kind.getAttribute('data-i'); state.legs[j].kind = KIND_CYCLE[state.legs[j].kind]; state.legs[j].strike = null; state.legs[j].premium = null; state.legs[j].pf = false; renderLegs(); }
       else if (x) { var k = +x.getAttribute('data-i'); state.legs.splice(k, 1); renderLegs(); }
+      else if (strikeBtn) { openStrikeSheet(+strikeBtn.getAttribute('data-i')); }
     });
     box.addEventListener('change', function (e) {
       var t = e.target, i = +t.getAttribute('data-i');
@@ -204,10 +253,26 @@
   function substantialCell(el, value, sublabel) {
     el.innerHTML = '<b class="subst" title="Tap to see the rupee figure">Substantial</b><small>' + sublabel + '</small>';
     var b = el.querySelector('.subst');
+    var sheet = $('#optSubstSheet');
     b.addEventListener('click', function () {
-      b.textContent = fmtRupee(value, 0);
-      b.title = 'Bounded only by the index reaching zero';
-    }, { once: true });
+      if (sheet) {
+        var body = $('#optSubstSheetBody');
+        if (body) body.textContent = fmtRupee(value, 0) + ' — bounded only by the index reaching zero.';
+        sheet.classList.add('open');
+      } else {
+        b.textContent = fmtRupee(value, 0);
+        b.title = 'Bounded only by the index reaching zero';
+      }
+    }, sheet ? {} : { once: true });
+  }
+
+  function wireSubstSheet() {
+    var sheet = $('#optSubstSheet');
+    if (!sheet || sheet._wired) return;
+    sheet._wired = true;
+    sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.classList.remove('open'); });
+    var closeBtn = $('#optSubstSheetClose');
+    if (closeBtn) closeBtn.addEventListener('click', function () { sheet.classList.remove('open'); });
   }
 
   function renderResult(res) {
@@ -290,6 +355,7 @@
 
   // ── wiring ─────────────────────────────────────────────────────────────────────────────────
   function wireStatic() {
+    wireSubstSheet();
     var tabs = $('#optTabs');
     if (tabs) tabs.addEventListener('click', function (e) { var t = e.target.closest('[data-tab]'); if (t) setTab(t.getAttribute('data-tab')); });
     var under = $('#optUnder');

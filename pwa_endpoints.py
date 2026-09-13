@@ -485,6 +485,10 @@ PWA_JS = """
     ['/m/invscan', '\\u2316', 'Investment Scanner (mobile)', 'm'],   // cc#1923
     ['/m/qbbuilder', '\\u2295', 'Basket Builder (mobile)', 'm'],   // cc#1925
     ['/m/screeners', '\\u2637', 'Screeners (mobile)', 'm'],
+    // cc#2039 (OPT sprint 4/5): Option Strategy Builder, mobile -- not one of the 5 bottom-nav
+    // slots (Home/GVM/Check/WoT/Models, see mobile/options.html's own bnav, copied verbatim from
+    // mobile/alerts.html), so 'm'-flagged (More sheet only), same tier as Screeners/Sector here.
+    ['/m/options', '\\u25c8', 'Option Strategy (mobile)', 'm'],
     ['/m/sector', '\\u2b21', 'Sector Intel (mobile)', 'm'],
     // cc#1903: Mutual Funds — a genuinely NEW page, no prior /m/ MF route or Home-grid tile
     // existed. Wired straight into the NAV array (the mobile More sheet), per the cc#1907 lesson

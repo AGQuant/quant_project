@@ -352,15 +352,8 @@ def options_web_page():
     return _page("scorr_options.html")
 
 
-# cc#2039 still owns /m/options's real page (mobile/options.html via the TEMPLATE_DIR convention) --
-# this placeholder is unchanged from cc#2037 until that card lands.
-_APP_PLACEHOLDER = """<!doctype html><html><head><meta charset="utf-8">
-<title>Option Strategy Builder</title></head><body style="font-family:sans-serif;padding:40px;color:#333">
-<h1>Option Strategy Builder</h1><p>The real app page ships in cc#2039. This router (cc#2037) is live:
-/api/options/meta, /api/options/chain, /api/options/templates, /api/options/resolve,
-/api/options/payoff.</p></body></html>"""
-
-
+# cc#2039: /m/options now serves the real app page. mobile/options.html sits under this file's own
+# TEMPLATE_DIR-style subdirectory (mobile/) -- same _page() cache, joined with the relative path.
 @router.get("/m/options", response_class=HTMLResponse)
-def options_app_placeholder():
-    return _APP_PLACEHOLDER
+def options_app_page():
+    return _page("mobile/options.html")

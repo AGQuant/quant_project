@@ -324,6 +324,7 @@ PROTECTED.add("/m/gvm2")     # cc#2013: symbol-card target (v10_page_endpoints.p
 PROTECTED.add("/m/alerts")
 PROTECTED.add("/m/models")   # cc#886 slot 5
 PROTECTED.add("/m/holdings")   # cc#1779: My Portfolio full page — PROTECTED-only like every /m/ screen (theme head injected; NOT _PWA_INJECT_PATHS)
+PROTECTED.add("/m/options")   # cc#2039: Option Strategy Builder, app screen — PROTECTED-only like every /m/ screen
 PROTECTED.add("/m/myportfolio")   # cc#1895: Dashboard-section My Portfolio page — same PROTECTED-only convention as /m/holdings
 PROTECTED.add("/m/myalerts")   # cc#1896: Dashboard-section My Alerts page — same PROTECTED-only convention
 PROTECTED.add("/m/mywatchlist")   # cc#1897: Dashboard-section My Watchlist page — same PROTECTED-only convention
@@ -1545,6 +1546,7 @@ NAV_REGISTRY = {
     "/m/invscan":     ("Investment Scanner (mobile) — board, positions, rule; Home grid tile", "nav-mobile"),   # cc#1923 (same tier note)
     "/m/qbbuilder":   ("Basket Builder (mobile) — four-step rule wizard on the V12 endpoints; Home grid tile", "nav-mobile"),   # cc#1925
     "/m/screeners":  ("Screeners (mobile)",     "nav-mobile"),   # cc#1899, tier fixed cc#1907
+    "/m/options":    ("Option Strategy Builder (mobile)", "nav-mobile"),   # cc#2039: OPT sprint 4/5, More sheet ('m' flag, not a bottom-nav slot)
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
