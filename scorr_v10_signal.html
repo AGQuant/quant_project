@@ -1646,6 +1646,16 @@ function csbSection(){
   var body = !rows.length
     ? ('<div class="unavail">' + (D.build ? 'No symbol matches this combination right now. Try Any on one picker, or a wider band.' : 'Loading…') + '</div>')
     : csbTable(rows);
+  // cc#2078: the SAME gap the founder reported on the V8 Dashboard's own Custom Screen Builder --
+  // D.build.opening_data_missing (cc#1844) is read on THIS page's buCard() (verbatim wording
+  // reused here, not reinvented) but was never wired into this page's own csbSection(). Same
+  // payload, same card family, same fix.
+  var oiNotice = (D.build && D.build.opening_data_missing)
+    ? ('<div class="unavail" style="margin-bottom:10px">Opening data is missing for today — the futures feed started at '
+        + esc(D.build.first_bar_time ? String(D.build.first_bar_time).slice(0, 5) + ' IST' : 'a later time')
+        + ', after the market opened. OI Δ% needs the session\'s first bar to measure '
+        + 'open-interest change from, so it has nothing to show right now.</div>')
+    : '';
   return '<div class="card">'
     + '<div class="vfhd"><h3>Custom Screen Builder</h3><span class="busub">' + rows.length + ' MATCH</span><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="csbGuide()" aria-label="How to read this card">i</button></div>'
@@ -1655,6 +1665,7 @@ function csbSection(){
     + '<div class="lb">BASIS BAND</div><div class="csbrow">' + csbBandChips(CSB_BASIS_BANDS, CSB.basis, 'csbToggleBasis') + '</div>'
     + '<div class="lb">VOLUME R BAND (first guess)</div><div class="csbrow">' + csbBandChips(CSB_VOLR_BANDS, CSB.volr, 'csbToggleVolr') + '</div>'
     + '</div>'
+    + oiNotice
     + body
     + (st.txt ? '<div class="vfasof' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + bbCount + ' of ' + universe + ' scanned</div>' : '')
     + '</div>';

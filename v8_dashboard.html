@@ -8723,6 +8723,20 @@ function rCustomScreen(){
   var body = !rows.length
     ? ('<div class="unavail">' + (D.loaded.buildup ? 'No symbol matches this combination right now. Try Any on one picker, or a wider band.' : 'Loading…') + '</div>')
     : csbTable(rows);
+  // cc#2078 fix A: D.build.opening_data_missing (cc#1844) has existed in the /api/v10/buildup
+  // payload since 08-Sep and has never been surfaced on THIS card -- cc#1834's own closing note
+  // flagged exactly this gap and promised a follow-up card that was never filed; this is that
+  // follow-up. Wording matches scorr_v10_signal.html's buCard() verbatim (cc#1844's own
+  // founder-ruled Option A message for this exact flag) rather than inventing new phrasing --
+  // one fact, one sentence, used everywhere it applies. Never a fabricated since-open baseline
+  // (cc#1509's own ruling); every OI Delta% cell below is a genuine dash, universe-wide, because
+  // the feed's first bar arrived after the market opened, not because this card is broken.
+  var oiNotice = (D.build && D.build.opening_data_missing)
+    ? ('<div class="unavail" style="margin-bottom:10px">Opening data is missing for today &mdash; the futures feed started at '
+        + esc(D.build.first_bar_time ? String(D.build.first_bar_time).slice(0, 5) + ' IST' : 'a later time')
+        + ', after the market opened. OI &Delta;% needs the session&rsquo;s first bar to measure '
+        + 'open-interest change from, so it has nothing to show right now.</div>')
+    : '';
   return '<section class="iisec"><div class="sh"><span class="st">Custom Screen Builder</span>' + badge
     + '<button type="button" class="ib" onclick="iiCsbGuide()" aria-label="How to read this card">i</button></div>'
     + '<div class="card sc">'
@@ -8730,6 +8744,7 @@ function rCustomScreen(){
     + csbRow('Orderflow', csbFlowChips())
     + csbRow('Basis band', csbBandChips(CSB_BASIS_BANDS, CSB.basis, 'iiCsbToggleBasis'))
     + csbRow('Volume R band (first guess)', csbBandChips(CSB_VOLR_BANDS, CSB.volr, 'iiCsbToggleVolr'))
+    + oiNotice
     + body
     + (st.txt ? '<div class="scf' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + bbCount + ' of ' + universe + ' scanned'
         + (tcHm ? ' · TC as of ' + tcHm + ' IST' : '') + '</div>' : '')
