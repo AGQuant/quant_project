@@ -9804,7 +9804,11 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // a string compare cannot do).
   var TC13_OPEN_COLS=[["symbol","Symbol"],["side","Side"],["entry_price","Entry"],["target","Target"],
     ["sl","SL"],["cmp","CMP"],["pnl_pct","P&L%"],["lot_size","Lot"],["pnl_rs","P&L ₹ (1 lot)"],
-    ["_prox","SL · Target"],["entry_ts","Entry Time"],["_daysN","Days Held"]];
+    // cc#2072: last column now DISPLAYS the open date (dShort(entry_ts), same D-Mon formatter the
+    // Closed Book's own Date column already uses), not the elapsed days-held count. Sort key stays
+    // _daysN (numeric, cc#1884 item 1/V6) — it is a monotonic twin of entry_ts, so it still sorts
+    // this column chronologically; only the rendered text in tc13OpenRow() below changed.
+    ["_prox","SL · Target"],["entry_ts","Entry Time"],["_daysN","Open Date"]];
   function tc13OpenRow(r){
     return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
       +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
@@ -9817,7 +9821,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<td class="'+cl2(r.pnl_rs)+'" title="one lot x price move, unrealised vs CMP">'+rsTxt(r.pnl_rs)+'</td>'
       +'<td>'+prox(r.target,r.sl,r.cmp,r.side)+'</td>'
       +'<td>'+eTime(r.entry_ts)+'</td>'
-      +'<td>'+daysHeld(r.entry_ts)+'</td></tr>';
+      +'<td>'+dShort(r.entry_ts)+'</td></tr>';   // cc#2072: open date, not days-held (daysHeld() stays defined -- still feeds the _daysN sort key above)
   }
   function openTable(rows, meta){
     var live = nseOpen();
