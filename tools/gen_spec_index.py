@@ -117,6 +117,7 @@ someone re-adopts by accident.
 | 5650 gates | BUY_MOMENTUM V3 gate set | **23197** BUY_MOMENTUM_V5 (rule source 23186) |
 | 324 | investment_check v1.0 | **27979** INVESTMENT_CHECK_V2 — *on V2 go-live; v1 still serving* |
 | 22310 | CC_PROGRESS_REPORT_FORMAT_V1 | **27944** REPORT_FORMAT_V2 (extends, does not retire) |
+| 40976 (+33626, 45415) | NEWS_POLISH_CANON_V3 batch composition (+ V1 batch size 33626, + V4 same-day intermediate 45415) | **45416** NEWS_POLISH_CANON_V5 — composition only; **40972** (execution mode: all polish moves to Claude.ai chat) still live, untouched |
 """
 
 

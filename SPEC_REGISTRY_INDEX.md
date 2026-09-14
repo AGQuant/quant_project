@@ -1,7 +1,7 @@
 # Scorr — Spec Registry Index
 
-Generated 02-Sep-2026 from the live `session_log` table by `tools/gen_spec_index.py`
-(682 doctrine entries across `architecture`, `canonical_spec`, `day_log`, `daylog`, `debug_learnings`, `decision`, `doctrine`, `framework`, `locked_spec`, `memory_rules`, `mobile_framework`, `propagation_map`, `protocol_one`, `ruling`, `spec`, `spec_locked`, `spec_registry`, `standing_rule`, `trading_learnings`, `week_log`).
+Generated 14-Sep-2026 from the live `session_log` table by `tools/gen_spec_index.py`
+(754 doctrine entries across `architecture`, `canonical_spec`, `day_log`, `daylog`, `debug_learnings`, `decision`, `doctrine`, `framework`, `locked_spec`, `memory_rules`, `mobile_framework`, `propagation_map`, `protocol_one`, `ruling`, `spec`, `spec_locked`, `spec_registry`, `standing_rule`, `trading_learnings`, `week_log`).
 
 **How to use this.** This is an INDEX, not the specs themselves. The full text of every
 entry lives in the Railway DB and is the authority. To read one:
@@ -215,8 +215,6 @@ dated recent section rather than being guessed into a topic.
 
 | id | Title |
 |---|---|
-| 40976 | NEWS_POLISH_CANON_V3 (founder 08-Sep-2026) — batch composition locked: 10 items = 1 AI Editorial + 9 Shorts. Supersedes V2 (40972) on composition only |
-| 40972 | NEWS_POLISH_CANON_V2 (founder 08-Sep-2026) — ALL news polish moves to Claude.ai chat (Fable); app-scheduler job and CC self-poll both RETIRED. Supersedes 40145, 40846, 40138 |
 | 13616 | L2_POLISH_PROTOCOL_V1 (founder-locked 02-Aug — CC-on-command, no API, no card-filing) |
 | 13456 | STOCK_VIEWS_FRAMEWORK_V2 (founder-locked 01-Aug-2026, supersedes id=10062 V1) |
 | 13354 | POLISH_RESULTS_FRAMEWORK_V1 (founder-locked 01-Aug-2026) |
@@ -388,10 +386,11 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 30016 | V8_TIMESTAMP_TYPE_CHECK_V1 — naive-IST vs timestamptz columns confirmed 24-Aug |
 
 
-### `decision` — 67
+### `decision` — 68
 
 | id | Title |
 |---|---|
+| 41618 | MODEL_ASSIGNMENT_OBSERVATION_08SEP2026 - founder: Sonnet 5 is performing well as CC on backend work too; Fable and Opus for chat. Amends the practical reading of MODEL_ARCHITECTURE_PHASE3_V1 without yet replacing it. |
 | 33972 | VOLUME CANON: sign-off round on cc#1441 and cc#1446, six decisions made by Fable per founder instruction (make the call as per my intent) |
 | 33844 | QSR_RETIREMENT -- founder order 30-Aug-2026: drop the QSR (Quality S1 Reclaim) strategy entirely, was unaware it existed, will rebuild later if needed |
 | 27563 | FABLE_CTO_FORUM_AUTHORITY_V1 |
@@ -461,12 +460,20 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 529 | TC v3.5 DIVISLAB Scale Decision — 25pt Accepted |
 
 
-### `doctrine` — 13
+### `doctrine` — 21
 
 | id | Title |
 |---|---|
+| 44884 | PUSH_IS_NOT_DEPLOY_V1 |
+| 44847 | CC_CARD_CLOSURE_AUTHORITY_V1 -- Fable closes against spec; founder taste is a NEW card, never a held card |
+| 44846 | CC_TASK_STATUS_VOCAB_V1 -- founder 12-Sep-2026: the word "in progress" is banned in CC task reporting. A card carrying a commit SHA is COMMITTED. |
+| 43999 | BUILD_ON_MAIN_V1 — CC builds the real page on main. Preview routes are the exception, not the default. SUPERSEDES PREVIEW_ROUTE_REF_V1 (43994). |
+| 43994 | PREVIEW_ROUTE_REF_V1 — every UI ref is a preview route served by the app, never a standalone HTML file |
+| 37316 | LAUNCH_ROADMAP_V3 - founder 03-Sep-2026 08:02: app AND web fully ready by 31-Oct-2026, with a proper login screen and payment integration. Supersedes SCORR_LAUNCH_ROADMAP_V2 (15783) dates for the app (was Dec-2026). Public launch stays Jan-2027. |
+| 36757 | V8_ERA_CUTOVER_ONLY_V1 - founder 02-Sep-2026 15:20: V8 performance is reported for the post-cutover era ONLY, labelled with the date ("Since 18-Jul-2026"). The full ledger since inception is SUSPENDED - not computed, not served, not displayed, anywhere (web, app, digest, reports, MCP tools). Amends V8_PNL_CANON_V1 (18337) era handling. |
+| 36703 | V10_DISPLAY_OPTIONS_ONLY_V1 - founder 02-Sep-2026 14:57: every V10 surface (web + app) DISPLAYS option-writing P&L only. Futures legs are stored in v10_trades and may be shown as entry context (price, time, side) but are INDICATIVE - never counted in displayed P&L, win rate, profit factor or trade counts, never presented as a strategy record. Reason: the index strategy will run via algo in option writing to optimise cost and risk; futures performance is deliberately hidden pre-launch. |
 | 36423 | NO_BRAND_IN_TAB_TITLE_V1 - founder 02-Sep-2026: no browser tab title on any web page carries the word "Scorr" until public launch (Jan-2027). Page name only. Extends the existing never-mention-Scorr rule for polished content to document titles. |
-| 36394 | WOT_APPROVED_ONLY_V1 - founder 02-Sep-2026: Wall of Trades displays ONLY approved trades (trade_alerts status=approved, any origin: manual or engine signal approved from a surface). Unapproved engine output leaves the WoT display. Amends MANUAL_TRADE_ALERTS_V1 (34521) architecture_decision on what WoT SHOWS; the union code is hidden, not deleted. |
+| 36394 | WOT_APPROVAL_SURFACE_V1 (corrects WOT_APPROVED_ONLY_V1) - founder 02-Sep-2026 16:12: Wall of Trades = the APPROVAL surface showing engine signals (V8 equity + futures) with an Approve button per row; Alerts = the APPROVED book where approved signals print. Fable misread the 15:00 comment and shipped the reverse in cc#1587. |
 | 36200 | PCR_MOOD_BANDS_V2 - founder-locked 02-Sep-2026: PCR 1.00-1.50 = GREED; above 1.50 = CAUTIOUS if Nifty week return <= -1.0%, else EXTREME GREED. Lower bands unchanged. |
 | 36144 | MODEL_EFFORT_CACHE_RULE_V1 — Fable 5.1 + Sonnet 5 by task fit, effort MEDIUM default, ultracode only for a named heavy card, preserve prompt-cache benefit. Founder-locked 02-Sep-2026. Amends PRODUCTION_MODE_V3 (29164) and MODEL_ARCHITECTURE_PHASE3_V1 (24-Aug daylog 30149). |
 | 32076 | V10_OPT_LEG_IS_REPLICATION_NOT_HEDGE_founder_27aug |
@@ -480,10 +487,17 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 28971 | CC_QUEUE_DRAIN_RULE_V1 — claim one, push one, drain until empty; stale claims auto-release |
 
 
-### `framework` — 17
+### `framework` — 24
 
 | id | Title |
 |---|---|
+| 44898 | APP_ROUTE_MAP_V1 -- registry-derived map of all 42 NAV routes to serving file, handler, template and group; table app_route_map |
+| 44865 | LPU_ACT_TWO_PRESENTATION_OUTLINE_V1 |
+| 44851 | LPU_INTRO_SPEECH_V2_WARM -- the simpler, warmer delivery of Act One (founder-approved 12-Sep-2026) |
+| 44850 | LPU_PREP_INTRO_SCRIPT_V2 -- Act One FINAL: story + AI bridge + pivot-to-audience close (founder-approved 12-Sep-2026) |
+| 44845 | LPU_PREP_INTRO_SCRIPT_V1 |
+| 44843 | LPU_PREP_V1 |
+| 42536 | APP_CARD_LAYOUT_LAW_V1 |
 | 34521 | MANUAL_TRADE_ALERTS_V1 — founder 31-Aug: new manual price-alert + approval feature, replaces Intel in bottom nav, chat-style feed |
 | 27782 | HKK09_PRO_INFINN_EXE_REPORT_PDF_B64_20AUG2026 |
 | 27762 | HKK09_PRO_INFINN_EXE_REPORT_FORMAT_V1 |
@@ -503,10 +517,23 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 13820 | MAX_IVR_TREE_V1 (canonical editable node list — seeds max_ivr_tree; parent doc id=13816) |
 
 
-### `locked_spec` — 2
+### `locked_spec` — 15
 
 | id | Title |
 |---|---|
+| 39586 | INVESTMENT_SCANNER_ENTRY_V2 -- VOID, never implemented (founder moved the DMA condition to V8 on 06-Sep-2026) |
+| 39581 | INVESTMENT_SCANNER_EXIT_V2 -- exit bars momentum < 75 / reversal < 70, PLUS hard stop 10% or alpha -5% vs Nifty 500 (founder 06-Sep-2026) |
+| 39570 | TC_SCANNER_LOT_SIZING_V1 -- one lot per TC Scanner signal; P&L in rupees on every TC surface (founder 06-Sep-2026) |
+| 39560 | YOY_BASIS_RULE_V1 -- every growth and margin comparison on every Scorr surface is YEAR-ON-YEAR (founder 06-Sep-2026) |
+| 39481 | SILVER_GOLD_BRUSHED_V1 -- founder picked candidate 1 Brushed from silver_gold_sheen_mock (06-Sep-2026) |
+| 39478 | WINE_PURPLE_AUBERGINE_V1 -- founder picked candidate 4 Aubergine from wine_purple_dark_mock (06-Sep-2026); Wine Purple becomes a DARK theme |
+| 39474 | BLUSH_SEASHELL_V1 -- founder picked candidate 4 Seashell from blush_shades_mock (06-Sep-2026) |
+| 39467 | TC_SCANNER_ENTRY_EXIT_V2 -- founder-stated 06-Sep-2026: entry REV>=80 / MOM>=85 computed every 5 min, hold 7 days max, target and SL 3% |
+| 39390 | SCORR_SCREEN_HIDDEN_VALUE_V1 -- founder-locked 06-Sep-2026 (v13_presets id 8) |
+| 39389 | SCREEN_SIZE_CAP_V1 -- CORRECTED 06-Sep: Fable changed presets before reading specs; see details.correction |
+| 39209 | MODEL_PORTFOLIO_V1 -- founder-picked 20-name discretionary basket, Rs 1L equal weight (05-Sep-2026) |
+| 39173 | QB_CAP_AMENDMENT_V1 -- Large Cap + Alpha Multicap max 15; Rs 5L capital for all six (founder 05-Sep-2026) |
+| 39141 | CC_TASK_STATUS_FLOW_V1 -- pushed status added (founder 05-Sep-2026) |
 | 19621 | GVM_SECTOR_WIDE_BASIS |
 | 19454 | GVM_G_YOY_GROWTH_V1 |
 
@@ -524,10 +551,25 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 15913 | MOBILE_APP_FRAMEWORK_V1 — canonical build framework for the Scorr mobile app (founder-set 05-Aug-2026) |
 
 
-### `protocol_one` — 31
+### `protocol_one` — 46
 
 | id | Title |
 |---|---|
+| 45441 | PROTOCOL_ONE — platform health 1-pager (14-Sep-2026 AM, automated) |
+| 44737 | PROTOCOL_ONE — platform health 1-pager (11-Sep-2026 PM, automated) |
+| 44075 | PROTOCOL_ONE — platform health 1-pager (11-Sep-2026 AM, automated) |
+| 43535 | PROTOCOL_ONE — platform health 1-pager (10-Sep-2026 PM, automated) |
+| 42906 | PROTOCOL_ONE — platform health 1-pager (10-Sep-2026 AM, automated) |
+| 42450 | PROTOCOL_ONE — platform health 1-pager (09-Sep-2026 PM, automated) |
+| 41802 | PROTOCOL_ONE — platform health 1-pager (09-Sep-2026 AM, automated) |
+| 41548 | PROTOCOL_ONE — platform health 1-pager (08-Sep-2026 PM, automated) |
+| 41020 | PROTOCOL_ONE — platform health 1-pager (08-Sep-2026 AM, automated) |
+| 40515 | PROTOCOL_ONE — platform health 1-pager (07-Sep-2026 PM, automated) |
+| 39946 | PROTOCOL_ONE — platform health 1-pager (07-Sep-2026 AM, automated) |
+| 38874 | PROTOCOL_ONE — platform health 1-pager (04-Sep-2026 PM, automated) |
+| 38394 | PROTOCOL_ONE — platform health 1-pager (04-Sep-2026 AM, automated) |
+| 37934 | PROTOCOL_ONE — platform health 1-pager (03-Sep-2026 PM, automated) |
+| 37367 | PROTOCOL_ONE — platform health 1-pager (03-Sep-2026 AM, automated) |
 | 36083 | PROTOCOL_ONE — platform health 1-pager (02-Sep-2026 AM, automated) |
 | 35863 | PROTOCOL_ONE — platform health 1-pager (01-Sep-2026 PM, automated) |
 | 35298 | PROTOCOL_ONE — platform health 1-pager (01-Sep-2026 AM, automated) |
@@ -561,10 +603,11 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 24585 | PROTOCOL_ONE — platform health 1-pager (17-Aug-2026 PM, automated) |
 
 
-### `ruling` — 55
+### `ruling` — 56
 
 | id | Title |
 |---|---|
+| 44020 | FABLE_BLOCKER_RULINGS_11SEP_0835 — founder delegated all open blockers to Fable; eight rulings, seven new cards (cc#1992-1998), cc#1982 closed |
 | 34700 | FINKHOZ_SCREENERS_IMPORT_V2 — LIQUIDCASE resolved: drop, no substitute — Helios + Defence cleared |
 | 34696 | FINKHOZ_SCREENERS_IMPORT_V1 — founder 31-Aug: 7 Finkhoz curated baskets added to the public Screeners tab strip, 5 of 7 cleared for import now |
 | 34683 | SCREENERS_TABLE_SORT_V1 — founder 31-Aug: clickable column-header sorting on the Screeners page |
@@ -622,10 +665,24 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 27933 | PUSH_MODES_V2 — FABLE_APP_DIRECT (founder-approved 20-Aug ~16:20 IST, supersedes PUSH_MODES_V1 mode definitions; ROLE_CHARTER_V3 unchanged) |
 
 
-### `spec` — 32
+### `spec` — 46
 
 | id | Title |
 |---|---|
+| 42500 | APP_GRID_FRAMEWORK_V2 — app carries FULL COVERAGE of every web section as condensed cards; nothing is web-only (founder 09-Sep-2026, amends V1 same day) |
+| 42467 | APP_GRID_FRAMEWORK_V1 — app is built section by section off the Home grid; swipeable cards per section, detail stays on Website View (founder 09-Sep-2026) |
+| 39131 | POLISH_TIMESTAMP_RULE_V2 (Fable finding 05-Sep-2026) -- polished_news.polished_at/published_time are now timestamptz, so bare NOW() is CORRECT and the V1_1 naive-IST instruction would stamp rows 5.5h in the future. Supersedes the mechanism in POLISH_LANDING_RULE_V1_1 (17173); the intent is unchanged. |
+| 38966 | QB_RETURN_BASIS_V1 (founder question 04-Sep-2026, Fable ruling) -- ONE return, ONE alpha per basket: whole-basket NAV basis, since inception; window figures labelled with their window |
+| 38962 | QB_CARD_ANATOMY_V2 (founder-locked 04-Sep-2026) -- Quant Basket card face = 6 facts + 2 actions; entry/exit/universe/sizing text moves behind (i); last-rebalance opens history; chart opens performance vs benchmark |
+| 38956 | SEGMENT_SIZE_CLASS_V1 (founder-locked 04-Sep-2026) -- Large / Mid / Small class per GVM segment by average member mcap rank |
+| 37945 | THEME_AINIGHT_V1 - eighth theme set, founder 03-Sep-2026 |
+| 37303 | THEME_BLUSH_ROSENIGHT_V1 - founder 03-Sep-2026: two pink/rose theme sets (BLUSH light, ROSE NIGHT dark) for the app switcher, designed by Fable to the scorr_themes.css 17-key contract, WCAG AA measured on all three grounds. P&L keeps hue (green win / red loss); brand pink is separated from loss red by hue (27 deg) and by the rule that money cells never carry the brand colour. |
+| 37158 | APP_SECTOR_PAGE_V1 - founder 02-Sep-2026 21:06: app Sector page (Home grid tile) = ROTATION strip (hot 5 / cold 5) + ranked sector rows with stacked G+V+M bar, 30d delta and top-stock chip + a detail sheet (G/V/M, inst/QoQ/upside/delta, top stocks, plain-words brief). Source /api/sector/rotation + sector_briefs. Design ref scorr_mobile_sector_R1 (cc_task_logs 4726). Web canon cc#827 kept (merge layer, GVM = rating and order). |
+| 37072 | APP_ALERTS_IDEAS_V1 - founder 02-Sep-2026 20:00: app Alerts tab = CURATED IDEAS (equity + futures), a paid section. Approved book rendered as premium idea cards with live since-approval P&L, plan (target/stop/progress), plain-words why, held/expiry; waiting cards show distance to trigger. Design ref scorr_mobile_alerts_R1 (cc_task_logs 4673). |
+| 36637 | APP_CHECK_PAGE_V2 - founder 02-Sep-2026 13:15: app Check tab rebuilt as THREE modes on one page: TRADE CHECK (single, 15 rule bars with plain-words lines) . RUN SCAN (Nifty 50 \| All Futures, LONG \| SHORT, table sorted by score with Day % and GVM) . INVEST CHECK (score /10, 9 weighted component bars). Design ref scorr_mobile_check_R1 (Fable). Supersedes the current Check page layout (12-verdict list + gaps chips). |
+| 36539 | ADV_DECL_SECTOR_CAPS_V1 - founder 02-Sep-2026 13:40: Advance/Decline full-screen list gets a sector day-change capsule strip in the middle (between header and the symbol table). Design ref scorr_adv_decl_sectorcaps_R1 (cc_task_logs, this insert). |
+| 36513 | APP_GVM_PAGE_V2 - founder 02-Sep-2026: app GVM company page = search entry from anywhere -> HERO (score) -> fixed 8-pill CAPSULE nav -> 8 cards built from the /api/gvm/company sections. Design ref scorr_mobile_gvm_R1 (cc_task_logs 4470, Fable). Supersedes the current /m/gvm layout. |
+| 36482 | APP_V8_PAGE_ORDER_V2 - founder 02-Sep-2026: app /m/v8 rebuilt to order MOOD -> OPEN POSITIONS -> SECTOR TABLE -> DAY PERFORMANCE BARS -> CLOSED -> FUNNEL (basket switch). Design ref scorr_mobile_v8_R1 (cc_task_logs id 4459, Fable-authored). Supersedes the previous /m/v8 section spec. |
 | 36294 | PCR_READ_INTERPRET_V1 - PCR card (i) popover: plain-words read of the current PCR band plus a next-day evidence line from pcr_daily x raw_prices; too-few line until 20 scored sessions per band. Founder ask 02-Sep-2026. Extends PCR_MOOD_BANDS_V2 (36200) and pcr_mood.py (cc#1568). |
 | 36283 | OI_STRUCTURE_INTERPRET_V1 - Max Pain card (i) popover: scenario read of max pain + call wall + put wall vs spot, each interpretation carrying its own evidence from a daily structure snapshot; labelled framework-only until >= 20 scored sessions per scenario. Founder ask 02-Sep-2026. |
 | 35016 | TC_SCANNER_R1_V1 |
@@ -660,14 +717,18 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | 23359 | APP_UPDATE_FRAMEWORK_V1 — how app-wide visual/product updates ship (addendum to MOBILE_APP_FRAMEWORK_V1 15913; locked from 16-Aug TELEMETRY DROP + Fight Card rollout) |
 
 
-### `spec_locked` — 144
+### `spec_locked` — 148
 
 | id | Title |
 |---|---|
+| 45416 | NEWS_POLISH_CANON_V5 -- founder 14-Sep-2026 CORRECTION: exact mix is 2 AI Editorial + 5 Domestic + 1 IPO + 2 Global + 2 Stock Views = 12. Stock Views framework formally MERGED into the news-polish trigger. Supersedes V4 (45415) on the exact split. |
+| 45192 | OPTION_STRATEGY_HTML_API_CONTRACT_V1 |
+| 45180 | OPTION_STRATEGY_BUILDER_V1_SPEC |
+| 45152 | LPU_GUEST_LECTURE_ACT_ONE_V3_ARPIT_PERSONAL_LOCKED |
+| 44848 | CC_COMMIT_FABLE_CLOSE_V1 -- CC commits and stops; Fable verifies and closes; the founder is not in the loop |
 | 34206 | V10_BANKNIFTY_SPEC_V3_10M_250_LOCKED — founder-locked 30-Aug-2026 (evening): ST 10m / ATR150 / mult 4.0 + EMA 3/10 on 30m gate, SL250 / T250; supersedes 34192 (20m/4.0/5-13/150-150) before its first live tick |
 | 34192 | V10_BANKNIFTY_SPEC_V2_20M_LOCKED — founder-locked 30-Aug-2026: ST 20m / ATR150 / mult 4.0 + EMA 5/13 on 30m gate, SL150 / T150; supersedes BNF ST150/3.0 10m + EMA3/10, SL150/T300 |
 | 34174 | V10_NIFTY_GEOMETRY_V2_SL100_T150 — founder-locked 30-Aug-2026 at LEVEL 2 (5m-stepped replay); signal ST150/3.0 + EMA3/10 UNCHANGED after L1+L2 sweeps; supersedes NIFTY SL100/T200 |
-| 33626 | NEWS_POLISH_BATCH_SIZE_V3 -- 10 per batch: 2 AI Editorial + 5 Domestic + 2 Global + 1 IPO (founder-locked 29-Aug-2026) |
 | 33587 | LIVE_FEED_STALENESS_PATTERN_V1 — >1hr fallback rule is a shared platform pattern, PCR is the first consumer |
 | 33583 | PCR_TICK_AND_EOD_DISPLAY_V2 — EOD/fallback citation returns, gated on >1hr live-feed absence, always stamped |
 | 33582 | PCR_TICK_AND_EOD_DISPLAY_V1 — 15:20 universal cutoff (supersedes 33581's brief 15:25 lock); EOD write stays, EOD display removed |
@@ -823,7 +884,6 @@ Entries added since the last curated pass. They are indexed and readable; they s
 | id | Title |
 |---|---|
 | 18337 | V8_PNL_CANON_V1 — one book formula, retired baskets excluded everywhere |
-| 36757 | V8_ERA_CUTOVER_ONLY_V1 — V8 performance reported for the post-cutover era only, captioned "Since 18-Jul-2026"; full ledger suspended (410, not computed); amends 18337 era handling (cc#1604, added by hand 02-Sep ahead of the next `gen_spec_index.py` run) |
 | 18278 | FABLE_DIAGNOSIS_FIRST_V1 |
 | 18213 | OPS_METRICS_RETIRED |
 
@@ -848,6 +908,15 @@ Indexed so an id can be looked up, kept apart so none of them is ever read as a 
 
 | id | Title |
 |---|---|
+| 45217 | DAY_LOG_13_SEP_2026 -- LPU lecture paragraphs 1-5 locked; cc#2026-2030 verified; Option Strategy Builder spec, engine, design ref and 5-card sprint filed |
+| 43757 | DAY_LOG_10SEP2026 — Fable session (Claude.ai) |
+| 42659 | DAY LOG 09-Sep-2026 PART 2 (evening) — TC canon rewritten twice, 100 news items, full FY27 estimate rebuild |
+| 42598 | DAY LOG 09-Sep-2026 — SmartGain reconcile, three P0s, app design-ref set complete (12 refs), 20 cards |
+| 41613 | DAY LOG 08-Sep-2026 (Tue) - Claude web session: PWA install fixed, 4 blocked cards cleared, 12 cards filed from a founder screen recording, PCR corruption found feeding a live verdict, IV history chain specced end to end, 20 news rows polished |
+| 41385 | DAYLOG 08-Sep-2026 — Forward-estimates provenance audit; trendlyne_estimates seeded (845 cos) |
+| 40154 | DAY LOG 07-Sep-2026 (Mon) -- covers cc#1770 to cc#1805, the gap after day log 39596 stopped at cc#1769. First trading day under TC Scanner V2 and Investment Scanner V2. P0 feed outage 09:15-10:15, news polish canon locked, theme system to 10 sets. |
+| 39596 | DAY LOG 06-Sep-2026 (Sunday) -- 43 cards, two engines re-ruled and cleared, four themes locked, app inventory, Sep-Dec plan set |
+| 38891 | DAY LOG 04-Sep-2026 (Fri) -- Claude web session: 9 cards filed (cc#1669-1677), all 8 live cards pushed and awaiting founder glass-check; 20 news rows polished (5031-5050); SEBI/BSE IA deposit paperwork reviewed |
 | 34970 | DAY LOG 31-Aug-2026 (Mon) -- 22 cc tasks closed, 40 news rows polished, F&O OI drift fixed, V8 miss ledger revived after ~3 months dead, FINKHOZ weekly content format locked |
 | 34169 | DAY LOG 30-Aug-2026 (extended session): Volume Metrics Canon closed end-to-end, QSR retired, ~20-task Index Intel UI overhaul, 3 real engine bugs found and fixed |
 | 33834 | DAY LOG 30-Aug-2026 (daytime) -- Claude web session: VOLUME_METRICS_CANON locked + sprints filed, 6 FINZ factsheets refreshed, cc#1432-1439, Finkhoz doc registry |
@@ -903,11 +972,10 @@ someone re-adopts by accident.
 
 | retired id | was | now live |
 |---|---|---|
-| 18337 (era handling only) | V8_PNL_CANON_V1 served two eras (fresh + all) | **36757** V8_ERA_CUTOVER_ONLY_V1 — cutover era only; the formula in 18337 stays live |
 | 17868 | ROLE_CHARTER_V3 — Fable owns all app tasks, CC benched | **27934** ROLE_CHARTER_V4 / EXECUTION_MODEL_PHASE_3 |
 | 22301, 22318, 22324, 22338 | V8 table specs, four rounds | **22342** (+ base 22321), per the 22344 lineage pointer |
 | 22405 | SEGMENT_TAXONOMY_V1 | **22406** SEGMENT_TAXONOMY_V2 |
 | 5650 gates | BUY_MOMENTUM V3 gate set | **23197** BUY_MOMENTUM_V5 (rule source 23186) |
 | 324 | investment_check v1.0 | **27979** INVESTMENT_CHECK_V2 — *on V2 go-live; v1 still serving* |
 | 22310 | CC_PROGRESS_REPORT_FORMAT_V1 | **27944** REPORT_FORMAT_V2 (extends, does not retire) |
-| 40145, 40846, 40138 | NEWS_POLISH_CANON_V1 / NEWS_POLISH_CC_SELFPOLL_V1 / NEWS_POLISH_AUTOMATION_V1 — automated app-job + CC self-poll execution modes | **40972** NEWS_POLISH_CANON_V2 (chat-only) + **40976** NEWS_POLISH_CANON_V3 (batch composition) |
+| 40976 (+33626, 45415) | NEWS_POLISH_CANON_V3 batch composition (+ V1 batch size 33626, + V4 same-day intermediate 45415) | **45416** NEWS_POLISH_CANON_V5 — composition only; **40972** (execution mode: all polish moves to Claude.ai chat) still live, untouched |
