@@ -9930,7 +9930,9 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
           'mean P&amp;L across all '+kpi.priced+' priced closed trades, winners and losers')
       +'</div>'
       +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
-      +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th title="one lot per signal (futures_universe.lot_size), display only">P&amp;L &#8377; (1 lot)</th><th>Date</th></tr></thead>'
+      // cc#2077: header was "Date" -- the cell below renders dShort(r.exit_ts), the exit/closing
+      // date (cc#1599 basis), unambiguous now that the table mixes rows entered on different days.
+      +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th title="one lot per signal (futures_universe.lot_size), display only">P&amp;L &#8377; (1 lot)</th><th>Closed Date</th></tr></thead>'
       +'<tbody>'+body+'</tbody></table></div></div></div></section>';
   }
 
