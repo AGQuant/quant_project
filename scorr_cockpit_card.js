@@ -477,9 +477,24 @@
       var ivpTag=o.ivp&&o.ivp.tag, ivpFair=o.ivp&&o.ivp.fair_value;
       // cc#2034 item 4: a strike/bucket below cc#1859's own session floor carries tag=None/
       // fair_value=None -- say so in plain words, never a blank line or a guessed number.
+      // cc#2048 item 1 (founder's own unambiguous ask): the Cheap/Fair/Expensive tag now sits
+      // beside Premium (the live traded price), not beside Fair value -- moved into premiumLine
+      // below. This line keeps the Fair value NUMBER exactly as before, tag-free.
       var fairLine = (ivpFair!=null)
-        ? ('<div>Fair value <b>'+_dcRupee(ivpFair)+'</b> <span style="color:var(--c-mut)">('+_dcTagWord(ivpTag)+')</span></div>')
+        ? ('<div>Fair value <b>'+_dcRupee(ivpFair)+'</b></div>')
         : '<div style="color:var(--c-dim)">Not enough history yet to rate this strike</div>';
+      // cc#2048 item 2 (founder-flagged, NOT resolved here -- needs sign-off): once beside
+      // Premium, a reader will naturally read this tag as "this premium is expensive relative to
+      // Fair value" -- but ivp.tag is an IV-PERCENTILE read (today's IV vs its own 120-session
+      // history), independent of whether the median-IV-based Fair value happens to sit above or
+      // below today's live Premium. A strike can legitimately show Premium just below Fair value
+      // while still reading EXPENSIVE. This card moves the tag exactly where the founder asked;
+      // it does NOT relabel it (e.g. "IV: Expensive") or switch to the older direct Premium-vs-
+      // Fair-value tag in deriv_metrics.py's _price_rows() -- that choice reopens cc#1859's own
+      // founder-ruled methodology and is logged in cc_task_logs for that ruling, not decided here.
+      var premiumLine = '<div>Premium <b>'+(o.ltp!=null?Number(o.ltp).toFixed(1):'&mdash;')+'</b>'
+        + (ivpTag!=null ? ' <span style="color:var(--c-mut)">('+_dcTagWord(ivpTag)+')</span>' : '')
+        + '</div>';
       var g = o.greeks;
       var greeks = '<div style="font-weight:800;color:var(--c-tx);margin:8px 0 4px;padding-top:8px;border-top:1px solid var(--c-bd)">Option Greeks</div>'
         + (g
@@ -490,15 +505,19 @@
           : '<div style="color:var(--c-dim)">Not available — no live quote to solve IV from</div>');
       return '<div style="flex:1;min-width:150px">'
         + '<div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div>'
-        + '<div>Premium <b>'+(o.ltp!=null?Number(o.ltp).toFixed(1):'&mdash;')+'</b></div>'
+        + premiumLine
         + '<div>IV <b>'+(o.iv!=null?o.iv+'%':'&mdash;')+'</b></div>'
         + fairLine
         // cc#2044 item 3: the Black-Scholes/realised-vol commentary line is removed from display --
         // founder does not want it surfaced. o.fair stays untouched in the API payload (display-only
         // removal); cc#1859's own Fair value/tag line above (fairLine) is the number that stays.
         + '<div>OI <b>'+_dcOiTxt(o)+'</b></div>'
-        + '<div style="color:var(--c-dim)">OI change: not tracked (no baseline tick defined yet)</div>'
-        + '<div style="color:var(--c-dim)">Bid/ask: not captured by the live feed today</div>'
+        // cc#2048 item 3 (explicit founder ruling this session, verbatim: "if something is not
+        // available, don't show, why show comment"): the OI-change and Bid/ask explanatory
+        // sentences are removed entirely -- when the payload has no data for a row, this panel
+        // renders nothing for it, not a sentence explaining the absence. option_chain_grid.py's
+        // own never-fabricate stance at the DATA layer is untouched; this is a front-end omission
+        // only, per the card's own do_not_touch.
         + greeks
         + '</div>';
     };
