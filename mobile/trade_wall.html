@@ -110,7 +110,7 @@ function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
 function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
 function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
 function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
-var Q={inst:'',status:'open',eng:'',cursor:'',events:[],aw:null,total:null,reqId:0};   /* cc#2059: reqId discards a stale out-of-order load() response, same pattern cc#2056/cc#2058 already use */
+var Q={inst:'',status:'open',eng:'',cursor:'',events:[],aw:null,total:null,reqId:0,hdr:null};   /* cc#2059: reqId discards a stale out-of-order load() response, same pattern cc#2056/cc#2058 already use. cc#2071: hdr caches the last FRESH response's header-only fields, read on an append (Load more) call instead of that response's own (empty) copies -- see draw(). */
 function inrS(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v), a=Math.abs(x); var t=a>=1e5?(a/1e5).toFixed(2)+' L':Math.round(a).toLocaleString('en-IN'); return (x<0?'−':(s&&x>0?'+':''))+'₹'+t; }
 function tsShort(s){ if(!s) return '—'; s=String(s); return dm(s)+(s.length>=16?' '+s.slice(11,16):''); }
 function ref(e){ return e.symbol+'@'+((e.entry&&e.entry.ts)||''); }
@@ -133,19 +133,30 @@ function row(e){
   return '<div class="row '+(open?ud(pn):(e.result==='WIN'?'up':(e.result==='LOSS'?'dn':'mu')))+'"><div><div class="nm"><a href="/m/check?sym='+encodeURIComponent(e.symbol)+'">'+esc(e.symbol)+'</a><span class="tag '+tagS+'">'+esc(e.side||'')+'</span></div><div class="sub">'+sub+'</div><div class="px">'+inrS(e.entry_price)+' → <b>'+inrS(px)+'</b>'+(open&&!e.cmp?' <span class="mu2">no live price</span>':'')+(!open&&e.note?' · '+esc(e.note):'')+'</div>'+stateHtml(e)+'</div><div class="v">'+right+'</div></div>';
 }
 function draw(d, append){
-  if(!append){ Q.events=d.events||[]; } else { Q.events=Q.events.concat(d.events||[]); }
+  if(!append){
+    Q.events=d.events||[];
+    /* cc#2071: cache the header-only fields from THIS fresh response -- the backend only
+       populates status_counts/by_engine/approval_counts/scope/counts/instruments/closed_summary
+       on a no-cursor request; on a Load-more (cursor) page every one of them comes back empty.
+       Reading them straight off d (as before this card) rebuilt the whole chip/status/record
+       header from that empty data on every Load-more tap and it visibly vanished -- reproduced
+       directly in this card's own test, not assumed from reading the code. */
+    Q.hdr={status_counts:d.status_counts||{}, by_engine:d.by_engine||{}, approval_counts:d.approval_counts||{},
+           scope:d.scope||'', counts:d.counts||{}, instruments:d.instruments||[], closed_summary:d.closed_summary||[]};
+  } else { Q.events=Q.events.concat(d.events||[]); }
   Q.aw=d.approval_window||Q.aw; Q.cursor=d.has_more?d.next_cursor:'';
-  var sc=d.status_counts||{}, eng=d.by_engine||{}, ac=d.approval_counts||{};
-  document.getElementById('asof').innerHTML='<b>'+(sc.open||0)+'</b> open · '+(sc.closed||0)+' closed · '+esc(d.scope||'')+(ac.pending!=null?' · <b>'+ac.pending+'</b> waiting for you':'')+(ac.approved_today?' · '+ac.approved_today+' approved today':'');
+  var hd=Q.hdr||{};   /* append reads the cached fresh header, never this response's own empty copies */
+  var sc=hd.status_counts||{}, eng=hd.by_engine||{}, ac=hd.approval_counts||{};
+  document.getElementById('asof').innerHTML='<b>'+(sc.open||0)+'</b> open · '+(sc.closed||0)+' closed · '+esc(hd.scope||'')+(ac.pending!=null?' · <b>'+ac.pending+'</b> waiting for you':'')+(ac.approved_today?' · '+ac.approved_today+' approved today':'');
   var h='<div class="seg" id="st"><span data-v="open"'+(Q.status==='open'?' class="on"':'')+'>Open · '+(sc.open||0)+'</span><span data-v="closed"'+(Q.status==='closed'?' class="on"':'')+'>Closed · '+(sc.closed||0)+'</span></div>';
-  var ic=d.counts||{};
-  h+='<div class="chips" id="inst"><span class="chip'+(Q.inst===''?' on':'')+'" data-v="">All</span>'+(d.instruments||[]).map(function(i){return '<span class="chip'+(Q.inst===i?' on':'')+'" data-v="'+i+'">'+i.charAt(0)+i.slice(1).toLowerCase()+(ic[i]!=null?' · '+ic[i]:'')+'</span>';}).join('')+'</div>';
+  var ic=hd.counts||{};
+  h+='<div class="chips" id="inst"><span class="chip'+(Q.inst===''?' on':'')+'" data-v="">All</span>'+(hd.instruments||[]).map(function(i){return '<span class="chip'+(Q.inst===i?' on':'')+'" data-v="'+i+'">'+i.charAt(0)+i.slice(1).toLowerCase()+(ic[i]!=null?' · '+ic[i]:'')+'</span>';}).join('')+'</div>';
   var engs=Object.keys(eng); if(engs.length>1) h+='<div class="chips" id="eng" style="padding-top:6px"><span class="chip'+(Q.eng===''?' on':'')+'" data-v="">Every engine</span>'+engs.map(function(k){return '<span class="chip'+(Q.eng===k?' on':'')+'" data-v="'+esc(k)+'">'+esc(k)+' · '+eng[k]+'</span>';}).join('')+'</div>';
   var list=Q.events;   /* cc#2059: server now scopes by engine (Q.eng passed on load()), no client-side re-filter */
   h+='<div class="sec"><h2>'+(Q.status==='open'?'Signals and open trades':'Closed trades')+'</h2><span class="hint">'+list.length+(Q.cursor?'+':'')+' · newest first</span></div>';
   h+= list.length ? '<div class="lst">'+list.map(row).join('')+'</div>' : '<div class="emp"><b>Nothing here</b>No '+Q.status+' trade for this filter since 10 Aug.</div>';
   if(Q.cursor) h+='<div style="margin:10px 16px 0"><button class="btn2" id="more">Load more</button></div>';
-  if(Q.status==='closed'&&(d.closed_summary||[]).length){ var cs=d.closed_summary; h+='<div class="sec"><h2>Record</h2><span class="hint">wins · losses · flat</span></div><div class="lst">'+cs.map(function(r){return '<div class="lr"><div class="nm">'+esc(r.engine)+'<small> · '+esc(String(r.instrument).toLowerCase())+'</small></div><div class="v"><span class="pos">'+r.wins+'</span> · <span class="neg">'+r.losses+'</span> · '+r.flat+'</div><div class="v '+cls(r.rs_total)+'">'+(r.rs_rows?inrS(r.rs_total,true):'—')+'</div></div>';}).join('')+'</div>'; }
+  if(Q.status==='closed'&&(hd.closed_summary||[]).length){ var cs=hd.closed_summary; h+='<div class="sec"><h2>Record</h2><span class="hint">wins · losses · flat</span></div><div class="lst">'+cs.map(function(r){return '<div class="lr"><div class="nm">'+esc(r.engine)+'<small> · '+esc(String(r.instrument).toLowerCase())+'</small></div><div class="v"><span class="pos">'+r.wins+'</span> · <span class="neg">'+r.losses+'</span> · '+r.flat+'</div><div class="v '+cls(r.rs_total)+'">'+(r.rs_rows?inrS(r.rs_total,true):'—')+'</div></div>';}).join('')+'</div>'; }
   h+='<div class="note"><b>What this wall is.</b> Every engine signal since 10 Aug, newest first. Approve records the live price and puts the trade in My Alerts; Dismiss hides it. One position per symbol and direction — a second signal on a name you hold is held back and says so. Futures P&L is one lot; equity is the position. Research, not advice.</div>';
   document.getElementById('body').innerHTML=h;
   var seg=function(id,fn){ var el=document.getElementById(id); if(!el) return; el.addEventListener('click', function(ev){ var s=ev.target.closest('[data-v]'); if(!s) return; fn(s.getAttribute('data-v')); }); };
