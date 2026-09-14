@@ -1645,8 +1645,20 @@ body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
 .dirbadge{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-9);
   font-weight:700;letter-spacing:var(--track-px10);border:var(--bw-1) solid;
   padding:var(--space-2) var(--space-7);border-radius:var(--radius-9)}
-.dirbadge.bull{border-color:#3E5A18;background:#18240E;color:var(--grn)}
-.dirbadge.bear{border-color:#5A2634;background:#241019;color:#FF8FA5}
+/* cc#2070: same theme_leak defect class as cc#2060 (scorr_digest_mobile.html/scorr_v10_signal.html
+   .w/.l/.n) found by grep while fixing those -- literal dark hex fill/border, always near-black
+   regardless of theme. Fixed with this file's OWN already-proven token idiom (--grn/--red/
+   --panel2/--line, the scoped bridge above, lines 58-71) rather than importing --win/--loss/--hi/
+   --edge directly -- .bull's pre-existing color:var(--grn) already resolves correctly wherever
+   .dirbadge renders today, so reusing the same names for background/border needs no separate
+   DOM-scope check. .bear's text also moves off its frozen literal #FF8FA5 (never bridged to any
+   theme, same class of problem cc#2069 fixed in the other two files) onto var(--red), which
+   bridges to --loss like --grn already bridges to --win. Per cc#2069's own honest finding, this is
+   NOT guaranteed to clear AA on every theme -- text-on-a-same-hue-wash is a tight-margin pairing
+   everywhere it has been measured (cc#2060/cc#2069) -- re-measured below for THIS file's own real
+   numbers, not assumed to transfer. */
+.dirbadge.bull{border-color:color-mix(in srgb,var(--grn) 40%,var(--line));background:color-mix(in srgb,var(--grn) 14%,var(--panel2));color:var(--grn)}
+.dirbadge.bear{border-color:color-mix(in srgb,var(--red) 40%,var(--line));background:color-mix(in srgb,var(--red) 14%,var(--panel2));color:var(--red)}
 /* cc#1404 · posbar's own margin-bottom is the "range bar -> label row" breathing-room gap the
    founder asked for (4px -> 20px). Everything else about this rule (position/height/zone bars)
    is do-not-touch per the task's own scope -- untouched. */
