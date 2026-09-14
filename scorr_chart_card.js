@@ -215,7 +215,20 @@ var _full = false;                // cc#779: fullscreen state
   function _detectTheme() {
     try {
       var b = document.body, r = document.documentElement;
-      var dt = (r.getAttribute("data-theme") || b.getAttribute("data-theme") || "").toLowerCase();
+      // cc#2052: BODY checked first, documentElement only as a fallback -- reversed from the
+      // original order. On every /m/* page main.py's _MOBILE_APP_DARK unconditionally pins
+      // <html data-theme="dark"> for an UNRELATED CSS-inheritance reason (cc#1064, "dark-only
+      // surface, stamped honestly" -- scorr_theme_r5.css's shell rule needs it), running AFTER
+      // the page's own boot script correctly writes the REAL selected theme onto <body>. Checking
+      // documentElement first meant this function saw that unrelated dark pin before it ever
+      // looked at body's correct value, so it returned "dark" on every real /m/* page regardless
+      // of theme -- confirmed by reproducing the actual main.py-injected scripts in order (not an
+      // isolated fixture), reports/CC2052_chart_card_theme_second_defeat.md. Safe for every other
+      // known caller: every web-side host (v8_dashboard.html, v10_dashboard.html,
+      // scorr_holdings.html, scorr_result_corner.html, scorr_news.html) has a plain <body> with NO
+      // data-theme attribute at all, so body.getAttribute() there is null and this still falls
+      // through to documentElement exactly as before -- confirmed by direct grep, not assumed.
+      var dt = (b.getAttribute("data-theme") || r.getAttribute("data-theme") || "").toLowerCase();
       if (dt === "dark") return "dark";
       if (dt === "light") return "light";
       // cc#2021: the two literal checks above only ever match the single theme actually named
