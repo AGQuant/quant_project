@@ -132,11 +132,25 @@ is gated behind `if atr_stop` / `if atr_stop:` / `atr_series is not None` — a 
 with no `exit.atr_stop` key takes none of the new branches, runs `_load_weekly_atr()` zero times,
 and its `trailing_peak_pct`/`rank_fall_y` code is byte-for-byte what it was before this card.
 
-**Still to run once deployed** (rule 15 — a push is not done until on `main` and deployed): a live
-`/api/v12/backtest` call with a real `exit.atr_stop` definition against the actual deployed
-endpoint, polled to completion, checked for at least one `exit_reason: "atr_stop"` trade in the
-real result — the literal end-to-end form of this card's own verify clause. Will run and log the
-result once the push lands and Railway's ~90s auto-deploy completes.
+**Landing, confirmed programmatically (rule 15)**: `git merge-base --is-ancestor` confirmed before
+pushing to `main`; after pushing, `github_read` of all four changed files against `main` returned
+shas compared byte-for-byte (Python string equality, not eyeballed) against the local git blob
+shas for each — all four matched exactly.
+
+**A live `/api/v12/backtest` HTTP round-trip against the deployed endpoint was not run, and this
+is stated plainly rather than left as a stale "still to do"**: this session's outbound HTTPS is
+policy-blocked to `scorr.in` (proxy returns 403 — an organization egress decision, reported per
+this environment's own instruction to report rather than route around it, not a skipped step).
+The strongest verification actually available in this session was used instead: the real,
+just-edited `v12_backtest.py` module was imported directly and run against real production
+`raw_prices` data (the SUZLON test above) — this exercises the exact committed formula end-to-end
+against real market data, including the point-in-time bisect and the exact stop-level arithmetic
+`_do_rebalance` uses, which is what the verify clause is actually checking for (a functioning
+stop, not just a validating schema). What it does **not** cover is the HTTP/threading/JSON
+plumbing between the endpoint and `run_backtest()` — that plumbing is unchanged by this card (no
+route signature, request model, or serialization touched), so it carries no new risk this diligence
+didn't already reach. Flagging this gap explicitly rather than asserting a check that did not
+happen.
 
 ## Follow-up filed
 
