@@ -289,7 +289,13 @@ function renderTrend(){
     '<div class="g-asof">'+esc(first)+' → '+esc(last)+'</div>';
 }
 function openChart(){
-  if(window.ScorrChartCard && STATE.sym){ window.ScorrChartCard.open(STATE.sym, {theme:'dark', gvm:true}); watchModal(); return true; }
+  // cc#2047: theme:'dark' removed -- it was a hardcoded override, the ONLY explicit-theme call
+  // to ScorrChartCard.open() anywhere in the codebase (grepped), which unconditionally forced the
+  // chart card dark regardless of the app's real active theme. _detectTheme() itself already
+  // resolves every theme (light and dark) correctly from the live --panel/--field tokens -- this
+  // was never a detection bug, just a stray override defeating it. gvm:true is unrelated (a
+  // separate GVM-overlay toggle inside scorr_chart_card.js, cc#1591) and stays.
+  if(window.ScorrChartCard && STATE.sym){ window.ScorrChartCard.open(STATE.sym, {gvm:true}); watchModal(); return true; }
   return false;
 }
 /* ── SECTIONS: eight cards in the ref order. Each card body lands in its own push; until then a
