@@ -9533,6 +9533,14 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 .tc13-wrap .tbl th{font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:10px 14px;border-bottom:1px solid var(--line)}
 .tc13-wrap .tbl th:first-child,.tc13-wrap .tbl th:nth-child(2),.tc13-wrap .tbl td:first-child,.tc13-wrap .tbl td:nth-child(2){text-align:left}
 .tc13-wrap .tbl td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
+/* cc#2074: closed-trade rows get their own surface, distinct from the ambient --well the
+   .tc13-card sits on (both tables share that card). var(--panel) — this page's own two-state
+   contract, scorr_web_tokens.css — is literal #FFFFFF in the light theme (html[data-theme=light])
+   and #121A33 in dark, so this reads as the requested white in light mode without a hardcoded
+   literal blinding out the dark theme (the cc#2055/2060/2069/2070 theme_leak defect class this
+   card's own spec flagged). .tbl is unique to this hand-built table on the page (the Open Book's
+   sortTbl()-rendered table carries no class at all), so this touches the Closed Book only. */
+.tc13-wrap .tbl tbody tr{background:var(--panel)}
 .tc13-wrap .tbl tr:last-child td{border-bottom:none}
 .tc13-wrap .tbl tr:hover td{background:var(--raise)}
 .tc13-wrap .tbl .sym{font:700 13.5px var(--f-d);font-family:var(--f-d)!important}
