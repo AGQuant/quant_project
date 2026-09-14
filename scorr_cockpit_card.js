@@ -11,6 +11,16 @@
  * API:  window.ScorrCockpitCard.open(symbol, side, qty, entry, cmp)   (only `symbol` is required)
  *       window.ScorrCockpitCard.close()
  *
+ * cc#2055 SCORR_SHARED_CARD_THEME_LOCK_V1 audit note: open()'s five parameters are all trade
+ * figures (side/qty/entry/cmp) -- none is a theme/opts parameter, and there never was one. This
+ * is NOT the same finding as scorr_analysis_card.js/ScorrRCard's CSS-inheritance immunity: the
+ * cockpit's dark-terminal palette is DELIBERATELY, PERMANENTLY host-theme-INDEPENDENT (cc#571
+ * PART B, "dark institutional terminal" -- see _dcInjectStyle()'s own comment). A future change
+ * that makes this component start following the host page's light/dark choice would be
+ * REVERSING an intentional design decision, not fixing an oversight -- confirmed by audit, not
+ * assumed. See scorr_chart_card.js for the sibling that DOES lock a live-detected (not fixed)
+ * theme.
+ *
  * DEPENDENCIES — scorr_card_common.js MUST load first (main.py injects it ahead of this file). Every
  * primitive is bound from window.ScorrCardCommon below rather than read off the bare globals, so a
  * host page that owns its own `num`/`sign`/`getJSON` cannot change what this card renders.

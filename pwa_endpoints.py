@@ -1616,6 +1616,13 @@ def pwa_mobile_tables_js():
 # rather than being dropped — no function was lost. `pill` survives only for the documented raw
 # <span class="rcard-pill" data-sym="SYM">R</span> pattern; it is deprecated, and every page call
 # site was migrated to ScorrCardRow in cc#798.
+#
+# cc#2055 SCORR_SHARED_CARD_THEME_LOCK_V1 audit note: ScorrRCard.open(sym) takes no theme/opts
+# parameter at all and never has -- its markup (.rcard, .rcard-hd, ...) is styled entirely off
+# CSS custom properties inherited from the host page (var(--card,#fff), var(--txt,#101828),
+# var(--line,...), var(--mut,...)), not a JS-computed palette. There is no override mechanism to
+# lock here; confirmed by audit, not assumed. See scorr_chart_card.js for the sibling that DOES
+# carry the lock (the only one of the four C·A·R·D components that ever needed it).
 RESULTS_CARD_JS = """
 (function(){
   if (window.__scorrRCard) return; window.__scorrRCard = true;

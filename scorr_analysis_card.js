@@ -11,6 +11,12 @@
  * API:  window.ScorrAnalysisCard.open(symbol)
  *       window.ScorrAnalysisCard.close()
  *
+ * cc#2055 SCORR_SHARED_CARD_THEME_LOCK_V1 audit note: qaAnalysis(sym) takes no theme/opts
+ * parameter at all and never has -- this card's markup is styled entirely off CSS custom
+ * properties inherited from the host page (var(--panel,#fff), var(--txt,#1c2536), var(--line,...)),
+ * not a JS-computed palette. There is no override mechanism to lock here; confirmed by audit, not
+ * assumed. See scorr_chart_card.js for the sibling that DOES carry the lock.
+ *
  * DEPENDENCIES — scorr_card_common.js MUST load first (main.py injects it ahead of this file). Every
  * primitive is bound from window.ScorrCardCommon below rather than read off the bare globals, so a
  * host page that owns its own `num`/`getJSON`/`newsEsc` cannot change what this card renders.

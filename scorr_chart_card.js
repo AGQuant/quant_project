@@ -5,8 +5,23 @@
  * and lazy-loads LightweightCharts (same unpkg build the V8 dashboard uses) only if absent. It does
  * NOT touch the live V8 dashboard or the GVM clean Price chart (both kept per founder 27-Jul).
  *
- * API:  window.ScorrChartCard.open(symbol, {theme:'light'|'dark'})
- *       theme auto-detected from the host page when omitted (light on GVM/SmartGain, dark on V8-like).
+ * API:  window.ScorrChartCard.open(symbol, opts)
+ *       theme is ALWAYS live-detected from the host page (light on GVM/SmartGain, dark on V8-like)
+ *       — opts.theme is NOT a real parameter; see SCORR_SHARED_CARD_THEME_LOCK_V1 below.
+ *
+ * SCORR_SHARED_CARD_THEME_LOCK_V1 (cc#2055, founder-set — binding on every future caller, app and
+ * web): no caller of this file may override the live-detected theme. _theme is ALWAYS the output
+ * of _detectTheme(), full stop — opts.theme is read only to warn, never to decide the palette.
+ * A future need for a different look is a reason to extend _detectTheme()/_pal() THEMSELVES, never
+ * to add a per-caller override — the exact same discipline cc#789/803/805 already locked for WHICH
+ * component each C·A·R·D letter opens (scorr_card_strip.js's own FORWARD RULE), applied here to
+ * WHAT PALETTE the C component renders with.
+ * Origin: two independent instances of the identical symptom (dark chrome on a light theme) were
+ * found one at a time in the same session — cc#2047 (mobile/gvm.html's own explicit theme:'dark'
+ * override) and cc#2052 (_detectTheme() itself answering the wrong question on every real /m/*
+ * page, no override involved at all). Two different root causes, same visible bug, is exactly the
+ * pattern that argues for closing the MECHANISM rather than patching the next call site someone
+ * happens to notice — reports/CC2055_card_theme_lock.md.
  *
  * Data:  daily 1W/1M/3M/1Y/ALL -> GET /api/candles/{sym}?days=N  (raw_prices; all stocks)
  *        5-min intraday      -> GET /api/intraday/{sym}?sessions=N  (fyers feed; FUTURES universe only)
@@ -1724,7 +1739,11 @@ var _full = false;                // cc#779: fullscreen state
     // cc#1059: index mode is explicit from the caller, never sniffed from the symbol string. A
     // guess here would silently mis-handle any future symbol that happens to look index-shaped.
     _index = !!opts.index;
-    _theme = opts.theme || _detectTheme();
+    // cc#2055 SCORR_SHARED_CARD_THEME_LOCK_V1: opts.theme is deliberately never read for the
+    // palette — _theme is ALWAYS _detectTheme()'s own live answer. The warn is diagnostic only
+    // (catches a future accidental regression early); removing it would not restore any behaviour.
+    if (opts.theme) { try { console.warn('[ScorrChartCard] opts.theme (\'' + opts.theme + '\') is locked out — SCORR_SHARED_CARD_THEME_LOCK_V1 (cc#2055). Theme is always live-detected, never caller-supplied. Ignored.'); } catch (e) {} }
+    _theme = _detectTheme();
     var ov = _buildModal();
     ov.style.display = "flex";
     document.getElementById("scorrChartTitle").textContent =

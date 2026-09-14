@@ -19,9 +19,13 @@
  *   window.ScorrCardStrip.setFutures(symbols)   page hands over a futures universe it already has
  *
  * DISPATCH — one rule, everywhere: every letter opens its shared component.
- *   C -> scorr_chart_card.js      (cc#706, locked cc#803)
- *   A -> scorr_analysis_card.js   (cc#805, locked cc#805)
- *   R -> results_card.js          (cc#573, locked cc#803)
+ *   C -> scorr_chart_card.js                          (cc#706, locked cc#803)
+ *   A -> scorr_analysis_card.js                        (cc#805, locked cc#805)
+ *   R -> pwa_endpoints.py RESULTS_CARD_JS (ScorrRCard) (cc#573, locked cc#803) — cc#2055 audit:
+ *        R was never its own standalone results_card.js file; that name (below, in _LOCKED, and
+ *        in this line before cc#2055) was stale. It lives inline in pwa_endpoints.py, injected
+ *        site-wide via _MOBILE_HEAD. Corrected here so a future reader isn't sent looking for a
+ *        file that does not exist.
  *   D -> scorr_cockpit_card.js    (cc#805, locked cc#805)
  * As of cc#805 ALL FOUR letters are locked, so register() is a no-op that warns: there is no way for
  * a page to change what a letter does. Every surface therefore gets not just the same strip markup
@@ -254,7 +258,7 @@
   var _LOCKED = {
     C: 'scorr_chart_card.js',
     A: 'scorr_analysis_card.js',
-    R: 'results_card.js',
+    R: 'pwa_endpoints.py (ScorrRCard)',   // cc#2055: was the stale, nonexistent 'results_card.js'
     D: 'scorr_cockpit_card.js'
   };
 
