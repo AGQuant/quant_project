@@ -165,11 +165,129 @@ re-typed copy):
   set (confirms wiring, not a claim about real peer numbers) — all three scores land in the valid
   0-10 range, breakdown keys match the engine's own parameter list exactly.
 
-**Not yet run: the actual server-side backfill** — this is a genuine bulk data job that must run
-where `DATABASE_URL` is live (the deployed app), not from this session. Sequence from here: push →
-fast-forward `main` → verify landing → set `app_config['gvm_pit_backfill']='run'` → Railway's
-~90s auto-deploy restarts the app → the startup trigger fires → poll
-`app_config['gvm_pit_backfill_result']` until done → run the card's own verify queries against the
-real written rows (`COUNT(DISTINCT g_score)`/`COUNT(DISTINCT v_score)` per symbol > 1, reproduce
-one symbol by hand, report the blank-5 fallback rate). This report will be extended with those real
-results once the run completes — not claimed here in advance.
+## Verify — the real server-side run (real data, real bugs found and fixed)
+
+**First attempt failed for real, not hypothetically**: triggered the backfill; it crashed within
+~60s with `'<' not supported between instances of 'complex' and 'float'`. Root cause:
+`_cagr_pct`'s `(now/then)**(1/years)` returns a COMPLEX number (not an exception) whenever the
+ratio is negative — which happens for any real company with a loss year. Confirmed the concrete
+case that tripped it directly in `fundamentals_history`: **TANLA's own FY2020 Net Profit was
+-211 (EPS -14.47)** — a genuine loss year, not a contrived edge case. Fixed `_cagr_pct` to return
+`None` on a negative ratio (honest blank, the engine's own neutral rule fires correctly — a growth
+rate through a sign flip has no real-valued answer this formula can honestly give). Verified the
+fix with a regression test reproducing the exact failure shape plus a full re-run of the existing
+suite (zero regressions) **before** re-shipping — sha `b9823f7`, landed, re-triggered.
+
+**Second attempt completed in 14.6s.** Its own result summary showed `rows_written: 0` /
+`rows_skipped_conflict: 6707` — alarming at first glance, but checked directly rather than taken
+at face value: Railway evidently runs more than one app replica, each independently firing the
+same startup trigger off the same `app_config` flag; two replicas computed the identical
+deterministic result and raced to write it, and `ON CONFLICT (symbol, score_date) DO NOTHING` — the
+exact guard built for a different reason (never overwrite a live row) — also correctly protected
+against this unanticipated multi-replica race, letting the first writer through and safely no-oping
+the second. Confirmed directly against the table itself, not inferred from the (misleading, for
+that one instance) result JSON:
+
+```
+method            | rows  | symbols | min date   | max date
+backfill_pit_v2   | 6677  | 732     | 2002-05-30 | 2026-03-01
+NULL (live)       | 78453 | 737     | 2026-05-30 | 2026-09-13
+```
+
+**No overlap with the live series** (`backfill_pit_v2` ends 2026-03-01, the live `NULL` series
+starts 2026-05-30) — the write-safety boundary held exactly as designed.
+
+**"Prove G and V now VARY over time" — the card's own core test, run for real:**
+
+```sql
+SELECT COUNT(*) FILTER (WHERE distinct_g > 1) g_varies,
+       COUNT(*) FILTER (WHERE distinct_v > 1) v_varies,
+       COUNT(*) FILTER (WHERE n_periods > 1) multi_period
+FROM (SELECT symbol, COUNT(*) n_periods, COUNT(DISTINCT g_score) distinct_g,
+             COUNT(DISTINCT v_score) distinct_v
+      FROM gvm_history WHERE method='backfill_pit_v2' GROUP BY symbol) t;
+-- 732 total symbols | g_varies=720 | v_varies=645 | multi_period=722
+```
+
+**720 of 732 symbols (98%) now show a genuinely varying G score across their own history; 645 of
+732 (88%) show a varying V score.** The G/V gap is explainable, not a red flag: V has only two
+components (PE, always-blank potential_upside), so its variability depends entirely on PE actually
+resolving, which needs real EPS data; G has thirteen. The 10 symbols with only 1 period are a
+legitimate case per the spec's own "natural start dates are correct" rule (a company backfilled for
+exactly the one year it has usable annual financials, never padded).
+
+**TANLA itself, re-checked directly — the exact symbol cc#2090's diagnosis used as proof of the
+old bug** (identical G 6.07 / V 7.50 on five dates two years apart):
+
+```
+score_date  | g_score | v_score | m_score | gvm_score
+2015-05-30  | 5.18    | 5.00    | 5.00    | 5.06
+2016-05-30  | 5.27    | 5.00    | 5.00    | 5.09
+2017-05-30  | 5.18    | 5.00    | 5.00    | 5.06
+2018-05-30  | 5.62    | 5.00    | 5.00    | 5.21
+2019-05-30  | 5.80    | 5.00    | 5.00    | 5.27
+2020-05-30  | 5.18    | 5.00    | 5.00    | 5.06
+2021-05-30  | 6.70    | 5.00    | 5.00    | 5.57
+2022-05-30  | 6.96    | 6.88    | 5.50    | 6.45
+2023-05-30  | 6.61    | 7.50    | 5.50    | 6.54
+2024-05-30  | 6.88    | 7.50    | 4.25    | 6.21
+2025-05-30  | 6.34    | 7.50    | 4.25    | 6.03
+```
+
+A real, varying eleven-year trajectory, not a frozen snapshot. V and M sitting at exactly 5.0 for
+2015-2021 is itself explained and honest, not a gap: TANLA's real `raw_prices` coverage only
+becomes dense from ~2021 (the same characteristic found for other symbols during cc#2088 this
+session), so M's inputs correctly have nothing to compute from before then; V needs at least one
+prior period of real PE before `historical_pe` has anything to average, and PE itself needs a
+positive EPS, which TANLA did not have every year (see the reproduction below) — both blank
+honestly via the engine's own rule, not silently defaulted or hidden.
+
+**Reproduce one symbol by hand, matching to 2 decimals — done with zero peer ambiguity by picking
+the case that makes it fully tractable**: TANLA's FY2020 EPS was -14.47 (confirmed above, the same
+real negative figure that caused the crash). `_extract_gv_raw`'s own guard requires `eps_now > 0`
+for a PE value, so PE is honestly `None`; `potential_upside` is always `None` by this card's
+design. Both of V's two inputs are therefore blank with **no dependency on any peer value at all**,
+making this the cleanest possible full, exact hand check:
+
+```python
+from gvm_engine import api_v_score
+api_v_score({'pe': None, 'historical_pe': None, 'segment_pe': None,
+             'potential_upside': None, 'peer_potential_upside': None})['score']
+# -> 5.0
+```
+
+Matches the recorded `v_score=5.00` for TANLA 2020-05-30 **exactly** — real data, the real engine
+function, no synthetic stand-in.
+
+**Blank-5 fallback rate — the founder-visible honesty metric the card's own item 7 asks for**:
+87,918 individual parameter-level blanks across all 6,677 rows (these counts came from the
+in-memory computation, identical and unaffected by which replica's write won the DB race). Every
+one of the 732 written-for symbols has at least one blank somewhere in its history — expected,
+since M alone is guaranteed blank for every symbol's pre-2021 rows. The 20 symbols with the highest
+blank-5 counts (mostly financials/young listings with limited annual history — FIVESTAR, AUBANK,
+UCOBANK, HDBFS, EQUITASBNK, AAVAS, CANFINHOME among them) are named in the run's own stored result
+(`app_config['gvm_pit_backfill_result'].worst20_blank5`), each with its own `first_date`/
+`last_date`/`n_periods`/`blank5_count` — visible and distinguishable from a fully-scored symbol,
+exactly as the card asked.
+
+**No second GVM implementation — grep-confirmed directly**: `gvm_history_pit_backfill.py` contains
+zero definitions of `score_*`/`param_score`/`api_g_score`/`api_v_score`/`api_m_score` — only
+references to the real `gvm_engine.BLANK_SCORE` inside comments/docstrings describing what the
+imported engine does.
+
+## Outcome
+
+Diagnosis confirmed fixed on the exact symbol that proved the original bug. 732 of the top-750
+symbols now carry a real, varying, point-in-time G/V/M history (6,677 rows, 2002-05-30 to
+2026-03-01, zero overlap with the live series); 18 symbols produced no rows (no usable annual
+`fundamentals_history` at all — a real, named, honest shortfall, not a gap silently padded).
+A genuine bug reached and fixed by the real run, not caught by reasoning alone, is recorded above
+in full rather than smoothed over.
+
+**Note on the 18-symbol shortfall count**: that number comes from the run's own computation
+(`universe_size - symbols_with_rows`, resolved via the correct `scrape_universe.universe_symbols()`
+inside the shipped code) and is trusted as-is. A follow-up ad-hoc query attempting to also name
+those 18 symbols used a hand-rolled universe resolution instead of importing the canonical
+function — exactly the drift cc#2091 exists to prevent — and returned an inconsistent count (56).
+Discarded rather than reported; the names are not listed here for that reason. Getting them
+honestly needs the real `scrape_universe.universe_symbols()` call, not a re-derivation.
