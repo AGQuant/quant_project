@@ -9908,6 +9908,12 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">To</label>'
       +'<input type="date" id="tc13To" value="'+esc(range.to||'')+'" title="Closed Book range end — the Open Book is never date-filtered"></span>'
       +'<span>Closed <b>'+kpi.closed+'</b></span>'
+      // cc#2076: founder ask was explicit -- "Need THREE total: All, Long, Short", default All.
+      // setTc13ClosedSide('ALL') already does the right thing with zero changes to the setter:
+      // its own toggle rule (_tc13ClosedSide===v ? 'ALL' : v) sets 'ALL' whenever the current side
+      // differs from 'ALL', and re-taps a no-op when already on it -- so this chip is a plain,
+      // undiscoverable-no-more third option through the SAME _tc13SideTag component, not a new one.
+      +_tc13SideTag('All','ALL',_tc13ClosedSide,'setTc13ClosedSide')
       +_tc13SideTag('Long','BUY',_tc13ClosedSide,'setTc13ClosedSide')+_tc13SideTag('Short','SELL',_tc13ClosedSide,'setTc13ClosedSide')
       +'</div></div>'
       // cc#1884 items 6/7/8: Realised (rupees, green/red), Accuracy (positive-pnl_rs win rate,
