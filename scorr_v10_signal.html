@@ -32,7 +32,7 @@ body{background:var(--field-night);font-family:'Space Grotesk',sans-serif;color:
    comment for the full root cause, the appshell bridge and the measured contrast findings; the
    text-colour follow-up is filed once, as cc#2069, covering both files. */
 .w{border-color:color-mix(in srgb,var(--win) 40%,var(--edge));background:color-mix(in srgb,var(--win) 14%,var(--hi));color:var(--volt)}
-.l{border-color:color-mix(in srgb,var(--loss) 40%,var(--edge));background:color-mix(in srgb,var(--loss) 14%,var(--hi));color:#FF8FA5}
+.l{border-color:color-mix(in srgb,var(--loss) 40%,var(--edge));background:color-mix(in srgb,var(--loss) 14%,var(--hi));color:var(--heat)}   /* cc#2069: was literal #FF8FA5, never bridged, failed AA on all 7 light themes (1.37-2.03:1, any mix%) -- var(--heat) bridges to --loss like .w/.n already do. NOT a full fix -- see scorr_digest_mobile.html's identical comment for the full real-Chromium numbers and the disclosed dark-theme trade-off; same rule, same fix, same open question (cc_task_logs task 2069). */
 .n{border-color:color-mix(in srgb,var(--amber) 40%,var(--edge));background:color-mix(in srgb,var(--amber) 14%,var(--hi));color:var(--amber)}
 .vitals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-9)}
 .vital{background:var(--hi);border:var(--bw-1) solid var(--edge);padding:var(--space-9);clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%)}
