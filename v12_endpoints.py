@@ -522,6 +522,17 @@ def _validate_basket_def(d: dict) -> list:
                 errs.append(f"exit.{k} must be a number")
         if "gate_mirror" in x and not isinstance(x["gate_mirror"], bool):
             errs.append("exit.gate_mirror must be true/false")
+        atr = x.get("atr_stop")   # cc#2088: weekly-ATR(14) stop/target, additive to trailing_peak_pct
+        if atr is not None:
+            if not isinstance(atr, dict):
+                errs.append("exit.atr_stop must be an object")
+            else:
+                if not (_isnum(atr.get("mult")) and atr["mult"] > 0):
+                    errs.append("exit.atr_stop.mult must be a positive number")
+                if "target_mult" in atr and not (_isnum(atr["target_mult"]) and atr["target_mult"] > 0):
+                    errs.append("exit.atr_stop.target_mult must be a positive number")
+                if "trailing" in atr and not isinstance(atr["trailing"], bool):
+                    errs.append("exit.atr_stop.trailing must be true/false")
     rb = d.get("rebalance")
     if not (isinstance(rb, dict) and rb.get("freq") in _REBAL_FREQ):
         errs.append(f"rebalance.freq must be one of {sorted(_REBAL_FREQ)}")

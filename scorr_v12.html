@@ -129,6 +129,12 @@
       <div class="fld"><label>Rank-fall exit (drops below Y)</label><input id="x_rank" type="number" placeholder=">= top X"></div>
     </div>
     <label class="chk"><input type="checkbox" id="x_gate"> Gate mirror — exit if the RSI/EMA entry gate flips</label>
+    <label class="chk"><input type="checkbox" id="x_atr_on"> ATR stop (weekly ATR-14) — alternative to the flat percent above</label>
+    <div class="grid" id="x_atr_box" style="display:none">
+      <div class="fld"><label>Stop — ATR multiple</label><input id="x_atr_mult" type="number" value="2" placeholder="e.g. 2"></div>
+      <div class="fld"><label>Target — ATR multiple (optional)</label><input id="x_atr_target" type="number" placeholder="e.g. 4"></div>
+    </div>
+    <label class="chk" id="x_atr_trail_wrap" style="display:none"><input type="checkbox" id="x_atr_trailing"> Trailing — stop follows the peak price, not just entry</label>
     <div class="row"><button class="btn ghost" onclick="go(1)">&larr; Back</button><button class="btn" onclick="go(3)">Next: Backtest &rarr;</button></div>
   </div>
 
@@ -172,6 +178,7 @@ function renderSteps(){
 function go(i){STEP=i;renderSteps();for(let k=0;k<5;k++){const el=document.getElementById('p'+k);if(el)el.classList.toggle('on',k===i);}window.scrollTo({top:0,behavior:'smooth'});}
 document.getElementById('e_rsi_on').addEventListener('change',e=>document.getElementById('e_rsi_box').style.display=e.target.checked?'grid':'none');
 document.getElementById('e_ema_on').addEventListener('change',e=>document.getElementById('e_ema_box').style.display=e.target.checked?'grid':'none');
+document.getElementById('x_atr_on').addEventListener('change',e=>{const on=e.target.checked;document.getElementById('x_atr_box').style.display=on?'grid':'none';document.getElementById('x_atr_trail_wrap').style.display=on?'flex':'none';});
 
 function num(id){const v=document.getElementById(id).value;return v===''?null:parseFloat(v);}
 function rng(minId,maxId){const o={};const a=num(minId),b=num(maxId);if(a!=null)o.min=a;if(b!=null)o.max=b;return Object.keys(o).length?o:null;}
@@ -210,6 +217,7 @@ function buildDefinition(){
   if(document.getElementById('e_rsi_on').checked)entry.rsi_gate={tf:document.getElementById('e_rsi_tf').value,period:parseInt(document.getElementById('e_rsi_p').value||'14'),threshold:parseFloat(document.getElementById('e_rsi_t').value||'50'),dir:document.getElementById('e_rsi_dir').value};
   if(document.getElementById('e_ema_on').checked){entry.ema_gate={tf:document.getElementById('e_ema_tf').value,ema1:parseInt(document.getElementById('e_ema1').value||'20'),ema2:parseInt(document.getElementById('e_ema2').value||'50')};const e3=num('e_ema3');if(e3!=null)entry.ema_gate.ema3=parseInt(e3);}
   const exit={};const tr=num('x_trail');if(tr!=null)exit.trailing_peak_pct=tr;const rf=num('x_rank');if(rf!=null)exit.rank_fall_y=parseInt(rf);if(document.getElementById('x_gate').checked)exit.gate_mirror=true;
+  if(document.getElementById('x_atr_on').checked){const am=num('x_atr_mult');if(am!=null){const a={mult:am};const at=num('x_atr_target');if(at!=null)a.target_mult=at;if(document.getElementById('x_atr_trailing').checked)a.trailing=true;exit.atr_stop=a;}}
   return {meta:{builder:'v12'},universe_ref:{filters},entry,exit,
     rebalance:{freq:document.getElementById('b_freq').value},
     costs:{txn_pct:parseFloat(document.getElementById('b_txn').value||'0'),slippage_pct:parseFloat(document.getElementById('b_slip').value||'0')}};
@@ -277,8 +285,8 @@ function renderResults(res){
   // trade log (last 100)
   const tr=(res.trades||[]).slice(-100).reverse();
   html+='<h2 style="font-size:13px;margin:14px 0 4px">Trade log <span class="pill b">'+(res.trades||[]).length+'</span></h2>';
-  html+= tr.length? '<div class="scroll"><table><thead><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry px</th><th>Exit px</th><th>Return</th></tr></thead><tbody>'+
-    tr.map(t=>'<tr><td>'+t.symbol+'</td><td>'+t.entry_date+'</td><td>'+t.exit_date+'</td><td>'+t.entry_px+'</td><td>'+t.exit_px+'</td><td>'+sc(t.return_pct,'%')+'</td></tr>').join('')+'</tbody></table></div>'
+  html+= tr.length? '<div class="scroll"><table><thead><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry px</th><th>Exit px</th><th>Return</th><th>Exit reason</th></tr></thead><tbody>'+
+    tr.map(t=>'<tr><td>'+t.symbol+'</td><td>'+t.entry_date+'</td><td>'+t.exit_date+'</td><td>'+t.entry_px+'</td><td>'+t.exit_px+'</td><td>'+sc(t.return_pct,'%')+'</td><td>'+(t.exit_reason||'')+'</td></tr>').join('')+'</tbody></table></div>'
     : '<div class="empty">No closed trades.</div>';
   if(res.honesty&&res.honesty.geometry)html+='<div class="sub" style="margin-top:12px">&#9432; '+res.honesty.geometry+'</div>';
   document.getElementById('results').innerHTML=html;
@@ -326,6 +334,7 @@ function applyPreset(id){
   if(f.mcap_rank){_setVal('u_mcaprank_min',f.mcap_rank.min);_setVal('u_mcaprank_max',f.mcap_rank.max);}
   const e=d.entry||{};_setVal('e_roc',e.roc_lookback);_setVal('e_topx',e.top_x);_setVal('e_min',e.min_stocks);_setVal('e_max',e.max_stocks);
   const x=d.exit||{};_setVal('x_trail',x.trailing_peak_pct);_setVal('x_rank',x.rank_fall_y);
+  if(x.atr_stop){const on=document.getElementById('x_atr_on');on.checked=true;document.getElementById('x_atr_box').style.display='grid';document.getElementById('x_atr_trail_wrap').style.display='flex';_setVal('x_atr_mult',x.atr_stop.mult);_setVal('x_atr_target',x.atr_stop.target_mult);if(x.atr_stop.trailing)document.getElementById('x_atr_trailing').checked=true;}
   if(d.rebalance)_setVal('b_freq',d.rebalance.freq);
   const c=d.costs||{};_setVal('b_txn',c.txn_pct);_setVal('b_slip',c.slippage_pct);
   go(0);

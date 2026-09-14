@@ -14,6 +14,11 @@ snapshot (gvm_ft / as-of fundamentals land with Phases 2-4) — so the result is
 PIT_PARTIAL and the front end must show that badge. Frozen universes are exact.
 
 The shared basket-definition validator + universe vocabulary live in v12_endpoints (single source).
+
+EXIT cc#2088: exit.atr_stop adds a weekly-ATR(14) stop/target, additive to exit.trailing_peak_pct
+(unchanged, kept exactly as-is per that card's own instruction -- see _do_rebalance's comment for
+why the two use different enforcement paths). Weekly ATR is EOD-only (raw_prices), never intraday,
+per the 14-Sep founder EOD-basis ruling -- see _load_weekly_atr.
 """
 import os
 import json
@@ -88,6 +93,61 @@ def _load_series(cur, symbols, start, end):
         buf.append((d, float(c)))
     if cur_sym is not None:
         s.add(cur_sym, buf)
+    return s
+
+
+def _load_weekly_atr(cur, symbols, start, end, period=14):
+    """cc#2088: point-in-time weekly ATR(period). EOD-only (raw_prices high/low/close), never
+    intraday -- per the 14-Sep founder EOD-basis ruling. Weeks are ISO calendar-week buckets
+    (Mon-Sun) built from each symbol's own trading days, so a holiday just shrinks a week's
+    bucket, never shifts it. Wilder-smoothed True Range, matching v10_st_ema._atr()'s formula
+    exactly (reused by value, not imported -- that file is a live intraday engine, this is a
+    backtest module, and an inter-module dependency for one numeric formula is not worth the
+    coupling). Returned as a _Series keyed at each week's own LAST trading date, so as_of(sym, d)
+    can only ever see a week that is fully known by close of day d -- a week in progress never
+    leaks its still-forming high/low into a lookup that lands mid-week. Symbols with fewer than
+    period+1 weekly bars are simply absent from the series (honest None on lookup, never a
+    fabricated value)."""
+    s = _Series()
+    if not symbols:
+        return s
+    load_start = start - timedelta(days=int(period * 7 * 2.5) + 30)
+    cur.execute("""SELECT symbol, price_date, high, low, close FROM raw_prices
+                   WHERE symbol = ANY(%s) AND price_date BETWEEN %s AND %s
+                   AND high IS NOT NULL AND low IS NOT NULL AND close IS NOT NULL
+                   ORDER BY symbol, price_date""", (list(symbols), load_start, end))
+    by_sym = {}
+    for sym, d, h, l, c in cur.fetchall():
+        by_sym.setdefault(sym, []).append((d, float(h), float(l), float(c)))
+    for sym, rows in by_sym.items():
+        weeks = []          # (week_end_date, week_high, week_low, week_close)
+        wk_key = wh = wl = wc = w_end = None
+        for d, h, l, c in rows:
+            key = d.isocalendar()[:2]
+            if key != wk_key:
+                if wk_key is not None:
+                    weeks.append((w_end, wh, wl, wc))
+                wk_key, wh, wl, wc, w_end = key, h, l, c, d
+            else:
+                wh = max(wh, h)
+                wl = min(wl, l)
+                wc = c
+                w_end = d
+        if wk_key is not None:
+            weeks.append((w_end, wh, wl, wc))
+        if len(weeks) < period + 1:
+            continue   # insufficient weekly history -- no ATR series for this symbol, honestly
+        trs = []
+        prev_close = weeks[0][3]
+        for _, wh2, wl2, wc2 in weeks[1:]:
+            trs.append(max(wh2 - wl2, abs(wh2 - prev_close), abs(wl2 - prev_close)))
+            prev_close = wc2
+        a = sum(trs[:period]) / period
+        atr_rows = [(weeks[period][0], a)]
+        for i in range(period, len(trs)):
+            a = (a * (period - 1) + trs[i]) / period
+            atr_rows.append((weeks[i + 1][0], a))
+        s.add(sym, atr_rows)
     return s
 
 
@@ -171,6 +231,7 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
     cost_rate = txn + slip
     trail = exit_def.get("trailing_peak_pct")
     rank_fall_y = exit_def.get("rank_fall_y")
+    atr_stop = exit_def.get("atr_stop")   # cc#2088: {mult, target_mult?, trailing?}
 
     bench_sym = _BENCH.get(str(benchmark).upper(), "NIFTY50")
 
@@ -193,6 +254,7 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         # load prices with a lookback buffer so ROC on the first rebalance has history
         load_start = start - timedelta(days=400)
         series = _load_series(cur, universe, load_start, end)
+        atr_series = _load_weekly_atr(cur, universe, load_start, end, period=14) if atr_stop else None
 
     rebals = _rebalance_dates(cal, start, end, freq)
     if len(rebals) < 2:
@@ -250,6 +312,35 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         target = target[:max_stocks]
         tw = (1.0 / len(target)) if target else 0.0
         new_holdings = {s: tw for s in target}
+        # cc#2088: ATR-stop forced exits. Unlike trailing_peak_pct/rank_fall_y above (their
+        # `keep` dict is intentionally untouched -- this card's own instruction is to leave
+        # exit.trailing_peak_pct exactly as it behaves today for baskets already using it),
+        # atr_stop must genuinely force an exit -- its own verify clause requires showing a real
+        # ATR-triggered exit, not just a computed-but-inert signal. Applied here, after the
+        # ranked target list, as a hard override: a position that hits its ATR stop/target closes
+        # even if still top-ranked. A stopped-out slot goes to cash (no reweight/backfill) until
+        # the next rebalance re-ranks fresh -- the simplest, most literal reading of "stopped out".
+        exit_reason = {}
+        if atr_stop:
+            mult = float(atr_stop.get("mult", 2))
+            tgt_mult = atr_stop.get("target_mult")
+            trailing = bool(atr_stop.get("trailing"))
+            for sym in list(new_holdings):
+                px = series.as_of(sym, d)
+                op = open_pos.get(sym)
+                a = op.get("entry_atr") if op else None
+                if px is None or not a:
+                    continue
+                if trailing:
+                    pk = peak_since_entry.get(sym, px)
+                    stop_level = pk - mult * a
+                else:
+                    stop_level = op["entry_px"] - mult * a
+                hit_target = bool(tgt_mult) and px >= op["entry_px"] + float(tgt_mult) * a
+                if px <= stop_level or hit_target:
+                    exit_reason[sym] = "atr_target" if hit_target else "atr_stop"
+            for sym in exit_reason:
+                new_holdings.pop(sym, None)
         # turnover cost: sum of |new - old| weights / 2 (one-way) * cost_rate
         allk = set(new_holdings) | set(holdings)
         turnover = sum(abs(new_holdings.get(s, 0) - holdings.get(s, 0)) for s in allk) / 2.0
@@ -262,12 +353,14 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
                 if op["entry_px"] and ex:
                     trades.append({"symbol": s, "entry_date": op["entry_date"], "exit_date": str(d),
                                    "entry_px": round(op["entry_px"], 2), "exit_px": round(ex, 2),
-                                   "return_pct": round((ex / op["entry_px"] - 1) * 100, 2)})
+                                   "return_pct": round((ex / op["entry_px"] - 1) * 100, 2),
+                                   "exit_reason": exit_reason.get(s, "rotation")})
                 peak_since_entry.pop(s, None)
         for s in new_holdings:
             if s not in open_pos:
                 ep = series.as_of(s, d)
-                open_pos[s] = {"entry_date": str(d), "entry_px": ep, "weight": tw}
+                entry_atr = atr_series.as_of(s, d) if atr_series is not None else None
+                open_pos[s] = {"entry_date": str(d), "entry_px": ep, "weight": tw, "entry_atr": entry_atr}
                 peak_since_entry[s] = ep if ep else 0
         holdings = new_holdings
         rebalance_log.append({"date": str(d), "n": len(target), "turnover": round(turnover, 4),
@@ -299,6 +392,7 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
     return {
         "pit_flag": pit_flag,
         "pit_partial": pit_flag in ("current_snapshot",),
+        "atr_stop_active": bool(atr_stop),   # cc#2088: true only when exit.atr_stop was set
         "universe_size": len(universe), "benchmark": bench_sym,
         "start": str(cal[start_i]), "end": str(cal[-1]), "years": round(years, 2),
         "rebalances": len(rebals), "freq": freq,
