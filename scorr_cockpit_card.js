@@ -574,6 +574,18 @@
     // use -- the two OI header cells, gated identically to the two OI row cells.
     var hOiCe = d.oi_available ? ('<td '+hcol+'>OI</td>') : '';
     var hOiPe = d.oi_available ? ('<td style="'+Bd+';text-align:center;padding:9px 11px;font-size:9px;color:var(--c-mut);font-weight:700">OI</td>') : '';
+    // cc#2080 (founder screenshot 14-Sep, a trading holiday -- every CE/PE LTP cell a bare dash,
+    // no explanation): a STOCK chain's LTP is a pure live Fyers quote (deriv_metrics._batch_quotes,
+    // zero DB fallback -- confirmed no stored stock-option-LTP table exists anywhere in this
+    // codebase, so the card's Option A was not viable). d.market_open (deriv_metrics._market_open_
+    // now, cc#2080 backend push) is only ever present on that STOCK leg -- the index leg reads a
+    // stored option_chain tick and is unaffected by this bug (confirmed by reading strike_chain()'s
+    // two branches, per this card's own scope_note) -- so this checks === false, never falsy, so an
+    // index payload (key simply absent) never shows it. Same message, table position, and box
+    // styling as _dcChainInfoHtml's own panel just above (confirmed-bridged tokens only).
+    var closedNotice = (d.market_open === false)
+      ? '<div style="font-size:10px;color:var(--c-mut);line-height:1.6;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:8px;padding:8px 10px;margin-bottom:6px">Market is closed right now &mdash; CE/PE LTP is a live quote only, so there is nothing to show until trading resumes.</div>'
+      : '';
     box.innerHTML =
         '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'
       +   '<div style="font-size:10px;color:var(--c-dim)">Spot '+d.spot+' &middot; exp '+d.expiry+' ('+d.days_to_expiry+'d)'+oiNote+'</div>'
@@ -584,6 +596,7 @@
       // button's and the tap-detail panel's job).
       + '<div style="font-size:10px;color:var(--c-mut);margin-bottom:6px">Tap a strike for fair value &amp; Greeks</div>'
       + info
+      + closedNotice
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border-radius:8px;font-family:\'IBM Plex Mono\',ui-monospace,monospace;font-size:11px">'
       +   '<thead><tr>'+hOiCe+'<td '+hcol+'>CE LTP</td>'
       +     '<td style="'+Bd+';text-align:center;padding:9px 12px;font-size:9px;color:var(--c-mut);font-weight:700">STRIKE</td>'

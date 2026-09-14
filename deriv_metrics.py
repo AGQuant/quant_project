@@ -17,15 +17,26 @@ atm_iv_daily(symbol,d,atm_iv,rv20,straddle_pct) is ensured here; a 15:25 snapsho
 it. Once a symbol has >=60 rows the Options-Cost verdict auto-upgrades from IV/RV to true IVP.
 """
 import os, math, time, logging
-from datetime import date
+from datetime import date, datetime, time as dt_time
 from typing import Optional, Dict, Any, List, Tuple
+from zoneinfo import ZoneInfo
 
 import psycopg
 import requests
 from fastapi import APIRouter, HTTPException
 
+import nse_holidays
+
 FYERS_CLIENT_ID = os.getenv("FYERS_CLIENT_ID", "1A4STS8ZGD-100")
 _QUOTES_URL = "https://api-t1.fyers.in/data/quotes"
+# cc#2080: the STOCK leg of strike_chain() is a pure live Fyers quote (_batch_quotes, zero DB
+# fallback) -- these three exist only to answer "is that live quote structurally possible right
+# now", same 09:15-15:30 IST window every other feed/write gate in this codebase already uses
+# (each module keeps its own copy rather than a shared import -- e.g. price_resolver.py's
+# _MARKET_OPEN/_MARKET_CLOSE, mobile_endpoints.py's MARKET_OPEN -- this follows that convention).
+IST = ZoneInfo("Asia/Kolkata")
+_MARKET_OPEN_T = dt_time(9, 15)
+_MARKET_CLOSE_T = dt_time(15, 30)
 
 log = logging.getLogger("scorr.deriv")
 deriv_router = APIRouter(tags=["deriv"])
@@ -1731,6 +1742,22 @@ def _stored_iv_gap_map(cur, sym: str) -> Tuple[Optional[str], Dict[float, Dict]]
     return str(trade_date), gap_map
 
 
+def _market_open_now(now_ist: datetime = None) -> bool:
+    """cc#2080: True only if `now_ist` (default: the live IST clock) falls on an NSE trading day
+    (nse_holidays.is_trading_day -- the same canonical gate main.py/scheduler.py/guards.py all
+    use) AND inside 09:15-15:30 IST. Pure -- no I/O -- so a test can pass any clock, matching
+    guards.py's approval_window() convention ("Pure: no I/O, so a test can pass any clock").
+    This is exactly the condition strike_chain()'s STOCK leg needs: _batch_quotes() is a live-only
+    Fyers fetch with zero DB fallback, so every CE/PE LTP is structurally blank whenever this is
+    False -- not just on a holiday (the card's own reported case) but equally before/after hours
+    on an ordinary trading day, since the underlying mechanism is identical in both."""
+    if now_ist is None:
+        now_ist = datetime.now(IST)
+    if not nse_holidays.is_trading_day(now_ist.date()):
+        return False
+    return _MARKET_OPEN_T <= now_ist.time() <= _MARKET_CLOSE_T
+
+
 @deriv_router.get("/api/deriv/strike-chain/{symbol}")
 def strike_chain(symbol: str):
     """cc#666 part_3: on-demand ATM±10 CE/PE chain with Black-Scholes fair value. Live ltp per contract
@@ -1855,7 +1882,11 @@ def strike_chain(symbol: str):
                                  "percentile": pe_cell.get("ivp")}
         return {"symbol": sym, "spot": round(spot, 2), "expiry": str(exp), "days_to_expiry": days,
                 "rv20": round(rv20 * 100, 1) if rv20 else None, "quoted": len(ltp), "strikes": rows,
-                "source": "fyers", "stored_iv_asof": stored_asof}
+                "source": "fyers", "stored_iv_asof": stored_asof,
+                # cc#2080: STOCK leg only (index leg reads a stored option_chain tick -- immune to
+                # this bug, confirmed by reading both branches -- so it never carries this key; the
+                # frontend checks === false, never falsy, for exactly that reason).
+                "market_open": _market_open_now()}
     except HTTPException:
         raise
     except Exception as e:
