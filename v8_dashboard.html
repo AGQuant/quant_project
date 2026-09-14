@@ -966,7 +966,14 @@ window.addEventListener('scorr:theme', function(){
    identical on purpose. */
 #pane-index .csblb{font:600 9px var(--f-m);letter-spacing:.1em;color:var(--tx3);margin-bottom:6px}
 #pane-index .csbrow{margin-bottom:12px}
-#pane-index .csbchip{font:700 10.5px var(--f-m);padding:5px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer;margin:0 6px 6px 0;display:inline-block}
+/* cc#2079 (founder 14-Sep): label font bumped 2 notches on all 4 picker rows (Buildup/Orderflow/
+   Basis band/Volume R band share this one .csbchip class, so one rule covers every row uniformly,
+   per the card's own scope_note). No stepped type-scale token exists on this page for buttons
+   (checked scorr_web_tokens.css/scorr_theme_r5.css -- --f-d/--f-m are font-FAMILY vars, not a
+   size scale), so this uses the card's own stated fallback: +2px per notch, +4px total,
+   10.5px -> 14.5px. Padding unchanged from 5px 12px -- confirmed by real-Chromium render (see
+   report) that the pill shape still holds at the new size, so no padding change was needed. */
+#pane-index .csbchip{font:700 14.5px var(--f-m);padding:5px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer;margin:0 6px 6px 0;display:inline-block}
 #pane-index .csbchip.on{background:var(--blu);color:var(--bg);border-color:var(--blu)}
 /* ===== cc#543 V14 pane (namespaced) ===== */
 #pane-v14 header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 12px;border-bottom:1px solid var(--line)}
