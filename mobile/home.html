@@ -1317,6 +1317,10 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
 .apd-k{font-size:var(--type-10);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;color:var(--muted);flex:0 0 auto}
 .apd-k small{display:block;font-weight:600;letter-spacing:0;text-transform:none;margin-top:var(--space-2)}
 .apd-v{text-align:right;font-size:var(--type-125);font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums}
+/* cc#2053: Entry/Approved's middle date part — deliberately less prominent than .apd-v's bold
+   price so the price still reads as the important number, matching the founder's own "keep the
+   price prominent" ask. */
+.apd-date{font-size:var(--type-105);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .apd-v .p{font-size:var(--type-10);font-weight:700;color:var(--muted);margin-left:var(--space-4)}
 .apd-v .b{display:block;font-size:var(--type-95);font-weight:600;color:var(--muted);margin-top:var(--space-2)}
 .apd-v.pos,.apd-v.pos .p{color:var(--win)}.apd-v.neg,.apd-v.neg .p{color:var(--loss)}
@@ -3630,6 +3634,19 @@ function apTrDetailRow(k, sub, v, cls, basis){
   return '<div class="apd-row"><div class="apd-k">' + esc(k) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>'
     + '<div class="apd-v' + (cls ? ' ' + cls : '') + '">' + v + (basis ? '<span class="b">' + esc(basis) + '</span>' : '') + '</div></div>';
 }
+/* cc#2053: Entry/Approved (and the manual-alert single-Entry variant) get their OWN three-part row
+   — label, then the date, then the price kept visually prominent — instead of apTrDetailRow's
+   normal two-column label/value shape with a date+price string squeezed into one run. .apd-row's
+   own CSS already reads justify-content:space-between, which spaces 3 children correctly with no
+   change needed; .apd-v is reused as-is for the price so it keeps the exact same bold weight every
+   other value on this sheet has. Every other row (Tag/Target/Stop loss/Day P&L/Net P&L/Potential
+   left) stays on apTrDetailRow, untouched. dateStr/priceStr are pre-escaped by the caller, same
+   convention apTrDetailRow's own v already follows. */
+function apTrDetailRowDate(k, sub, dateStr, priceStr){
+  return '<div class="apd-row"><div class="apd-k">' + esc(k) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>'
+    + '<div class="apd-date">' + dateStr + '</div>'
+    + '<div class="apd-v">' + priceStr + '</div></div>';
+}
 function apTrPnlCls(v){ return (v == null || isNaN(Number(v))) ? '' : (Number(v) > 0 ? 'pos' : (Number(v) < 0 ? 'neg' : '')); }
 function apTrPnlHtml(v, pct){
   if (v == null) return '—';
@@ -3646,10 +3663,10 @@ function apTrDetailOpen(p){
   /* entry: a V8 row has TWO events -- the engine entry and the founder's approval -- both labelled;
      a non-V8 row has no engine entry by construction, so the approval is the entry, labelled as such */
   if (v8) {
-    h += apTrDetailRow('Entry', 'engine entry', esc(when(p.opened_at)) + ' · ' + esc(apTrPx(p.entry)));
-    h += apTrDetailRow('Approved', 'your entry', esc(when(p.approved_at)) + ' · ' + esc(apTrPx(p.approved_price)));
+    h += apTrDetailRowDate('Entry', 'engine entry', esc(when(p.opened_at)), esc(apTrPx(p.entry)));
+    h += apTrDetailRowDate('Approved', 'your entry', esc(when(p.approved_at)), esc(apTrPx(p.approved_price)));
   } else {
-    h += apTrDetailRow('Entry', 'approval (no engine entry)', esc(when(p.approved_at)) + ' · ' + esc(apTrPx(p.approved_price)));
+    h += apTrDetailRowDate('Entry', 'approval (no engine entry)', esc(when(p.approved_at)), esc(apTrPx(p.approved_price)));
   }
   h += apTrDetailRow('Tag', '', tag);
   h += apTrDetailRow('Target', '', esc(apTrPx(p.target)));
@@ -3659,8 +3676,11 @@ function apTrDetailOpen(p){
     : 'no prior close on record';
   h += apTrDetailRow('Day P&L', 'since previous close', hasCmp ? apTrPnlHtml(p.day_pnl, p.day_pnl_pct) : '—', hasCmp ? apTrPnlCls(p.day_pnl) : '', dayBasis);
   h += apTrDetailRow('Net P&L', 'since your approval price', hasCmp ? apTrPnlHtml(p.pnl_since_approval, p.pnl_since_approval_pct) : '—', hasCmp ? apTrPnlCls(p.pnl_since_approval) : '');
-  h += apTrDetailRow('Target', 'level · value left · % move needed', esc(apTrPx(p.target)) + (hasCmp ? ' · ' + apTrPnlHtml(p.reward_left, p.reward_left_pct) : ''), '', hasCmp ? 'the % is the move still needed from the current price' : '');
-  h += apTrDetailRow('Stop', 'level only', esc(apTrPx(p.stop_loss)));   /* founder: NO value, NO percent on the stop, in any state */
+  /* cc#2053 (founder amendment): the price already prints once above (line ~3655) — this row is
+     RELABELLED, not deleted, and drops the price entirely so it is never shown twice. Stop's own
+     later row (below, pre-amendment) had no equivalent second figure the founder asked to keep, so
+     it is removed outright rather than relabelled — the founder's amendment was about Target only. */
+  h += apTrDetailRow('Potential left', 'value left · % move needed', hasCmp ? apTrPnlHtml(p.reward_left, p.reward_left_pct) : '—', '', hasCmp ? 'the % is the move still needed from the current price' : '');
   h += '</div>';
   h += '<div class="apd-note">' + (hasCmp ? 'Live price ' + esc(apTrPx(p.cmp)) + (p.cmp_as_of ? ' as of ' + esc(String(p.cmp_as_of).slice(0, 16)) : '') : 'No live price right now, so the P&L rows are blank.')
     + (p.qty != null ? ' · 1 lot (' + esc(apTrLot(p.qty)) + ')' : ' · per share') + '</div>';
