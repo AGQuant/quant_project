@@ -1331,6 +1331,11 @@ var RN = { items: [], page: 0, per: 6, mode: 'polish', raw: [], polish: [] };
    the first Next-past-the-end serves them with no network call; the server cursor continues from
    the last row of the raw response, so nothing is skipped or refetched. */
 RN.polishCursor = null; RN.polishHasMore = false; RN.polishOverflow = []; RN.polishLoading = false;
+/* cc#2058: polishReqId discards a stale, out-of-order fetch if the reader picks another category
+   before the first one resolves. polishCatCounts is the SERVER's full category_counts (independent
+   of pagination/scope -- the same breakdown regardless of which category was requested), used by
+   the filter menu and the POLISH tab badge instead of counting whatever happens to be loaded. */
+RN.polishReqId = 0; RN.polishCatCounts = null;
 /* cc#1366 · archive search state. While a query is live RN.items serves the SEARCH results
    (server rank order: symbol match above text match, newest within rank); the reader's page is
    saved on entry and restored exactly on clear. Search runs server-side over the FULL store —
@@ -1372,6 +1377,21 @@ function rnMapArticle(a){
 var RN_CAT = 'ALL';
 var RN_CATS = ['AI Editorial','Domestic','Global','IPO','Stock Views'];
 var RN_FILTER_OPEN = false;
+/* cc#2058: /api/news/polished's category= param expects the lowercase snake_case KEY
+   (news_endpoints.py's own _CANON_CAT), not the display string RN_CAT/RN_CATS hold -- confirmed
+   by reading that mapping directly. RN_CAT itself stays the display string: rnApplyMode()'s
+   client-side ALL-mode compare (n.category === RN_CAT) reads the raw article data, which carries
+   the display form, not the API key. */
+var RN_CAT_API = { 'ALL':'all', 'AI Editorial':'ai_editorial', 'Domestic':'domestic',
+                    'Global':'global', 'IPO':'ipo', 'Stock Views':'stock_views' };
+/* cc#2058: the true POLISH total, from the server's full category_counts -- NOT RN.polish.length,
+   which under a category-scoped fetch only ever holds that one category's own loaded rows. Falls
+   back to RN.polish.length before the first fetch resolves (polishCatCounts is still null). */
+function _rnPolishTotal(){
+  var counts = RN.polishCatCounts;
+  if (!counts) return RN.polish.length;
+  return RN_CATS.reduce(function(s, c){ return s + (counts[c] || 0); }, 0);
+}
 
 function rnApplyMode(){
   if (RN_SEARCH.q.trim()){ RN.items = RN_SEARCH.items; return; }   /* cc#1366 */
@@ -1395,11 +1415,24 @@ function nwFilterToggle(ev){
   nwPaintTabs();
 }
 function nwFilterPick(cat){
+  var changed = (cat !== RN_CAT);
   RN_CAT = cat;
   RN.page = 0;
   RN_FILTER_OPEN = false;
-  rnApplyMode();
-  rnPaint();
+  if (changed){
+    // cc#2058: a real category pick is a FRESH, server-scoped fetch -- reset paging state and
+    // refetch scoped, instead of filtering an ever-growing category=all set client-side.
+    // polishReqId increments FIRST so any fetch already in flight (rnFetchPolish OR rnLoadOlder,
+    // from before this pick) is stale by the time it resolves and cannot overwrite this reset.
+    RN.polishReqId++;
+    RN.polish = []; RN.polishOverflow = []; RN.polishCursor = null; RN.polishHasMore = false;
+    RN.polishLoading = true;
+    rnApplyMode(); rnPaint();   // clears the list and shows the loading state immediately
+    rnFetchPolish(cat);
+  } else {
+    rnApplyMode();
+    rnPaint();
+  }
 }
 /* click-outside-closes, bound once. .nwfilter wraps both the icon and its open menu, so a tap
    anywhere else in the document (including the tabs, the deck, another card) closes it -- the
@@ -1449,10 +1482,16 @@ function rnLoadOlder(){
   }
   if (!RN.polishHasMore || !RN.polishCursor) return;
   RN.polishLoading = true;
+  var myReqId = RN.polishReqId;   // cc#2058: discard this page if a newer filter pick took over meanwhile
   rnPaint();
-  fetch('/api/news/polished?category=all&limit=60&cursor=' + encodeURIComponent(RN.polishCursor))
+  // cc#2058: stays scoped to whatever category is CURRENTLY active -- once a scoped session's own
+  // overflow buffer (above) is exhausted, continuing without the category param would silently
+  // fall back to unfiltered paging.
+  fetch('/api/news/polished?category=' + encodeURIComponent(RN_CAT_API[RN_CAT] || 'all')
+        + '&limit=60&cursor=' + encodeURIComponent(RN.polishCursor))
     .then(function(r){ return r.json(); })
     .then(function(d){
+      if (myReqId !== RN.polishReqId) return;   // stale
       RN.polishLoading = false;
       if (!d || d.error) throw new Error((d && d.error) || 'no data');
       var slice = (d.articles || [])
@@ -1638,9 +1677,12 @@ function rnPaint(){
 
 function nwFilterMenuHtml(){
   if (RN.mode !== 'polish' || !RN_FILTER_OPEN) return '';
-  var counts = {};
-  RN.polish.forEach(function(n){ if (n.category) counts[n.category] = (counts[n.category] || 0) + 1; });
-  var opts = [{ t:'ALL', n: RN.polish.length }].concat(
+  // cc#2058: counts come from the SERVER's full category_counts (independent of pagination) --
+  // not from RN.polish, which under a category-scoped fetch only ever holds ONE category's own
+  // loaded rows. Every category with a nonzero SERVER count is listed even if none of its rows
+  // happen to be loaded yet (the pre-fix bug: a sparse category could vanish from this menu).
+  var counts = RN.polishCatCounts || {};
+  var opts = [{ t:'ALL', n: _rnPolishTotal() }].concat(
     RN_CATS.filter(function(c){ return counts[c] > 0; }).map(function(c){ return { t:c, n:counts[c] }; }));
   return '<div class="nwfmenu">' + opts.map(function(o){
     return '<button type="button" class="nwfitem' + (o.t === RN_CAT ? ' on' : '') + '" onclick="nwFilterPick(\''
@@ -1675,7 +1717,7 @@ function nwPaintTabs(){
     : '';
   var hadFocus = document.activeElement && document.activeElement.id === 'nwsq';
   var caret = hadFocus ? document.activeElement.selectionStart : null;
-  el.innerHTML = '<div class="nwtabsrow"><div class="nwtabs">' + tab('polish', 'POLISH', RN.polish.length)
+  el.innerHTML = '<div class="nwtabsrow"><div class="nwtabs">' + tab('polish', 'POLISH', _rnPolishTotal())
     + tab('raw', 'RAW', RN.raw.length) + '</div>'
     + '<div class="nwfilter">' + searchBtn + '</div>'
     + (filterBtn ? '<div class="nwfilter">' + filterBtn + nwFilterMenuHtml() + '</div>' : '') + '</div>'
@@ -1707,8 +1749,20 @@ function loadRawNews(){
       if (cnt) cnt.textContent = 'unavailable ›';
       box.innerHTML = '<div class="unavail" style="padding:8px 0">Live news unavailable: ' + esc(e.message) + '</div>';
     });
-  fetch('/api/news/polished?category=all&limit=300').then(function(r){ return r.json(); })  /* cc#1331: backend cap was 100, raised to 300 */
+  rnFetchPolish('ALL');
+}
+/* cc#2058: shared polish-fetch, parameterized by category display string ('ALL' for the
+   unfiltered load, one of RN_CATS for a scoped filter pick). Both paths do the SAME 48h win/over
+   split (cc#1365) so rnLoadOlder()'s existing overflow-buffer-then-cursor logic keeps working
+   unchanged regardless of which scope is currently loaded -- the buffer is not made irrelevant by
+   scoping, it simply now holds rows within whatever scope is active. */
+function rnFetchPolish(cat){
+  var myReqId = RN.polishReqId;
+  fetch('/api/news/polished?category=' + encodeURIComponent(RN_CAT_API[cat] || 'all') + '&limit=300')  /* cc#1331: backend cap was 100, raised to 300 */
+    .then(function(r){ return r.json(); })
     .then(function(d){
+      if (myReqId !== RN.polishReqId) return;   // stale -- a newer filter pick already took over
+      RN.polishLoading = false;
       if (!d || d.error) throw new Error((d && d.error) || 'no data');
       var cutoff = Date.now() - 48 * 3600 * 1000;
       /* cc#1365: the 48h window is the OPENING view, not the archive's edge. This response's rows
@@ -1726,11 +1780,16 @@ function loadRawNews(){
       RN.polishOverflow = over;
       RN.polishCursor = d.next_cursor || null;
       RN.polishHasMore = !!d.has_more;
+      // cc#2058: category_counts is the server's FULL breakdown, independent of which category
+      // was requested -- safe to store from any successful response.
+      RN.polishCatCounts = d.category_counts || {};
       if (RN.mode === 'polish'){ RN.page = 0; rnApplyMode(); }
       rnPaint();
       rnBindSwipe();
     })
     .catch(function(){
+      if (myReqId !== RN.polishReqId) return;
+      RN.polishLoading = false;
       RN.polish = [];
       if (RN.mode === 'polish'){ RN.mode = 'raw'; RN.page = 0; rnApplyMode(); }
       rnPaint();
