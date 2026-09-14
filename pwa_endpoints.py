@@ -2791,7 +2791,14 @@ APP_THEME_RESOLVE_JS = """(function(){
     try{localStorage.setItem('scorr_theme',k);}catch(e){}
     var b=document.body;if(b&&b.hasAttribute('data-theme'))b.setAttribute('data-theme',k);
     /* the OS status bar follows the new field (cc#1629 meta), so a light theme does not sit under a black strip */
-    try{var mc=document.querySelector('meta[name="theme-color"]');if(mc&&b){var fc=getComputedStyle(b).getPropertyValue('--field').trim();if(fc)mc.content=fc;}}catch(e){}
+    /* cc#2067: theme-color's own luminance was the only signal for the status bar ICON colour, and
+       not every browser/OEM skin infers it correctly -- a light --field could leave dark-on-light
+       icons unreadable. --color-scheme gives the OS an explicit signal instead, derived from --field's
+       OWN measured luminance (WCAG relative luminance, same formula used across this app's contrast
+       work) rather than a hardcoded per-theme light/dark list -- correct by construction for every
+       theme already live and every one added after this ships, with nothing to update when a new
+       theme lands. Mirrors the identical calc in every /m/ page's own inline boot script. */
+    try{var mc=document.querySelector('meta[name="theme-color"]');if(mc&&b){var fc=getComputedStyle(b).getPropertyValue('--field').trim();if(fc)mc.content=fc;var cs=document.querySelector('meta[name="color-scheme"]'),csm=fc&&/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(fc);if(cs&&csm){var csch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},cslum=0.2126*csch(csm[1])+0.7152*csch(csm[2])+0.0722*csch(csm[3]);cs.content=cslum>0.5?'light':'dark';}}}catch(e){}
     try{window.dispatchEvent(new CustomEvent('scorr:theme',{detail:{theme:k}}));}catch(e){}
     return k;
   }

@@ -13,6 +13,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0A0A0C">
+<meta name="color-scheme" content="dark">
 <title>Dashboard · Scorr</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
@@ -43,7 +44,7 @@
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
 if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
-try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;}catch(e){}})();</script>
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;var cs=document.querySelector('meta[name="color-scheme"]'),csm=fc&&/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(fc);if(cs&&csm){var csch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},cslum=0.2126*csch(csm[1])+0.7152*csch(csm[2])+0.0722*csch(csm[3]);cs.content=cslum>0.5?'light':'dark';}}catch(e){}})();</script>
 <div class="screen">
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">Dashboard</span></div><div class="as-slot"></div></div>
 <div class="dh-asof" id="dh-asof">Your book, alerts, watchlist and trades</div>
