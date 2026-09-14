@@ -2,23 +2,33 @@ import os
 import re
 import json
 import asyncio
+import logging
+import secrets
+import time
 import httpx
 import psycopg
 from fastapi import APIRouter, Request, Response
 
 import yahoo_ondemand
 
+log = logging.getLogger("scorr.mcp")
+
 # ── MCP dispatch layer ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # Extracted from main.py (File 5/5 split, piece B). Self-contained:
 # reads env vars directly, owns its get_conn, imports yahoo_ondemand.
 # NO import from main.py -> no circular import.
-# Exposes: MCP_TOOLS, router (POST /mcp).
+# Exposes: MCP_TOOLS, router (POST /mcp, POST /mcp/pair).
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 BASE_URL = os.getenv("RAILWAY_PUBLIC_DOMAIN", "quantproject-production.up.railway.app")
 if not BASE_URL.startswith("http"):
     BASE_URL = f"https://{BASE_URL}"
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+# cc#2075 STEP 4: the module-level ADMIN_TOKEN read is gone. It fed a passthrough in _call_tool
+# that forwarded this process's own ADMIN_TOKEN to every downstream admin-gated route it proxies
+# to, auto-granting itself whatever that route required regardless of who actually called /mcp.
+# Confirmed safe to remove (env_check, 14-Sep-2026): ADMIN_TOKEN is unset in production today, so
+# that header was already empty on every call — this is a no-op today and closes the hole for the
+# day someone DOES set it. See _call_tool's own header dict below.
 VERSION = os.getenv("APP_VERSION", "2.9.22")
 
 router = APIRouter()
@@ -41,6 +51,126 @@ def _maintenance_block(query):
     if not m:
         return None
     return re.sub(r"\s+", " ", m.group(1).upper())
+
+
+# ── cc#2075 MCP AUTH — pairing-based gate ──────────────────────────────────────────────────────
+# Problem (cc_task_logs 6391): /mcp had zero auth of its own — run_sql runs arbitrary
+# caller-supplied SQL, and every other tool proxied to admin-gated routes via the now-removed
+# ADMIN_TOKEN passthrough above. Founder decision (2026-09-14): a pairing gate mirroring
+# scorr_auth.py's own password-gate UX — a 6-digit code once per NEW client, then a persistent
+# server-stored token the client resends on every later call. Never a code retyped per request.
+#
+# SHIPPED DISABLED BY DEFAULT (MCP_AUTH_ENFORCED unset/false). STEP 1 finding, before any of this
+# was written: /mcp is the ONLY way this Claude Code session and Fable's session reach the app at
+# all, and neither one's MCP client connector configuration lives in this repo or is visible/
+# editable from inside it — that configuration is set at the harness/hosting layer for each
+# client, outside anything this codebase controls. Flipping enforcement on before BOTH live
+# clients are reconfigured with a minted token would lock out live tooling with no way to un-stick
+# it from inside a now-locked-out session — exactly what STEP 5 exists to prevent. The gate is
+# fully built and testable via /mcp/pair the moment this deploys; turning enforcement on is one
+# Railway env var (MCP_AUTH_ENFORCED=true), left for the founder once both connector configs
+# carry a token — the exact steps are in this card's push log.
+MCP_GATE_CODE_ENV = os.getenv("MCP_GATE_CODE", "")
+MCP_AUTH_ENFORCED = os.getenv("MCP_AUTH_ENFORCED", "").strip().lower() in ("1", "true", "yes")
+# Fallback ONLY if MCP_GATE_CODE is missing from Railway (warned once — same convention as
+# scorr_auth.py's _PASSWORD). Deliberately a DIFFERENT value from the site password: one leaked
+# secret must never unlock both gates. Do not commit a new value.
+_GATE_CODE_FALLBACK = "704518"
+_warned_gate_fallback = False
+
+# Same shape as scorr_auth.py's login rate limit (duplicated, not imported — this file is
+# deliberately self-contained per its own top-of-file note). /mcp/pair guards a code that unlocks
+# arbitrary SQL, so it earns the same brute-force protection the site password already has.
+_PAIR_RATE_MAX = 5
+_PAIR_RATE_WINDOW = 10 * 60
+_PAIR_FAILED: dict = {}
+
+
+def _gate_code() -> str:
+    global _warned_gate_fallback
+    if MCP_GATE_CODE_ENV:
+        return MCP_GATE_CODE_ENV.strip()
+    if not _warned_gate_fallback:
+        log.warning("MCP_GATE_CODE not set -- falling back to the in-repo constant. Set it in Railway.")
+        _warned_gate_fallback = True
+    return _GATE_CODE_FALLBACK
+
+
+def _pair_client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _pair_rate_limited(ip: str) -> bool:
+    now = time.time()
+    hits = [t for t in _PAIR_FAILED.get(ip, []) if now - t < _PAIR_RATE_WINDOW]
+    _PAIR_FAILED[ip] = hits
+    return len(hits) >= _PAIR_RATE_MAX
+
+
+def _pair_record_fail(ip: str):
+    _PAIR_FAILED.setdefault(ip, []).append(time.time())
+
+
+def _ensure_mcp_schema(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS mcp_pairings (
+        token TEXT PRIMARY KEY,
+        client_label TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_used_at TIMESTAMPTZ)""")
+
+
+def _mint_pairing_token_blocking(label):
+    token = secrets.token_hex(32)
+    with get_conn() as conn, conn.cursor() as cur:
+        _ensure_mcp_schema(cur)
+        cur.execute("INSERT INTO mcp_pairings (token, client_label) VALUES (%s, %s)", (token, label))
+        conn.commit()
+    return token
+
+
+# cc#877's own lesson (scorr_auth.py), applied here rather than relearned: a DB round-trip on
+# every single /mcp call -- which is EVERY tool call from Claude or Fable once enforcement is on
+# -- would put the same handshake latency back on the hottest path in the app. Positive-only
+# cache, 60s TTL: a miss is never cached, so a revoked token is re-checked against the DB on the
+# very next call; a valid one costs nothing for 60s.
+_MCP_TOKEN_CACHE: dict = {}
+_MCP_TOKEN_CACHE_TTL_S = 60
+_MCP_TOKEN_CACHE_MAX = 200
+
+
+def _mcp_cache_put(token):
+    if len(_MCP_TOKEN_CACHE) >= _MCP_TOKEN_CACHE_MAX:
+        try:
+            del _MCP_TOKEN_CACHE[min(_MCP_TOKEN_CACHE, key=_MCP_TOKEN_CACHE.get)]
+        except (ValueError, KeyError):
+            _MCP_TOKEN_CACHE.clear()
+    _MCP_TOKEN_CACHE[token] = time.monotonic() + _MCP_TOKEN_CACHE_TTL_S
+
+
+def _is_paired_blocking(token):
+    if not token:
+        return False
+    hit = _MCP_TOKEN_CACHE.get(token)
+    if hit is not None:
+        if hit > time.monotonic():
+            return True
+        _MCP_TOKEN_CACHE.pop(token, None)
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            _ensure_mcp_schema(cur)
+            cur.execute("UPDATE mcp_pairings SET last_used_at = now() WHERE token = %s RETURNING token", (token,))
+            ok = cur.fetchone() is not None
+            conn.commit()
+    except Exception as e:
+        log.warning(f"mcp pairing check failed: {e}")
+        return False   # fail closed, same as scorr_auth.py's _is_authed
+    if ok:
+        _mcp_cache_put(token)
+    return ok
+
 
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -202,7 +332,11 @@ async def _http_json(client, method, url, tool, **kw):
 
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
-        h = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+        # cc#2075 STEP 4: was {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {} -- the
+        # passthrough. Each downstream admin-gated route must enforce its own gate independently,
+        # not inherit one via this proxy; giving those ~20 routes their own independent gate is
+        # this card's own explicitly_deferred item, tracked separately.
+        h = {}
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
         elif name == "health_report": r = await client.get(f"{BASE_URL}/api/health/report"); return r.json()
         elif name == "hr_report_generate": r = await client.post(f"{BASE_URL}/api/health/generate", json=args, headers=h); return r.json()
@@ -509,9 +643,43 @@ async def _call_tool(name, args):
             )
         return {"error": f"Unknown tool: {name}"}
 
+@router.post("/mcp/pair")
+async def mcp_pair(req: Request):
+    """cc#2075: one-time 6-digit gate code -> a persistent pairing token. A plain endpoint of its
+    own, not a method inside the /mcp JSON-RPC dispatch below -- so the enforcement check in
+    mcp_endpoint can never accidentally gate the very call that is supposed to open the gate."""
+    ip = _pair_client_ip(req)
+    if _pair_rate_limited(ip):
+        return Response(content=json.dumps({"error": "too many attempts, wait 10 minutes"}),
+                        status_code=429, media_type="application/json")
+    body = await req.json()
+    code = str(body.get("code", "")).strip()
+    label = str(body.get("label", "")).strip()[:200] or None
+    if not code or code != _gate_code():
+        _pair_record_fail(ip)
+        return Response(content=json.dumps({"error": "invalid gate code"}),
+                        status_code=401, media_type="application/json")
+    token = await asyncio.to_thread(_mint_pairing_token_blocking, label)
+    return {"token": token, "header": "X-MCP-Token",
+            "note": "Store this token and resend it as the X-MCP-Token header on every /mcp "
+                    "request. It does not expire, is shown once, and is not recoverable if lost "
+                    "-- pair again with the gate code to mint a new one."}
+
+
 @router.post("/mcp")
 async def mcp_endpoint(req: Request):
     body = await req.json(); method = body.get("method"); params = body.get("params",{}); msg_id = body.get("id")
+    # cc#2075: OFF by default (MCP_AUTH_ENFORCED unset) -- see the block above for why. When on,
+    # every method (including initialize/tools-list, not just tools/call) needs a paired token:
+    # the tool list itself is reconnaissance-relevant, and gating only run_sql would leave a
+    # narrower but real hole.
+    if MCP_AUTH_ENFORCED:
+        token = req.headers.get("X-MCP-Token", "")
+        if not await asyncio.to_thread(_is_paired_blocking, token):
+            return {"jsonrpc":"2.0","id":msg_id,"error":{"code":-32001,
+                    "message":"Pairing required. POST {\"code\":\"<6-digit gate code>\"} to "
+                              "/mcp/pair for a token, then send it as header X-MCP-Token on "
+                              "every /mcp call."}}
     if method == "initialize":
         return {"jsonrpc":"2.0","id":msg_id,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"Scorr","version":VERSION}}}
     if method == "tools/list":
