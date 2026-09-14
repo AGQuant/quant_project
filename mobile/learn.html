@@ -27,6 +27,18 @@
 .chips{display:flex;gap:var(--space-6);overflow-x:auto;padding:var(--space-4) var(--space-16) 0;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
 .chip{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel);cursor:pointer}.chip.on{color:var(--brand);background:color-mix(in srgb, var(--brand) 14%, var(--panel));border-color:color-mix(in srgb, var(--brand) 55%, transparent)}
 .chip b{color:inherit;font-weight:800;margin-left:var(--space-3)}
+/* cc#2051 — search icon beside the ALL ARTICLES / category header. Unlike the cc#2050 galaxy
+   overlay above (deliberately fixed-dark, ignores the theme), this is a normal in-page control,
+   so it uses the live theme tokens same as every other rule on this page -- opposite rule,
+   same file, for opposite reasons. */
+.sec .sec-r{display:flex;align-items:center;gap:var(--space-8)}
+.sec-ic{flex:none;width:26px;height:26px;border-radius:50%;border:var(--bw-1) solid var(--edge);background:var(--panel);color:var(--muted);font-size:var(--type-12);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;line-height:1}
+.sec-ic:active{color:var(--ink);border-color:var(--brand)}
+.sec-srch{position:relative;display:flex;align-items:center}
+.sec-srch input{width:118px;max-width:34vw;padding:var(--space-5) 24px var(--space-5) var(--space-9);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);font-size:var(--type-11);font-family:inherit;outline:none;background:var(--field);color:var(--ink)}
+.sec-srch input:focus{border-color:var(--brand)}
+.sec-x{position:absolute;right:2px;top:50%;transform:translateY(-50%);width:18px;height:18px;border:none;background:transparent;color:var(--muted);font-size:14px;cursor:pointer;line-height:1;border-radius:50%;display:none}
+.sec-x.on{display:block}
 /* one card per article: the app's .c .slab .dense grammar (mobile_app.css .c, scorr_theme_r5.css .slab) */
 .lst{margin:var(--space-10) var(--space-16) 0}
 .art{display:block;text-decoration:none;color:inherit;cursor:pointer}
@@ -123,6 +135,10 @@ function renderMd(t){
   return '<p>'+esc(t).replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>')+'</p>';
 }
 var D=null, CAT='all', MD={};
+/* cc#2051: Q is the lowercase, trimmed search term; SRCH_OPEN toggles the icon<->input state in
+   the .sec row. Matching rule reused verbatim from scorr_news.html's applyKbFilters() -- lowercase
+   substring against title+summary, ANDed with the category chip -- do not invent a second rule. */
+var Q='', SRCH_OPEN=false, _learnSearchDeb=null;
 /* difficulty -> tag colour class, keyed on the endpoint's OWN difficulty_counts order (no name list here):
    the levels are ranked by their position in that object as served — first = entry level */
 function diffCls(d){
@@ -146,12 +162,56 @@ function artHtml(a){
     + (a.summary ? '<div class="sum">'+esc(a.summary)+'</div>' : '')
     + '<div class="more">Read</div><div class="body"></div></div>';
 }
+/* cc#2051: CAT + Q combine exactly like web's kbCat + kbSearch -- search narrows WITHIN the
+   active category, never a separate category-blind search. */
+function filteredRows(){
+  return (D.articles || []).filter(function(a){
+    if (CAT!=='all' && a.category!==CAT) return false;
+    if (Q){ var hay=((a.title||'')+' '+(a.summary||'')).toLowerCase(); if (hay.indexOf(Q)<0) return false; }
+    return true;
+  });
+}
+function resultsHtml(rows){
+  return rows.length ? '<div class="lst" id="lst">'+rows.map(artHtml).join('')+'</div>'
+    : '<div class="emp"><b>Nothing here yet</b>'+(Q ? 'No article matches this search.' : 'No article in this category has been published.')+'</div>';
+}
+function secRowHtml(rows){
+  var title = CAT==='all' ? 'All articles' : esc(CAT);
+  var right = '<span class="hint">'+rows.length+(Q ? ' match' : ' · newest first')+'</span>';
+  right += SRCH_OPEN
+    ? ('<span class="sec-srch"><input type="text" id="learnSearch" placeholder="Search…" autocomplete="off" value="'+esc(Q)+'">'
+       + '<button class="sec-x'+(Q?' on':'')+'" type="button" aria-label="Clear search" onclick="clearLearnSearch()">&times;</button></span>')
+    : '<button class="sec-ic" type="button" aria-label="Search articles" onclick="openLearnSearch()">⌕</button>';
+  return '<div class="sec"><h2>'+title+'</h2><div class="sec-r">'+right+'</div></div>';
+}
+/* Re-renders ONLY the count text + the result list -- never the .sec row's own <input>. This is
+   what the debounced keystroke handler calls: rebuilding the whole row on every keystroke (the
+   way draw() does for a chip click) would recreate the <input> and drop focus/caret mid-type. */
+function renderLearnList(){
+  var rows = filteredRows();
+  var hintEl = document.querySelector('.sec .hint');
+  if (hintEl) hintEl.textContent = rows.length + (Q ? ' match' : ' · newest first');
+  var host = document.getElementById('learnResults');
+  if (host) host.innerHTML = resultsHtml(rows);
+  var lst = document.getElementById('lst');
+  if (lst) lst.addEventListener('click', function(e){ var c=e.target.closest('.art'); if(!c) return; openArt(c); });
+}
+function openLearnSearch(){ SRCH_OPEN = true; draw(); }
+/* mirrors web's clearKbSearch(): clears the term and refocuses, does NOT collapse the box back
+   to the icon -- same as web's search box never hiding itself once in view. */
+function clearLearnSearch(){
+  Q = '';
+  var si = document.getElementById('learnSearch'); if (si) si.value = '';
+  var xb = document.querySelector('.sec-x'); if (xb) xb.classList.remove('on');
+  renderLearnList();
+  if (si) si.focus();
+}
 function draw(){
-  var rows = (D.articles || []).filter(function(a){ return CAT==='all' || a.category===CAT; });
+  var rows = filteredRows();
   var h = galaxyBannerHtml();
   h += '<div class="chips" id="chips">'+chipsHtml()+'</div>';
-  h += '<div class="sec"><h2>'+(CAT==='all'?'All articles':esc(CAT))+'</h2><span class="hint">'+rows.length+' · newest first</span></div>';
-  h += rows.length ? '<div class="lst" id="lst">'+rows.map(artHtml).join('')+'</div>' : '<div class="emp"><b>Nothing here yet</b>No article in this category has been published.</div>';
+  h += secRowHtml(rows);
+  h += '<div id="learnResults">'+resultsHtml(rows)+'</div>';
   h += '<div class="note"><b>Knowledge Hub.</b> The same articles as the Learn tab on the web Intel page. Tap a card to read it in place.</div>';
   document.getElementById('asof').innerHTML = '<b>'+esc(D.total)+'</b> articles · '+Object.keys(D.category_counts||{}).length+' categories';
   document.getElementById('body').innerHTML = h;
@@ -159,6 +219,19 @@ function draw(){
   document.getElementById('chips').addEventListener('click', function(e){ var s=e.target.closest('[data-c]'); if(!s) return; CAT=s.getAttribute('data-c'); draw(); });
   var lst = document.getElementById('lst');
   if (lst) lst.addEventListener('click', function(e){ var c=e.target.closest('.art'); if(!c) return; openArt(c); });
+  if (SRCH_OPEN){
+    var si = document.getElementById('learnSearch');
+    if (si){
+      si.focus();
+      var vlen = si.value.length; si.setSelectionRange(vlen, vlen);   /* caret at end, not a full re-select */
+      si.addEventListener('input', function(){
+        var v = si.value;
+        var xb = document.querySelector('.sec-x'); if (xb) xb.classList.toggle('on', !!v);   /* instant, not debounced -- matches web's own kbClear toggle */
+        clearTimeout(_learnSearchDeb);
+        _learnSearchDeb = setTimeout(function(){ Q = v.trim().toLowerCase(); renderLearnList(); }, 180);   /* debounce matches web's 180ms */
+      });
+    }
+  }
 }
 /* cc#2050 — Knowledge Galaxy: banner + full-screen star map, ported from scorr_news.html's Learn
    tab (Knowledge Hub = instance #1 of the shared, instance-agnostic /galaxy_map.js;
