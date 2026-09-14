@@ -3570,7 +3570,12 @@ var APTR = { rows: [], filter: null, counts: null };
 var APTR_FILTERS = [
   { key: 'fl', label: 'Futures Long',  test: function(p){ return p.instrument === 'FUTURES' && String(p.side || '').toUpperCase() === 'LONG'; } },
   { key: 'fs', label: 'Futures Short', test: function(p){ return p.instrument === 'FUTURES' && String(p.side || '').toUpperCase() === 'SHORT'; } },
-  { key: 'eq', label: 'Equity',        test: function(p){ return p.instrument === 'EQUITY'; } }
+  { key: 'eq', label: 'Equity',        test: function(p){ return p.instrument === 'EQUITY'; } },
+  // cc#2049: Closed is a NAVIGATION, not a local filter -- APTR.rows is this component's own OPEN
+  // approved book only (its own comment above says so), so there is no closed-trade data here to
+  // filter against. `nav` (not `test`) is how apTrFilterOpen()/apTrFilterPick() below tell this
+  // entry apart from the three real filters, without guessing from the key name.
+  { key: 'closed', label: 'Closed', nav: '/m/alerts#closed' }
 ];
 var APTR_FUNNEL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h12L9.5 8.6V13l-3 1.4V8.6L2 3z"/></svg>';
 function apTrFilterDef(){ for (var i = 0; i < APTR_FILTERS.length; i++){ if (APTR_FILTERS[i].key === APTR.filter) return APTR_FILTERS[i]; } return null; }
@@ -3663,15 +3668,28 @@ function apTrFilterOpen(){
   var ov = apTrFilterOv(), sh = document.getElementById('apTrFiltSheet');
   var h = '<div class="dsh-hd"><b>Approved trades</b><button type="button" class="dsh-close" onclick="apTrFilterClose()" aria-label="Close">×</button></div>';
   APTR_FILTERS.forEach(function(f){
-    var on = APTR.filter === f.key, n = APTR.rows.filter(f.test).length;
+    /* cc#2049: a `nav` entry (Closed) has no `test` predicate -- APTR.rows is this component's
+       own OPEN book only, so there is nothing here to count or highlight as active. Guard both
+       before they'd otherwise throw on f.test being undefined. */
+    var on = !f.nav && APTR.filter === f.key;
+    var n = f.nav ? null : APTR.rows.filter(f.test).length;
     h += '<button type="button" class="apf-opt' + (on ? ' on' : '') + '" onclick="apTrFilterPick(\'' + f.key + '\')">'
-      + '<span class="tick">' + (on ? '✓' : '') + '</span>' + esc(f.label) + '<span class="sub">' + n + '</span></button>';
+      + '<span class="tick">' + (on ? '✓' : '') + '</span>' + esc(f.label) + '<span class="sub">' + (n == null ? '—' : n) + '</span></button>';
   });
   h += '<div class="apf-note">One at a time. Tap the active option again to show all ' + APTR.rows.length + '.</div>';
   sh.innerHTML = h;
   ov.classList.add('open');
 }
 function apTrFilterPick(key){
+  var f = null;
+  for (var i = 0; i < APTR_FILTERS.length; i++){ if (APTR_FILTERS[i].key === key) f = APTR_FILTERS[i]; }
+  if (f && f.nav){
+    /* cc#2049: Closed is a navigation, not a local filter -- leave APTR.filter/apTrRender()
+       untouched and send the founder to the page that actually has closed-trade data. */
+    apTrFilterClose();
+    window.location.href = f.nav;
+    return;
+  }
   APTR.filter = (APTR.filter === key) ? null : key;   /* tap the active one again => All */
   apTrFilterClose();
   apTrRender();

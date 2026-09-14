@@ -557,6 +557,21 @@ function checkNewHash(){
 }
 checkNewHash();
 window.addEventListener('hashchange', checkNewHash);
+/* cc#2049: Home's EXPERT CURATED filter sheet's new Closed option navigates here with #closed
+   rather than filtering in place (no closed-trade data exists in that component to filter --
+   see mobile/home.html's own APTR_FILTERS). Same same-document-hash-change reasoning as
+   checkNewHash() above: preselect the Closed tab, then clear the hash so it doesn't linger in
+   the URL bar or get re-applied on a later hashchange. No busy-guard needed here -- unlike
+   checkNewHash()'s setTimeout(...,0) continuation, this runs fully synchronously so it can't
+   re-enter itself. */
+function checkClosedHash(){
+  if (location.hash !== '#closed') return;
+  location.hash = '';
+  IA.tab = 'closed'; IA.cat = 'all';
+  renderFilters(); renderList();
+}
+checkClosedHash();
+window.addEventListener('hashchange', checkClosedHash);
 </script>
 </body>
 </html>
