@@ -166,8 +166,14 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
 -->
 <div class="screen">
 
+  <!-- cc#2054: cross-links to Home's EXPERT CURATED carousel, same approved-trade rows via a
+       different endpoint/renderer (GET /api/alerts/ideas here vs GET /api/mobile/home/approved-
+       trades there, confirmed this session). Reuses .ia-tags/.ia-tag mu verbatim (the same pill
+       family the idea cards below already use for style/instrument) rather than a new pattern —
+       placed inside .ia-h1, under the existing subtitle, so it never crowds it. Static text on
+       purpose, per the card's own scope item 3 default — not tap-to-navigate. -->
   <div class="ia-top">
-    <div class="ia-h1">Trade Alerts<small>Curated · Equity &amp; Futures</small></div>
+    <div class="ia-h1">Trade Alerts<small>Curated · Equity &amp; Futures</small><div class="ia-tags"><span class="ia-tag mu">Expert Curated</span></div></div>
   </div>
 
   <div class="body">

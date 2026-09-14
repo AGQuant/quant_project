@@ -3575,7 +3575,12 @@ function apTrCardHtml(p){
     + '</div>';
 }
 function apTrShellHtml(){
-  return '<div class="approved-slider"><div class="ap-hdr"><span class="eye">EXPERT CURATED</span><div class="rule"></div><span class="cnt" id="apTrCount"></span>'   /* cc#1964 (founder 10-Sep): display string only — was APPROVED TRADES; every id, class, function, key and route keeps its approved* name */
+  return '<div class="approved-slider"><div class="ap-hdr"><span class="eye">EXPERT CURATED</span><span class="ap-tag">Trade Alerts</span><div class="rule"></div><span class="cnt" id="apTrCount"></span>'   /* cc#1964 (founder 10-Sep): display string only — was APPROVED TRADES; every id, class, function, key and route keeps its approved* name */
+  /* cc#2054: the .ap-tag beside EXPERT CURATED cross-links to /m/alerts's Trade Alerts page, which
+     shows the SAME approved-trade rows via a different endpoint/renderer (confirmed this session,
+     GET /api/mobile/home/approved-trades here vs GET /api/alerts/ideas there, same underlying
+     rows). Bare .ap-tag (not .b/.s) — this is a neutral cross-reference label, not a side badge.
+     Static text on purpose, per the card's own scope item 3 default — not tap-to-navigate. */
     + '<button type="button" class="filt" id="apTrFilt" title="Filter" onclick="apTrFilterOpen()">' + APTR_FUNNEL + '</button></div>'   /* cc#1957 */
     + '<div class="ap-empty" id="apTrBody">Loading…</div></div>';
 }
