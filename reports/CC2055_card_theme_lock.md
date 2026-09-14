@@ -52,8 +52,9 @@ never an explicit override — `_detectTheme()` itself was answering the wrong q
 override mechanism here would not have touched that bug at all, and cc#2052's own fix (swapping
 the check order) would not have prevented a *future* caller from reintroducing cc#2047's bug by
 simply passing `opts.theme` again. Confirmed empirically, not just argued: this card's own
-regression suite re-ran cc#2052's full real-injection test matrix against the now-locked file and
-it still passes 43/43 — the two fixes are consistent and additive, neither re-opens the other.
+regression suite re-ran cc#2052's full real-injection test matrix (42 scored checks) against the
+now-locked file and it still passes clean — the two fixes are consistent and additive, neither
+re-opens the other.
 
 ## Canonical rule, stated as asked
 
@@ -67,7 +68,7 @@ adds a per-caller switch.*
 ## Verify
 
 `node --check` clean on all four `.js` files touched; `ast.parse` clean on `pwa_endpoints.py`.
-Real headless Chromium, the real (now-locked) `scorr_chart_card.js` — **13/13 checks pass**:
+Real headless Chromium, the real (now-locked) `scorr_chart_card.js` — **12/12 checks pass**:
 
 - `opts.theme:'dark'` passed on a genuinely light page (`aquawhite`) is ignored — chart still
   paints light; the reverse (`opts.theme:'light'` on a dark page) is equally ignored — chart still
@@ -75,8 +76,8 @@ Real headless Chromium, the real (now-locked) `scorr_chart_card.js` — **13/13 
 - Normal auto-detection (no `opts.theme` at all, including GVM's own real `{gvm:true}` call shape)
   is completely unaffected — zero warnings, correct paint on both a light and a dark theme.
 - A repo-wide grep re-confirms zero live callers currently pass a `theme` key anywhere.
-- cc#2052's own 42-check real-injection regression suite re-run against this same file: still
-  **all pass** — the two fixes are consistent, neither reopens the other.
+- cc#2052's own real-injection regression suite (42 scored checks) re-run against this same file:
+  still **all pass** — the two fixes are consistent, neither reopens the other.
 
 One unrelated, pre-existing gap was found and deliberately **not** fixed here (out of scope for a
 theme-lock card): `_ensureLib()`'s script-tag-reuse path only re-listens for `'load'` on a second
