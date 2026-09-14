@@ -344,6 +344,28 @@ body{background:var(--field-night);font-family:'Space Grotesk',sans-serif;color:
 .vfmore{width:100%;min-height:40px;margin-top:var(--space-8);font-family:'JetBrains Mono';font-size:var(--type-10);
  font-weight:700;letter-spacing:var(--track-em9);color:var(--chalk);background:var(--hi);
  border:var(--bw-1) solid var(--edge);border-radius:var(--radius-7);cursor:pointer}
+/* cc#2068 · Custom Screen Builder picker rows. .vfchips/.vfchip (flex, flex:1 per child, above) is
+   right for 2-4 SHORT equal options (KIND/DIRECTION/TRIGGER, the ticks filter) but wrong here --
+   Buildup alone has 5 options with long labels ("Short Covering", "Long Unwinding") that would
+   truncate forced into equal-width flex slots. Web's own .csbchip (v8_dashboard.html, cc#1822)
+   wraps instead of flexing for the exact same reason -- same layout choice ported, this page's
+   own colour tokens (matches .vfchip/.vfchip.on's border/colour treatment, not a new palette). */
+.csb .lb{font-family:'JetBrains Mono';font-size:var(--type-9);letter-spacing:var(--track-em12);color:var(--muted);margin:var(--space-10) 0 var(--space-6)}
+.csb .lb:first-child{margin-top:0}
+.csbrow{margin-bottom:var(--space-4)}
+.csbchip{font-family:'JetBrains Mono';font-size:var(--type-95);font-weight:700;padding:var(--space-4) var(--space-9);
+ border-radius:var(--radius-5);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--muted);
+ cursor:pointer;margin:0 var(--space-5) var(--space-5) 0;display:inline-block}
+.csbchip.on{border-color:var(--aqua);color:var(--aqua)}
+/* column widths, proportional not device-measured (unlike .b6tbl/.qbtbl/.vftbl above, stated
+   honestly rather than implying a Chromium measurement that was not done) -- SYMBOL/CMP mirror
+   .b6tbl's own split since the CMP cell is the identical shape (price + embedded day% span); the
+   remaining numeric columns split the rest evenly, 5-way without WK or 6-way with it. */
+.butbl.csbtbl th:nth-child(1),.butbl.csbtbl td:nth-child(1){width:19%}
+.butbl.csbtbl th:nth-child(2),.butbl.csbtbl td:nth-child(2){width:23%}
+.butbl.csbtbl th:nth-child(n+3),.butbl.csbtbl td:nth-child(n+3){width:11.6%}
+.butbl.csbtbl.wk th:nth-child(n+3),.butbl.csbtbl.wk td:nth-child(n+3){width:9.67%}
+.csbtbl .cmpct{font-size:var(--type-10)}
 .vfveil{position:fixed;inset:0;background:var(--veil);z-index:80}
 .vfsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;z-index:81;
  background:var(--panel);border-top:var(--bw-1) solid var(--edge);border-radius:var(--radius-18) var(--radius-18) 0 0}
@@ -1437,6 +1459,211 @@ function qLabel(i){
 function qWrap(){ dkWrap('qtrack'); qLabel(dkDots('qtrack')); }
 function qPark(){ dkPark('qtrack'); qLabel(dkDots('qtrack')); }
 
+/* ══ cc#2068 · CUSTOM SCREEN BUILDER, ported from v8_dashboard.html (CUSTOM_SCREEN_BUILDER_V1,
+   cc#1822, session_log 40520) ══════════════════════════════════════════════════════════════════
+   ADDITIVE ONLY on this page too — Buildup and Orderflow read D.build/VF.data, the SAME payload
+   objects the Futures Buildup and Volume Flow decks above already fetch; Basis and Vol R bands
+   read fields already inside D.build's own rows (basis_pct, rvol). No new fetch for any of the
+   four pickers. Combining rule, confirmed against web's csbPool() directly (not from memory): AND
+   across every picker that is SET — Any / no band picked on a picker never narrows anything.
+
+   TC /100 COLUMN — SCOPE DECISION (cc#2068 item 4), option (b) taken: NOT built in this pass.
+   Web's TC column needs its own fetch (loadTc() -> /api/v10/tc_screen -> tc_universe_ticks) this
+   page does not otherwise make — every other column here is genuinely free (already-loaded data),
+   and adding the one column that costs a real new network call would break the "no new fetch"
+   property the rest of this port keeps. Named here as a known, deliberate gap vs web, flagged for
+   a follow-up card if it is confirmed worth the extra fetch.
+
+   Class names reuse this page's OWN idiom (.csbchip wrapping row, new above, not web's .csbrow/
+   .csbchip verbatim; .butbl for the table) rather than web's dialect. Guide text is web's csbGuide()
+   verbatim, minus the TC paragraph (not built) and with one honesty line added naming the gap. */
+var CSB = { build: null, flow: null, basis: {}, volr: {}, sort: { key: null, dir: 1 } };
+/* cc#2068: OWN key, deliberately NOT web's 'scorr_csb_filters' — collision-safe (never the raw
+   string a differently-scoped page might also write), same persistence pattern/shape as web. */
+var CSB_STORE_KEY = 'scorr_csb_filters_v10';
+function csbSave(){
+  try{
+    localStorage.setItem(CSB_STORE_KEY, JSON.stringify({
+      build: CSB.build, flow: CSB.flow, basis: CSB.basis, volr: CSB.volr,
+    }));
+  }catch(e){ /* private mode / quota — picker still works in-memory, just not persisted */ }
+}
+function csbRestore(){
+  var raw;
+  try{ raw = localStorage.getItem(CSB_STORE_KEY); }catch(e){ return; }
+  if(!raw) return;
+  var saved;
+  try{ saved = JSON.parse(raw); }catch(e){ return; }
+  if(!saved || typeof saved !== 'object') return;
+  var buildKeys = [null].concat(BU_STATES.map(function(s){ return s.k; }));
+  if(buildKeys.indexOf(saved.build) !== -1) CSB.build = saved.build;
+  if(saved.flow === 'BULLISH' || saved.flow === 'BEARISH') CSB.flow = saved.flow;
+  if(saved.basis && typeof saved.basis === 'object'){
+    CSB_BASIS_BANDS.forEach(function(b){ if(saved.basis[b.k]) CSB.basis[b.k] = true; });
+  }
+  if(saved.volr && typeof saved.volr === 'object'){
+    CSB_VOLR_BANDS.forEach(function(b){ if(saved.volr[b.k]) CSB.volr[b.k] = true; });
+  }
+}
+var CSB_BASIS_BANDS = [
+  { k: 'p1',  label: '0 to 1%',    test: function(v){ return v > 0 && v <= 1; } },
+  { k: 'p1p', label: '1%+',        test: function(v){ return v > 1; } },
+  { k: 'n1',  label: '0 to -1%',   test: function(v){ return v < 0 && v >= -1; } },
+  { k: 'n1p', label: 'Beyond -1%', test: function(v){ return v < -1; } },
+];
+/* cc#1822 scope 5 (web): Fable's proposal, ported verbatim — NOT LOCKED, flagged in the picker
+   row label + the guide sheet below, same as web. */
+var CSB_VOLR_BANDS = [
+  { k: 'lt1',   label: 'Below 1.0x', test: function(v){ return v < 1.0; } },
+  { k: 'b1015', label: '1.0-1.5x',   test: function(v){ return v >= 1.0 && v < 1.5; } },
+  { k: 'b1520', label: '1.5-2.0x',   test: function(v){ return v >= 1.5 && v < 2.0; } },
+  { k: 'gt2',   label: '2.0x+',      test: function(v){ return v >= 2.0; } },
+];
+function csbBackbone(){
+  /* the SAME de-dupe buPool() already does above — long_buildup/short_buildup overlap. */
+  var bd = D.build || {}, seen = {}, out = {};
+  (bd.long_buildup || []).concat(bd.short_buildup || []).forEach(function(r){
+    if (r && r.symbol && !seen[r.symbol]) { seen[r.symbol] = 1; out[r.symbol] = r; }
+  });
+  return out;
+}
+function csbPool(){
+  var bb = csbBackbone();
+  var vf = VF.data || {};
+  var bullRow = {}, bearRow = {};
+  (vf.bullish || []).forEach(function(r){ bullRow[r.symbol] = r; });
+  (vf.bearish || []).forEach(function(r){ bearRow[r.symbol] = r; });
+  var basisOn = Object.keys(CSB.basis).some(function(k){ return CSB.basis[k]; });
+  var volrOn = Object.keys(CSB.volr).some(function(k){ return CSB.volr[k]; });
+  var rows = [];
+  Object.keys(bb).sort().forEach(function(sym){
+    var r = bb[sym];
+    var state = r.signal;
+    var flow = bullRow[sym] ? 'BULLISH' : (bearRow[sym] ? 'BEARISH' : null);   // null = ABSENT, never guessed
+    var basisPct = (r.basis_pct == null) ? null : Number(r.basis_pct);
+    var volR = (r.rvol == null) ? null : Number(r.rvol);
+
+    if (CSB.build && state !== CSB.build) return;
+    if (CSB.flow && flow !== CSB.flow) return;
+    if (basisOn){
+      if (basisPct == null) return;   // ABSENT cannot satisfy a band it has no value for
+      if (!CSB_BASIS_BANDS.some(function(b){ return CSB.basis[b.k] && b.test(basisPct); })) return;
+    }
+    if (volrOn){
+      if (volR == null) return;
+      if (!CSB_VOLR_BANDS.some(function(b){ return CSB.volr[b.k] && b.test(volR); })) return;
+    }
+    var fRow = flow === 'BULLISH' ? bullRow[sym] : (flow === 'BEARISH' ? bearRow[sym] : null);
+    rows.push({
+      symbol: sym, cmp: r.price, day_pct: r.day_1d, oi_pct: r.oi_chg_pct,
+      basis_pct: basisPct, vol_r: volR, vol_p: r.vol_p, vol_d: r.vol_d,
+      week_pct: fRow ? fRow.week_chg_pct : null,
+    });
+  });
+  return rows;
+}
+var CSB_SORT_GETTERS = {
+  SYMBOL: function(r){ return r.symbol; },
+  CMP:    function(r){ return r.day_pct; },
+  OI:     function(r){ return r.oi_pct; },
+  BASIS:  function(r){ return r.basis_pct; },
+  VOLR:   function(r){ return r.vol_r; },
+  VOLP:   function(r){ return r.vol_p; },
+  VOLD:   function(r){ return r.vol_d; },
+  WK:     function(r){ return r.week_pct; },
+};
+var CSB_SORT_DEFAULT_DIR = { SYMBOL: 1, CMP: -1, OI: -1, BASIS: -1, VOLR: -1, VOLP: -1, VOLD: -1, WK: -1 };
+function csbSort(key){
+  if (CSB.sort.key === key) CSB.sort.dir = -CSB.sort.dir;
+  else { CSB.sort.key = key; CSB.sort.dir = CSB_SORT_DEFAULT_DIR[key]; }
+  csbRepaint();
+}
+function csbSetBuild(k){ CSB.build = k; csbSave(); csbRepaint(); }
+function csbSetFlow(k){ CSB.flow = k; csbSave(); csbRepaint(); }
+function csbToggleBasis(k){ CSB.basis[k] = !CSB.basis[k]; csbSave(); csbRepaint(); }
+function csbToggleVolr(k){ CSB.volr[k] = !CSB.volr[k]; csbSave(); csbRepaint(); }
+function csbChip(label, on, click){
+  return '<button type="button" class="csbchip' + (on ? ' on' : '') + '" onclick="' + click + '">' + esc(label) + '</button>';
+}
+function csbBuildChips(){
+  var opts = [{ k: null, label: 'Any' }].concat(BU_STATES.map(function(s){ return { k: s.k, label: s.h }; }));
+  return opts.map(function(o){
+    return csbChip(o.label, CSB.build === o.k, "csbSetBuild(" + (o.k ? "'" + o.k + "'" : 'null') + ")");
+  }).join('');
+}
+function csbFlowChips(){
+  var opts = [{ k: null, label: 'Any' }, { k: 'BULLISH', label: 'Bullish' }, { k: 'BEARISH', label: 'Bearish' }];
+  return opts.map(function(o){
+    return csbChip(o.label, CSB.flow === o.k, "csbSetFlow(" + (o.k ? "'" + o.k + "'" : 'null') + ")");
+  }).join('');
+}
+function csbBandChips(bands, state, handlerName){
+  return bands.map(function(b){
+    return csbChip(b.label, !!state[b.k], handlerName + "('" + b.k + "')");
+  }).join('');
+}
+function csbTh(label, key){
+  return _sortTh(label, key, CSB.sort, "csbSort('" + key + "')");
+}
+function csbTable(rows){
+  var showWk = !!CSB.flow;
+  var head = csbTh('SYMBOL', 'SYMBOL') + csbTh('CMP', 'CMP') + csbTh('OI Δ%', 'OI')
+    + csbTh('BASIS', 'BASIS') + csbTh('Vol R', 'VOLR') + csbTh('Vol P', 'VOLP') + csbTh('Vol D', 'VOLD')
+    + (showWk ? csbTh('WK', 'WK') : '');
+  var body = rows.map(function(r){
+    var d = r.day_pct;
+    var dtxt = d == null ? '' : ' <span class="cmpct ' + (d > 0 ? 'up' : d < 0 ? 'dn' : '') + '">' + Number(d).toFixed(2) + '%</span>';
+    return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
+      + '<td>' + (r.cmp != null ? String(Math.round(Number(r.cmp))) : '—') + dtxt + '</td>'
+      + buNum(r.oi_pct, 2, '%', true)
+      + buNum(r.basis_pct, 2, '%', true)
+      + (r.vol_r == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_r).toFixed(1) + '×</td>')
+      + (r.vol_p == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
+      + (r.vol_d == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>')
+      + (showWk ? buNum(r.week_pct, 2, '%', true) : '')
+      + '</tr>';
+  }).join('');
+  return '<table class="butbl csbtbl' + (showWk ? ' wk' : '') + '"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>';
+}
+function csbGuide(){
+  vfSheet('<div class="vfsh">How to read Custom Screen Builder</div><div class="vfg">'
+    + '<p><b>The idea.</b> Pick from four filters. The table shows only stocks that match every filter you set. Leave a filter on Any, or pick no band, and it does not narrow anything.</p>'
+    + '<p><b>Buildup.</b> The same four states as the Futures Buildup cards above.</p>'
+    + '<p><b>Orderflow.</b> The same Bullish / Bearish definition as the Volume Flow cards above — 60%+ of recent volume on one side, day and week move both agreeing. A stock not on either list there will not match Bullish or Bearish here either.</p>'
+    + '<p><b>Basis band.</b> The futures price minus the spot price, as a percent of the spot price. Positive means futures cost more than the stock. 0 to 1% and 1%+ are the two positive bands; 0 to -1% and beyond -1% mirror them on the negative side.</p>'
+    + '<p><b>Volume R band.</b> Today\'s volume pace vs the normal pace at this time of day. These four breakpoints are a first guess — below 1.0x, 1.0-1.5x, 1.5-2.0x, 2.0x+ — not locked yet, and may change once seen against real data.</p>'
+    + '<p><b>A dash (—).</b> That stock has no number for that column right now. It is never a guess and never a zero standing in for missing data — and it is not the same as failing a filter.</p>'
+    + '<p><b>Honesty.</b> Every number here is read straight from the Futures Buildup and Volume Flow cards above — nothing is recomputed differently for this table. This app view does not yet carry the TC /100 column the web version has; it needs its own fetch and is a named follow-up, not a silent drop.</p>'
+    + '</div>');
+}
+function csbSection(){
+  var bbCount = Object.keys(csbBackbone()).length;
+  var rows = _sortByState(csbPool(), CSB.sort, CSB_SORT_GETTERS);
+  var st = scorrAsofStamp(D.build && D.build.as_of);
+  /* universe read LIVE off VF.data (volume_flow's own registry query) — never a hardcoded count.
+     Falls back to this card's own backbone count only until VF.data has loaded. */
+  var universe = (VF.data && VF.data.universe) || bbCount;
+  var body = !rows.length
+    ? ('<div class="unavail">' + (D.build ? 'No symbol matches this combination right now. Try Any on one picker, or a wider band.' : 'Loading…') + '</div>')
+    : csbTable(rows);
+  return '<div class="card">'
+    + '<div class="vfhd"><h3>Custom Screen Builder</h3><span class="busub">' + rows.length + ' MATCH</span><span class="sp"></span>'
+    + '<button type="button" class="vfib" onclick="csbGuide()" aria-label="How to read this card">i</button></div>'
+    + '<div class="csb">'
+    + '<div class="lb">BUILDUP</div><div class="csbrow">' + csbBuildChips() + '</div>'
+    + '<div class="lb">ORDERFLOW</div><div class="csbrow">' + csbFlowChips() + '</div>'
+    + '<div class="lb">BASIS BAND</div><div class="csbrow">' + csbBandChips(CSB_BASIS_BANDS, CSB.basis, 'csbToggleBasis') + '</div>'
+    + '<div class="lb">VOLUME R BAND (first guess)</div><div class="csbrow">' + csbBandChips(CSB_VOLR_BANDS, CSB.volr, 'csbToggleVolr') + '</div>'
+    + '</div>'
+    + body
+    + (st.txt ? '<div class="vfasof' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + bbCount + ' of ' + universe + ' scanned</div>' : '')
+    + '</div>';
+}
+function csbRepaint(){
+  var el = document.getElementById('csbwrap');
+  if (el) el.innerHTML = csbSection();
+}
+
 /* cc#1393: THE RECORD's whole rc-function family (RC_SEGS/RC_SEG/RC_PER/RC_PAGES state, rcLeg/
    rcMatch/rcList/rcStat/rcMoney/rcBig/rcPrice/rcDay/rcNote/rcChips/rcBox/rcStrip/rcRow/rcDeck/
    rcPick/rcLabel and the ctrack wrappers cWrap/cPark) and THE BOOK · V10's book-function family
@@ -1666,6 +1893,7 @@ function vfPaint(){
   }
   var ch = document.getElementById('vfchiprow');
   if (ch) ch.innerHTML = vfChips();
+  csbRepaint();   /* cc#2068: Orderflow reads VF.data too — repaint CSB the same moment Flow does */
 }
 function fLabel(i){
   var el = document.getElementById('fpg');
@@ -1799,7 +2027,14 @@ function render(){
   ${flowDeck()}
 
   <div class="eyebrow">QUALITY BULLISH · FLOW + BASIS</div>
-  ${qbbDeck()}`;
+  ${qbbDeck()}
+
+  <div class="eyebrow">CUSTOM SCREEN BUILDER</div>
+  <div id="csbwrap">${csbSection()}</div>`;
+  /* cc#2068: Custom Screen Builder is the LAST section on the page, per the founder's explicit
+     placement instruction — added directly after Quality Bullish · Flow + Basis, which was last
+     before this card. #csbwrap lets csbRepaint() update just this section on a picker/sort tap,
+     the same in-place-repaint pattern #utrack/#qtrack/#ftrack already use for their own decks. */
   /* cc#1458 (corrected scope): THREE separate decks, SECTION ORDER Buildup -> Volume Flow ->
      Quality Bullish/Basis per the founder's actual ask. Each deck template renders from current
      state, so a 5-minute rebuild never blanks a page while a fetch is out; the parks below
@@ -1949,7 +2184,7 @@ function iicSubmit(){
     .catch(function(e){ f.err = e.message; iicSheet(); });
 }
 
-async function boot(){ await loadAll(); render(); vPark(); uPark(); fPark(); qPark(); vfLoad(); iicLoad(); }   /* cc#1526: + approved-map paint */   /* cc#1458 correction: three separate decks stand — all four tracks park */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
+async function boot(){ await loadAll(); csbRestore(); render(); vPark(); uPark(); fPark(); qPark(); vfLoad(); iicLoad(); }   /* cc#2068: restore CSB picker selections before the first render */   /* cc#1526: + approved-map paint */   /* cc#1458 correction: three separate decks stand — all four tracks park */   /* cc#1242: park on the middle set before the deck is ever seen, so the first swipe left wraps instead of hitting a wall. cc#1368: VOLUME FLOW paints its placeholder with render() above, vfLoad() fills it after — the same sequencing LIVE NEWS had before it moved to the Daily Digest. cc#1393: bPark()/cPark() are gone with btrack/ctrack. */
 boot();
 setInterval(async()=>{ const d=IST(),m=d.getHours()*60+d.getMinutes();
   if(d.getDay()>=1&&d.getDay()<=5&&m>=555&&m<=935){ await loadAll(); render(); vfLoad(); } },300000);
