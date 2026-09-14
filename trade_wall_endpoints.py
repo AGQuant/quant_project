@@ -556,7 +556,7 @@ assert chr(37) not in _EVENTS_SQL, (
     "chr(37) instead, and keep it out of SQL comments too — the scanner does not skip them.")
 
 
-def _fetch(cur, limit, cur_ts, cur_sk, instrument, status, wall_sql):
+def _fetch(cur, limit, cur_ts, cur_sk, instrument, status, engine, wall_sql):
     """One page of the wall, newest first, keyset-paged. Returns limit+1 rows when more exist."""
     where, args = [], []
     if instrument:
@@ -565,6 +565,9 @@ def _fetch(cur, limit, cur_ts, cur_sk, instrument, status, wall_sql):
     if status:
         where.append("status = %s")
         args.append(status)
+    if engine:   # cc#2059: same shape as instrument/status above -- server-side, not a client filter
+        where.append("engine = %s")
+        args.append(engine)
     if cur_ts is not None:
         # Written as two comparisons rather than a row constructor so it cannot trip on the
         # column's exact timestamp type — the same shape cc#983 used on the intel feed.
@@ -679,7 +682,7 @@ _SUPPRESSED_WHERE = ("AND EXISTS (SELECT 1 FROM trade_alerts a LEFT JOIN trade_a
 
 @router.get("/api/tradewall")
 @_json_safe
-def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: str = "", status: str = "open"):
+def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: str = "", status: str = "open", engine: str = ""):
     """Every position, newest first, keyset-paged (cc#983 pattern, reused not rebuilt).
 
     cc#1295: `status` (open/closed, default open) is now the primary split — see the union's own
@@ -705,6 +708,14 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
     elif st not in STATUSES:
         return {"error": "unknown status", "known": list(STATUSES), "events": [], "has_more": False}
 
+    # cc#2059: engine has no fixed enum (it's read live off the wall itself, by_engine below) --
+    # unlike instrument/status there is nothing to validate against, and a hardcoded allowlist here
+    # is exactly the staleness risk cc#1587's own buckets-read-per-request comment above already
+    # avoids for a different field. An unmatched value legitimately returns zero rows, not an error.
+    eng = (engine or "").strip()
+    if not eng:
+        eng = None
+
     cur_ts = cur_sk = None
     if cursor:
         try:
@@ -722,7 +733,7 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
         # cc#1732: equity epoch + QB narrowing ride the same composition point (see _wall_sql).
         equity_epoch, epoch_missing = wot_equity_epoch(cur)
         wall_sql = _wall_sql(buckets, equity_epoch=equity_epoch)
-        rows = _fetch(cur, limit, cur_ts, cur_sk, inst, st, wall_sql)
+        rows = _fetch(cur, limit, cur_ts, cur_sk, inst, st, eng, wall_sql)
         has_more = len(rows) > limit
         rows = rows[:limit]
         counts = {}
@@ -1080,9 +1091,9 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
 
 @router.get("/api/mobile/tradewall")
 @_json_safe
-def tradewall_mobile_alias(request: Request, limit: int = 40, cursor: str = "", instrument: str = "", status: str = "open"):
+def tradewall_mobile_alias(request: Request, limit: int = 40, cursor: str = "", instrument: str = "", status: str = "open", engine: str = ""):
     """Alias kept because the card named this path. Same function, one computation."""
-    return tradewall(request, limit=limit, cursor=cursor, instrument=instrument, status=status)
+    return tradewall(request, limit=limit, cursor=cursor, instrument=instrument, status=status, engine=engine)
 
 
 # ── OTHER WALL ENGINES (i-button) ────────────────────────────────────────────────────────────
