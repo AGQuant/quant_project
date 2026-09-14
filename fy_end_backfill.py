@@ -97,21 +97,14 @@ def _json(d):
 
 
 def _universe(cur) -> List[str]:
-    """Scrape universe V2 (cc#701): top-750 NSE by market_cap UNION any sector_ops_metrics member (cc#814)."""
-    cur.execute("""
-        WITH ranked AS (
-            SELECT UPPER(nse_code) AS code
-            FROM screener_raw
-            WHERE nse_code IS NOT NULL AND nse_code <> '' AND nse_code !~ '^[0-9]+$'
-              AND market_cap IS NOT NULL
-            ORDER BY market_cap DESC NULLS LAST
-            LIMIT 500)
-        SELECT code FROM ranked
-        UNION
-        SELECT DISTINCT UPPER(symbol) FROM sector_ops_metrics
-        ORDER BY code
-    """)
-    return [r[0] for r in cur.fetchall()]
+    """cc#2091 (14-Sep-2026): delegates to scrape_universe.universe_symbols(), the ONE canonical
+    definition (clean top-750 by market_cap, no sector_ops_metrics union — cc#701's inclusive
+    union was dropped by founder ruling). This function used to hand-roll its own copy of the
+    ranking AND had drifted to the pre-cc#814 LIMIT 500 cutoff (should have been 750) — found
+    while unifying the universe definition across every table/script that claims to track it;
+    fixed to import rather than re-derive, so it can never drift again."""
+    from scrape_universe import universe_symbols
+    return sorted(universe_symbols(cur))
 
 
 def _already_done(cur, symbol: str) -> bool:

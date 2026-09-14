@@ -2281,8 +2281,11 @@ def _ops_season_mode(today=None):
 
 def _bg_ops_metrics_coverage():
     """cc#773 + cc#774 DENOMINATOR FIX: nightly DUAL coverage counter, measured against the SCRAPE
-    UNIVERSE ONLY (top-750 NSE non-numeric by mcap UNION sector_ops_metrics symbols;
-    SCRAPE_UNIVERSE_TOP500_NSE_V1 id=9178 + HARD_BOUNDARY id=10260), 21-day window.
+    UNIVERSE ONLY (top-750 NSE non-numeric by mcap; SCRAPE_UNIVERSE_TOP500_NSE_V1 id=9178 +
+    HARD_BOUNDARY id=10260). cc#2091 (14-Sep-2026, founder-ruled) dropped the sector_ops_metrics
+    UNION from the shared definition this imports (scrape_universe.UNIVERSE_CTE) — clean top-750
+    now, not top-750-union-sector_ops_metrics (~830) — this comment only, the import already
+    inherits the new behavior automatically. 21-day window.
 
     cc#774: the cc#773 version measured against ALL of screener_raw (~1801), so it read ~50% coverage
     and would have fired a false <80% alert every night. Out-of-universe reporters are NOT a gap — the
