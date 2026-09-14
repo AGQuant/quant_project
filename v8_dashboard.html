@@ -9862,10 +9862,16 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // applied HERE, first, so the table, the capsules and closedKpis() all read the SAME filtered
   // set — a filtered table beside an unfiltered KPI would be the exact ambiguity cc#1809 already
   // ruled out for the Open Book (same principle, this book).
-  function closedTable(rows, dateStr, lastClosure){
+  // cc#2073: `range` is the endpoint's OWN closed_range ({from,to}) — the range it actually
+  // queried, not a UI-only guess — so the two date inputs and the badge always agree with the
+  // rows on screen. from=null means unbounded lower (the default: every closure up to `to`).
+  function closedTable(rows, range, lastClosure){
+    range = range || {from:null, to:null};
     var fRows = _tc13ClosedSide==='ALL' ? rows : rows.filter(function(r){return r.side===_tc13ClosedSide;});
     var closed=fRows.filter(function(r){return r.exit_reason!=='OPEN';});
     var kpi=closedKpis(fRows);
+    var rangeBadge = range.from ? (esc(range.from)+' &rarr; '+esc(range.to||'')) : ('through '+esc(range.to||''));
+    var rangeDesc = range.from ? ('between '+esc(range.from)+' and '+esc(range.to||'')) : ('up to '+esc(range.to||'now'));
     var body=closed.length ? closed.map(function(r){
       return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
         +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
@@ -9876,17 +9882,19 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
         +'<td class="'+cl2(r.pnl_rs)+'" title="one lot ('+(r.lot_size!=null?r.lot_size:'no lot size')+') x price move, realised at exit">'+rsTxt(r.pnl_rs)+'</td>'
         +'<td>'+dShort(r.exit_ts)+'</td></tr>';
     }).join('') : '<tr class="empty-row"><td colspan="8">No closed '
-        +(_tc13ClosedSide!=='ALL'?(_tc13ClosedSide==='BUY'?'Long ':'Short '):'')+'TC Scanner positions on '+esc(dateStr||'this date')
+        +(_tc13ClosedSide!=='ALL'?(_tc13ClosedSide==='BUY'?'Long ':'Short '):'')+'TC Scanner positions '+rangeDesc
         +(lastClosure?' &middot; last closures: '+esc(lastClosure):'')+'</td></tr>';
     var realised=bookRs(closed);
     return '<section><div class="sh"><h2>Closed Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
       +'<span class="badge b-eng">TC SCANNER &middot; V2 SCORE100</span>'
       +'<span class="tc13-ibtn" tabindex="0" role="button" onclick="tc13InfoOpen()" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tc13InfoOpen();}" aria-label="How the TC13 scanner works" title="How the TC13 scanner works">i</span>'
-      +'<span class="badge b-eng">'+esc(dateStr||'')+'</span>'
+      +'<span class="badge b-eng">'+rangeBadge+'</span>'
       +'<div class="stats">'
-      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">Closed Book date</label>'
-      +'<input type="date" id="tc13Date" value="'+esc(dateStr||'')+'" title="Governs the Closed Book only — the Open Book is never date-filtered"></span>'
+      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">From</label>'
+      +'<input type="date" id="tc13From" value="'+esc(range.from||'')+'" title="Closed Book range start — blank means every closure up to the end date"></span>'
+      +'<span class="tc13-datepick"><label style="font-size:10.5px;color:var(--tx3)">To</label>'
+      +'<input type="date" id="tc13To" value="'+esc(range.to||'')+'" title="Closed Book range end — the Open Book is never date-filtered"></span>'
       +'<span>Closed <b>'+kpi.closed+'</b></span>'
       +_tc13SideTag('Long','BUY',_tc13ClosedSide,'setTc13ClosedSide')+_tc13SideTag('Short','SELL',_tc13ClosedSide,'setTc13ClosedSide')
       +'</div></div>'
@@ -9965,9 +9973,14 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     _tc13LastData=d;
     box.innerHTML='<div class="tc13-wrap">'
       +openTable(openRows, {hasOpenAll: hasOpenAll, asOf: d.as_of || d.date, realised: _tc13RealisedCache})
-      +closedTable(closedRows, d.date, d.last_closure_date)
+      // cc#2073: d.closed_range is the range the endpoint actually applied (server default = full
+      // history to date on first load, since load(null,null) sends no from_/to_ at all); the
+      // pre-cc#2073 fallback keeps a payload without the key readable during a deploy.
+      +closedTable(closedRows, d.closed_range || {from:null, to:d.date}, d.last_closure_date)
       +'</div>';
-    document.getElementById('tc13Date').addEventListener('change',function(e){load(e.target.value);});
+    var _tc13FromEl=document.getElementById('tc13From'), _tc13ToEl=document.getElementById('tc13To');
+    if(_tc13FromEl) _tc13FromEl.addEventListener('change',function(){load(this.value, _tc13ToEl?_tc13ToEl.value:'');});
+    if(_tc13ToEl) _tc13ToEl.addEventListener('change',function(){load(_tc13FromEl?_tc13FromEl.value:'', this.value);});
     try{ tc13MarkScroll(box); }catch(e){ console.warn('[tc13 scroll]', e && e.message); }
   }
 
@@ -9985,16 +9998,22 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     }, 150);
   }, {passive:true});
 
-  function load(dateStr){
+  // cc#2073: fromStr/toStr drive the Closed Book range (from_/to_ on the endpoint); both blank
+  // (the boot call) sends neither param, so the server applies its own default — full closed
+  // history to date. The Open Book (open_all) is never touched by these params.
+  function load(fromStr, toStr){
     var box=document.getElementById('tc13Box');
     if(box && !box.querySelector('.tc13-wrap'))box.innerHTML='<div class="tc13-empty">Loading TC13 holds…</div>';
-    var url='/api/scanners/tc/holds'+(dateStr?('?date_='+encodeURIComponent(dateStr)):'');
+    var qs=[];
+    if(fromStr) qs.push('from_='+encodeURIComponent(fromStr));
+    if(toStr) qs.push('to_='+encodeURIComponent(toStr));
+    var url='/api/scanners/tc/holds'+(qs.length?('?'+qs.join('&')):'');
     (window.fetchWithTimeout||fetch)(url).then(function(r){return r.json();})
       .then(function(d){render(d);})
       .catch(function(e){box.innerHTML='<div class="tc13-empty">Could not load TC13 holds — '+esc(e.message||e)+'</div>';});
   }
 
-  window.tc13Boot=function(){ if(_booted)return; _booted=true; load(null); };
+  window.tc13Boot=function(){ if(_booted)return; _booted=true; load(null,null); };
 
   // cc#1685: the info sheet. Facts come from /api/scanners/tc/spec (tc_scanner_endpoints.py's own
   // registry — cc#465's named constants, never a hand-typed number here) plus the CURRENTLY

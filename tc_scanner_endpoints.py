@@ -492,12 +492,24 @@ def tc_scanner_spec():
 
 # ── read endpoint ──────────────────────────────────────────────────────
 @router.get("/api/scanners/tc/holds")
-def tc_scanner_holds(date_: Optional[str] = None):
+def tc_scanner_holds(date_: Optional[str] = None, from_: Optional[str] = None, to_: Optional[str] = None):
     """BUY + SELL, open + closed, for the page's two-table view. WR% + net pts computed here."""
     with _conn() as conn, conn.cursor() as cur:
         ensure_schema(cur)
         conn.commit()
         d = date_ or str(date.today())
+        # cc#2073: the Closed Book (closed_by_exit below) reads a RANGE, not a single day. from_/to_
+        # take priority when given; a lone date_ collapses to a one-day range (old single-date
+        # behaviour, unchanged); no params at all = the full closed history to date (unbounded lower,
+        # to_ = today) so the tab's default view is "everything, till now" per the founder ask.
+        if from_ or to_:
+            range_to = to_ or str(date.today())
+            range_from = from_
+        elif date_:
+            range_from = range_to = date_
+        else:
+            range_from = None
+            range_to = str(date.today())
         cur.execute("""
             SELECT h.symbol, h.side, h.score, h.evaluated, h.entry_price, h.entry_ts,
                    h.target, h.sl, h.exit_price, h.exit_ts, h.exit_reason, c.cmp
@@ -570,13 +582,24 @@ def tc_scanner_holds(date_: Optional[str] = None):
     # Open Book history). The keys above stay exactly as they were (scan_date = entry day), so
     # the Open Book and every older reader are untouched; the tab reads the two new keys.
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("""
-            SELECT h.symbol, h.side, h.score, h.evaluated, h.entry_price, h.entry_ts,
-                   h.target, h.sl, h.exit_price, h.exit_ts, h.exit_reason, h.scan_date
-            FROM tc_scanner_holds h
-            WHERE h.exit_reason <> 'OPEN' AND h.exit_ts::date = %s
-            ORDER BY h.exit_ts DESC
-        """, (d,))
+        # cc#2073: BETWEEN when a lower bound is in effect, else an unbounded "up to to_" scan —
+        # both read the same exit_ts::date basis cc#1599 established, just widened from one day.
+        if range_from:
+            cur.execute("""
+                SELECT h.symbol, h.side, h.score, h.evaluated, h.entry_price, h.entry_ts,
+                       h.target, h.sl, h.exit_price, h.exit_ts, h.exit_reason, h.scan_date
+                FROM tc_scanner_holds h
+                WHERE h.exit_reason <> 'OPEN' AND h.exit_ts::date BETWEEN %s AND %s
+                ORDER BY h.exit_ts DESC
+            """, (range_from, range_to))
+        else:
+            cur.execute("""
+                SELECT h.symbol, h.side, h.score, h.evaluated, h.entry_price, h.entry_ts,
+                       h.target, h.sl, h.exit_price, h.exit_ts, h.exit_reason, h.scan_date
+                FROM tc_scanner_holds h
+                WHERE h.exit_reason <> 'OPEN' AND h.exit_ts::date <= %s
+                ORDER BY h.exit_ts DESC
+            """, (range_to,))
         ccols = [c[0] for c in cur.description]
         crows = [dict(zip(ccols, r)) for r in cur.fetchall()]
     by_exit = {"BUY": [], "SELL": []}
@@ -661,7 +684,8 @@ def tc_scanner_holds(date_: Optional[str] = None):
             # cc#1599: closed on this EXIT date, whatever day they were entered.
             "closed_by_exit": {"buy": by_exit.get("BUY", []), "sell": by_exit.get("SELL", [])},
             "closed_by_exit_stats": {"buy": _stats(by_exit.get("BUY", [])), "sell": _stats(by_exit.get("SELL", []))},
-            "closed_basis": "exit_ts::date = date (cc#1599); open book keyed on scan_date (entry)",
+            "closed_basis": "exit_ts::date BETWEEN closed_range.from AND closed_range.to (cc#2073, widens cc#1599's single-day match); unbounded from = every closure up to closed_range.to; open book keyed on scan_date (entry)",
+            "closed_range": {"from": range_from, "to": range_to},
             # cc#1744: the Open Book proper — every open hold as of now, no date predicate.
             "open_all": {"buy": open_all.get("BUY", []), "sell": open_all.get("SELL", [])},
             "open_all_count": n_open_all,
