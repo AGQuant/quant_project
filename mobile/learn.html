@@ -46,6 +46,55 @@
 .emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
 .note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
 .err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+/* cc#2050: Knowledge Galaxy banner + overlay, ported from scorr_news.html's Learn tab. This
+   starfield is deliberately NOT built from var(--field)/var(--panel)/etc: on the app those tokens
+   ARE redefined per theme (light on aquawhite/goldday/silvergold -- confirmed cc#2047), so the
+   overlay would break its own "stays dark regardless of theme" requirement if it used them. Plain
+   hex only, same as galaxy_map.js's own internal palette. */
+.kb-galaxy{position:relative;margin:0 var(--space-16) var(--space-12);border-radius:var(--radius-14);overflow:hidden;border:var(--bw-1) solid #1c2b52;cursor:pointer;background:#070b1a}
+.kb-galaxy canvas{display:block;width:100%;height:120px}
+.kb-galaxy .kb-galaxy-ov{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;padding:12px 14px;background:linear-gradient(180deg,rgba(7,11,26,0) 30%,rgba(7,11,26,.72))}
+.kb-galaxy .kb-galaxy-ttl{color:#e8eefc;font-size:13px;font-weight:800}
+.kb-galaxy .kb-galaxy-sub{color:#9fb0d6;font-size:11px;margin-top:1px}
+.kb-galaxy .kb-galaxy-btn{align-self:flex-start;margin-top:8px;padding:6px 12px;border-radius:16px;background:#2563eb;color:#fff;font-size:11.5px;font-weight:700;border:none;cursor:pointer}
+.galaxy-overlay{position:fixed;inset:0;z-index:1000;background:#070b1a;display:none}
+.galaxy-overlay.on{display:block}
+.galaxy-canvas{position:absolute;inset:0}
+.galaxy-topbar{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:linear-gradient(180deg,rgba(7,11,26,.94),rgba(7,11,26,0))}
+.galaxy-title{color:#e8eefc;font-size:13px;font-weight:800;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.galaxy-count{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:11px;background:rgba(37,99,235,.22);border:1px solid #2563eb;color:#60a5fa;font-size:10.5px;font-weight:700;vertical-align:middle}
+.galaxy-close{width:34px;height:34px;flex-shrink:0;border-radius:50%;border:1px solid #29406e;background:#0d1428;color:#e8eefc;font-size:18px;cursor:pointer;line-height:1}
+.galaxy-hint{position:absolute;left:0;right:0;bottom:calc(12px + env(safe-area-inset-bottom));text-align:center;color:#6d80ab;font-size:10.5px;pointer-events:none;z-index:2}
+.galaxy-article{position:absolute;left:0;right:0;bottom:0;height:86vh;z-index:4;background:#0d1428;border-top:1px solid #1c2b52;border-radius:18px 18px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.55);transform:translateY(104%);transition:transform .26s ease;display:flex;flex-direction:column}
+.galaxy-article.on{transform:translateY(0)}
+.ga-head{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid #16223f;flex-shrink:0}
+.ga-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:0}
+.ga-chips .gd-cat{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#9fb0d6}
+.ga-chips .gd-rt{color:#7f92bd;font-size:11px;font-weight:600}
+.ga-chips .gd-diff{font-size:10px;font-weight:800;padding:2px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em}
+.ga-chips .gd-diff.pro{background:rgba(251,191,36,.16);color:#fbbf24}
+.ga-chips .gd-diff.beg{background:rgba(52,211,153,.16);color:#34d399}
+.ga-x{width:32px;height:32px;flex-shrink:0;border-radius:50%;border:1px solid #29406e;background:#0d1428;color:#e8eefc;font-size:18px;cursor:pointer;line-height:1}
+.ga-grab{width:38px;height:4px;border-radius:2px;background:#29406e;margin:8px auto 0;flex-shrink:0}
+.ga-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 18px calc(28px + env(safe-area-inset-bottom))}
+.ga-title{color:#eef3ff;font-size:20px;font-weight:800;line-height:1.25;margin-bottom:8px}
+.ga-sum{color:#9fb0d6;font-size:14px;line-height:1.6;margin-bottom:16px}
+.ga-body{color:#d3ddf3;font-size:15px;line-height:1.75}
+.ga-body>:first-child{margin-top:0}
+.ga-body h1,.ga-body h2,.ga-body h3,.ga-body h4{color:#eef3ff;line-height:1.3;margin:20px 0 8px}
+.ga-body h1{font-size:21px}.ga-body h2{font-size:18px}.ga-body h3{font-size:16px}
+.ga-body p{margin:12px 0}
+.ga-body ul,.ga-body ol{margin:12px 0 12px 22px}.ga-body li{margin:6px 0}
+.ga-body strong{color:#eef3ff;font-weight:700}
+.ga-body a{color:#60a5fa;text-decoration:underline}
+.ga-body blockquote{border-left:3px solid #2b3d66;margin:14px 0;padding:2px 0 2px 14px;color:#9fb0d6}
+.ga-body code{background:#16223f;padding:1px 5px;border-radius:4px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+.ga-body pre{background:#0a1226;border:1px solid #16223f;padding:12px 14px;border-radius:8px;overflow-x:auto;margin:14px 0}
+.ga-body pre code{background:none;padding:0}
+.ga-body table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+.ga-body th,.ga-body td{border:1px solid #23345c;padding:7px 10px;text-align:left}
+.ga-body th{background:#16223f;color:#eef3ff}
+.ga-soon{color:#8095bd;font-style:italic}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -99,16 +148,134 @@ function artHtml(a){
 }
 function draw(){
   var rows = (D.articles || []).filter(function(a){ return CAT==='all' || a.category===CAT; });
-  var h = '<div class="chips" id="chips">'+chipsHtml()+'</div>';
+  var h = galaxyBannerHtml();
+  h += '<div class="chips" id="chips">'+chipsHtml()+'</div>';
   h += '<div class="sec"><h2>'+(CAT==='all'?'All articles':esc(CAT))+'</h2><span class="hint">'+rows.length+' · newest first</span></div>';
   h += rows.length ? '<div class="lst" id="lst">'+rows.map(artHtml).join('')+'</div>' : '<div class="emp"><b>Nothing here yet</b>No article in this category has been published.</div>';
   h += '<div class="note"><b>Knowledge Hub.</b> The same articles as the Learn tab on the web Intel page. Tap a card to read it in place.</div>';
   document.getElementById('asof').innerHTML = '<b>'+esc(D.total)+'</b> articles · '+Object.keys(D.category_counts||{}).length+' categories';
   document.getElementById('body').innerHTML = h;
+  drawGalaxyThumb();
   document.getElementById('chips').addEventListener('click', function(e){ var s=e.target.closest('[data-c]'); if(!s) return; CAT=s.getAttribute('data-c'); draw(); });
   var lst = document.getElementById('lst');
   if (lst) lst.addEventListener('click', function(e){ var c=e.target.closest('.art'); if(!c) return; openArt(c); });
 }
+/* cc#2050 — Knowledge Galaxy: banner + full-screen star map, ported from scorr_news.html's Learn
+   tab (Knowledge Hub = instance #1 of the shared, instance-agnostic /galaxy_map.js;
+   galaxy_endpoints.py's own docstring names Quant Basket universe as the planned instance #2).
+   Star-map rendering, physics and pan/zoom/tap are ALL galaxy_map.js's job -- nothing here
+   re-implements any of that. No new fetch: the banner and the star map are both built from the
+   SAME `D` object load() already populates.
+   Deliberately simpler than the web instance: this page has no search box or difficulty pills to
+   wire a dim-while-filtering behaviour to, and the founder's own ask was "opens the full galaxy
+   (all articles)" -- so every star always renders at full brightness, independent of the page's
+   own category chip (CAT). That chip, the card list and openArt() are otherwise untouched. */
+var CAT_COLORS = {"Basics":"#60a5fa","Investing Styles":"#a78bfa","Market Mechanics":"#22d3ee","Instruments":"#f472b6","Macro & Policy":"#fbbf24","Analysis":"#34d399","Alternative Assets":"#fb7185","Planning & Tax":"#c084fc"};
+var _galaxy = null;
+function galaxyBannerHtml(){
+  return '<div class="kb-galaxy" onclick="openGalaxy()">'
+    + '<canvas id="kbGalaxyThumb"></canvas>'
+    + '<div class="kb-galaxy-ov">'
+    + '<div class="kb-galaxy-ttl">✦ Knowledge Galaxy</div>'
+    + '<div class="kb-galaxy-sub">'+esc(D.total)+' articles · '+esc(Object.keys(D.category_counts||{}).length)+' topics · explore the learning map</div>'
+    + '<button class="kb-galaxy-btn" type="button" onclick="event.stopPropagation();openGalaxy()">View Learning Map</button>'
+    + '</div></div>';
+}
+function drawGalaxyThumb(){
+  var cv = document.getElementById('kbGalaxyThumb'); if(!cv || !D || !(D.articles||[]).length) return;
+  var w = cv.clientWidth||300, h=120, dpr=Math.min(window.devicePixelRatio||1,2);
+  cv.width=w*dpr; cv.height=h*dpr; var g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  g.fillStyle='#070b1a'; g.fillRect(0,0,w,h);
+  var rg=g.createRadialGradient(w/2,h*0.4,0,w/2,h*0.4,w*0.7); rg.addColorStop(0,'rgba(30,45,90,.5)'); rg.addColorStop(1,'rgba(7,11,26,0)');
+  g.fillStyle=rg; g.fillRect(0,0,w,h);
+  var arts=D.articles, n=Math.min(arts.length,60);
+  for(var i=0;i<n;i++){ var a=arts[i]; var seed=(i*2654435761+101)>>>0;
+    var cx=(seed%1000)/1000*w, cy=((seed>>>10)%1000)/1000*h;
+    var col=CAT_COLORS[a.category]||'#60a5fa'; var r=a.difficulty==='Pro'?2.6:1.7;
+    g.globalAlpha=.85; g.fillStyle=col; g.beginPath(); g.arc(cx,cy,r,0,6.283); g.fill(); }
+  g.globalAlpha=1;
+}
+function buildGalaxyConfig(){
+  var seen={}; (D.articles||[]).forEach(function(a){ if(a.category) seen[a.category]=1; });
+  var cats=Object.keys(seen).sort().map(function(c){ return {name:c,color:CAT_COLORS[c]||'#8ca6e6'}; });
+  var nodes=(D.articles||[]).map(function(a){ return {
+    id:a.slug, label:a.title, category:a.category,
+    tier:(a.difficulty==='Pro'?'pro':'beginner'),
+    sublabel:(a.reading_time_min?a.reading_time_min+' min read':''),
+    payload:a }; });
+  return {nodes:nodes, categories:cats, cacheKey:'knowledge', layout:'force'};
+}
+function loadGalaxyScript(cb){
+  if(window.GalaxyMap){ cb(); return; }
+  var s=document.createElement('script'); s.src='/galaxy_map.js?v=203'; s.onload=cb;
+  s.onerror=function(){ alert('Could not load the galaxy map.'); };
+  document.head.appendChild(s);
+}
+function ensureGalaxyOverlay(){
+  if(document.getElementById('galaxyOverlay')) return;
+  var o=document.createElement('div'); o.className='galaxy-overlay'; o.id='galaxyOverlay';
+  o.innerHTML =
+    '<div class="galaxy-canvas" id="galaxyCanvas"></div>'+
+    '<div class="galaxy-topbar">'+
+      '<div class="galaxy-title">✦ Knowledge Galaxy <span class="galaxy-count" id="galaxyCount"></span></div>'+
+      '<button class="galaxy-close" onclick="closeGalaxy()" aria-label="Close">&times;</button>'+
+    '</div>'+
+    '<div class="galaxy-hint">drag to pan · scroll / pinch to zoom · tap a star to read</div>'+
+    '<div class="galaxy-article" id="galaxyArticle">'+
+      '<div class="ga-grab"></div>'+
+      '<div class="ga-head"><div class="ga-chips" id="gaChips"></div><button class="ga-x" onclick="hideGalaxyArticle()" aria-label="Close">&times;</button></div>'+
+      '<div class="ga-scroll" id="gaScroll"></div>'+
+    '</div>';
+  document.body.appendChild(o);
+}
+function openGalaxy(){
+  if(!D || !(D.articles||[]).length) return;
+  ensureGalaxyOverlay();
+  document.getElementById('galaxyOverlay').classList.add('on');
+  document.documentElement.style.overflow='hidden';
+  loadGalaxyScript(function(){
+    var host=document.getElementById('galaxyCanvas');
+    if(_galaxy){ _galaxy.destroy(); _galaxy=null; }
+    host.innerHTML='';
+    _galaxy = GalaxyMap.create(host, buildGalaxyConfig(), {
+      onTap: function(nd){ openGalaxyArticle(nd.payload); }
+    });
+    console.assert(_galaxy._nodes.length === D.total,
+      'Knowledge Galaxy: '+_galaxy._nodes.length+' stars vs api.total '+D.total);
+    var gb=document.getElementById('galaxyCount'); if(gb) gb.textContent=D.total+' articles';
+  });
+}
+function closeGalaxy(){
+  if(document.getElementById('galaxyArticle') && document.getElementById('galaxyArticle').classList.contains('on')){ hideGalaxyArticle(); return; }
+  var ov=document.getElementById('galaxyOverlay'); if(ov) ov.classList.remove('on');
+  document.documentElement.style.overflow='';
+}
+/* tapping a star opens the full article IN PLACE (no navigation) -- the galaxy instance is never
+   destroyed on this path, so zoom/pan state survives closing the article panel. Reuses the SAME
+   MD cache and renderMd() this file's own openArt() already uses -- no second cache, and an
+   article read via the card list is already warm here (and vice versa). */
+function openGalaxyArticle(a){
+  var panel=document.getElementById('galaxyArticle'); if(!panel) return;
+  var slug=a.slug;
+  var diff = a.difficulty ? '<span class="gd-diff '+(a.difficulty==='Pro'?'pro':'beg')+'">'+esc(a.difficulty)+'</span>' : '';
+  var rt = a.reading_time_min ? '<span class="gd-rt">'+esc(a.reading_time_min)+' min read</span>' : '';
+  document.getElementById('gaChips').innerHTML = '<span class="gd-cat">'+esc(a.category||'')+'</span>'+diff+rt;
+  var sc=document.getElementById('gaScroll');
+  sc.innerHTML = '<h1 class="ga-title">'+esc(a.title||'')+'</h1>'+
+                 (a.summary?'<p class="ga-sum">'+esc(a.summary)+'</p>':'')+
+                 '<div class="ga-body">'+(MD[slug] != null ? MD[slug] : 'Loading…')+'</div>';
+  sc.scrollTop=0;
+  panel.classList.add('on');
+  if (MD[slug] != null) return;   /* already cached by openArt() or a prior galaxy visit -- no re-fetch */
+  fetch('/api/knowledge/articles/'+encodeURIComponent(slug), {credentials:'same-origin'}).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(function(d){
+    var md = d.content_md || '';
+    MD[slug] = md.trim() ? renderMd(md) : '<p class="ga-soon">Full article coming soon.</p>';
+    var body = sc.querySelector('.ga-body'); if (body) body.innerHTML = MD[slug];
+  }).catch(function(e){
+    var body = sc.querySelector('.ga-body'); if (body) body.innerHTML = '<p class="ga-soon">Could not load this article ('+esc(e.message||e)+').</p>';
+  });
+}
+function hideGalaxyArticle(){ var p=document.getElementById('galaxyArticle'); if(p) p.classList.remove('on'); }
 function openArt(card){
   var slug = card.getAttribute('data-slug'), body = card.querySelector('.body'), more = card.querySelector('.more');
   if (card.classList.contains('open')){ card.classList.remove('open'); if(more) more.textContent='Read'; return; }
