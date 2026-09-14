@@ -68,9 +68,24 @@ body.ia-scope .as-pg .t{white-space:nowrap}   /* cc#1667: TRADE ALERTS stays on 
 .ia-trk .z{position:absolute;top:-4px;width:1px;height:13px;background:var(--dim);display:block}
 .ia-trk .cmp{position:absolute;top:-4px;width:2px;height:13px;background:var(--gold);box-shadow:0 0 6px var(--gold);display:block}
 .ia-trk .lab{position:absolute;top:10px;font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap}
-.ia-ft{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;padding-top:24px;font-family:var(--mono);font-size:10px;color:var(--dim)}
-.ia-ft.tight{padding-top:10px}
+.ia-ft{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px 12px;padding-top:15px;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.ia-ft.tight{padding-top:1px}
 .ia-ft b{color:var(--mute);font-weight:600}
+/* cc#2046: the C.A.R.D strip (window.ScorrCardRow, prepended in foot()) and the existing footer
+   text now share this one flex row -- .ia-ft was already display:flex/space-between, so the strip
+   (first child) lands bottom-left and the text group (second child) lands on the right, no new
+   stacked row. .ia-ft-txt groups the text spans into ONE flex item so space-between treats them as
+   a unit (was: N separate top-level spans, which space-between would otherwise fan out across the
+   whole row instead of keeping them together as one line on the right). padding-top above was
+   trimmed 24px/10px -> 15px/1px: measured (not guessed) that this footer's own text content is
+   ~11px tall and the strip's own locked pill height (cc#1956, never shrunk here) is a fixed 20px,
+   a 9px difference -- removing exactly that 9px from each padding value holds every TEXT-BEARING
+   card's total height exactly unchanged. The one exception is a live FUT card, whose .ia-ft cc#2045
+   left completely empty (0 content height) -- no padding value can make a fixed 20px pill row fit
+   inside what a 0-content row needed, so that one scenario keeps a real, explained ~11px growth;
+   every other scenario measures a true zero delta. Full numbers in
+   reports/CC2046_alerts_card_strip.md. */
+.ia-ft-txt{display:flex;flex-wrap:wrap;gap:4px 12px}
 /* cc#2024: P5's waiting-card rules (.ia-dist track + .ia-acts approve/dismiss buttons + .ia-cerr
    error line) and P6's .ia-why rule are gone -- the Waiting rail and the why-line no longer render
    anywhere on this client-facing surface (founder ruling 12-Sep). The endpoints they posted to
@@ -300,7 +315,18 @@ function foot(c, tight){
   else if (c.instrument === 'OPT') p.push('option leg');
   else p.push('cash equity');
   if (c.style === 'Price level') p.push('handpicked · founder');
-  return '<div class="ia-ft' + (tight ? ' tight' : '') + '">' + p.map(function(x){ return '<span>' + x + '</span>'; }).join('') + '</div>';
+  // cc#2046: the shared C.A.R.D strip, bottom-left, sharing this row with the footer text (never
+  // a new stacked row -- see the .ia-ft/.ia-ft-txt CSS above). window.ScorrCardRow is cc#789's own
+  // single-sourced compact strip (never hand-rolled here) -- ALREADY loaded on this page via
+  // main.py's own _MOBILE_HEAD injection (confirmed by tracing auth_gate: /m/alerts is
+  // PROTECTED-only, not in _PWA_INJECT_PATHS, but _MOBILE_HEAD's injection test keys on the
+  // page's own markup lacking /static/mobile.css, not on that set membership -- so it still
+  // fires here). No manual <script src="/scorr_card_strip.js"> tag is added; one would be an
+  // inert duplicate, harmless only because the file's own `if (window.ScorrCardStrip) return`
+  // guard no-ops a second load. Defensive typeof check purely in case that ever changes.
+  var strip = (typeof window.ScorrCardRow === 'function') ? window.ScorrCardRow(c.symbol) : '';
+  var text = p.length ? ('<div class="ia-ft-txt">' + p.map(function(x){ return '<span>' + x + '</span>'; }).join('') + '</div>') : '';
+  return '<div class="ia-ft' + (tight ? ' tight' : '') + '">' + strip + text + '</div>';
 }
 /* cc#2024 item 4: waitBody() -- the whole waiting-card body (distance track + Approve/Dismiss
    buttons) -- is REMOVED. Founder ruling 12-Sep: /m/alerts is client-facing; a pending, unapproved
