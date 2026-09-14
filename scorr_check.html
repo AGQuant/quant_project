@@ -1550,13 +1550,26 @@ function _tcrHero(d, best, uiMode){
   const ev=d.evidence||{};
   const s100=_tcrScore100(best), uncal=(best.score10!=null&&best.score10_weighted===false);
   const v10=uncal?null:(best.verdict10||null);
+  // cc#2083: cc#1909's own TICK OVERLAY (tc_v4_dual.py) deliberately nulls score10/verdict10/
+  // score100 AND sets no_score_today=true when tc_universe_ticks has no row for today (no live
+  // tick yet -- before the market opens, or a non-trading day like today) -- "never a silent
+  // fall-back to the live ratio" is the whole point of that design, do_not_touch. The gap this
+  // card actually fixes: that honest null was never told apart from any other blank on this page
+  // -- both the hero and the tiles below showed a bare, unexplained "—" either way. The per-rule
+  // breakdown on the right is untouched -- it is computed live from `rules`, not the tick, so it
+  // keeps working exactly as the founder's own screenshot shows; this fix only explains the LEFT
+  // side's blank, it never changes what number (or lack of one) is shown.
+  const noTick=!!best.no_score_today;
   const cuts=_tcrCuts(best);
   const order=['WATCH','VALID','STRONG'];
   const marks=order.filter(k=>cuts[k]!=null).map(k=>'<u style="left:'+Math.max(0,Math.min(100,cuts[k]))+'%"></u>').join('');
   const ml='<span>FAIL</span>'+order.filter(k=>cuts[k]!=null).map(k=>'<span>'+k+' '+cuts[k]+'</span>').join('');
   const tiles=[...(d.cards||[])].sort((a,b)=>(_tcrScore100(b)||0)-(_tcrScore100(a)||0)).map(c=>{
     const k=c.side+'|'+c.style, sc=_tcrScore100(c), cu=(c.score10!=null&&c.score10_weighted===false);
-    const b=cu?'uncal':(c.verdict10||'—');
+    // cc#2083: same no_score_today check, per-card -- a tile is its own bucket's tick lookup, so
+    // one bucket can carry a tick while another does not (rare but possible); each tile states its
+    // own honest reason rather than borrowing the hero's.
+    const b=c.no_score_today?'no tick yet':(cu?'uncal':(c.verdict10||'—'));
     return '<button type="button" class="tcr-tile'+(k===window.__tcView.sel?' on':'')+'" onclick="tcrPick(\''+k+'\')">'
       +'<b>'+_tcAttr(c.label)+'</b><div class="n '+(cu?'':(c.verdict10||''))+'">'+(sc==null?'—':sc.toFixed(1))+'</div><div class="b">'+b+'</div></button>';
   }).join('');
@@ -1568,13 +1581,14 @@ function _tcrHero(d, best, uiMode){
     const next=v10==='WATCH'?'VALID':v10==='VALID'?'STRONG':v10==='REJECT'?'WATCH':null;
     if(next&&cuts[next]!=null) gapTxt=_tcrWord(v10)+' — '+(Math.round((cuts[next]-s100)*10)/10)+' short of '+_tcrWord(next)+'.';
     else gapTxt=_tcrWord(v10)+' — top band.';
-  } else if(uncal){ gapTxt='Uncalibrated — this bucket has no live rule weights.'; }
+  } else if(noTick){ gapTxt='No tick yet today, so no scored number — the intraday tick engine has not run yet (before the market opens, or on a non-trading day). The rule breakdown on the right is still live.'; }
+  else if(uncal){ gapTxt='Uncalibrated — this bucket has no live rule weights.'; }
   return '<div class="tcr-hd"><div>'
     +'<div class="tcr-sym">'+_tcAttr(d.symbol)+(window.ScorrCardRow?ScorrCardRow(d.symbol):'')+'</div>'
     +(meta?'<div class="tcr-nm">'+meta+'</div>':'')
     +'</div><div class="tcr-px"><b>'+(d.cmp!=null?'₹'+Number(d.cmp).toFixed(2):'—')+'</b><small>CMP · '+_tcAttr(_tcrScoredLabel(d.computed_at))+' · spot</small></div></div>'
     +'<div class="tcr-eye">BEST OF 4 · '+_tcAttr(best.label)+' · '+(best.side==='SELL'?'▼ SHORT':'▲ LONG')+' view</div>'
-    +'<div class="tcr-vrow"><div class="tcr-vword '+_tcrWordCls(v10)+'">'+(uncal?'Uncalibrated':_tcrWord(v10))+'</div>'
+    +'<div class="tcr-vrow"><div class="tcr-vword '+_tcrWordCls(v10)+'">'+(noTick?'No tick yet today':(uncal?'Uncalibrated':_tcrWord(v10)))+'</div>'
     +'<div class="tcr-score">'+(s100==null?'—':s100.toFixed(1))+'<small>/ 100</small></div></div>'
     +'<div class="tcr-meter"><i style="width:'+(s100==null?0:Math.max(0,Math.min(100,s100)))+'%"></i>'+marks+'</div>'
     +'<div class="tcr-ml">'+ml+'</div>'
@@ -1630,10 +1644,16 @@ function tcrRead(){
   const v=window.__tcView; if(!v) return;
   const d=v.d, best=d.best||{}, s100=_tcrScore100(best), cuts=_tcrCuts(best);
   const uncal=(best.score10!=null&&best.score10_weighted===false), v10=uncal?null:best.verdict10;
+  const noTick=!!best.no_score_today;   // cc#2083, same flag _tcrHero reads
   const zero=(best.rules||[]).filter(r=>Number(r.max)>0&&Number(r.credit)<=0&&r.weight!=null).slice(0,5);
   const half=(best.rules||[]).filter(r=>Number(r.max)>0&&Number(r.credit)>0&&Number(r.credit)<Number(r.max)&&r.weight!=null).slice(0,5);
   let lines=[];
-  if(uncal) lines.push('This bucket has no live rule weights, so the number is an unweighted ratio and carries no band.');
+  // cc#2083: the rule-level lines below (zero/half credit, alerts) are computed live from
+  // `best.rules`, untouched by the tick overlay (cc#1909's own do_not_touch) -- they stay
+  // meaningful and are still appended even on a no-tick day, alongside the honest headline
+  // explanation, rather than suppressed just because there is no official scored number today.
+  if(noTick) lines.push('No tick yet today, so there is no official scored number for '+_tcAttr(best.label)+' — the intraday tick engine has not run yet (before the market opens, or on a non-trading day). The rule-by-rule read below is still live and current.');
+  else if(uncal) lines.push('This bucket has no live rule weights, so the number is an unweighted ratio and carries no band.');
   else if(s100!=null&&v10){
     const next=v10==='WATCH'?'VALID':v10==='VALID'?'STRONG':v10==='REJECT'?'WATCH':null;
     lines.push(_tcrWord(v10)+' on '+_tcAttr(best.label)+' at '+s100.toFixed(1)+' / 100'+(next&&cuts[next]!=null?', '+(Math.round((cuts[next]-s100)*10)/10)+' short of '+_tcrWord(next)+' ('+cuts[next]+').':'.'));
