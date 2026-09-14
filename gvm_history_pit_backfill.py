@@ -301,9 +301,20 @@ def _quarter_same_q_prior_year(rows, q_period_end):
 # ── per-symbol raw G+V extraction for one annual period ──────────────────────────────────────
 
 def _cagr_pct(now, then, years):
+    """(now/then)**(1/years) is only real-valued when the ratio is >= 0 -- a negative ratio (the
+    NOW figure went negative, e.g. a loss year's Net Profit) raises it to a fractional power and
+    Python returns a COMPLEX number, not an exception. That complex value would silently flow into
+    gvm_engine and, worse, crash statistics.median() the moment it is sorted against a real float
+    from another peer ('<' not supported between complex and float) -- caught for real on the
+    first live run (14-Sep-2026), not by reasoning alone. A sign flip has no honest real-valued
+    CAGR here, so it returns None -- the engine's own blank rule scores it neutrally, which is
+    correct: a growth rate through a loss year is not a number this formula can honestly produce."""
     if now is None or then is None or then <= 0:
         return None
-    return ((now / then) ** (1.0 / years) - 1.0) * 100.0
+    ratio = now / then
+    if ratio < 0:
+        return None
+    return (ratio ** (1.0 / years) - 1.0) * 100.0
 
 
 def _extract_gv_raw(fh_sym, period_end, as_known_date, px, symbol):
