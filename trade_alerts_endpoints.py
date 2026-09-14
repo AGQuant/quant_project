@@ -326,6 +326,36 @@ def list_alerts(status: str = "all", limit: int = 200):
                     r["cmp"] = hit.get("cmp")
                     r["cmp_live"] = bool(hit.get("live")) if hit else None
                     r["cmp_source"] = hit.get("source")
+        # cc#2082: the Alerts page's new Instrument (Equity/Future/Options) and Book (Open/Closed)
+        # tabs are built on TWO facts approved rows did not carry before -- both come from
+        # resolve_close_state(), the SAME cc#1781 resolver trade_wall_approved.py's own Approved
+        # tab already uses for the identical open/closed distinction (session_log 40507 part_2's
+        # own instruction: reuse it, do not build a second one). Its origin lookup also correctly
+        # resolves V10/Index Intel's real per-row FUTURES-vs-OPTIONS split (from v10_trades.leg) --
+        # trade_alerts itself carries no leg column, so a bare source_engine string map could not
+        # do this; the resolver already can, via a real DB lookup, not a guess. Approved rows only
+        # (pending/triggered/dismissed never reach the pure-display page any more, and the
+        # resolver's origin lookup is real per-row DB work -- no reason to spend it on rows that
+        # will not render there).
+        for r in rows:
+            if r["status"] == "approved":
+                try:
+                    st = resolve_close_state(cur, r)
+                    r["closed"] = bool(st.get("closed"))
+                    r["closed_at"] = str(st["closed_at"]) if st.get("closed_at") else None
+                    r["close_price"] = st.get("close_price")
+                    origin = st.get("origin") or {}
+                    # a manual alert (source_engine NULL) has no origin -- verified EQUITY, not
+                    # assumed: scorr_alert_create.js's only symbol picker is /api/gvm/search, a
+                    # stock search, so a manual alert can never be a futures/options trigger.
+                    r["instrument"] = origin.get("instrument") or "EQUITY"
+                    if r["instrument"] == "FUT":
+                        r["instrument"] = "FUTURES"   # trade_wall_endpoints.INSTRUMENTS spelling
+                    elif r["instrument"] == "OPT":
+                        r["instrument"] = "OPTIONS"
+                except Exception as e:   # a resolver hiccup must not blank the whole list
+                    log.warning("list_alerts: resolve_close_state failed for id=%s (%s)", r.get("id"), e)
+                    r["closed"], r["closed_at"], r["close_price"], r["instrument"] = False, None, None, "EQUITY"
         unseen = _attach_seen(cur, rows)   # cc#1717: seen flag per row + the bell's badge count
     return {"status_filter": status, "count": len(rows), "alerts": rows,
             "unseen_count": unseen, "seen_count": sum(1 for r in rows if r.get("seen"))}

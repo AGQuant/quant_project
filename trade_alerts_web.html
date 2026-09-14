@@ -10,7 +10,12 @@
      sit adjacent on the nav and must read as one product. Tokens (--bg, --panel, --line, --mut …)
      come from main.py's injected token sheet, same as every desktop page.
      cc#1831: the .ov / .ov-box create-alert modal that used to live in this block moved to
-     scorr_alert_create.js — this page no longer owns any modal markup or CSS. */
+     scorr_alert_create.js — this page no longer owns any modal markup or CSS.
+     cc#2082 (session_log 40507 ALERTS_PURE_DISPLAY_V1, founder 14-Sep): this page is now PURE
+     DISPLAY of APPROVED trades only — approval happens on Wall of Trades (session_log 36394
+     WOT_APPROVAL_SURFACE_V1), not here. THIS IS THE SINGLE REFERENCE for that split going
+     forward — see session_log 45648 WOT_ALERTS_CANON_V1 (cc#2084) if this is ever in question
+     again. No Approve/Dismiss/override control exists on this page any more. */
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
        font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
@@ -18,8 +23,9 @@
   h1{font-size:19px;font-weight:800;margin:4px 0 2px;display:inline-block}
   .hd-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .sub{font-size:12px;color:var(--mut);margin-bottom:14px;line-height:1.5}
-  .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:10px}
+  .tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px;margin-bottom:6px}
   .tabs::-webkit-scrollbar{display:none}
+  .tabs:last-of-type{margin-bottom:10px}
   .tab{flex:0 0 auto;padding:8px 13px;border-radius:9px;border:1px solid var(--line);
        background:var(--panel);color:var(--mut);font-size:12.5px;font-weight:700;cursor:pointer;
        white-space:nowrap;min-height:38px;display:inline-flex;align-items:center;gap:6px}
@@ -43,17 +49,10 @@
   .al-st{font:700 10px ui-monospace,monospace;letter-spacing:.06em;border-radius:5px;
          padding:2px 7px;white-space:nowrap;border:1px solid var(--line2);color:var(--mut)}
   .al-st.approved{color:var(--grn);border-color:var(--grn)}
-  .al-st.triggered{color:var(--amber);border-color:var(--amber)}
-  .al-st.dismissed{color:var(--red);border-color:var(--red)}
-  .al-pend{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
   .al-why{font-size:10.5px;color:var(--mut,#8A8A93)}
-  .al-dis{margin-left:6px;color:var(--mut,#8A8A93)}
-  .al-ovr{color:var(--amber,#FF9F45);text-decoration:underline dotted}
   .al-badge{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 8px;border-radius:5px;border:1px solid var(--line,#2A2A31)}
   .al-badge.ok{color:var(--grn,#2FD48B);border-color:var(--grn,#2FD48B)}
   .al-badge.no{color:var(--mut,#8A8A93)}
-  .al-pend .al-dis{margin-left:0}
-  .btn:disabled{opacity:.45;cursor:not-allowed}
   .al-eng{font:600 10px ui-monospace,monospace;color:var(--mut);border:1px solid var(--line2);
           border-radius:5px;padding:2px 6px;white-space:nowrap}
   .al-notes{white-space:normal;max-width:260px;font-size:12px;color:var(--mut);line-height:1.45}
@@ -71,14 +70,7 @@
   .tw-btn{padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--panel);
           color:var(--txt);font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}
   .tw-btn:hover{border-color:var(--blu)}
-  /* cc#1525's button grammar, carried over so Approve looks identical on the wall and here */
   .twa{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-  .twa .btn{font:700 11px ui-monospace,monospace;letter-spacing:.06em;padding:7px 12px;min-height:36px;
-            border-radius:8px;border:1px solid var(--line2);background:var(--card2);color:var(--txt);cursor:pointer}
-  .twa .btn.pri{border-color:var(--blu);background:var(--blu);color:#fff}
-  .twa .btn[disabled]{opacity:.5;cursor:default}
-  .twa-ok{font:700 10.5px ui-monospace,monospace;color:var(--grn);white-space:nowrap}
-  .twa-err{font:600 10px ui-monospace,monospace;color:var(--red);white-space:normal;max-width:220px}
   @media(max-width:760px){
     .wrap{padding:12px 10px 64px}
     thead th,tbody td{padding:7px 6px;font-size:12px}
@@ -93,16 +85,15 @@
     <h1>Alerts</h1>
   </div>
   <div class="sub" id="subline">
-    The approve surface. Price triggers the founder sets, engine signals approved from any
-    surface — all in one book. This page computes nothing of its own — it renders
-    <b>/api/alerts/list</b>, the same endpoint the app screen reads.
+    Pure display of approved trades — realised and unrealised, one book. Approving happens on
+    <b>Wall of Trades</b>, not here (session_log 40507 ALERTS_PURE_DISPLAY_V1). This page computes
+    nothing of its own — it renders <b>/api/alerts/list</b>, the same endpoint the app screen reads.
     <!-- cc#1831: "+ New alert" (manual/custom creation) moved to Wall of Trades (/trades) --
-         ALERTS_PURE_DISPLAY_V1 (session_log 40507). A freshly-created alert starts pending, and
-         once cc#1816 lands this page shows only decided (approved) rows, so creation has nowhere
-         left to live here. Same shared form, new home: see scorr_alert_create.js. -->
+         ALERTS_PURE_DISPLAY_V1 (session_log 40507). -->
   </div>
 
-  <div class="tabs" id="tabsStatus"></div>
+  <div class="tabs" id="tabsInstrument"></div>
+  <div class="tabs" id="tabsBook"></div>
 
   <div class="card">
     <div class="meta" id="meta">Loading…</div>
@@ -119,55 +110,56 @@
 <script src="/scorr_card_common.js"></script>
 <script>
 /* cc#1536 — desktop Alerts. ONE COMPUTATION, TWO RENDERERS (the trade_wall precedent): the app
-   screen (/m/alerts) and this page both read /api/alerts/list, approve through /api/alerts/approve
-   and create through /api/alerts/create. Nothing about an alert is derived here.
+   screen (/m/alerts) and this page both read /api/alerts/list. Nothing about an alert is derived
+   here beyond the two client-side filters below.
 
-   ORDER: NEWEST-first, the API's own contract. The app's chat order (oldest at top, 34521) is a
-   deliberately mobile-only display choice; a desktop table follows the wall's newest-first
-   convention instead. */
-var STATE = { alerts: [], status: 'all' };
-var TABS = ['all', 'pending', 'triggered', 'approved', 'dismissed'];
+   ORDER: NEWEST-first, the API's own contract.
+
+   cc#2082 (founder 14-Sep, session_log 40507 part_1+3 + cc#2028's gap): this page is now PURE
+   DISPLAY of approved trades ONLY -- Approve/Dismiss/override, the pending/triggered/dismissed
+   concept, and QB rebalance_due notices are ALL GONE from this page. Two independent tab rows
+   replace the old single status-tab row:
+     Row 1 INSTRUMENT = Equity / Future / Options -- the SAME classification trade_wall_endpoints.
+       py's own INSTRUMENT filter is built on (cc#992's ENGINE/INSTRUMENT MAP), reached here via
+       resolve_close_state()'s origin.instrument (trade_alerts_endpoints.py, cc#1781) rather than a
+       second hand-typed engine map -- that resolver already does the one case a bare source_engine
+       string cannot (V10/Index Intel is FUTURES or OPTIONS per-row, from `leg`, and trade_alerts
+       itself carries no leg column) via a real lookup, not a guess. A manual alert (source_engine
+       NULL, no origin) is EQUITY -- verified, not assumed: scorr_alert_create.js's only symbol
+       picker is /api/gvm/search, a stock search, so a manual alert can never be a futures/options
+       trigger. Counts are over the WHOLE approved book regardless of the other row's current
+       selection, matching trade_wall_endpoints.py's own stated convention ("Instrument/status
+       counts are over the WHOLE wall").
+     Row 2 BOOK = Open / Closed -- trade_alert_levels.closed_at via that SAME resolve_close_state
+       call, the identical distinction trade_wall_approved.py's own Approved tab already computes
+       (cc#1781 TRADE_ALERT_CLOSE_PRIORITY_V1) -- not a second, different open/closed rule.
+   No "All" option on either row -- the founder's own tab list names exactly Equity/Future/
+   Options/Open/Closed, five tabs, nothing more.
+   Realised/unrealised P&L (session_log 40507 part_2) is NOT built by this card: nothing of the
+   kind existed on this page before this change (checked, not assumed), and item 5 of this card's
+   own scope says keep-what-exists rather than build fresh -- flagged as an open item in the task
+   result, same as this card's own QB-placement question, not invented here. */
+var STATE = { alerts: [], instrument: 'EQUITY', book: 'open' };
+var INSTRUMENTS = ['EQUITY', 'FUTURES', 'OPTIONS'];
+var INSTRUMENT_LABEL = { EQUITY: 'Equity', FUTURES: 'Future', OPTIONS: 'Options' };  // founder's own words
+var BOOKS = ['open', 'closed'];
+var BOOK_LABEL = { open: 'Open', closed: 'Closed' };
 /* cc#1693 (founder 04-Sep screenshot: "Hide When and Notes column and show only Action column
    along with TC score replacing notes"). HIDE, not delete -- same shape as SHOW_VOL_TILES /
    SHOW_GATE_CHIP (scorr_v10_signal.html). One line each to restore. WHEN's information is not
-   lost: it is already in ACTION for approved rows; for pending/triggered rows it moves into the
-   TRIGGER cell as a second muted line (row 217-241 origin unchanged). NOTES text is kept as a
-   title= tooltip on the SYMBOL cell so a founder note stays reachable on hover. */
+   lost: it is already in ACTION for approved rows; NOTES text is kept as a title= tooltip on the
+   SYMBOL cell so a founder note stays reachable on hover. Untouched by cc#2082 -- unrelated toggle. */
 var SHOW_ALERT_WHEN = false;
 var SHOW_ALERT_NOTES = false;
 /* cc#1693: TC /100 -- the SAME per-symbol, side-aware score the V8 dashboard Open Positions TC
-   column reads, GET /api/trade-check/position-stars-v2 (tc_position_stars_v2.py). No new
-   endpoint or backend field (P1 discovery: the GATE was false) -- that endpoint already returns
-   every current symbol+side row with no params, so this page fetches it exactly the way
-   v8_dashboard.html does and looks it up client-side. Built as OWN {symbol|dir_side: item}, not
-   the raw LONG/SHORT-keyed dict the endpoint returns, so the lookup matches an alert's BUY/SELL
-   direction directly.
+   column reads, GET /api/trade-check/position-stars-v2 (tc_position_stars_v2.py). Built as OWN
+   {symbol|dir_side: item}, not the raw LONG/SHORT-keyed dict the endpoint returns, so the lookup
+   matches an alert's BUY/SELL direction directly.
    FIELD CORRECTED after checking the dashboard's own source, not just its label: v8_dashboard.html
    L4039-4041 names this TC_BEST_OF_FOUR_V1 (cc#1603, founder 02-Sep 15:34) and states the column's
    headline VALUE is best_any_score100 (best of the 4 cards, ANY direction) -- the position's own-
-   side card "rides along for the hover, never as the headline." A first pass here used the row's
-   own-direction score100 instead, on the reasoning that an alert is directional and best_any could
-   show the opposite side -- a real concern, but the founder already ruled the SAME concern the
-   SAME way for open positions (also directional), so matching "the same score the V8 dashboard TC
-   column shows" means best_any_score100 here too, with the own-side score as the hover detail. */
+   side card "rides along for the hover, never as the headline." */
 var TC_MAP = {}, TC_ASOF = null;
-
-/* cc#1885 P1: trade_alerts holds TWO different kinds of record rendered through one price-alert
-   template. kind='rebalance_due' rows (source_engine='qb') are QB Quant Basket notices, not price
-   alerts -- confirmed against real rows: symbol carries only the FIRST candidate of the basket
-   (never the alert's real subject), trigger_price carries a basket-level rupee figure (never a
-   price level -- ids 16-20 range 24,317 to 584,565 against stocks trading in the low thousands),
-   and trigger_condition carries the whole prose message ("QB REBALANCE DUE - N candidate(s):
-   SYM1, SYM2, ... +K more"), not a condition token. BUG_FIRST_RULE: fix what these rows actually
-   show before restyling anything. Render-side only -- the QB engine and what it writes into
-   trade_alerts are untouched (G1, whether rebalance-due belongs in trade_alerts at all, is a
-   founder question flagged in the task result, not decided here). */
-var REBAL_BASKET_LABEL = {mid_cap:'Mid Cap', large_cap:'Large Cap', contra_value:'Contra Value',
-  breakout_52w:'Breakout 52W', alpha_multicap:'Alpha Multicap'};
-function rebalBasketLabel(a){
-  var key = a.notes || (a.source_ref || '').split(':')[0];
-  return REBAL_BASKET_LABEL[key] || String(key || '').replace(/_/g, ' ');
-}
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -186,17 +178,8 @@ function istStamp(ts){
 function fmtPx(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', {maximumFractionDigits: 2}); }
 
 /* cc#1693: TC /100 cell, built to MATCH v8_dashboard.html's tcCell() exactly (same headline,
-   same cap, same tooltip shape) rather than reinvent it:
-     - number = best_any_score100 (best of 4 cards, any direction) -- the dashboard's own headline
-     - cap = best_any_bucket (e.g. "BUY-MOM"/"SELL-REV"), green if it starts BUY else red, an amber
-       border when it opposes the alert's own direction (best_any_opposes_position, precomputed
-       server-side against this exact symbol+dir_side row -- never recomputed here)
-     - the row's OWN-direction score (score100/verdict10, STRONG|VALID|WATCH|REJECT) rides in the
-       title= tooltip, exactly where the dashboard keeps its own-side detail ("never as the
-       headline"). The card's "STRONG/VALID tag if the dashboard shows one" is conditional, and the
-       dashboard does not actually surface tc_band anywhere (checked: computed, never read) -- the
-       bucket cap is what it shows, so that is what this matches.
-   Em dash when no row exists for that symbol+direction -- never 0, never invented. */
+   same cap, same tooltip shape) rather than reinvent it. Em dash when no row exists for that
+   symbol+direction -- never 0, never invented. Untouched by cc#2082. */
 function tcAlertCell(a){
   var t = TC_MAP[a.symbol + '|' + a.direction];
   if (!t || t.best_any_score100 == null) return '<td class="al-tag">—</td>';
@@ -221,94 +204,56 @@ function theadHtml(){
     + '<th>Action</th></tr>';
 }
 
-function tabsHtml(){
-  var n = { all: STATE.alerts.length, pending: 0, triggered: 0, approved: 0, dismissed: 0 };
-  STATE.alerts.forEach(function(a){ if (n[a.status] != null) n[a.status]++; });
-  return TABS.map(function(k){
-    return '<button class="tab' + (k === STATE.status ? ' on' : '') + '" onclick="pickStatus(\'' + k + '\')">'
-      + k.charAt(0).toUpperCase() + k.slice(1) + ' <span class="n">' + n[k] + '</span></button>';
+/* cc#2082: counts are over the WHOLE approved book regardless of the OTHER row's current
+   selection -- trade_wall_endpoints.py's own stated convention for its two-level filter, matched
+   here rather than a narrower (and inconsistent-with-the-sibling-page) "count only what the other
+   filter also allows". */
+function instrumentTabsHtml(){
+  var n = { EQUITY: 0, FUTURES: 0, OPTIONS: 0 };
+  STATE.alerts.forEach(function(a){ var k = a.instrument || 'EQUITY'; if (n[k] != null) n[k]++; });
+  return INSTRUMENTS.map(function(k){
+    return '<button class="tab' + (k === STATE.instrument ? ' on' : '') + '" onclick="pickInstrument(\'' + k + '\')">'
+      + INSTRUMENT_LABEL[k] + ' <span class="n">' + n[k] + '</span></button>';
+  }).join('');
+}
+function bookTabsHtml(){
+  var n = { open: 0, closed: 0 };
+  STATE.alerts.forEach(function(a){ n[a.closed ? 'closed' : 'open']++; });
+  return BOOKS.map(function(k){
+    return '<button class="tab' + (k === STATE.book ? ' on' : '') + '" onclick="pickBook(\'' + k + '\')">'
+      + BOOK_LABEL[k] + ' <span class="n">' + n[k] + '</span></button>';
   }).join('');
 }
 
 function rowHtml(a){
-  var st = String(a.status || 'pending');
-  /* cc#1885 items 1-2: rebalance_due rows get their OWN render, entirely separate from the
-     price-alert path below -- every cell here is built from a field that actually describes a
-     QB rebalance notice, and trigger_price never appears anywhere in it. G1 (should these even be
-     written into trade_alerts, or moved to a Quant Basket surface) is a founder question, flagged
-     in the task result, not decided by this render fix. */
-  if (a.kind === 'rebalance_due') {
-    var basket = rebalBasketLabel(a);
-    var mCount = String(a.trigger_condition || '').match(/(\d+)\s*candidate/i);
-    var candList = String(a.trigger_condition || '').replace(/^.*candidate\(s\):\s*/i, '') || (a.trigger_condition || '');
-    var rebalTrig = mCount ? (mCount[1] + ' candidate' + (mCount[1] === '1' ? '' : 's')) : 'QB rebalance notice';
-    var rebalWhen = 'set ' + istStamp(a.created_at);
-    /* item 5: Approve/Dismiss offer an action that has no meaning here -- there is no trigger to
-       cross and nothing to approve. A neutral read-only badge, same visual family as the existing
-       Dismissed/no-action badge, rather than live buttons that would do something undefined. This
-       does NOT strand anything (see item 4/5 gate note above rowHtml for kind='entry' rows, which
-       keep their real Approve/Dismiss controls completely unchanged). */
-    var rebalAct = '<div class="twa"><span class="al-badge no" title="QB basket notice -- not a price trigger, nothing to approve or dismiss">Notice</span></div>';
-    return '<tr id="al-' + a.id + '">'
-      + '<td class="sym" title="' + esc(candList) + '">' + esc(basket) + '</td>'
-      + '<td class="al-tag">—</td>'
-      + '<td><span class="al-st ' + esc(st) + '">' + esc(st.toUpperCase()) + '</span></td>'
-      + '<td>' + (a.source_engine ? '<span class="al-eng">' + esc(a.source_engine) + '</span>' : '<span class="al-tag">manual</span>') + '</td>'
-      + '<td class="al-tag" title="' + esc(candList) + '">' + esc(rebalTrig) + '<span class="al-tag2">' + esc(rebalWhen) + '</span></td>'
-      + (SHOW_ALERT_WHEN ? '<td class="al-tag">' + esc(rebalWhen) + '</td>' : '')
-      + (SHOW_ALERT_NOTES ? '<td class="al-notes">' + esc(a.notes || '') + '</td>' : '<td class="al-tag">—</td>')
-      + '<td>' + rebalAct + '</td>'
-      + '</tr>';
-  }
-  /* kind='entry' — the genuine price-alert path, UNCHANGED below (item 5 gate: this is the only
-     live approve surface for a real alert, per cc#1537 — Wall of Trades is read-only-display by
-     founder ruling, so removing this here would strand approval entirely). */
+  /* cc#2082: every row reaching this page is now status='approved' by construction (load() only
+     ever fetches status=approved and additionally drops kind='rebalance_due' -- see load() below)
+     -- the pending/triggered/dismissed render paths, the Approve/Dismiss/override buttons, and the
+     separate QB rebalance_due template are all DELETED, not hidden, per this card's own verify
+     clause ("grep confirms zero Approve/Dismiss/override markup or handlers remain"). */
   var dirCls = a.direction === 'BUY' ? 'long' : 'short';
   /* cc#1531: a signal-approved row (approve_signal — never was 'triggered') carries a sentinel
      trigger_price/trigger_condition, not a real watch level. Suppress the trigger cell for those
-     rows only; a manual pending -> triggered -> approved alert keeps its real trigger context. */
-  var isSignalApproval = st === 'approved' && !a.triggered_at;
+     rows only; a manual triggered -> approved alert keeps its real trigger context. */
+  var isSignalApproval = !a.triggered_at;
   var trig = isSignalApproval ? '—'
     : ('crosses ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price));
-  var when = '';
-  if (st === 'approved' && a.approved_at) when = 'approved ' + istStamp(a.approved_at) + ' @ ' + fmtPx(a.approved_price)
+  var when = 'approved ' + (a.approved_at ? istStamp(a.approved_at) : '') + ' @ ' + fmtPx(a.approved_price)
     + (a.approved_via ? ' · via ' + a.approved_via : '');
-  else if (st === 'triggered' && a.triggered_at) when = 'triggered ' + istStamp(a.triggered_at);
-  else when = 'set ' + istStamp(a.created_at);
-  /* cc#1586 (founder 02-Sep: "I could not see approve switch here"): the control is ALWAYS
-     visible. TRIGGERED -> Approve enabled (server rule unchanged). PENDING -> Approve disabled with
-     the reason in words, using the resolver price the list ships (the same price the trigger
-     sweep compares). APPROVED / DISMISSED -> the decision, no button. */
-  var act = '';
-  var dis = '<button type="button" class="btn al-dis" id="dm-' + a.id + '" onclick="dismiss(' + a.id + ')">Dismiss</button>';
-  if (st === 'triggered') {
-    act = '<div class="twa"><button type="button" class="btn pri" id="ap-' + a.id + '" onclick="approve(' + a.id + ')">Approve</button>' + dis + '</div>';
-  } else if (st === 'approved') {
-    /* scope 4: the decision, no button — WoT reads approved rows, so "sent to WoT" is implicit */
-    act = '<div class="twa"><span class="al-badge ok">Approved' + (a.approved_price != null ? ' @ ' + fmtPx(a.approved_price) : '')
-        + (a.approved_at ? ' · ' + istStamp(a.approved_at) : '') + '</span>'
-        + (a.notes && /override before trigger/.test(a.notes) ? '<span class="al-why">founder override before trigger</span>' : '') + '</div>';
-  } else if (st === 'dismissed') {
-    act = '<div class="twa"><span class="al-badge no">Dismissed</span></div>';
-  } else if (st === 'pending') {
-    var cond = a.trigger_condition === 'ABOVE' ? '≥' : '≤';
-    var liveTxt = a.cmp == null ? 'no live price right now'
-                : 'live ' + fmtPx(a.cmp) + (a.cmp_live === false ? ' (last close)' : '');
-    act = '<div class="twa al-pend"><button type="button" class="btn pri" disabled title="Approve becomes active when the trigger crosses">Approve</button>'
-        + dis
-        + '<span class="al-why">waits for cross ' + cond + ' ' + fmtPx(a.trigger_price) + ' (' + esc(liveTxt) + ')'
-        + (a.cmp == null ? '' : ' · <a href="#" class="al-ovr" onclick="return overrideApprove(' + a.id + ', ' + Number(a.cmp) + ')" title="Founder override: approve before the trigger crosses; the record says so">Approve now</a>')
-        + '</span></div>';
-  }
-  /* cc#1693: WHEN's text is dropped as a column but not as information -- approved rows already
-     print it in ACTION ("Approved @ ... . date"), so it is skipped there; every other status
-     (pending/triggered/dismissed) gets the SAME computed `when` string as a second muted line
-     under TRIGGER, byte-identical to what the WHEN column used to show for that row. */
-  var trigSub = (st !== 'approved' && when) ? '<span class="al-tag2">' + esc(when) + '</span>' : '';
+  var trigSub = when ? '<span class="al-tag2">' + esc(when) + '</span>' : '';
+  /* cc#2082 item 3: the Book split rides in the same Action cell as the approval badge -- Closed
+     shown as a second, distinct badge (.al-badge.no, the same "settled/no further action" visual
+     family Dismissed already used pre-this-card) alongside Approved, never replacing it: a closed
+     row is still, factually, an approved trade. */
+  var act = '<div class="twa"><span class="al-badge ok">Approved' + (a.approved_price != null ? ' @ ' + fmtPx(a.approved_price) : '')
+      + (a.approved_at ? ' · ' + istStamp(a.approved_at) : '') + '</span>'
+      + (a.closed ? ('<span class="al-badge no">Closed' + (a.closed_at ? ' · ' + istStamp(a.closed_at) : '')
+                     + (a.close_price != null ? ' @ ' + fmtPx(a.close_price) : '') + '</span>') : '')
+      + (a.notes && /override before trigger/.test(a.notes) ? '<span class="al-why">founder override before trigger</span>' : '') + '</div>';
   return '<tr id="al-' + a.id + '">'
     + '<td class="sym"' + (a.notes ? ' title="' + esc(a.notes) + '"' : '') + '>' + esc(a.symbol) + '</td>'
     + '<td class="' + dirCls + '">' + esc(a.direction) + '</td>'
-    + '<td><span class="al-st ' + esc(st) + '">' + esc(st.toUpperCase()) + '</span></td>'
+    + '<td><span class="al-st approved">APPROVED</span></td>'
     + '<td>' + (a.source_engine ? '<span class="al-eng">' + esc(a.source_engine) + '</span>' : '<span class="al-tag">manual</span>') + '</td>'
     + '<td class="al-tag">' + esc(trig) + trigSub + '</td>'
     + (SHOW_ALERT_WHEN ? '<td class="al-tag">' + esc(when) + '</td>' : '')
@@ -318,92 +263,38 @@ function rowHtml(a){
 }
 
 function render(){
-  document.getElementById('tabsStatus').innerHTML = tabsHtml();
+  document.getElementById('tabsInstrument').innerHTML = instrumentTabsHtml();
+  document.getElementById('tabsBook').innerHTML = bookTabsHtml();
   document.getElementById('thead').innerHTML = theadHtml();
-  var view = STATE.status === 'all'
-    ? STATE.alerts
-    : STATE.alerts.filter(function(a){ return a.status === STATE.status; });
+  var view = STATE.alerts.filter(function(a){
+    var inst = a.instrument || 'EQUITY';
+    var bk = a.closed ? 'closed' : 'open';
+    return inst === STATE.instrument && bk === STATE.book;
+  });
   document.getElementById('meta').textContent =
-    'showing ' + view.length + ' of ' + STATE.alerts.length + ' alerts'
-    + (STATE.status === 'all' ? '' : ' · ' + STATE.status) + ' · newest first';
+    'showing ' + view.length + ' of ' + STATE.alerts.length + ' approved alerts · '
+    + INSTRUMENT_LABEL[STATE.instrument] + ' · ' + BOOK_LABEL[STATE.book];
   var cols = 5 + (SHOW_ALERT_WHEN ? 1 : 0) + 2;   // symbol/dir/status/engine/trigger + when? + (tc-or-notes) + action
   document.getElementById('body').innerHTML = view.length
     ? view.map(rowHtml).join('')
-    : '<tr><td colspan="' + cols + '" class="empty">No ' + (STATE.status === 'all' ? '' : STATE.status + ' ')
-      + 'alerts.</td></tr>';
+    : '<tr><td colspan="' + cols + '" class="empty">No ' + INSTRUMENT_LABEL[STATE.instrument].toLowerCase()
+      + ' ' + BOOK_LABEL[STATE.book].toLowerCase() + ' alerts.</td></tr>';
 }
 
-function pickStatus(k){
-  if (k === STATE.status) return;
-  STATE.status = k;
-  render();
-}
-
-/* cc#1586 scope 5: founder override on a PENDING row — behind a confirm that states the live
-   price; the server appends "override before trigger" to the notes and records the live price. */
-function overrideApprove(id, live){
-  if (!window.confirm('Trigger not crossed. Approve at live ' + fmtPx(live) + '?')) return false;
-  approve(id, true);
-  return false;
-}
-function approve(id, override){
-  var btn = document.getElementById('ap-' + id);
-  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
-  fetchWithTimeout('/api/alerts/approve', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(override ? { id: id, override: true } : { id: id }) })
-    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
-    .then(function(x){
-      if (!x.ok) throw new Error((x.d && x.d.detail) || 'approve failed');
-      for (var i = 0; i < STATE.alerts.length; i++)
-        if (STATE.alerts[i].id === id) STATE.alerts[i] = x.d.alert;
-      render();
-    })
-    .catch(function(e){
-      if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
-      /* the server's reason, on glass — a silent failure would read as a dead button */
-      var row = document.getElementById('al-' + id);
-      if (row && !row.querySelector('.twa-err')) {
-        var cell = row.lastElementChild;
-        var err = document.createElement('span');
-        err.className = 'twa-err';
-        err.textContent = 'Could not approve — ' + e.message;
-        cell.appendChild(err);
-      }
-    });
-}
-
-/* cc#1586 scope 3: Dismiss on every pending / triggered row — POST /api/alerts/dismiss {id}
-   (pending | triggered -> dismissed, server-enforced). The reason lands on glass on failure. */
-function dismiss(id){
-  var btn = document.getElementById('dm-' + id);
-  if (btn) { btn.disabled = true; btn.textContent = 'Dismissing…'; }
-  fetchWithTimeout('/api/alerts/dismiss', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
-    .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
-    .then(function(x){
-      if (!x.ok || !x.d || !x.d.alert) throw new Error((x.d && x.d.detail) || 'dismiss failed');
-      for (var i = 0; i < STATE.alerts.length; i++)
-        if (STATE.alerts[i].id === id) STATE.alerts[i] = x.d.alert;
-      render();
-    })
-    .catch(function(e){
-      if (btn) { btn.disabled = false; btn.textContent = 'Dismiss'; }
-      var row = document.getElementById('al-' + id);
-      if (row && !row.querySelector('.twa-err')) {
-        var err = document.createElement('span');
-        err.className = 'twa-err';
-        err.textContent = 'Could not dismiss — ' + e.message;
-        row.lastElementChild.appendChild(err);
-      }
-    });
-}
+function pickInstrument(k){ if (k === STATE.instrument) return; STATE.instrument = k; render(); }
+function pickBook(k){ if (k === STATE.book) return; STATE.book = k; render(); }
 
 function load(){
-  fetchWithTimeout('/api/alerts/list?status=all&limit=200')
+  /* cc#2082: status=approved server-side -- pending/triggered/dismissed rows have no home on this
+     page at all any more, so there is no reason to fetch or ship them. kind='rebalance_due' rows
+     (QB basket notices) are dropped client-side per this card's own scope item 2 -- they do not
+     belong on a pure-display TRADE P&L page; where they should surface instead is NOT decided by
+     this card (an open placement question, same as cc#2028 left it -- not invented here). */
+  fetchWithTimeout('/api/alerts/list?status=approved&limit=200')
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (d.error) throw new Error(d.error);
-      STATE.alerts = d.alerts || [];
+      STATE.alerts = (d.alerts || []).filter(function(a){ return a.kind !== 'rebalance_due'; });
       render();
     })
     .catch(function(e){
@@ -414,14 +305,14 @@ function load(){
     });
 }
 load();
-/* the engine sweeps every 5 minutes (cc#1504); refresh on the same cadence so a just-triggered
-   row does not wait on a manual reload. In-place, filter preserved. */
+/* the engine sweeps every 5 minutes (cc#1504); refresh on the same cadence so a just-approved /
+   just-closed row does not wait on a manual reload. In-place, filter preserved. */
 setInterval(load, 300000);
 
 /* cc#1693: TC /100 -- a second, independent fetch of the SAME batch endpoint the V8 dashboard
    reads (no params, returns every current symbol+side row). Failure here degrades every TC cell
    to em dash (tcAlertCell already treats a missing TC_MAP entry that way) rather than blocking
-   the alerts list itself -- the two fetches are deliberately independent. */
+   the alerts list itself -- the two fetches are deliberately independent. Untouched by cc#2082. */
 function loadTc(){
   fetchWithTimeout('/api/trade-check/position-stars-v2')
     .then(function(r){ return r.json(); })
