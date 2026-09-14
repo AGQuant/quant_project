@@ -248,13 +248,21 @@ INTEL_WINDOW_DAYS = 60
 
 @router.get("/api/mobile/intel")
 @_json_safe   # cc#887
-def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str = ""):
+def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str = "", category: str = ""):
     """ONE call for the whole screen: header, chips and both content sections (item 6).
 
     Reads v_polished_articles, the canonical view — so cc#870's suppression is inherited for free
     and a culled story cannot reappear here.
     TRAP (e): the sort key is published_time, which IS the polish time (spec 8188). Sorting on the
     raw article date would bury a story polished today under one published last week.
+
+    cc#2056: optional `category` scopes the header/count query AND the paginated feed query —
+    mirrors /api/news/polished's own category-scoped `total` (cc#1365), which derives it from the
+    SAME full-window per-category counts rather than a second query. category_counts here stays
+    the untouched, full-window GROUP BY regardless (do_not_touch) — only what "this request's own
+    count/newest/oldest/feed" means changes when a category is active. No hardcoded category
+    allowlist: an unmatched value naturally returns zero rows, same registry-derived philosophy
+    category_counts itself already uses (no name list to drift out of sync).
     """
     g = _guard(request)
     if g:
@@ -291,9 +299,14 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
             win = (f"display_time >= NOW() - INTERVAL '{INTEL_WINDOW_DAYS} days'" if hours <= 0
                    else "display_time >= NOW() - (%s || ' hours')::interval")
             wargs = [] if hours <= 0 else [hours]
+            # cc#2056: category is a plain parameterized equality, applied identically to the
+            # header/count query and the feed query below — never to category_counts.
+            category = (category or "").strip()
+            cat_sql = " AND category = %s" if category else ""
+            cat_args = [category] if category else []
             cur.execute(
                 "SELECT COUNT(*) AS n, MAX(display_time) AS newest, MIN(display_time) AS oldest "
-                "FROM v_polished_articles WHERE " + win, wargs)
+                "FROM v_polished_articles WHERE " + win + cat_sql, wargs + cat_args)
             head = _rows(cur)[0]
             # cc#1001: server-computed per-category counts over the FULL window (one cheap GROUP BY),
             # so EVERY nonzero chip (incl. AI Editorial) is visible from first load with a true count —
@@ -312,10 +325,10 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
             # comes back there is another page, and it is trimmed before shaping.
             cols = ("SELECT polished_id, headline, summary, full_summary, category, sentiment, "
                     "impact, mentioned_symbols, source_name, display_time "
-                    "FROM v_polished_articles WHERE " + win)
+                    "FROM v_polished_articles WHERE " + win + cat_sql)
             if cur_time is None:
                 cur.execute(cols + " ORDER BY display_time DESC NULLS LAST, polished_id DESC "
-                                   "LIMIT %s", wargs + [limit + 1])
+                                   "LIMIT %s", wargs + cat_args + [limit + 1])
             else:
                 # cc#983, unchanged and deliberately NOT rewritten (this card says extend, not
                 # rewrite): written as two comparisons rather than a row constructor so it cannot
@@ -325,7 +338,7 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
                                    "      OR (display_time = %s::timestamptz AND polished_id < %s))"
                                    " ORDER BY display_time DESC NULLS LAST, polished_id DESC"
                                    " LIMIT %s",
-                            wargs + [cur_time, cur_time, cur_id, limit + 1])
+                            wargs + cat_args + [cur_time, cur_time, cur_id, limit + 1])
             arts = _rows(cur)
             has_more = len(arts) > limit
             arts = arts[:limit]
@@ -372,6 +385,10 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
         # cc#1001: server-side per-category counts over the FULL 60-day window — the template renders
         # ALL nonzero chips (incl. AI Editorial) from this immediately, never from loaded pages.
         "category_counts": category_counts,
+        # cc#2056: echoes what was actually applied (empty string = no filter, the default mixed
+        # feed) — same shape as /api/news/polished's own "category" echo, so the client can confirm
+        # the server scoped the request it asked for.
+        "category": category,
         "editorials": editorials,
         "feed": feed,
         "shown": len(editorials) + len(feed),

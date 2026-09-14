@@ -62,7 +62,9 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
 
 <script>
 /* One fetch for the whole screen (item 6). fetchWithTimeout is cc#878's shared helper. */
-var STATE = { data: null, cat: 'All', open: {} };   // cc#993: which cards are expanded
+var STATE = { data: null, cat: 'All', open: {}, reqId: 0 };   // cc#993: which cards are expanded
+                                    // cc#2056: reqId discards a stale out-of-order fetch response
+                                    // if the reader switches categories again before the first one resolves
 
 function esc(s){ return String(s == null ? '' : s)
   .replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -252,7 +254,11 @@ function chipsHtml(){
   var cc = STATE.data.category_counts || {};
   var order = Object.keys(cc).filter(function(k){ return cc[k] > 0; });
   order.sort(function(x, y){ return cc[y] - cc[x] || x.localeCompare(y); });
-  var total = (STATE.data.header && STATE.data.header.count) || 0;
+  // cc#2056: header.count is now SCOPED to the active request (the selected category, when one
+  // is active) so the "showing X of Y" cover line stays honest for the current view -- the All
+  // chip needs the TRUE all-categories total instead, derived from category_counts (untouched,
+  // full-window, independent of the filter) the same way /api/news/polished derives its own total.
+  var total = Object.keys(cc).reduce(function(s, k){ return s + (cc[k] || 0); }, 0);
   return [{label:'All', n: total}]
     .concat(order.map(function(k){ return {label:k, n:cc[k]}; }))
     .map(function(c){
@@ -277,11 +283,9 @@ function render(){
   var total = d.header.count;
   document.getElementById('chips').innerHTML = chipsHtml();
 
+  // cc#2056: eds/feed arrive ALREADY scoped to STATE.cat by the server when a category is active
+  // (mobile_intel()'s own `category` parameter) -- no client-side re-filter needed or performed.
   var eds  = d.editorials || [], feed = d.feed || [];
-  if (STATE.cat !== 'All') {
-    eds  = eds.filter(function(a){ return a.category === STATE.cat; });
-    feed = feed.filter(function(a){ return a.category === STATE.cat; });
-  }
   var html = '';
   if (eds.length){
     html += '<div class="sect">TODAY\'S EDITORIAL</div>';
@@ -291,9 +295,13 @@ function render(){
   }
   if (feed.length) html += '<div class="sect">THE FEED</div>'
                         + feed.map(function(a){ return card(a, 'feed'); }).join('');
-  if (!html) html = '<div class="empty" id="filterEmpty"><b>Nothing in this filter yet</b>'
-                  + 'Loading more stories filed under ' + esc(STATE.cat)
-                  + ' from the last ' + ((d.header && d.header.window_days) || 60) + ' days\u2026</div>';
+  // cc#2056: this fetch was already scoped to STATE.cat, so zero items here means the category
+  // genuinely has none in the window -- not "still paging to find one" (ensureFilterFilled/the
+  // blind-unfiltered-paging design this replaced). filterEmpty's id is kept: appendCards() still
+  // removes it if a later loadMore() page turns up a match within a category large enough to paginate.
+  if (!html) html = '<div class="empty" id="filterEmpty"><b>Nothing here</b>'
+                  + 'No ' + esc(STATE.cat) + ' stories'
+                  + ' in the last ' + ((d.header && d.header.window_days) || 60) + ' days.</div>';
   document.getElementById('body').innerHTML = html + sentinelHtml();
   updateCover(eds.length + feed.length, total);
   armSentinel();
@@ -311,9 +319,16 @@ function render(){
    WHY A KEYSET CURSOR AND NOT A PAGE NUMBER: see the endpoint. Short version, an OFFSET would
    skip or repeat rows the moment a story is polished while you are scrolling.
 
-   PAGING IS UNFILTERED ON PURPOSE (item 3): the fetch always pulls the next slice of the FULL
-   set and the chip filter is applied client-side over everything loaded so far. Filtering
-   server-side would make the chip counts lie about a set the client only partly holds. */
+   PAGING IS CATEGORY-SCOPED SERVER-SIDE (cc#2056, supersedes the original "unfiltered on
+   purpose" design below): a sparse category (Stock Views, 5 of 3603 in the window) used to make
+   ensureFilterFilled() blindly call loadMore() against the FULL unfiltered feed, ~90 sequential
+   round trips before enough matching items surfaced client-side. mobile_intel() now accepts an
+   optional `category`, applied to its own paginated query only — the chip counts (category_counts,
+   below) are a SEPARATE, always-unfiltered full-window query, so scoping the feed itself was
+   never actually a risk to the chip counts lying; that was the original (incorrect) justification
+   for keeping paging unfiltered, confirmed wrong by reading mobile_intel() itself. A chip switch
+   now fires exactly one fresh, category-scoped fetch (loadCategory()); loadMore() continues
+   paging WITHIN that same category via the same `category` param. */
 var PAGE = { cursor: null, more: true, busy: false, obs: null };
 
 function sentinelHtml(){
@@ -328,13 +343,9 @@ function updateCover(shown, total){
   if (el) el.textContent = 'showing ' + shown + ' of ' + total;
 }
 function visibleCount(){
+  // cc#2056: STATE.data is always already scoped to STATE.cat server-side -- no filter needed.
   var d = STATE.data || {};
-  var eds = d.editorials || [], feed = d.feed || [];
-  if (STATE.cat !== 'All'){
-    eds  = eds.filter(function(a){ return a.category === STATE.cat; });
-    feed = feed.filter(function(a){ return a.category === STATE.cat; });
-  }
-  return eds.length + feed.length;
+  return (d.editorials || []).length + (d.feed || []).length;
 }
 function armSentinel(){
   if (PAGE.obs){ PAGE.obs.disconnect(); PAGE.obs = null; }
@@ -349,11 +360,13 @@ function armSentinel(){
 function loadMore(){
   if (PAGE.busy || !PAGE.more || !PAGE.cursor) return;
   PAGE.busy = true;
+  var myReqId = STATE.reqId;   // cc#2056: discard this response if the reader switched categories meanwhile
   var sent = document.getElementById('sentinel');
   if (sent) sent.textContent = 'Loading more…';
-  fetchWithTimeout('/api/mobile/intel?limit=40&cursor=' + encodeURIComponent(PAGE.cursor))
+  fetchWithTimeout(fetchUrl(PAGE.cursor))
     .then(function(r){ return r.json(); })
     .then(function(d){
+      if (myReqId !== STATE.reqId) return;   // stale -- a newer category switch already took over
       if (d.error) throw new Error(d.error);
       PAGE.cursor = d.next_cursor || null;
       PAGE.more   = !!(d.has_more && d.next_cursor);
@@ -375,9 +388,9 @@ function loadMore(){
       document.getElementById('chips').innerHTML = chipsHtml();
       updateCover(visibleCount(), (STATE.data.total != null ? STATE.data.total : d.header.count));
       armSentinel();
-      ensureFilterFilled();   // cc#1001: keep paging until the filtered category shows an item
     })
     .catch(function(e){
+      if (myReqId !== STATE.reqId) return;   // stale -- a newer category switch already took over
       PAGE.busy = false;
       var s3 = document.getElementById('sentinel');
       if (s3) s3.innerHTML = 'Could not load more \u00b7 '
@@ -385,16 +398,12 @@ function loadMore(){
     });
 }
 function appendCards(newEds, newFeed){
-  /* respects the active chip: a page loads the full set, but only what matches is rendered now.
-     The rest stays in STATE and appears if the founder switches back to All. */
+  // cc#2056: newEds/newFeed arrive already scoped to STATE.cat (the fetch itself is category-
+  // scoped now) -- no client-side re-filter.
   var eds = newEds, feed = newFeed;
-  if (STATE.cat !== 'All'){
-    eds  = eds.filter(function(a){ return a.category === STATE.cat; });
-    feed = feed.filter(function(a){ return a.category === STATE.cat; });
-  }
   if (!eds.length && !feed.length) return;
-  /* cc#1001: the auto-fill (ensureFilterFilled) may have rendered the "Nothing in this filter yet"
-     placeholder while paging toward this category's first item — remove it before the real cards land. */
+  /* removes the "Nothing here" empty placeholder if a later loadMore() page (within the same
+     active category) turns up the first match — a category can still be large enough to paginate. */
   var fe = document.getElementById('filterEmpty'); if (fe) fe.parentNode.removeChild(fe);
   var body = document.getElementById('body');
   var sent = document.getElementById('sentinel');
@@ -408,33 +417,51 @@ function appendCards(newEds, newFeed){
   while (frag.firstChild) body.insertBefore(frag.firstChild, sent);
 }
 
-/* cc#1001 (item 4): if the reader filters to a category whose items are not on the loaded pages
-   yet (e.g. AI Editorial, sparse and deep), keep paging WITHIN the 60-day window until an item of
-   that category appears or the window is exhausted. The chip COUNT stays the server 60-day number;
-   only the rendered list lazy-fills. Terminates: PAGE.more goes false at the window edge, or a
-   matching item makes visibleCount() > 0. */
-function ensureFilterFilled(){
-  if (STATE.cat !== 'All' && visibleCount() === 0 && PAGE.more && !PAGE.busy) loadMore();
+/* cc#2056: builds the request URL, scoped to STATE.cat when it is not 'All'. Shared by the
+   initial/category-switch load (loadCategory, cursor=null) and continued paging (loadMore,
+   cursor=PAGE.cursor) so the two can never drift onto a different category mid-scroll. */
+function fetchUrl(cursor){
+  var u = '/api/mobile/intel?limit=40';
+  if (cursor) u += '&cursor=' + encodeURIComponent(cursor);
+  if (STATE.cat !== 'All') u += '&category=' + encodeURIComponent(STATE.cat);
+  return u;
 }
-function pick(cat){ STATE.cat = cat; render(); ensureFilterFilled(); }
+/* cc#2056: the fresh-fetch entry point for BOTH the initial page load and every category switch —
+   replaces the old design where switching a chip just re-filtered whatever unfiltered pages were
+   already loaded (ensureFilterFilled then blindly called loadMore() up to ~90 times for a category
+   as sparse as Stock Views, 5 of 3603). Now: one request, scoped server-side, done. */
+function loadCategory(){
+  var myReqId = ++STATE.reqId;   // invalidates any in-flight loadMore()/loadCategory() from before this switch
+  PAGE = { cursor: null, more: true, busy: false, obs: null };
+  if (PAGE.obs){ PAGE.obs.disconnect(); PAGE.obs = null; }
+  document.getElementById('chips').innerHTML = STATE.data ? chipsHtml() : '';   // chip row stays visible/tappable while the new page loads
+  document.getElementById('body').innerHTML = '<div class="loading">Loading ' + esc(STATE.cat) + '…</div>';
+  fetchWithTimeout(fetchUrl(null))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (myReqId !== STATE.reqId) return;   // stale -- a newer switch already took over
+      if (d.error) throw new Error(d.error);
+      STATE.data = d;
+      PAGE.cursor = d.next_cursor || null;
+      PAGE.more   = !!(d.has_more && d.next_cursor);
+      render();
+    })
+    .catch(function(e){
+      if (myReqId !== STATE.reqId) return;
+      document.getElementById('body').innerHTML =
+        '<div class="empty"><b>Could not load intel</b>' + esc(e.message) +
+        '<div style="margin-top:12px"><button class="chip" onclick="loadCategory()">Retry</button></div></div>';
+      document.getElementById('sub').textContent = 'failed to load';
+    });
+}
+function pick(cat){ STATE.cat = cat; loadCategory(); }
 
 /* cc#993: no `hours` parameter — the endpoint's default is now the WHOLE table, newest to
-   oldest, and the keyset cursor walks it to the true oldest row. */
-fetchWithTimeout('/api/mobile/intel?limit=40')
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    if (d.error) throw new Error(d.error);
-    STATE.data = d;
-    PAGE.cursor = d.next_cursor || null;
-    PAGE.more   = !!(d.has_more && d.next_cursor);
-    render();
-  })
-  .catch(function(e){
-    document.getElementById('body').innerHTML =
-      '<div class="empty"><b>Could not load intel</b>' + esc(e.message) +
-      '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
-    document.getElementById('sub').textContent = 'failed to load';
-  });
+   oldest, and the keyset cursor walks it to the true oldest row.
+   cc#2056: initial load goes through loadCategory() too (STATE.cat starts 'All', so this is the
+   same unscoped fetch as before) rather than a separate one-off fetch, so there is exactly ONE
+   code path that populates STATE.data/PAGE, never two that could disagree. */
+loadCategory();
 </script>
 </body>
 </html>
