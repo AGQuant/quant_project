@@ -458,6 +458,7 @@ function rowsHtml(list, showDay){
         + (e.suppressed_by ? '<span class="tw-supp">in position: ' + heldTxt(e.suppressed_by) + '</span>' : '')
         + '</td>')
       + twCell(e)
+      + twOptCell(e)
       + '</tr>';
   });
   return h;
@@ -494,7 +495,11 @@ function theadHtml(){
          approved_at to the SAME CMP, same qty — blank until approved. No CMP = both blank. */
       + _th('P&amp;L (indicative)','PNL_IND',true,pnlBasisTitle('indicative'))
       + _th('P&amp;L (approved)','PNL_APP',true,pnlBasisTitle('approved'))
-      + _th('Detail','DETAIL') + _th('Status',null) + '</tr>';
+      + _th('Detail','DETAIL') + _th('Status',null)
+      /* cc#2081: Option column — FUTURES only (twOptCell returns '' for any other instrument,
+         matching this header being futures-branch-only), independent of the Status/Approve cell
+         beside it (Q3: fully independent buttons, never one status field). */
+      + (STATE.instrument === 'FUTURES' ? _th('Option',null) : '') + '</tr>';
 }
 /* cc#1813: value getters, one per sortable column — each returns exactly the number/string that
    column's cell actually displays for that row (never a re-derivation the cell itself doesn't
@@ -948,6 +953,7 @@ function boot(keepCounts){
       PAGE.more   = !!(d.has_more && d.next_cursor);
       render();
       if (STATE.mode !== 'approved') twLoadApproved();   /* cc#1525 scope 4: paint APPROVED before the user touches anything */
+      if (STATE.mode !== 'approved') twLoadOptionApproved();   /* cc#2081: independent paint, same trigger point */
     })
     .catch(function(e){
       document.getElementById('meta').textContent = 'Could not load the wall — ' + e.message;
@@ -1192,7 +1198,7 @@ document.addEventListener('keydown', function(e){
    a decision already taken is exactly what a display-only wall should do. source_ref stays
    symbol + '@' + entry.ts AS SERVED — the one key every approve surface writes, so the badge
    matches wherever the founder clicked. */
-var TWA = { approved: {} };
+var TWA = { approved: {}, option: {} };   /* cc#2081: .option mirrors .approved, independent map */
 
 function twRef(e){ return e.symbol + '@' + ((e.entry && e.entry.ts) || ''); }
 function twStampFull(sIn){ var t = String(sIn || ''); return t.length >= 16 ? t.slice(0, 16) : t; }
@@ -1254,6 +1260,51 @@ function twCell(e){
     + '<button type="button" class="twa-btn twa-dismiss" data-act="dismiss" data-rowid="' + k + '" title="Dismiss — always available">DISMISS</button>'
     + '<span class="twa-msg" id="twa-msg-' + k + '"></span></div></td>';
 }
+/* cc#2081 WOT_APPROVE_OPTION_V1 (founder direct, 14-Sep-2026, 5 decisions closed same day) —
+   INDEPENDENT of twCell()/APPROVE/DISMISS above (Q3: "FULLY INDEPENDENT BUTTONS... do not model
+   this as one status field") — its own column, its own map (TWA.option), its own POST. Futures
+   instrument only (the futures signal's direction is what maps to CE/PE, per Q2); returns '' for
+   any other instrument so it adds zero cells there, matching how the header only appears for
+   FUTURES. NOT built: a live options price feed on the resulting position — the approved_price
+   shown is the one-shot live quote AT THE CLICK, same convention as the futures APPROVE price;
+   see wot_option_approve.py's module docstring and the cc#2081 report for what is and is not
+   built and why. */
+function twOptCell(e){
+  if (STATE.status !== 'open' || STATE.instrument !== 'FUTURES') return '';
+  if (e.src === 'alert') return '<td></td>';
+  var hit = (TWA.option[e.engine] || {})[twRef(e)];
+  if (hit){
+    return '<td><div class="twa"><span class="twa-ok">' + esc(hit.option_type) + ' ' + esc(hit.strike)
+      + (hit.approved_price != null ? ' @ ' + px(hit.approved_price) : ' · no live quote')
+      + '</span><span class="twa-via">exp ' + esc(hit.expiry_date || '') + ' · 1 lot</span></div></td>';
+  }
+  var k = esc(e.id);
+  return '<td><div class="twa twa-act" data-rowid="opt-' + k + '">'
+    + '<button type="button" class="twa-btn twa-approve" data-act="approve_option" data-rowid="' + k + '"'
+    + (STATE.approvalWindow && STATE.approvalWindow.open ? '' : ' disabled aria-disabled="true"')
+    + ' title="Resolve ATM strike + the current monthly expiry, buy 1 lot at the live premium — independent of the futures APPROVE/DISMISS beside it">APPROVE OPTION</button>'
+    + '<span class="twa-msg" id="twa-opt-msg-' + k + '"></span></div></td>';
+}
+function twOptAct(id, btn){
+  var e = twFind(id); if (!e) return;
+  var msg = document.getElementById('twa-opt-msg-' + id);
+  if (!(STATE.approvalWindow && STATE.approvalWindow.open)){
+    if (msg) msg.textContent = 'not recorded: ' + ((STATE.approvalWindow && STATE.approvalWindow.reason) || 'approvals open 09:15-15:15 IST on trading days');
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (msg) msg.textContent = 'resolving ATM strike + live premium…';
+  var body = { source_engine: e.engine, source_ref: twRef(e), symbol: e.symbol, direction: twDirection(e), approved_via: 'web-wall' };
+  fetchWithTimeout('/api/tradewall/approve_option', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+    .then(function(res){
+      if (!res.ok){ if (msg) msg.textContent = 'not recorded: ' + (res.j.detail || 'error'); if (btn) btn.disabled = false; return; }
+      TWA.option[e.engine] = TWA.option[e.engine] || {};
+      TWA.option[e.engine][twRef(e)] = res.j.option_trade;
+      render();
+    })
+    .catch(function(err){ if (msg) msg.textContent = 'not recorded: ' + err.message; if (btn) btn.disabled = false; });
+}
 function twFind(id){ for (var i = 0; i < STATE.events.length; i++) if (String(STATE.events[i].id) === String(id)) return STATE.events[i]; return null; }
 function twAct(act, id, btn){
   var e = twFind(id); if (!e) return;
@@ -1292,6 +1343,10 @@ document.addEventListener('click', function(ev){
   var b = ev.target.closest && ev.target.closest('.twa-btn'); if (!b) return;
   var act = b.getAttribute('data-act'), id = b.getAttribute('data-rowid');
   if (act === 'approve'){ apLvlOpen(id, b); return; }   /* cc#2027: approve always confirms target/SL first */
+  /* cc#2081: MUST be intercepted here, before the fallthrough to twAct() below — twAct() only
+     knows 'approve'/'dismiss' and would silently misroute 'approve_option' into its dismiss
+     branch (both share the .twa-btn class for styling). Independent action, independent handler. */
+  if (act === 'approve_option'){ twOptAct(id, b); return; }
   twAct(act, id, b);
 });
 /* ══ cc#2027: target/SL confirmation popup on Approve — founder voice 13-Sep-2026: "approving ANY
@@ -1386,6 +1441,17 @@ function twLoadApproved(){
       .then(function(r){ return r.json(); })
       .then(function(d){ TWA.approved[eng] = d.map || {}; render(); })
       .catch(function(_e){ /* the map is a paint optimisation — a miss just means no stamps yet */ });
+  });
+}
+function twLoadOptionApproved(){
+  /* cc#2081: mirrors twLoadApproved() exactly, independent map, futures-only (the endpoint and
+     column both only mean anything for a futures signal). */
+  if (STATE.status !== 'open' || STATE.instrument !== 'FUTURES') return;
+  (BUCKETS[STATE.instrument] || []).forEach(function(eng){
+    fetchWithTimeout('/api/tradewall/approve_option/map?engine=' + encodeURIComponent(eng))
+      .then(function(r){ return r.json(); })
+      .then(function(d){ TWA.option[eng] = d.map || {}; render(); })
+      .catch(function(_e){ /* paint optimisation — a miss just means no option approvals yet */ });
   });
 }
 
