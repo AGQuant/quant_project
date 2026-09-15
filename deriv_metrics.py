@@ -145,6 +145,50 @@ def _bs_iv(price, S, K, T, cp) -> Optional[float]:
     return round((lo + hi) / 2.0, 4)
 
 
+# ── cc#2031 A1: Black-76 (forward-based) -- ADDITIVE, one pricer family ─────────
+# _bs_price/_bs_iv above stay byte-for-byte unchanged (do_not_touch -- _price_rows' RV20 fair
+# tag, _options_block's straddle gap, and the atm_iv_daily snapshot all read them as-is). This
+# is the fix for the wrong PREMISE cc#2031's audit found: _bs_price/_bs_iv assume the underlying
+# drifts at R_FREE (7%) between now and expiry (d1's (R_FREE+0.5*sigma^2)*T term) -- real
+# put-call parity on NIFTY/BANKNIFTY implies an actual carry of 0.2-0.7%, never near 7% (e1_
+# forward_error evidence, cc#2031 spec). Black-76 prices off an already-known FORWARD instead of
+# assuming one from spot+R_FREE, so a caller with real parity data (both ATM legs quoted) prices
+# correctly; a caller without it falls back to F=spot*e^(R_FREE*T), which is ALGEBRAICALLY
+# IDENTICAL to _bs_price/_bs_iv above (same d1, same price, verified: d1 reduces to
+# (ln(S/K)+(R_FREE+0.5*sigma^2)*T)/(sigma*sqrt(T)) when F=S*e^(R_FREE*T), and the discounted
+# F*N(d1) term reduces to S*N(d1)) -- so this is a strict superset, never a second, diverging
+# model. Same d1/d2 machinery, same R_FREE, same bisection bounds/iteration count as _bs_price/
+# _bs_iv -- r is used for DISCOUNTING ONLY here (no drift term in d1: F already embeds whatever
+# carry produced it, parity-implied or the carry-fallback above).
+def _b76_price(F, K, T, sigma, cp) -> Optional[float]:
+    if not (F and K and T and sigma) or F <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return None
+    d1 = (math.log(F / K) + 0.5 * sigma * sigma * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    disc = math.exp(-R_FREE * T)
+    if cp == "CE":
+        return disc * (F * _norm_cdf(d1) - K * _norm_cdf(d2))
+    return disc * (K * _norm_cdf(-d2) - F * _norm_cdf(-d1))
+
+
+def _b76_iv(price, F, K, T, cp) -> Optional[float]:
+    """Implied vol by bisection on [0.01%, 500%], Black-76. Same bounds/iteration count as
+    _bs_iv. None if price is below intrinsic / bad input."""
+    if not (price and F and K and T) or price <= 0 or T <= 0:
+        return None
+    lo, hi = 1e-4, 5.0
+    for _ in range(64):
+        mid = (lo + hi) / 2.0
+        p = _b76_price(F, K, T, mid, cp)
+        if p is None:
+            return None
+        if p > price:
+            hi = mid
+        else:
+            lo = mid
+    return round((lo + hi) / 2.0, 4)
+
+
 # ── cc#2034: OPTION GREEKS — additive only, _bs_price/_bs_iv above stay byte-for-byte unchanged
 # (other surfaces read them; do_not_touch). Same d1/d2 machinery as _bs_price (one pricer family),
 # same R_FREE for discounting. Standard closed-form (Hull): delta_CE=N(d1), delta_PE=N(d1)-1;
@@ -1816,8 +1860,11 @@ def strike_chain(symbol: str):
                 # cc#1859/2004: same cursor, before the connection closes -- chain_tags needs
                 # `strikes` (moved earlier in this branch for exactly this) and is read-only
                 # against option_iv_daily, same discipline as _stored_iv_gap_map just above.
+                # cc#2031 A3: this branch's `px` ({(strike,'CE'/'PE'): ltp}, built just above from
+                # the same option_chain tick) is passed straight through -- chain_tags uses it to
+                # price off the live parity-implied forward instead of assuming spot*e^(R_FREE*T).
                 import option_ivp
-                tag_map = option_ivp.chain_tags(cur, sym, spot, strikes, days)
+                tag_map, forward_source = option_ivp.chain_tags(cur, sym, spot, strikes, days, px=px)
             T = days / 365.0
             rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: px.get((s, ot)))
             for row in rows:
@@ -1836,7 +1883,8 @@ def strike_chain(symbol: str):
                     "days_to_expiry": days, "rv20": round(rv20 * 100, 1) if rv20 else None,
                     "quoted": len(px), "strikes": rows, "source": "option_chain",
                     "chain_tick": str(tick) if tick else None,
-                    "stored_iv_asof": stored_asof}
+                    "stored_iv_asof": stored_asof,
+                    "forward_source": forward_source}  # cc#2031 A3: 'parity' or 'carry_fallback'
         import stock_options_backfill as sob
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
@@ -1854,8 +1902,7 @@ def strike_chain(symbol: str):
             # cc#1859/2004: symbol-master cache + strike resolution moved inside this connection
             # (neither needs `cur` — _resolve_strikes is a pure computation over the cached
             # text — so this only means the DB connection stays open a little longer, not that
-            # DB access is required for them) so `strikes` is known while `cur` is still open,
-            # letting chain_tags run on the SAME cursor as the cc#1994 read just above.
+            # DB access is required for them).
             now_t = time.time()
             if not _SYM_MASTER_CACHE["text"] or now_t - _SYM_MASTER_CACHE["t"] > 21600:
                 _SYM_MASTER_CACHE["text"] = sob._load_symbol_master()
@@ -1866,11 +1913,24 @@ def strike_chain(symbol: str):
                 return {"symbol": sym, "spot": round(spot, 2), "strikes": [],
                         "error": "no listed strikes for this underlying in the Fyers symbol master"}
             days = max((exp - today).days, 0)
-            import option_ivp
-            tag_map = option_ivp.chain_tags(cur, sym, spot, strikes, days)
+        # cc#2031 A3: chain_tags now needs live px to price off the parity-implied forward, and
+        # px only exists after the Fyers quote fetch below -- which stays OUTSIDE any held DB
+        # connection, same invariant this branch already had (a Fyers network round-trip must
+        # never hold a Postgres connection open). So the connection above closes first, THEN
+        # quotes are fetched, THEN a fresh short connection runs chain_tags. Both connections are
+        # read-only -- nothing is written between them, nothing to reconcile.
         T = days / 365.0
         tickers = [sob.strike_ticker(sym, code, s, ot) for s in strikes for ot in ("CE", "PE")]
         ltp = _batch_quotes(tickers, token)
+        px = {}
+        for s in strikes:
+            for ot in ("CE", "PE"):
+                v = ltp.get(sob.strike_ticker(sym, code, s, ot))
+                if v is not None and v > 0:
+                    px[(s, ot)] = v
+        import option_ivp
+        with _conn() as conn2, conn2.cursor() as cur2:
+            tag_map, forward_source = option_ivp.chain_tags(cur2, sym, spot, strikes, days, px=px)
         rows = _price_rows(strikes, spot, T, rv20, lambda s, ot: ltp.get(sob.strike_ticker(sym, code, s, ot)))
         for row in rows:
             row["stored_iv_gap"] = gap_map.get(row["strike"])  # cc#1994, may be None
@@ -1886,7 +1946,8 @@ def strike_chain(symbol: str):
                 # cc#2080: STOCK leg only (index leg reads a stored option_chain tick -- immune to
                 # this bug, confirmed by reading both branches -- so it never carries this key; the
                 # frontend checks === false, never falsy, for exactly that reason).
-                "market_open": _market_open_now()}
+                "market_open": _market_open_now(),
+                "forward_source": forward_source}  # cc#2031 A3: 'parity' or 'carry_fallback'
     except HTTPException:
         raise
     except Exception as e:

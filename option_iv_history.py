@@ -16,10 +16,25 @@ WHAT THIS BUILDS
 
 WHAT IT DOES NOT DO (do_not_touch, card cc#1858)
     Does NOT touch fo_eod, nse_fo_eod.py, or bg_fo_eod's dispatch in scheduler.py -- the nightly
-    futures-OI ingest is completely unchanged. Does NOT change deriv_metrics.py's Black-Scholes
-    maths (R_FREE, the d1/d2 formula, the bisection bounds/iteration count) -- this module CONSUMES
-    that exact formula (imports deriv_metrics.R_FREE, mirrors _bs_price/_bs_iv's algorithm), it does
-    not invent a second model. Does NOT touch atm_iv_daily (cc#1847's separate table/question).
+    futures-OI ingest is completely unchanged. Does NOT touch atm_iv_daily (cc#1847's separate
+    table/question). Does NOT change deriv_metrics.py's _bs_price/_bs_iv -- those stay byte-for-
+    byte unchanged (do_not_touch, other surfaces read them as-is).
+
+AMENDED cc#2031 (15-Sep-2026) -- SOLVER CHANGED from spot-based Black-Scholes to forward-based
+    Black-76. The premise this module originally mirrored (_bs_price/_bs_iv's d1 assumes the
+    underlying drifts at R_FREE, 7%, to expiry) was found wrong by Fable's 13-Sep audit: real
+    NIFTY/BANKNIFTY put-call parity implies an actual carry of 0.2-0.7%, never near 7% (cc#2031
+    e1_forward_error evidence). _b76_price_vec/_b76_iv_vec below are the vectorised twin of
+    deriv_metrics._b76_price/_b76_iv (same d1/d2 family, same [1e-4,5.0]/64-iteration bisection,
+    additive -- _bs_price_vec/_bs_iv_vec above are UNCHANGED and still defined, just no longer
+    called from ingest_date()). Per (symbol, trade_date), F = the real put-call-parity-implied
+    forward (K_atm + (C_atm-P_atm)*e^(R_FREE*T), K_atm = the strike nearest spot with BOTH legs
+    priced that day) when such a pair exists; F = spot*e^(R_FREE*T) otherwise (algebraically
+    IDENTICAL to what _bs_price_vec/_bs_iv_vec would have produced -- proven in deriv_metrics.
+    _b76_price's own docstring -- so a symbol/day with no valid ATM pair sees the exact same
+    stored iv as before, never a fabricated forward). Fallback count is returned from
+    ingest_date() and surfaced in run_backfill()/run_forward_tick()'s own result dicts, per the
+    card's own instruction to state it, not just log it.
 
 ATM WINDOW DEFINITION -- ONE_REGISTRY_ONE_DERIVATION_V1
     Spot proxy, near-month option expiry, and the ATM +-10 (21 nearest strikes) selection are
@@ -79,11 +94,12 @@ TRIGGER -- same pattern as fy_end_backfill.py / bhavcopy_diagnostic.py (sandbox 
 import io
 import csv
 import logging
+import math
 import threading
 import time
 import zipfile
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Dict, Optional
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -161,6 +177,42 @@ def _bs_iv_vec(price, S, K, T, is_call):
     for _ in range(64):
         mid = (lo + hi) / 2.0
         p = _bs_price_vec(S, K, T, mid, is_call)
+        p = np.where(np.isfinite(p), p, -np.inf)   # a bad d1/d2 (e.g. sigma underflow) never wins the bisection
+        gt = p > price
+        hi = np.where(gt, mid, hi)
+        lo = np.where(gt, lo, mid)
+    iv = (lo + hi) / 2.0
+    return np.where(valid, iv, np.nan)
+
+
+# ── cc#2031 A2: vectorised Black-76 -- SAME formula as deriv_metrics._b76_price/_b76_iv, array-
+# wise, mirroring _bs_price_vec/_bs_iv_vec's own structure exactly (same bounds, same iteration
+# count). Prices off a FORWARD (F) instead of assuming one from spot+R_FREE -- r is used for
+# DISCOUNTING ONLY, no drift term in d1. _bs_price_vec/_bs_iv_vec above are unchanged and no
+# longer called from ingest_date() (see AMENDED cc#2031 at the top of this file) but stay defined
+# in case a future caller needs the old spot-based behaviour explicitly.
+def _b76_price_vec(F, K, T, sigma, is_call):
+    with np.errstate(all="ignore"):
+        sqrtT = np.sqrt(T)
+        d1 = (np.log(F / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT)
+        d2 = d1 - sigma * sqrtT
+        disc = np.exp(-R_FREE * T)
+        call_px = disc * (F * ndtr(d1) - K * ndtr(d2))
+        put_px = disc * (K * ndtr(-d2) - F * ndtr(-d1))
+    return np.where(is_call, call_px, put_px)
+
+
+def _b76_iv_vec(price, F, K, T, is_call):
+    """Vectorised bisection on [1e-4, 5.0], 64 iterations -- identical bounds/iteration count to
+    _bs_iv_vec / deriv_metrics._b76_iv, applied to whole arrays. Returns NaN for any row with an
+    invalid input (mirrors _b76_iv returning None on the same conditions)."""
+    n = price.shape[0]
+    lo = np.full(n, 1e-4, dtype=float)
+    hi = np.full(n, 5.0, dtype=float)
+    valid = (price > 0) & (F > 0) & (K > 0) & (T > 0) & np.isfinite(F)
+    for _ in range(64):
+        mid = (lo + hi) / 2.0
+        p = _b76_price_vec(F, K, T, mid, is_call)
         p = np.where(np.isfinite(p), p, -np.inf)   # a bad d1/d2 (e.g. sigma underflow) never wins the bisection
         gt = p > price
         hi = np.where(gt, mid, hi)
@@ -277,13 +329,50 @@ def ingest_date(d: date) -> dict:
         if not syms:
             return {"ok": True, "rows_written": 0, "note": "no ATM rows selected"}
 
+        # cc#2031 A2: per-symbol put-call-parity forward, from the SAME `closes` values about to
+        # be solved (settlement-substituted, matching price_arr below exactly -- no second price
+        # source). K_atm = the strike nearest that symbol's spot with BOTH legs priced (>0) today;
+        # F = K_atm + (C_atm-P_atm)*e^(R_FREE*T). No such pair -> carry fallback F=spot*e^(R_FREE*T)
+        # (algebraically identical to the old _bs_iv_vec solve -- see deriv_metrics._b76_price's
+        # docstring), counted in forward_fallback_count (stated in the result, per the card).
+        by_sym_legs: Dict[str, Dict[float, Dict[str, float]]] = {}
+        for i in range(len(syms)):
+            c = closes[i]
+            if c is None or c <= 0:
+                continue
+            by_sym_legs.setdefault(syms[i], {}).setdefault(strikes[i], {})[otypes[i]] = c
+        forward_by_sym: Dict[str, Optional[float]] = {}
+        fallback_syms = []
+        for sym, strikes_map in by_sym_legs.items():
+            spot = spot_by_sym.get(sym)
+            exp = opt_near_expiry.get(sym)
+            T_sym = (exp - d).days / 365.0 if exp else None
+            best = None   # (dist, K_atm, C, P)
+            if spot and T_sym and T_sym > 0:
+                for K, legs in strikes_map.items():
+                    C, P = legs.get("CE"), legs.get("PE")
+                    if C is not None and P is not None:
+                        dist = abs(K - spot)
+                        if best is None or dist < best[0]:
+                            best = (dist, K, C, P)
+            if best is not None:
+                _, K_atm, C_atm, P_atm = best
+                forward_by_sym[sym] = K_atm + (C_atm - P_atm) * math.exp(R_FREE * T_sym)
+            elif spot and T_sym and T_sym > 0:
+                forward_by_sym[sym] = spot * math.exp(R_FREE * T_sym)
+                fallback_syms.append(sym)
+            else:
+                forward_by_sym[sym] = None
+                fallback_syms.append(sym)
+        fwd_arr = np.array([forward_by_sym.get(s) if forward_by_sym.get(s) is not None else np.nan
+                             for s in syms], dtype=float)
+
         price_arr = np.array([c if c is not None else np.nan for c in closes], dtype=float)
-        S_arr = np.array(spots, dtype=float)
         K_arr = np.array(strikes, dtype=float)
         T_arr = np.array([(e - d).days / 365.0 for e in expiries], dtype=float)
         call_arr = np.array(is_call, dtype=bool)
         with np.errstate(invalid="ignore"):
-            iv_arr = _bs_iv_vec(np.nan_to_num(price_arr, nan=-1.0), S_arr, K_arr, T_arr, call_arr)
+            iv_arr = _b76_iv_vec(np.nan_to_num(price_arr, nan=-1.0), fwd_arr, K_arr, T_arr, call_arr)
         iv_arr = np.where(np.isnan(price_arr) | (price_arr <= 0), np.nan, iv_arr)
 
         rows = []
@@ -309,7 +398,8 @@ def ingest_date(d: date) -> dict:
                 is_settlement=EXCLUDED.is_settlement, loaded_at=NOW()""")
         deleted, kept = _retire_superseded_expiry_rows(cur, d, syms, expiries)
         conn.commit()
-        return {"ok": True, "rows_written": len(rows), "rows_deleted": deleted, "kept_old_symbols": kept}
+        return {"ok": True, "rows_written": len(rows), "rows_deleted": deleted, "kept_old_symbols": kept,
+                "forward_fallback_count": len(fallback_syms)}  # cc#2031 A2: symbols priced off carry, not parity
     except Exception as e:
         conn.rollback()
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -341,7 +431,7 @@ def run_backfill() -> dict:
     """Claim the earliest pending date, ingest it, mark done/error, repeat -- until no pending
     dates remain or the 08:30 IST hard abort fires. Runs in a daemon thread (see _maybe_start),
     never inside a request or a CC session."""
-    processed, total_rows, errors = 0, 0, 0
+    processed, total_rows, errors, total_fallback = 0, 0, 0, 0
     # cc#2020: the flag is claimed at DEPLOY time, and a deploy can land after 08:30 IST (this
     # correction was pushed at ~23:30 IST). Rather than burn the claim on an instant abort, wait
     # for the next 00:00 IST and run then -- the wall-clock test inside the loop is unchanged.
@@ -378,6 +468,7 @@ def run_backfill() -> dict:
                                    SET status='done', rows_written=%s, finished_at=NOW(), error=NULL
                                    WHERE trade_date=%s""", (res.get("rows_written", 0), d))
                     total_rows += res.get("rows_written", 0)
+                    total_fallback += res.get("forward_fallback_count", 0)   # cc#2031 A2
                 else:
                     cur.execute("""UPDATE option_iv_backfill_status
                                    SET status='error', error=%s, finished_at=NOW()
@@ -391,7 +482,8 @@ def run_backfill() -> dict:
         log.info(f"option_iv_history backfill run ended: {processed} dates, {total_rows} rows, "
                  f"{errors} errors, {elapsed:.0f}s")
         _mark_flag_done()
-        return {"ok": True, "processed": processed, "rows_written": total_rows, "errors": errors}
+        return {"ok": True, "processed": processed, "rows_written": total_rows, "errors": errors,
+                "forward_fallback_count": total_fallback}  # cc#2031 A2, summed across all dates this run
     except Exception as e:
         log.error(f"option_iv_history backfill crashed: {e}")
         return {"ok": False, "error": str(e), "processed": processed, "rows_written": total_rows}
