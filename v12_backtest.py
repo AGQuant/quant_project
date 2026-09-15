@@ -901,10 +901,19 @@ def _v12_selftest_run():
                 "exit": {"trailing_peak_pct": 15}, "rebalance": {"freq": "monthly"},
                 "costs": {"txn_pct": 0.1, "slippage_pct": 0.1}}
         res = run_backtest(defn, date.today() - timedelta(days=5 * 365), date.today(), "NIFTY50")
+        trades = res.get("trades", [])
+        # cc#2093 evidence: tally exit_reason across real trades so the self-test result itself
+        # proves (or disproves) that trailing_peak_pct/rank_fall_y forced exits actually fired,
+        # rather than just showing the pipeline ran without crashing.
+        exit_reason_counts = {}
+        for tr in trades:
+            r = tr.get("exit_reason", "rotation")
+            exit_reason_counts[r] = exit_reason_counts.get(r, 0) + 1
         out = {"error": res.get("error"), "pit_flag": res.get("pit_flag"),
                "runtime_s": round(time.time() - t0, 1), "stats": res.get("stats"),
-               "n_trades": len(res.get("trades", [])), "rebalances": res.get("rebalances"),
+               "n_trades": len(trades), "rebalances": res.get("rebalances"),
                "universe_size": res.get("universe_size"),
+               "exit_reason_counts": exit_reason_counts,
                "first_rebal": (res.get("rebalance_log") or [{}])[0]}
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config(key,value,updated_at) VALUES('v12_bt_selftest_result',%s,NOW()) "
