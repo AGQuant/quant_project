@@ -1417,8 +1417,12 @@ var _full = false;                // cc#779: fullscreen state
     if (!b) return "";
     var c = b === "Strong Buy" ? "#2FD48B" : b === "Buy" ? "#7FD4A8"
           : b === "Watch" ? "#F5B94A" : "#FF5C6C";
+    // cc#2102: pill label shortens (Strong Buy -> S.Buy) so its width class matches Buy/Watch/Exit
+    // and rows stop shifting; the colour keys off the FULL string b, unchanged, and the full text
+    // stays in the header's band-rule legend (d.band_rule, untouched) -- label only, not the value.
+    var label = b === "Strong Buy" ? "S.Buy" : b;
     return '<span style="font-size:9.5px;font-weight:800;letter-spacing:.03em;padding:2px 6px;' +
-      'border-radius:6px;color:' + c + ';border:1px solid ' + c + '55;white-space:nowrap">' + b + '</span>';
+      'border-radius:6px;color:' + c + ';border:1px solid ' + c + '55;white-space:nowrap">' + label + '</span>';
   }
 
   function _loadPeers() {
@@ -1547,11 +1551,16 @@ var _full = false;                // cc#779: fullscreen state
       // the one misread this table must not allow. Snapping makes the scroll come to rest on a
       // column boundary instead of mid-number. `proximity`, never `mandatory`: mandatory can leave
       // the tail past the last snap point unreachable, which would hide the CARD button.
+      // cc#2102 item 4: the sort headers were already wired (cc#987), but an UNSORTED column
+      // showed no glyph at all — plain text is not a visible tap affordance. A faint ⇅ now sits on
+      // every sortable header always; it becomes the existing solid ▼/▲ once that column is active
+      // — same buttons, same _peerSortBy, no second sort mechanism.
       return '<th style="' + th + (left ? ';text-align:left;' + stick + 'background-color:' + p.panel
                                         : ';scroll-snap-align:start') + '">' +
         '<button data-sortcol="' + key + '" aria-label="Sort by ' + label + '"' +
         ' style="' + thBtn + (left ? ';text-align:left' : '') + ';color:' + col + '">' + label +
-        (on ? '<span style="margin-left:3px">' + (_peerSortDir < 0 ? "▼" : "▲") + '</span>' : '') +
+        '<span style="margin-left:3px' + (on ? '' : ';opacity:.4') + '">' +
+        (on ? (_peerSortDir < 0 ? "▼" : "▲") : "⇅") + '</span>' +
         '</button></th>';
     }
 
@@ -1575,13 +1584,18 @@ var _full = false;                // cc#779: fullscreen state
         '<td style="' + td + '">' + _pc(r.day_pct, nar) + '</td>' +
         '<td style="' + td + '">' + _pc(r.week_pct, nar) + '</td>' +
         '<td style="' + td + '">' + _pc(r.month_pct, nar) + '</td>' +
-        '<td style="' + td + ';color:' + p.txt + ';font-weight:700">' + (r.gvm == null ? "—" : r.gvm.toFixed(2)) + '</td>' +
-        '<td style="' + td + '">' + _bandChip(r.band) + '</td>' +
+        // cc#2102 item 2: GVM score and Band tag merge into one middle column, visually grouped —
+        // the score number beside its own pill, rather than two separate columns that used to
+        // split them apart. GVM stays sortable via the header above (unchanged, still gvm on the
+        // payload); this only changes which column the VALUE renders in.
+        '<td style="' + td + '"><span style="color:' + p.txt + ';font-weight:700">' +
+          (r.gvm == null ? "—" : r.gvm.toFixed(2)) + '</span> ' + _bandChip(r.band) + '</td>' +
         '<td style="' + td + '"><button data-card="' + r.symbol + '" style="border:1px solid ' + p.line +
           ';background:' + p.btn + ';color:' + p.mut + ';border-radius:7px;padding:4px ' + (nar ? "7px" : "10px") +
           ';min-height:30px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit">CARD</button></td>' +
         '</tr>' +
-        '<tr data-drawer="' + r.symbol + '" style="display:none"><td colspan="7" style="padding:0"></td></tr>';
+        // cc#2102: colspan 7->6 -- the table has one fewer column now that GVM+Band share a cell.
+        '<tr data-drawer="' + r.symbol + '" style="display:none"><td colspan="6" style="padding:0"></td></tr>';
     }).join("");
 
     // The hint sits ABOVE the table, not under it: the pane is itself vertically scrollable
@@ -1596,9 +1610,9 @@ var _full = false;                // cc#779: fullscreen state
         '<thead><tr>' +
           hcell("sym", "Symbol", true) + hcell("day", nar ? "Day %" : "Day") +
           hcell("week", nar ? "Wk %" : "Week") + hcell("month", nar ? "Mo %" : "Month") +
+          // cc#2102 item 2: the standalone "Band" header is gone — GVM's own header now covers
+          // the merged GVM+Band column below (Band was never itself a sort key, see _PEER_KEY).
           hcell("gvm", "GVM") +
-          '<th style="' + th + ';scroll-snap-align:start;padding:' + pad + ';font-size:9.5px;font-weight:800;' +
-            'letter-spacing:.05em;text-transform:uppercase;color:' + p.sub + '">Band</th>' +
           // ...and the last column snaps to END, so the far edge of the scroll is itself a rest
           // point and the CARD button can never sit half off the fold.
           '<th style="' + th + ';scroll-snap-align:end"></th>' +
