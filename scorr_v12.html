@@ -84,6 +84,12 @@
       <div class="fld"><label>Profit growth 3y % (min)</label><input id="u_pg3_min" type="number" placeholder="min"></div>
       <div class="fld"><label>Promoter holding % (min)</label><input id="u_promoter_min" type="number" placeholder="min"></div>
       <div class="fld"><label>Segment (contains)</label><input id="u_segment" type="text" placeholder="e.g. IT - Large"></div>
+      <!-- cc#2086: Robo Basket Phase-2 register additions (PEG ratio + Op. profit growth dropped
+           -- screener_raw columns exist but are 100% NULL in production, see cc#2086 report) -->
+      <div class="fld"><label>P/E multiplier, cur/5Y avg (min / max)</label><div class="two"><input id="u_pemult_min" type="number" placeholder="min"><input id="u_pemult_max" type="number" placeholder="max"></div></div>
+      <div class="fld"><label>Mcap / Sales (min / max)</label><div class="two"><input id="u_mcapsales_min" type="number" placeholder="min"><input id="u_mcapsales_max" type="number" placeholder="max"></div></div>
+      <div class="fld"><label>Promoter pledge % (min / max)</label><div class="two"><input id="u_pledge_min" type="number" placeholder="min"><input id="u_pledge_max" type="number" placeholder="max"></div></div>
+      <div class="fld"><label>Beta vs Nifty, 1y (min / max)</label><div class="two"><input id="u_beta_min" type="number" placeholder="min"><input id="u_beta_max" type="number" placeholder="max"></div></div>
     </div>
     <div class="row">
       <button class="btn ghost" onclick="previewUniverse()">Preview universe</button>
@@ -192,6 +198,11 @@ function buildFilters(){
   if(num('u_de_max')!=null)f.de={max:num('u_de_max')};
   if(num('u_pg3_min')!=null)f.profit_growth_3y={min:num('u_pg3_min')};
   if(num('u_promoter_min')!=null)f.promoter={min:num('u_promoter_min')};
+  // cc#2086: Robo Basket Phase-2 register additions
+  const pemult=rng('u_pemult_min','u_pemult_max');if(pemult)f.pe_multiplier=pemult;
+  const mcs=rng('u_mcapsales_min','u_mcapsales_max');if(mcs)f.mcap_sales=mcs;
+  const pldg=rng('u_pledge_min','u_pledge_max');if(pldg)f.promoter_pledge=pldg;
+  const bta=rng('u_beta_min','u_beta_max');if(bta)f.beta_1y=bta;
   const seg=document.getElementById('u_segment').value.trim();
   return {filters:f, segment:seg};
 }

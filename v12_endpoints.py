@@ -321,7 +321,7 @@ def screener_page():
 # a leverage filter (D/E or interest coverage) auto-excludes financial segments. Universe is a
 # saved object (v12_universes), dynamic (re-evaluated) or frozen (symbol list snapshotted at save).
 
-# filter key -> SQL expression. g=gvm_scores, s=screener_raw, i=input_raw
+# filter key -> SQL expression. g=gvm_scores, s=screener_raw, i=input_raw, bt=beta_daily (latest row)
 _UNI_COLS = {
     "price":            "g.price",
     "market_cap":       "g.market_cap",
@@ -348,6 +348,16 @@ _UNI_COLS = {
     "fii_change":       "s.fii_change",
     "dii_change":       "s.dii_change",
     "w52_index":        "s.return_52w_vs_index",
+    # cc#2086 — Robo Basket Phase-2 register (docs/ROBO_BASKET_FILTER_REGISTER_v1_1.md, A6).
+    # Direct EOD columns/joins, no derived multi-period math. NOT included: "PEG Ratio" and
+    # "Operating profit growth" exist as screener_raw columns but are 100% NULL across all 1881
+    # rows in production (checked, not assumed) -- functionally blocked-on-data, would ship a
+    # filter that silently always returns zero. See report for those two plus the fields deferred
+    # (fundamentals_history-derived, own follow-up) and the two genuinely blocked on schema.
+    "pe_multiplier":    "s.pe / NULLIF(s.historical_pe, 0)",       # current PE / 5Y-avg PE
+    "mcap_sales":       's.market_cap / NULLIF(s."Sales", 0)',
+    "promoter_pledge":  's."Promoter holding" - s."Unpledged promoter holding"',
+    "beta_1y":          "bt.beta",                                  # cc#2032's beta_daily, 252-session window vs NIFTY50
 }
 _UNI_LEVERAGE_KEYS = {"de", "int_cov"}   # any of these triggers the BFSI exclusion
 
@@ -355,6 +365,10 @@ _UNI_BASE = """
     FROM gvm_scores g
     LEFT JOIN screener_raw s ON UPPER(s.nse_code) = UPPER(g.symbol)
     LEFT JOIN input_raw i    ON UPPER(i.nse_code) = UPPER(g.symbol)
+    LEFT JOIN LATERAL (
+        SELECT beta FROM beta_daily bd
+        WHERE UPPER(bd.symbol) = UPPER(g.symbol) ORDER BY bd.d DESC LIMIT 1
+    ) bt ON TRUE
     WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
 """
 
