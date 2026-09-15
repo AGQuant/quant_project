@@ -121,10 +121,24 @@ composite with the ghost member is bit-for-bit identical to the composite withou
 self-test hook from cc#2085 (`app_config['v12_bt_selftest']`, startup-gated, re-armable on any
 boot — confirmed by reading `_v12_selftest_trigger`'s `startup` hook: it checks the flag fresh
 every boot, not a one-time-ever consumption). Re-armed it (`value='run'`) before this push, so it
-fires a REAL `run_backtest()` call end-to-end against production on this deploy's own boot,
-exercising the new `sector_stats` wiring for real, not just the isolated new function. Result
-appended below once the deploy completes and the self-test writes back
-(`app_config['v12_bt_selftest_result']`).
+fired a REAL `run_backtest()` call end-to-end against production on this deploy's own boot.
+
+**Result, stated precisely — what this does and does not prove.** `app_config['v12_bt_selftest']`
+came back `done` (not `error`) at `2026-09-15 05:56:54`, ~9 minutes after the push — the run
+completed in 10.6s: `universe_size=737`, `rebalances=62`, `total_trades=262`, `cagr_pct=39.06`,
+`benchmark_cagr_pct=5.84`, `alpha_pct=33.16`, `first_rebal` matching cc#2085's own recorded
+first-rebalance exactly (2021-11-15, ESCORTS/RADICO/APLLTD/AUROPHARMA) — the walk itself is stable
+and unaffected by this card's additions. This proves `run_backtest()` executed **through** this
+card's new segment-collection/composite code path on a real 5-year, 737-symbol, 62-rebalance run
+without raising — a bug in the new SQL or wiring (a bad column name, a malformed query) would have
+set `value='error'` with the exception captured, and it did not. **What it does NOT prove**: the
+actual `sector_stats` values from this run. `_v12_selftest_run` is cc#2085's own pre-existing
+function; its summary (`out = {..., "stats": res.get("stats"), ...}`) captures a fixed field
+subset that does not include `sector_stats` — not extended here, since widening what an
+already-shipped, already-relied-upon self-test captures is a separate decision from this card's
+own scope. So the load-bearing evidence for the sector math ITSELF stays the unit-level proof
+above (exact 9-decimal match + the ghost-member exclusion test); this self-test's contribution is
+narrower but still real: confirmed integration, not confirmed output.
 
 **Live check**: `/v12` Step 4, run a real backtest, confirm all 3 layers render with real numbers
 and the benchmark selector changes Layer 3's output — CC's container has no egress path to
