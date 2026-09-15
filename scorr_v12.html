@@ -150,7 +150,11 @@
     <div class="sub">Portfolio walk on 5-year EOD prices. Rebalance on schedule, equal-weight, with your costs. Honest: daily-mark drawdown, yearly split, min-n badge.</div>
     <div class="grid">
       <div class="fld"><label>Rebalance</label><select id="b_freq"><option>weekly</option><option selected>monthly</option><option>quarterly</option></select></div>
-      <div class="fld"><label>Benchmark</label><select id="b_bench"><option>NIFTY50</option><option>NIFTY100</option><option>NIFTY200</option><option>NIFTY500</option></select></div>
+      <!-- cc#2087: NIFTY100/NIFTY200 removed -- raw_prices has zero rows for either (checked),
+           so they always errored if picked. BANKNIFTY added (1313 real raw_prices rows, checked).
+           Midcap 150 / Smallcap 250 requested by the card are NOT offered -- no matching index
+           data exists (see report); offering them would be a selector that always fails. -->
+      <div class="fld"><label>Benchmark</label><select id="b_bench"><option>NIFTY50</option><option>NIFTY500</option><option>BANKNIFTY</option></select></div>
       <div class="fld"><label>Txn cost %</label><input id="b_txn" type="number" value="0.1"></div>
       <div class="fld"><label>Slippage %</label><input id="b_slip" type="number" value="0.1"></div>
       <div class="fld"><label>Start (YYYY-MM-DD)</label><input id="b_start" type="text" placeholder="auto -5y"></div>
@@ -293,10 +297,24 @@ function renderResults(res){
   html+='<div class="cards">'+
     card('CAGR',sc(s.cagr_pct,'%'))+card('Absolute',sc(s.absolute_return_pct,'%'))+
     card('vs '+res.benchmark,sc(s.benchmark_return_pct,'%'))+card('Alpha',sc(s.alpha_pct,'%'))+
+    /* cc#2087: Layer 2 (sector) sits right beside Layer 3 (index) above -- same tile style, same
+       row, so the two comparisons read together. sector_stats is null when the basket held no
+       symbol with a real segment (e.g. an all-cash-parked run). */
+    (res.sector_stats ? card('vs Sector',sc(res.sector_stats.sector_return_pct,'%'))
+      + card('Sector Alpha',sc(res.sector_stats.vs_sector_alpha_pct,'%')) : '')+
     card('Beta',s.beta==null?'--':s.beta)+card('Max DD',sc(s.max_drawdown_pct,'%'))+
     card('Sharpe',s.sharpe==null?'--':s.sharpe)+card('Calmar',s.calmar==null?'--':s.calmar)+
     card('XIRR',sc(s.xirr_pct,'%'))+card('Accuracy',s.accuracy_pct==null?'--':s.accuracy_pct+'%')+
     card('Trades',s.total_trades)+card('Win/Loss',s.win_trades+' / '+s.loss_trades)+'</div>';
+  /* cc#2087: the 3-layer summary line -- Layer 1 (standalone, the CAGR/Absolute tiles above),
+     Layer 2 (sector, this basket's own traded segments), Layer 3 (the chosen index benchmark). */
+  if (res.sector_stats){
+    html+='<div class="sub" style="margin-top:8px">&#9432; Layer 2 (sector): vs '
+      +esc(res.sector_stats.segments.join(', '))+' ('+res.sector_stats.n_members+' stocks, '
+      +'sector CAGR '+res.sector_stats.sector_cagr_pct+'%). '+esc(res.sector_stats.methodology)+'</div>';
+  } else {
+    html+='<div class="sub" style="margin-top:8px">&#9432; Layer 2 (sector): not available -- no held symbol carried a real segment for this run.</div>';
+  }
   html+='<div class="chartwrap">'+svgChart(res.equity_series||[],res.benchmark_series||[])+
     '<div class="legend"><span><span class="sw" style="background:var(--blu)"></span>Basket (rebased 100)</span><span><span class="sw" style="background:#5E6B8F"></span>'+res.benchmark+'</span></div></div>';
   // yearly split

@@ -63,7 +63,19 @@ def _conn():
 
 _LOOKBACK_DAYS = {"1M": 30, "3M": 91, "6M": 182, "12M": 365}
 _FREQ_DAYS = {"weekly": 7, "monthly": 30, "quarterly": 91}
-_BENCH = {"NIFTY50": "NIFTY50", "NIFTY100": "NIFTY100", "NIFTY200": "NIFTY200", "NIFTY500": "NIFTY500"}
+# cc#2087: NIFTY100/NIFTY200 were already dead entries -- raw_prices has ZERO rows for either
+# (checked, not assumed), so selecting them already fell through to run_backtest's own
+# "insufficient benchmark history" error (line ~351) rather than fabricating a series -- fails
+# safely today, but a selector offering two options that always error is bad UX while this exact
+# dropdown is already being touched for the layer-3 extension. Removed from the UI list below;
+# left in _BENCH itself (harmless, still resolves to the same dead symbol -> same honest error --
+# not deleted from the backend map in case some other caller passes them explicitly). BANKNIFTY is
+# real (1313 raw_prices rows, checked). NIFTY MIDCAP 150 / SMALLCAP 250 requested by the card are
+# NOT added: no raw_prices rows for either name, and MIDCAPNIFTY (Nifty Midcap SELECT, the ~25-30
+# stock F&O index) is a narrower, different index from "Midcap 150" -- reported as a gap in the
+# report, not silently substituted.
+_BENCH = {"NIFTY50": "NIFTY50", "NIFTY100": "NIFTY100", "NIFTY200": "NIFTY200",
+          "NIFTY500": "NIFTY500", "BANKNIFTY": "BANKNIFTY"}
 
 
 def params_hash(basket_def, start, end, benchmark):
@@ -112,6 +124,55 @@ def _load_series(cur, symbols, start, end):
     if cur_sym is not None:
         s.add(cur_sym, buf)
     return s
+
+
+def _segment_composite_series(cur, segments, cal):
+    """cc#2087 Layer 2 (sector): a fixed-weight mcap composite over `segments`, chained across
+    `cal` (the SAME trading-day calendar the basket/benchmark already walk). No historical daily
+    mcap series exists in this platform (only today's gvm_scores.market_cap snapshot) -- so this
+    is a cap-weighted-AT-INCEPTION, price-return-chained composite: each member's weight is fixed
+    at its mcap SHARE within these segments today, applied to that member's own day-over-day
+    raw_prices return and compounded. This is the standard construction a custom index uses
+    without full historical constituent-weight history -- stated explicitly here and in the
+    report, never presented as a true daily-rebalanced cap-weighted index. Returns
+    ({date: level}, member_symbols) -- the member list is returned too so a caller states exactly
+    who was in the composite, not just the segment names."""
+    if not segments or not cal:
+        return {}, []
+    cur.execute("""
+        SELECT symbol, market_cap FROM gvm_scores
+        WHERE segment = ANY(%s) AND score_date = (SELECT MAX(score_date) FROM gvm_scores)
+          AND market_cap IS NOT NULL AND market_cap > 0
+    """, (list(segments),))
+    members = [(r[0], float(r[1])) for r in cur.fetchall()]
+    if not members:
+        return {}, []
+    total_mcap = sum(mc for _, mc in members)
+    weights = {sym: mc / total_mcap for sym, mc in members}
+    series = _load_series(cur, list(weights.keys()), cal[0] - timedelta(days=10), cal[-1])
+    level = 100.0
+    out = {cal[0]: level}
+    prev = cal[0]
+    for d in cal[1:]:
+        ret_sum, w_sum = 0.0, 0.0
+        for sym, w in weights.items():
+            pc, pp = series.as_of(sym, d), series.as_of(sym, prev)
+            if pc is not None and pp:
+                ret_sum += w * (pc / pp - 1.0)
+                w_sum += w
+        # cc#2087, verified with real data + a synthetic no-data member (report): .as_of() is a
+        # bisect-to-latest-price-AT-OR-BEFORE lookup (same as the basket's own equity walk above),
+        # so a member missing ONLY that day's row forward-fills to its last known price (0% for
+        # that day, correctly included in w_sum) -- it is NEVER excluded for a mere same-day gap.
+        # w_sum only drops below the full weight for a member with NO price at all at-or-before
+        # this point (never listed, or genuinely no data) -- that member is excluded and the
+        # remaining members' weights renormalised, so one data-less name can never silently drag
+        # the whole composite toward zero.
+        day_ret = (ret_sum / w_sum) if w_sum > 0 else 0.0
+        level *= (1 + day_ret)
+        out[d] = level
+        prev = d
+    return out, sorted(weights.keys())
 
 
 def _load_weekly_atr(cur, symbols, start, end, period=14):
@@ -502,6 +563,37 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
 
     years = max((cal[-1] - cal[start_i]).days / 365.25, 1e-9)
     pack = _stats_pack(equity_series, bench_series, trades, years, equity)
+
+    # cc#2087 Layer 2: sector benchmark, over the FULL calendar cal walked (not the truncated
+    # rebalance_log[-60:] the payload returns) -- every segment the basket held at ANY rebalance,
+    # so a basket that rotated through several sectors is compared against all of them, not just
+    # its final holding.
+    held_segments = None
+    sector_stats = None
+    touched_syms = {s for row in rebalance_log for s in row.get("holdings", [])}
+    if touched_syms:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT segment FROM gvm_scores WHERE symbol = ANY(%s) "
+                        "AND score_date = (SELECT MAX(score_date) FROM gvm_scores) "
+                        "AND segment IS NOT NULL", (list(touched_syms),))
+            held_segments = sorted(r[0] for r in cur.fetchall())
+            sector_level, sector_members = _segment_composite_series(cur, held_segments, cal)
+        if sector_level and cal[start_i] in sector_level and cal[-1] in sector_level:
+            s0, s1 = sector_level[cal[start_i]], sector_level[cal[-1]]
+            sector_ret = s1 / s0 - 1.0
+            sector_cagr = (s1 / s0) ** (1 / years) - 1.0
+            sector_stats = {
+                "segments": held_segments, "n_members": len(sector_members),
+                "sector_return_pct": round(sector_ret * 100, 2),
+                "sector_cagr_pct": round(sector_cagr * 100, 2),
+                "vs_sector_alpha_pct": round((pack["stats"]["cagr_pct"] / 100 - sector_cagr) * 100, 2),
+                "methodology": ("Fixed-weight mcap composite (each member's TODAY's mcap share "
+                                 "within these segments, applied to its own day-over-day price "
+                                 "return, compounded) -- not a true daily-rebalanced cap-weighted "
+                                 "index, since no historical daily mcap series exists here. "
+                                 "Includes every segment the basket held at any rebalance, not "
+                                 "just its current/final holding."),
+            }
     pit_universe_note = None
     if gvm_filters is not None:
         # cc#2085: the founder's own explicit ask -- "state the point-in-time universe size
@@ -529,6 +621,12 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         "rebalance_log": rebalance_log[-60:], "trades": trades,
         "stats": pack["stats"], "month_wise": pack["month_wise"],
         "yearly": pack["yearly"], "streaks": pack["streaks"], "honesty": pack["honesty"],
+        # cc#2087: three comparison layers. Layer 1 (standalone) is stats.absolute_return_pct /
+        # cagr_pct, already computed above -- nothing new to add for it. Layer 3 (index) is
+        # stats.benchmark_return_pct / benchmark_cagr_pct / alpha_pct, already computed above too
+        # -- this card only widened which index can be chosen (see _BENCH). Layer 2 (sector) is
+        # genuinely new:
+        "sector_stats": sector_stats,   # None when the basket held no symbol with a real segment
     }
 
 
