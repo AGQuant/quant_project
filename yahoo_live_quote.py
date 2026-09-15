@@ -24,17 +24,26 @@ card asked to be investigated: at ~210 symbols, TWO batched requests (BATCH_SIZE
 entire universe -- not the 30+ minutes a 1-symbol-per-second throttle (yahoo_symbol_resolver.py's
 own THROTTLE=1.0, built for nightly chart-endpoint backfill) would need for ~1800 names.
 
-BATCH ENDPOINT -- NOT LIVE-VERIFIED FROM THIS SESSION, STATED HONESTLY. This session's sandboxed
-network denies query1.finance.yahoo.com (org policy on the egress proxy's CONNECT tunnel) -- the
-exact live response shape/limits of Yahoo's v7/finance/quote batch contract could not be
-curl-tested from here. What follows is the long-stable, publicly documented behaviour of that
-endpoint (the same one yfinance and many other open-source tools rely on: a comma-separated
-`symbols=` query param returns many quotes in ONE call), DISTINCT from the chart/history endpoint
-yahoo_daily_update.py/yahoo_symbol_resolver.py already use and already confirmed reachable in
-production. Every failure path below degrades to "symbol absent from the result" rather than
-raising or fabricating a value, specifically because this exact call was not verified live here --
-confirm the first real batch call once deployed (Railway's egress is not sandboxed the way this
-session's is) and note the true latency observed.
+ENDPOINT CORRECTION (cc#2096, 15-Sep-2026) -- the original v7/finance/quote batch call above was
+"not live-verified from this session" by design (this sandbox cannot reach Yahoo either); cc#2094
+(equity_cmp_poll.py) reused this function and got the first real production evidence: 0 of 52 real
+symbols returned, no exception -- the exact failure signature of v7/finance/quote's crumb+cookie
+auth requirement (industry-standard since ~2022 for unauthenticated callers), not a network fault.
+fetch_live_quotes() below now calls v8/finance/chart/{ticker} instead -- the SAME endpoint
+yahoo_daily_update.py/yahoo_symbol_resolver.py already use and have PROVEN reachable in production,
+confirmed no auth needed. Trade-off, stated plainly: v8/chart is NOT batchable (one symbol per
+request, unlike v7/quote's comma-separated batch) -- fetched CONCURRENTLY instead, at the exact
+sem_size=3/sleep_s=0.4 settings yahoo_daily_update.SEMAPHORE_DEFAULT/SLEEP_DEFAULT already run in
+production for the nightly EOD backfill, reused rather than guessed at a faster, unverified rate.
+For mobile_home2()'s full-universe ADR/breadth call (~208-212 symbols) that means roughly 1-2
+minutes per outage-triggered request, not the 3.5+ minutes a naive sequential 1-req/sec throttle
+would cost -- slow is an acceptable trade for a rare outage-fallback path; silently returning
+nothing forever, the prior behaviour, is not. Price/OHLC are read from the chart response's own
+`meta` object (regularMarketPrice/previousClose/regularMarketDayHigh/Low -- long-stable, public
+Yahoo chart fields) with a fallback to the latest daily bar's close when meta is absent, so a
+partial/unusual response still degrades to "absent" rather than a fabricated value, same principle
+as before. Every failure path still degrades to "symbol absent from the result", never raising or
+fabricating -- unchanged from the original design, only the transport underneath it changed.
 
 SOURCE TAGGING -- never disguised as a genuine Fyers tick, matching domestic_live()'s own existing
 two-tier "source": "live_intraday" / "eod_fallback" convention. This adds a third: "yahoo_live_
@@ -45,13 +54,13 @@ request; there is nothing to persist. The instant the fyers_eq leg's newest bar 
 the very next request's check returns False and mobile_home2.py's normal domestic_live()/
 market_mood() path runs unchanged -- the Yahoo values were never cached or reused.
 """
-import json
+import asyncio
 import logging
 import os
-import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta, timezone, time as dt_time
+
+import httpx
 
 from feed_guardian import _leg_ages, STALE_MIN   # cc#1417: REUSE, not a second detector
 
@@ -61,10 +70,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 MARKET_OPEN = dt_time(9, 15)
 MARKET_CLOSE = dt_time(15, 30)
 
-QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
-BATCH_SIZE = 150          # ~210-symbol universe -> 2 requests; keeps the symbols= query string
-                          # comfortably under typical URL-length limits even as the universe grows
-TIMEOUT_SEC = 4           # a live-page fallback must fail fast, never hang a request behind it
+# cc#2096: v8/chart, not v7/quote -- see the module doc's ENDPOINT CORRECTION section for why.
+CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+TIMEOUT_SEC = 15          # a per-symbol chart call over real network latency, not the old 4s
+                          # batch-call budget -- matches yahoo_daily_update.py's own chart timeout
+SEM_SIZE = 3              # reused verbatim from yahoo_daily_update.SEMAPHORE_DEFAULT -- the one
+SLEEP_S = 0.4             # concurrency/pace this codebase has actually run against Yahoo in
+                          # production (nightly EOD backfill), not a fresh guess for this call
 SOURCE_TAG = "yahoo_live_fallback"
 
 _IDX_YAHOO = {"NIFTY50": "^NSEI", "BANKNIFTY": "^NSEBANK"}
@@ -93,41 +105,91 @@ def _yahoo_symbol(nse_symbol):
     return _IDX_YAHOO.get(nse_symbol, f"{nse_symbol}.NS")
 
 
-def fetch_live_quotes(symbols):
-    """Batched live quote fetch. Returns {nse_symbol: {price, chg_pct, prev_close, open, high,
-    low, asof, source}} for whatever Yahoo actually returned -- a symbol Yahoo didn't return, or
-    a batch whose request failed outright, is simply ABSENT from the result. Never zero-filled,
-    never a stale/cached value passed off as fresh -- see the module doc for why this exact call
-    is unverified from this session and what that means for the failure handling below."""
-    out = {}
-    uniq = list(dict.fromkeys(symbols))
-    for i in range(0, len(uniq), BATCH_SIZE):
-        batch = uniq[i:i + BATCH_SIZE]
-        y_syms = [_yahoo_symbol(s) for s in batch]
-        rev = {y: s for y, s in zip(y_syms, batch)}
-        url = QUOTE_URL + "?" + urllib.parse.urlencode({"symbols": ",".join(y_syms)})
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+def _f(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _fetch_one(client, sem, nse_sym, fetched_at):
+    """One symbol's chart call, semaphore-limited (cc#2096). Returns (nse_sym, quote_or_None).
+    meta carries the live price directly; the last daily bar is the fallback when meta is thin --
+    either way, a genuinely unresolvable symbol returns None, never a fabricated number."""
+    ticker = _yahoo_symbol(nse_sym)
+    url = CHART_URL.format(ticker=urllib.parse.quote(ticker)) + "?interval=1d&range=5d"
+    async with sem:
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            fetched_at = _ist_now().replace(microsecond=0).isoformat()
-            for r in (((data.get("quoteResponse") or {}).get("result")) or []):
-                nse_sym = rev.get(r.get("symbol"))
-                price = r.get("regularMarketPrice")
-                if not nse_sym or price is None:
-                    continue
-                out[nse_sym] = {
-                    "price": float(price),
-                    "prev_close": float(r["regularMarketPreviousClose"]) if r.get("regularMarketPreviousClose") is not None else None,
-                    "open": float(r["regularMarketOpen"]) if r.get("regularMarketOpen") is not None else None,
-                    "high": float(r["regularMarketDayHigh"]) if r.get("regularMarketDayHigh") is not None else None,
-                    "low": float(r["regularMarketDayLow"]) if r.get("regularMarketDayLow") is not None else None,
-                    "chg_pct": float(r["regularMarketChangePercent"]) if r.get("regularMarketChangePercent") is not None else None,
-                    "asof": fetched_at,
-                    "source": SOURCE_TAG,
-                }
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as e:
-            log.warning("yahoo_live_quote batch %d-%d failed (%s symbols dropped, not fabricated): %s",
-                        i, i + len(batch), len(batch), e)
-            continue   # this batch's symbols simply stay absent -- never a fabricated value
-    return out
+            r = await client.get(url)
+            r.raise_for_status()
+            data = r.json()
+            result = (data.get("chart") or {}).get("result") or []
+            if not result:
+                return nse_sym, None
+            res = result[0]
+            meta = res.get("meta") or {}
+            price = _f(meta.get("regularMarketPrice"))
+            prev_close = _f(meta.get("previousClose") or meta.get("chartPreviousClose"))
+            day_high = _f(meta.get("regularMarketDayHigh"))
+            day_low = _f(meta.get("regularMarketDayLow"))
+            day_open = None
+            if price is None or day_open is None or day_high is None or day_low is None:
+                # meta thin -- fall back to the latest bar (yahoo_daily_update.py's own proven
+                # parse shape: indicators.quote[0].{open,high,low,close}[])
+                q = (res.get("indicators") or {}).get("quote") or [{}]
+                q = q[0]
+                closes = q.get("close") or []
+                opens = q.get("open") or []
+                highs = q.get("high") or []
+                lows = q.get("low") or []
+                last_close = next((c for c in reversed(closes) if c is not None), None)
+                if price is None:
+                    price = _f(last_close)
+                if day_open is None:
+                    day_open = _f(next((o for o in reversed(opens) if o is not None), None))
+                if day_high is None:
+                    day_high = _f(next((h for h in reversed(highs) if h is not None), None))
+                if day_low is None:
+                    day_low = _f(next((l for l in reversed(lows) if l is not None), None))
+                if prev_close is None and len(closes) >= 2:
+                    prev_close = _f(next((c for c in reversed(closes[:-1]) if c is not None), None))
+            if price is None:
+                return nse_sym, None
+            chg_pct = round((price / prev_close - 1) * 100.0, 2) if prev_close else None
+            return nse_sym, {"price": price, "prev_close": prev_close, "open": day_open,
+                              "high": day_high, "low": day_low, "chg_pct": chg_pct,
+                              "asof": fetched_at, "source": SOURCE_TAG}
+        except Exception as e:
+            log.warning("yahoo_live_quote chart fetch %s failed (dropped, not fabricated): %s",
+                        nse_sym, e)
+            return nse_sym, None
+        finally:
+            await asyncio.sleep(SLEEP_S)
+
+
+async def _fetch_live_quotes_async(symbols):
+    fetched_at = _ist_now().replace(microsecond=0).isoformat()
+    uniq = list(dict.fromkeys(s for s in symbols if s))
+    sem = asyncio.Semaphore(SEM_SIZE)
+    async with httpx.AsyncClient(
+        timeout=TIMEOUT_SEC,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        limits=httpx.Limits(max_connections=SEM_SIZE * 2, max_keepalive_connections=SEM_SIZE),
+    ) as client:
+        tasks = [_fetch_one(client, sem, s, fetched_at) for s in uniq]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+    return {sym: q for sym, q in results if q is not None}
+
+
+def fetch_live_quotes(symbols):
+    """Live quote fetch, one v8/finance/chart call per symbol, concurrency-limited (cc#2096 --
+    see the module doc's ENDPOINT CORRECTION for why this is no longer the v7/finance/quote batch
+    call). Returns {nse_symbol: {price, chg_pct, prev_close, open, high, low, asof, source}} for
+    whatever Yahoo actually returned -- a symbol Yahoo didn't return, or whose request failed
+    outright, is simply ABSENT from the result. Never zero-filled, never a stale/cached value
+    passed off as fresh. Synchronous on the outside (both call sites are plain `def`s on a worker
+    thread -- a FastAPI sync route handler or a scheduler background thread, never the running
+    event loop), asyncio.run() is safe to use here."""
+    if not symbols:
+        return {}
+    return asyncio.run(_fetch_live_quotes_async(symbols))
