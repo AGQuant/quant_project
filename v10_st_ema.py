@@ -623,6 +623,13 @@ V10_OPT_BROKERAGE_PER_TRADE = 100.0
 # guard below. Deliberately NOT unified with SmartGain's separate brokerage model
 # (smartgain_daily_m2m.BROKERAGE_RATE, Rs 1,000/crore/fill leg) — different books, different costs.
 
+V10_FUT_BROKERAGE_PER_TRADE = 1000.0
+# cc#2104 (founder-set 15-Sep-2026): Rs 1,000 per round-trip FUTURES trade — same one-charge-per-
+# closed-trade convention as V10_OPT_BROKERAGE_PER_TRADE above, no FUT brokerage figure existed
+# anywhere in this codebase before this task (grepped v10_st_ema.py, v10_endpoints.py,
+# mobile_home2.py). Consumed by mobile_home2.mobile_v10chart()'s by_leg gross/net split — this
+# module does not apply it itself (get_performance() stays OPT-only, cc#1883/cc#1891 untouched).
+
 
 def get_performance(leg=None):
     """Full live-paper stats from v10_trades for the dashboard performance panel.

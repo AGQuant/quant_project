@@ -857,22 +857,30 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
             outside += 1
 
     # per-leg totals so each log section can state its own real numbers
+    # cc#2104: this accumulator was mislabelled net_pnl though nothing was ever subtracted from
+    # it — renamed gross_pnl, with a genuine net_pnl added below (gross minus that leg's own
+    # round-trip brokerage rate x its closed-trade count). PROFIT_FACTOR stays on gross rupee
+    # P&L, unchanged (do_not_touch) — only gross_pnl/net_pnl move.
+    from v10_st_ema import V10_FUT_BROKERAGE_PER_TRADE, V10_OPT_BROKERAGE_PER_TRADE
+    _V10_LEG_BROKERAGE = {"FUT": V10_FUT_BROKERAGE_PER_TRADE, "OPT": V10_OPT_BROKERAGE_PER_TRADE}
     by_leg = {}
     for t in trades:
-        b = by_leg.setdefault(t["leg"], {"trades": 0, "open": 0, "net_pnl": 0.0,
+        b = by_leg.setdefault(t["leg"], {"trades": 0, "open": 0, "gross_pnl": 0.0,
                                          "_gp": 0.0, "_gl": 0.0})
         if t["open"]:
             b["open"] += 1
         else:
             b["trades"] += 1
             if t["pnl"] is not None:
-                b["net_pnl"] += t["pnl"]
+                b["gross_pnl"] += t["pnl"]
                 if t["pnl"] > 0:
                     b["_gp"] += t["pnl"]
                 elif t["pnl"] < 0:
                     b["_gl"] += t["pnl"]
-    for b in by_leg.values():
-        b["net_pnl"] = round(b["net_pnl"], 2)
+    for leg, b in by_leg.items():
+        b["gross_pnl"] = round(b["gross_pnl"], 2)
+        rate = _V10_LEG_BROKERAGE.get(leg)
+        b["net_pnl"] = round(b["gross_pnl"] - b["trades"] * rate, 2) if rate is not None else b["gross_pnl"]
         # cc#1464: profit factor per leg — _cut_stats' own formula (gross profit / |gross loss|),
         # folded over this leg's closed rupee P&L, the exact set the popup's log lists. None when
         # the leg has never taken a loss: the denominator is zero, not small (_segment_stats rule).

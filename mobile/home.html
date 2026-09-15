@@ -4949,6 +4949,10 @@ function v10LegStats(d, leg){
   var bl = (d.by_leg && d.by_leg[leg]) || {};
   return {
     trades: bl.trades || 0, open: bl.open || 0,
+    // cc#2104: gross is the raw closed-trade sum (what by_leg used to mislabel net_pnl); net is
+    // now the true post-brokerage figure (gross minus that leg's own round-trip rate x trades,
+    // Rs 1000/FUT or Rs 100/OPT, computed server-side in mobile_home2.mobile_v10chart()).
+    gross: (bl.gross_pnl == null ? null : bl.gross_pnl),
     net: (bl.net_pnl == null ? null : bl.net_pnl),
     pf: (bl.profit_factor == null ? null : bl.profit_factor)
   };
@@ -4986,15 +4990,18 @@ function v10Log(d){
      above — is now the single source for this strip, same formula, same "no verdicts is not a 0%
      record" rule (cc#912) it always followed. */
   var st = v10LegStats(d, view);
+  // cc#2104: OPEN tile removed, GROSS tile added beside NET -- trades / profit factor / gross / net.
   var h = '<div class="v10sum">'
     + '<div><b>' + st.trades + '</b><span>trades</span></div>'
     + '<div onclick="v10PfSheet()" role="button" aria-label="Profit factor breakdown" style="cursor:pointer">'
       + '<b>' + (st.pf == null ? '&mdash;' : Number(st.pf).toFixed(2) + '×') + '<i class="pfib">i</i></b>'
       + '<span>profit factor</span></div>'
+    + '<div><b class="' + cls(st.gross) + '">' + (st.gross == null ? '&mdash;'
+        : (st.gross >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(Math.round(st.gross)).toLocaleString('en-IN'))
+      + '</b><span>gross</span></div>'
     + '<div><b class="' + cls(st.net) + '">' + (st.net == null ? '&mdash;'
         : (st.net >= 0 ? '+' : '\u2212') + '\u20B9' + Math.abs(Math.round(st.net)).toLocaleString('en-IN'))
       + '</b><span>net</span></div>'
-    + '<div><b>' + st.open + '</b><span>open</span></div>'
     + '</div>';
   /* cc#953 item 2: the "36 hedged · 9 unhedged" sub-line is REMOVED. It was mine (cc#943 pattern,
      carried into cc#941) and the founder does not want it — and cc#954 shows the framing behind it
