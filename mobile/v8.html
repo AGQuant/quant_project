@@ -135,6 +135,7 @@ body{ --field:#0A0A0C; }
 #v8p .passline{font-family:var(--mono);font-size:11px;color:var(--mute);margin-top:var(--space-10)}
 /* 2a · KPI wells (.well-up from the shared sheet) + filter chips */
 #v8p .kpi{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-12);margin-bottom:10px}   /* cc#1656 P2: gap between tiles one step (8->12) */
+#v8p #cl-extra-kpi .kpi{grid-template-columns:1fr 1fr}   /* cc#2098: #cl-extra-kpi only ever renders 2 boxes (WIN/LOSS, AVG WIN/LOSS) -- inheriting the shared 3-col rule above squeezed each into a 33%-wide column. Scoped override by ID so open-kpi/cl-kpi/net-kpi (still 3 real boxes) are untouched. */
 #v8p .kw{padding:var(--space-15) var(--space-15) var(--space-14);min-width:0}   /* cc#1656 P2: padding two steps (10/10/9 -> 15/15/14); cc#1856 min-width:0 so a grid item can shrink below its nowrap child's content width instead of blowing out the row */
 #v8p .kw .kl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--mute)}
 /* cc#1856 FABLE APPROVED (09-Sep-2026): a ratio value (52 / 44, +2.9% / -3.2%) must NEVER wrap
@@ -179,6 +180,7 @@ body{ --field:#0A0A0C; }
 #v8p .prow .pmeta2 + .pmeta{margin-top:var(--space-4)}   /* cc#1868: OPEN row only (the only .prow with a .pmeta2 sibling) -- tighter gap since pmeta2 already sits directly above */
 #v8p .prow .pmeta b{color:var(--chalk);font-weight:600}
 #v8p .prow .pmeta .age{margin-left:auto;color:var(--dim)}   /* still used by the CLOSED book row (cc#1868's OPEN row no longer nests .age inside .pmeta) */
+#v8p .prow .rowstrip{grid-column:1 / span 2;display:flex;justify-content:center;margin-top:var(--space-10);padding-top:var(--space-10);border-top:1px solid var(--line)}   /* cc#2098: tap-to-reveal C.A.R.D strip -- hidden by inline style until tapped; JS toggles display:none <-> '' (falls back to this flex rule) */
 /* cc#1660: rail grows from a bare 6px fill bar to SL/entry/CMP/target on the bar. Axis is now
    RAW PRICE, low->high, left->right, for BOTH long and short (trkAxis/trkFrac below) -- the old
    axis put SL at the left end unconditionally by direction; this one never mirrors, so the
@@ -838,6 +840,21 @@ function posMetaLine(p){
   bk = bk.replace(/\b\w/g, function(c){ return c.toUpperCase(); });
   return [sideTxt, bk, heldLabel(p)].filter(Boolean).join(' · ');
 }
+/* cc#2098: tap-to-reveal C.A.R.D strip for OPEN and CLOSED position rows -- same shared component
+   already live on GVM/Home/My Portfolio (scorr_card_strip.js, cc#789/803/805), never re-implemented
+   here. Rows stay a clean dense list (founder ask); the strip renders lazily, inline, on tap --
+   not always-visible like the GVM hero card, which would not fit this list's density. */
+function cardStripToggle(row){
+  var box = row.querySelector('.rowstrip'); if(!box) return;
+  if(box.style.display !== 'none'){ box.style.display = 'none'; return; }
+  if(!box.firstChild){
+    if(!window.ScorrCardStripHtml) return;   // shared file not loaded -- no strip, never four hand-rolled buttons
+    var html = window.ScorrCardStripHtml(row.getAttribute('data-card-strip'), '');
+    if(!html) return;
+    box.innerHTML = html;
+  }
+  box.style.display = '';
+}
 function posRow(p){
   var side = (p.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
   var ax = trkAxis(p);
@@ -866,13 +883,14 @@ function posRow(p){
       + '</div>';
   }
   var cmpTxt = num(p.cmp) ? px(p.cmp) : '—';
-  return '<div class="slab dense prow" data-side="'+sl+'" data-basket="'+esc(p.basket||'')+'">'+
+  return '<div class="slab dense prow" data-side="'+sl+'" data-basket="'+esc(p.basket||'')+'" data-card-strip="'+esc(p.symbol)+'">'+
     '<div class="psym"><span class="sym">'+esc(p.symbol)+'</span>'+mkFlag(p)+'</div>'+
     '<div class="pnl '+sgn(p.unrealised)+'">'+inr(p.unrealised)+'</div>'+
     '<div class="pmeta2">'+esc(posMetaLine(p))+'</div>'+
     /* cc#1660 item 4 (kept): the tgt/sl half of this line is gone -- both numbers are on the bar now.
        cc#1868: age/heldLabel moved up into pmeta2 above -- not duplicated here. */
-    '<div class="pmeta"><span>'+px(p.entry_price)+' → <b>'+cmpTxt+'</b>'+(p.cmp_is_live===false?' <span class="mu">(last close)</span>':'')+'</span></div>'+trk+'</div>';
+    '<div class="pmeta"><span>'+px(p.entry_price)+' → <b>'+cmpTxt+'</b>'+(p.cmp_is_live===false?' <span class="mu">(last close)</span>':'')+'</span></div>'+trk+
+    '<div class="rowstrip" style="display:none"></div></div>';
 }
 function renderOpen(){
   var bk = STATE.book, el = document.getElementById('sec-open'), more = document.getElementById('open-more');
@@ -1440,11 +1458,12 @@ function closedAge(t){
 }
 function closedRow(t){
   var side = (t.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
-  return '<div class="slab dense prow">'+
+  return '<div class="slab dense prow" data-card-strip="'+esc(t.symbol)+'">'+
     '<div class="psym">'+esc(t.symbol)+' <span class="tag '+sl+'">'+esc(side||'—')+'</span>'+resTag(t.result)+'</div>'+
     '<div class="pnl '+sgn(t.realised)+'">'+inr(t.realised)+'</div>'+
     '<div class="pmeta"><span>'+px(t.entry_price)+' → <b>'+px(t.exit_price)+'</b> · '+pct(t.return_pct,2)+'</span>'+
-    '<span class="age">'+esc(closedAge(t))+'</span></div></div>';
+    '<span class="age">'+esc(closedAge(t))+'</span></div>'+
+    '<div class="rowstrip" style="display:none"></div></div>';
 }
 /* ── cc#1613 · CLOSED with two filters (founder 02-Sep 19:39: "keep long short realised P&L
    switch separately with duration toggle"). ALL | LONG | SHORT and ALL | 1W | 1M, in-memory,
@@ -1786,6 +1805,8 @@ document.getElementById('v8p').addEventListener('click', function(e){
   var f = e.target.closest('[data-open-filter]'); if(f){ openFilter = f.getAttribute('data-open-filter'); openAll = false; renderOpen(); return; }
   var so = e.target.closest('[data-open-sort]'); if(so){ openSortSheetOpen(); return; }   /* cc#1870 item 5 */
   var mk = e.target.closest('[data-mk-sym]'); if(mk){ e.stopPropagation(); mkOpen(mk.getAttribute('data-mk-sym'), mk.getAttribute('data-mk-side')); return; }
+  if(e.target.closest('.scorr-card-strip')) return;   /* cc#2098: a tap on the strip's own C/A/R/D pill must not also collapse the row it lives in */
+  var cst = e.target.closest('[data-card-strip]'); if(cst){ cardStripToggle(cst); return; }
   var mc = e.target.closest('[data-open-marker]'); if(mc){ var k = mc.getAttribute('data-open-marker'); openMarkers[k] = !openMarkers[k]; openAll = false; renderOpen(); return; }
   var ml = e.target.closest('[data-mk-legend]'); if(ml){ mkLegendOpen(); return; }
   var dlo = e.target.closest('[data-daylog-open]'); if(dlo){ daylogOpen(); return; }
