@@ -460,6 +460,7 @@ _MOBILE_HEAD = (
     + b'<script src="/scorr_custom_alert_create.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2095: the bell's new "+ CUSTOM ALERT" button opens this -- same every-app-page reasoning as scorr_alert_create.js just above
     + b'<script src="/scorr_mobile_cards.js?v=' + _BUILD_B + b'" defer></script>'  # cc#859 Part A: shared mobile section card (cc#862/#863 import it, never redefine it)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
+    + b'<script src="/scorr_position_row.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2101: shared price-rail geometry + TC capsule + card-strip toggle (mobile/v8.html, mobile/tcscan.html)
     + b'<script src="/scorr_segment_results.js?v=' + _BUILD_B + b'" defer></script>'  # cc#1191: SEGMENT RESULTS popout — AFTER the strip, which it calls per row
     + b'<script src="/results_card.js?v=' + _BUILD_B + b'" defer></script>'       # cc#573: shared Results R-pill + card
     + b'<script src="/scorr_chart_card.js?v=' + _BUILD_B + b'" defer></script>'   # cc#706: shared V8-type price chart card (letter C)

@@ -2590,6 +2590,21 @@ def pwa_scorr_card_strip_js():
     return Response(SCORR_CARD_STRIP_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
+# cc#2101: shared position-row primitives (price-rail geometry, TC capsule bands, C.A.R.D toggle) —
+# SINGLE SOURCE for mobile/v8.html and mobile/tcscan.html, same read-once-at-import pattern as
+# scorr_card_strip.js above.
+try:
+    with open(_os.path.join(_os.path.dirname(__file__), "scorr_position_row.js"), "r", encoding="utf-8") as _spr_f:
+        SCORR_POSITION_ROW_JS = _spr_f.read()
+except Exception:
+    SCORR_POSITION_ROW_JS = "/* scorr_position_row.js unavailable */"
+
+
+@router.get("/scorr_position_row.js")
+def pwa_scorr_position_row_js():
+    return Response(SCORR_POSITION_ROW_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
 # cc#1191: the SEGMENT RESULTS popout, same read-once-at-import pattern as its neighbours.
 # It is served from here rather than bundled into scorr_card_strip.js because it is a different
 # thing with a different lifetime: the strip is a tiny always-on component on every card, and this

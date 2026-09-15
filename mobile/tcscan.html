@@ -30,14 +30,30 @@
 .seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
 .seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
 .lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
-.row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
-.row:last-child{border-bottom:none}
-.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
-.row.up::before{background:var(--win)}.row.dn::before{background:var(--loss)}.row.mu::before{background:var(--edge)}
-.row .nm{font-size:var(--type-125);font-weight:800}.row .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
-.row .nm .tag.b{color:var(--win)}.row .nm .tag.s{color:var(--loss)}.row .nm .tag.g{color:var(--brand)}
-.row .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}.row .sub b{color:var(--ink);font-weight:700}
-.row .v{text-align:right}.row .v .n{font-size:var(--type-15);font-weight:800;line-height:1}.row .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+/* cc#2101: the row is no longer a plain <a class="row"> link out to Check -- it now matches V8's
+   position-row shape (price-rail bar + TC capsule via the shared scorr_position_row.js), and tap
+   reveals the C.A.R.D strip in place (Chart/Analysis/Result/Cockpit -- a richer set of destinations
+   than the single Check link it replaces). .scorr-prow is this page's own block layout; the shared
+   module's own injected CSS (also scoped .scorr-prow) supplies the .trk/.lbl/.fn-tc rail+capsule
+   styling on top of it. */
+.scorr-prow{display:block;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative}
+.scorr-prow:last-child{border-bottom:none}
+.scorr-prow::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
+.scorr-prow.up::before{background:var(--win)}.scorr-prow.dn::before{background:var(--loss)}.scorr-prow.mu::before{background:var(--edge)}
+.scorr-prow .hd{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8)}
+.scorr-prow .nm{font-size:var(--type-125);font-weight:800}
+.scorr-prow .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.scorr-prow .nm .tag.b{color:var(--win)}.scorr-prow .nm .tag.s{color:var(--loss)}
+.scorr-prow .v{text-align:right;flex:none}
+.scorr-prow .v .n{font-size:var(--type-15);font-weight:800;line-height:1}
+.scorr-prow .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+.scorr-prow .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}
+.scorr-prow .sub b{color:var(--ink);font-weight:700}
+/* exit-reason badge -- same .tag.res.{t|s|g} shape mobile/v8.html's resTag() uses, this page's own
+   tokens (v8.html's --up/--down/--amber are v8-local aliases this page does not define). */
+.tag.res{background:var(--hi);color:var(--muted);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-8);padding:var(--space-1) var(--space-5);font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase}
+.tag.res.t{color:var(--win)} .tag.res.s{color:var(--loss)} .tag.res.g{color:var(--brand)}
+.sortbar{display:flex;gap:var(--space-6);margin:0 var(--space-16) var(--space-6);overflow-x:auto;scrollbar-width:none}.sortbar::-webkit-scrollbar{display:none}
 .emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
 .card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
 .ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
@@ -76,35 +92,100 @@ function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); 
 function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
 function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
 function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
-function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
-var D=null, SIDE='ALL', DATE='';
-function trow(r){
+function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+var D=null, SIDE='ALL', DATE='', OSORT='pnl_desc';
+/* cc#2101 item 5: exit-reason badge, established from the real API values (grep'd tc_scanner_endpoints.py,
+   not guessed) -- OPEN/SL/TARGET/TIME are the only reasons this engine ever writes. Same .tag.res.{t|s|g}
+   pill shape mobile/v8.html's resTag() uses (word lists differ, shape matches). */
+function tcTagRes(reason){
+  var r = String(reason||''); if(!r || r==='OPEN') return '';
+  var c = r.indexOf('TARGET')===0 ? 't' : r==='TIME' ? 'g' : 's';
+  var txt = r==='TIME' ? 'TIME STOP' : r;
+  return '<span class="tag res '+c+'">'+esc(txt)+'</span>';
+}
+/* cc#2101 item 3: SL/entry/CMP/target rail -- TC Scanner had no bar before this card. Built on the
+   shared scorr_position_row.js geometry (trkAxis/trkFrac/trkTickStyle/trkFixLabels), this page's own
+   f2() price formatter and field names (target/sl/entry/cmp, not V8's stop_loss/entry_price). */
+function tcTrkLabels(r, fz, fc, slEnd, tgtEnd){
+  var ts = window.ScorrPositionRow.trkTickStyle;
+  var enPx = f2(r.entry), cmpPx = r.cmp!=null ? f2(r.cmp) : '—';
+  var bottom = '<i class="lbl end '+slEnd+'">SL '+f2(r.sl)+'</i><i class="lbl end '+tgtEnd+'">TGT '+f2(r.target)+'</i>';
+  var top = fz == null
+    ? '<i class="lbl tick cmp" style="'+ts(fc)+'">CMP '+cmpPx+'</i>'
+    : '<i class="lbl tick entry" style="'+ts(fz)+'">ENTRY '+enPx+'</i>'
+      + '<i class="lbl tick cmp" style="'+ts(fc)+'">CMP '+cmpPx+'</i>';
+  return bottom + top;
+}
+/* cc#2101: replaces trow(). Row is no longer a bare <a href> link -- it matches V8's position-row
+   shape (rail + TC capsule + tap-reveal C.A.R.D strip). item 4: pnl_pct stays the headline number
+   (this engine's own convention, target/stop are percent-defined), pnl_rs/lot stays secondary --
+   unchanged from before this card. item 2: r.score is used directly, no mkTc()-style lookup needed. */
+function positionRow(r){
   var live = r.exit_reason==='OPEN';
-  var sub = (r.score!=null?'TC '+f1(r.score)+' · ':'')+'in '+f2(r.entry)+(live?(r.cmp!=null?' → now <b>'+f2(r.cmp)+'</b>':' · no price'):' → out <b>'+f2(r.exit)+'</b>')
-    +(live?' · T '+f2(r.target)+' · SL '+f2(r.sl):' · '+esc(r.exit_reason||''))+' · '+esc(dmt(live?r.entry_ts:r.exit_ts));
-  return '<a class="row '+ud(r.pnl_pct)+'" href="/m/check?sym='+encodeURIComponent(r.symbol)+'#tc"><div><div class="nm">'+esc(r.symbol)+'<span class="tag '+(r.side==='BUY'?'b':'s')+'">'+(r.side==='BUY'?'Long':'Short')+'</span></div><div class="sub">'+sub+'</div></div>'
-    +'<div class="v"><div class="n '+cls(r.pnl_pct)+'">'+pct(r.pnl_pct)+'</div><div class="c">'+(r.pnl_rs!=null?inr(r.pnl_rs,true)+' / lot':'no lot')+'</div></div></a>';
+  var SPR = window.ScorrPositionRow;
+  var ax = SPR.trkAxis({target:r.target, stop_loss:r.sl});
+  var mark = live ? r.cmp : r.exit;
+  var fz = ax ? SPR.trkFrac(r.entry, ax) : null;
+  var fc = ax ? SPR.trkFrac(mark, ax) : null;
+  var trk;
+  if(!ax || fc == null){
+    trk = '<div class="trk none" title="no target or stop on this position"></div>';
+  } else {
+    var slFrac = SPR.trkFrac(r.sl, ax), slEnd = slFrac <= 0.5 ? 'l' : 'r', tgtEnd = slEnd==='l' ? 'r' : 'l';
+    var pnlCls = r.pnl_pct==null ? 'flat' : (r.pnl_pct>0 ? 'win' : r.pnl_pct<0 ? 'loss' : 'flat');
+    var fillFrom = (fz == null ? fc : fz);
+    trk = '<div class="trk pnl-'+pnlCls+'">'
+      + '<i class="tfill" style="left:'+Math.round(Math.min(fillFrom,fc)*100)+'%;width:'+Math.round(Math.abs(fc-fillFrom)*100)+'%"></i>'
+      + (fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')
+      + '<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i>'
+      + tcTrkLabels(r, fz, fc, slEnd, tgtEnd)
+      + '</div>';
+  }
+  var sub = 'in '+f2(r.entry)+(live?(r.cmp!=null?' → now <b>'+f2(r.cmp)+'</b>':' · no price'):' → out <b>'+f2(r.exit)+'</b>')
+    +' · '+esc(dmt(live?r.entry_ts:r.exit_ts));
+  // item 3: no marker/flag signal source exists for TC Scanner (unlike V8's mkFired/mkKeys) -- that
+  // slot is simply not rendered, per the card's own explicit allowance, never fabricated.
+  var mkrow = SPR.fnTcCapsule(r.score) + tcTagRes(r.exit_reason);
+  return '<div class="scorr-prow '+ud(r.pnl_pct)+'" data-card-strip="'+esc(r.symbol)+'">'
+    + '<div class="hd"><div class="nm">'+esc(r.symbol)+'<span class="tag '+(r.side==='BUY'?'b':'s')+'">'+(r.side==='BUY'?'Long':'Short')+'</span></div>'
+    + '<div class="v"><div class="n '+cls(r.pnl_pct)+'">'+pct(r.pnl_pct)+'</div><div class="c">'+(r.pnl_rs!=null?inr(r.pnl_rs,true)+' / lot':'no lot')+'</div></div></div>'
+    + '<div class="sub">'+sub+'</div>'
+    + trk
+    + '<div class="mkrow">'+mkrow+'</div>'
+    + '<div class="rowstrip" style="display:none"></div></div>';
 }
 function pick(o){ var a=[]; if(SIDE!=='SHORT') a=a.concat(o.buy||[]); if(SIDE!=='LONG') a=a.concat(o.sell||[]); return a; }
+/* cc#2101 item 6: sort control for the Open list, which was always P&L-desc with no user choice. */
+var OSORT_OPTS = [['pnl_desc','P&L ↓'],['pnl_asc','P&L ↑'],['new','Newest'],['old','Oldest']];
+function sortOpen(rows){
+  var r = rows.slice();
+  if(OSORT==='pnl_desc') r.sort(function(a,b){return (b.pnl_pct||0)-(a.pnl_pct||0);});
+  else if(OSORT==='pnl_asc') r.sort(function(a,b){return (a.pnl_pct||0)-(b.pnl_pct||0);});
+  else if(OSORT==='new') r.sort(function(a,b){return String(b.entry_ts||'').localeCompare(String(a.entry_ts||''));});
+  else if(OSORT==='old') r.sort(function(a,b){return String(a.entry_ts||'').localeCompare(String(b.entry_ts||''));});
+  return r;
+}
 function draw(){
   var d=D, o=d.open||{}, c=d.closed||{}, ob=o.book||{}, cb=c.book||{}, rec=d.record||{}, rb=rec.BUY||{}, rs=rec.SELL||{}, sp=d.spec||{};
-  var openRows=pick(o).sort(function(a,b){return (b.pnl_pct||0)-(a.pnl_pct||0);}), closedRows=pick(c);
+  var openRows=sortOpen(pick(o)), closedRows=pick(c);
   var net=(rb.net_pts_pct||0)+(rs.net_pts_pct||0);
   var h='<div class="hero"><div class="eye">TC scanner · paper book · one lot per signal</div><div class="big"><div class="r">'+(o.count||0)+'</div><div class="n">open now · unrealised <b class="'+cls(ob.unrealised_rs_one_lot)+'">'+inr(ob.unrealised_rs_one_lot,true)+'</b><br>'+(ob.priced||0)+' of '+(ob.n||0)+' priced'+(ob.rows_without_cmp?' · '+ob.rows_without_cmp+' without a price':'')+'</div></div>'
     +'<div class="kg"><div class="cell"><div class="k">Long record</div><div class="v">'+(rb.wr_pct!=null?rb.wr_pct+'% of '+rb.closed:'—')+'</div></div><div class="cell"><div class="k">Short record</div><div class="v">'+(rs.wr_pct!=null?rs.wr_pct+'% of '+rs.closed:'—')+'</div></div><div class="cell"><div class="k">Net pts</div><div class="v '+cls(net)+'">'+pct(net,1)+'</div></div></div></div>';
   h+='<div class="sec"><h2>Book</h2><span class="hint">since '+esc(dm(rb.since||rs.since))+'</span></div>';
   h+='<div class="seg" id="side">'+['ALL','LONG','SHORT'].map(function(s){return '<span data-s="'+s+'"'+(s===SIDE?' class="on"':'')+'>'+s.charAt(0)+s.slice(1).toLowerCase()+'</span>';}).join('')+'</div>';
-  h+='<div class="sec"><h2>Open</h2><span class="hint">'+openRows.length+' · by P&L</span></div>';
-  h+= openRows.length ? '<div class="lst">'+openRows.map(trow).join('')+'</div>' : '<div class="emp"><b>Nothing open</b>No hold is live on this side right now.</div>';
+  h+='<div class="sec"><h2>Open</h2><span class="hint">'+openRows.length+'</span></div>';
+  h+='<div class="sortbar" id="osort">'+OSORT_OPTS.map(function(o){return '<span class="chip'+(o[0]===OSORT?' on':'')+'" data-osort="'+o[0]+'">'+o[1]+'</span>';}).join('')+'</div>';
+  h+= openRows.length ? '<div class="lst">'+openRows.map(positionRow).join('')+'</div>' : '<div class="emp"><b>Nothing open</b>No hold is live on this side right now.</div>';
   h+='<div class="sec"><h2>Closed on</h2><span class="hint">'+esc(dm(d.date))+' · realised <b class="'+cls(cb.realised_rs_one_lot)+'">'+inr(cb.realised_rs_one_lot,true)+'</b></span></div>';
   h+='<div class="chips" id="days">'+(d.exit_days||[]).map(function(x){return '<span class="chip'+(x===d.date?' on':'')+'" data-d="'+x+'">'+esc(dm(x))+'</span>';}).join('')+'</div>';
-  h+= closedRows.length ? '<div class="lst" style="margin-top:8px">'+closedRows.map(trow).join('')+'</div>' : '<div class="emp"><b>No exits that day</b>Pick another date above. Last closure was '+esc(dm(d.last_closure))+'.</div>';
+  h+= closedRows.length ? '<div class="lst" style="margin-top:8px">'+closedRows.map(positionRow).join('')+'</div>' : '<div class="emp"><b>No exits that day</b>Pick another date above. Last closure was '+esc(dm(d.last_closure))+'.</div>';
   h+='<div class="card"><div class="ch"><span class="t">The rule</span><span class="n">'+esc(sp.version||'')+'</span></div><div class="rule">Every '+esc(sp.cadence_min)+' minutes, all futures names are scored on four buckets. A name <b>enters</b> when a bucket clears its bar: '+(sp.entry_rules||[]).map(function(e){return esc(e.bucket)+' ≥ '+esc(e.threshold);}).join(' · ')+'. Target <b>+'+esc(sp.target_pct)+'%</b>, stop <b>−'+esc(sp.sl_pct)+'%</b>, out after <b>'+esc(sp.hold_days)+' days</b> whatever happens. Stop is checked before target inside a bar.</div><div class="rule mu">'+esc(sp.exit_basis||'')+'</div></div>';
   h+='<div class="note"><b>Track record, plainly.</b> '+esc(d.note||'')+' As of '+esc(d.as_of||'')+'.</div>';
   document.getElementById('asof').innerHTML='As of <b>'+esc(d.as_of||'')+'</b> · '+(o.count||0)+' open · last closure '+esc(dm(d.last_closure));
   document.getElementById('body').innerHTML=h;
   document.getElementById('side').addEventListener('click', function(e){ var s=e.target.closest('[data-s]'); if(!s) return; SIDE=s.getAttribute('data-s'); draw(); });
   document.getElementById('days').addEventListener('click', function(e){ var s=e.target.closest('[data-d]'); if(!s) return; load(s.getAttribute('data-d')); });
+  document.getElementById('osort').addEventListener('click', function(e){ var s=e.target.closest('[data-osort]'); if(!s) return; OSORT=s.getAttribute('data-osort'); draw(); });
 }
 function load(dt){
   DATE=dt||'';
@@ -113,6 +194,13 @@ function load(dt){
     D=d; draw();
   }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load the scanner book.</div>'; });
 }
+/* cc#2101 item 7: C.A.R.D tap-reveal, same guard+toggle pattern as mobile/v8.html's own #v8p
+   delegate -- wired ONCE on #body (a stable container across redraws, unlike #side/#days/#osort
+   which are recreated by every innerHTML=h and so rebind inside draw() itself). */
+document.getElementById('body').addEventListener('click', function(e){
+  if(e.target.closest('.scorr-card-strip')) return;   // a tap on the strip's own C/A/R/D pill must not also collapse the row it lives in
+  var cst = e.target.closest('[data-card-strip]'); if(cst){ window.ScorrPositionRow.cardStripToggle(cst); return; }
+});
 load('');
 </script>
 </body></html>

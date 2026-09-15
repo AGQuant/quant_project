@@ -741,30 +741,17 @@ function applyFilter(rows){
    tick to the gold CMP marker (toward target when winning, back toward stop when losing) - never
    a fill from the stop end, which painted every winning trade near target as an almost full solid
    bar (SUZLON short: stop-to-CMP read 90%; entry-to-CMP is a 36% band from 54% to 90%). */
-function trkAxis(p){
-  var t = p.target, sl = p.stop_loss;
-  if(!num(t) || !num(sl) || t===sl) return null;
-  var lo = Math.min(t, sl), hi = Math.max(t, sl);
-  return { lo:lo, hi:hi, span:hi-lo };
-}
-function trkFrac(v, ax){
-  if(!num(v) || !ax) return null;
-  return Math.max(0, Math.min(1, (v - ax.lo) / ax.span));
-}
-/* cc#2100 (founder 15-Sep-2026, direct ask): ENTRY/CMP move onto the rail as labels, freeing the
-   text row below for a TC capsule + fired-flag chips (see posRow). This REINTRODUCES cc#1660's
-   trkTickStyle and cc#1726's trkFixLabels collision pass, which cc#1868 item 6 had removed as moot
-   once the labels themselves were gone -- not a regression of that call, the founder has now asked
-   for the labelled version again. Bodies restored verbatim from cc#1726 (git 195732b) rather than
-   re-derived, since that collision-avoidance was measured and proven then. cc#1726's "combo" branch
-   (labels within 12% of track -> one merged label) is NOT restored -- cc#1726's own commit already
-   replaced it with always-render-both + trkFixLabels, for the reason stated in that commit: a %
-   threshold guesses text width and was the original bug. */
-function trkTickStyle(f){
-  if(f <= 0.15) return 'left:0;text-align:left';
-  if(f >= 0.85) return 'left:100%;transform:translateX(-100%);text-align:right';
-  return 'left:'+Math.round(f*100)+'%;transform:translateX(-50%);text-align:center';
-}
+/* cc#2101: trkAxis/trkFrac/trkTickStyle/trkFixLabels/fnTcBand/fnTcCapsule now live in the shared
+   scorr_position_row.js (site-wide via _MOBILE_HEAD, loads before this inline script -- but these
+   are plain function declarations calling window.ScorrPositionRow lazily at CALL time, not at
+   parse time, so they are safe regardless of script-tag order in principle anyway) so
+   mobile/tcscan.html can consume the SAME geometry/band logic instead of a second copy. Every
+   call site below (posRow, trkLabels, closestTable, renderOpen) is UNCHANGED -- same names, same
+   signatures, same output; only the bodies moved. */
+function trkAxis(p){ return window.ScorrPositionRow.trkAxis(p); }
+function trkFrac(v, ax){ return window.ScorrPositionRow.trkFrac(v, ax); }
+function trkTickStyle(f){ return window.ScorrPositionRow.trkTickStyle(f); }
+function trkFixLabels(root){ return window.ScorrPositionRow.trkFixLabels(root); }
 function trkLabels(p, fz, fc, slEnd, tgtEnd){
   var enPx = px(p.entry_price), cmpPx = num(p.cmp) ? px(p.cmp) : '—';
   var bottom = '<i class="lbl end '+slEnd+'">SL '+px(p.stop_loss)+'</i><i class="lbl end '+tgtEnd+'">TGT '+px(p.target)+'</i>';
@@ -776,37 +763,6 @@ function trkLabels(p, fz, fc, slEnd, tgtEnd){
     : '<i class="lbl tick entry" style="'+trkTickStyle(fz)+'">ENTRY '+enPx+'</i>'
       + '<i class="lbl tick cmp" style="'+trkTickStyle(fc)+'">CMP '+cmpPx+cmpSuffix+'</i>';
   return bottom + top;
-}
-/* cc#2100 · LABEL COLLISION PASS, restored verbatim from cc#1726 (git 195732b). Runs once per
-   render over every rail in the list. Rule: if the ENTRY box and the CMP box would share pixels (a
-   6px gap counts as touching), ENTRY moves BELOW the rail onto the SL/TGT row, centred on its own
-   marker; if there it would touch SL or TGT text, it is pushed just clear of that end label (right
-   of a left-end label, left of a right-end label) and clamped to the rail. CMP always stays above
-   and lit. Measured with getBoundingClientRect (via a Range, so a CSS rule shrinking the box can
-   never hide real text overflow -- the original cc#1726 bug), so it is right for any symbol length,
-   font or viewport. */
-function trkFixLabels(root){
-  var GAP = 6, trks = (root || document).querySelectorAll('#v8p .trk');
-  for(var i = 0; i < trks.length; i++){
-    var trk = trks[i], en = trk.querySelector('.lbl.tick.entry'), cm = trk.querySelector('.lbl.tick.cmp');
-    if(!en || !cm) continue;
-    var tr = trk.getBoundingClientRect(); if(!tr.width) continue;
-    var box = function(el){ try { var r = document.createRange(); r.selectNodeContents(el); var b = r.getBoundingClientRect(); if(b.width) return b; } catch(e){} return el.getBoundingClientRect(); };
-    var re = box(en), rc = box(cm);
-    if(!(re.right + GAP > rc.left && rc.right + GAP > re.left)) continue;   // clear above: nothing to do
-    en.classList.add('below');
-    re = box(en);
-    var ends = trk.querySelectorAll('.lbl.end');
-    for(var j = 0; j < ends.length; j++){
-      var e = ends[j], rr = box(e);
-      if(!(re.right + GAP > rr.left && rr.right + GAP > re.left)) continue;
-      var left = e.classList.contains('l') ? (rr.right - tr.left + GAP) : (rr.left - tr.left - GAP - re.width);
-      left = Math.max(0, Math.min(left, tr.width - re.width));
-      en.style.left = Math.round(left) + 'px'; en.style.transform = 'none';
-      en.style.textAlign = e.classList.contains('l') ? 'left' : 'right';
-      re = box(en);
-    }
-  }
 }
 /* held time from entry_ts (naive IST string, cc#844: compare with IST wall-clock, no offset) */
 function heldLabel(p){
@@ -924,21 +880,13 @@ function posMetaLine(p){
   bk = bk.replace(/\b\w/g, function(c){ return c.toUpperCase(); });
   return [sideTxt, bk, heldLabel(p)].filter(Boolean).join(' · ');
 }
-/* cc#2098: tap-to-reveal C.A.R.D strip for OPEN and CLOSED position rows -- same shared component
-   already live on GVM/Home/My Portfolio (scorr_card_strip.js, cc#789/803/805), never re-implemented
-   here. Rows stay a clean dense list (founder ask); the strip renders lazily, inline, on tap --
-   not always-visible like the GVM hero card, which would not fit this list's density. */
-function cardStripToggle(row){
-  var box = row.querySelector('.rowstrip'); if(!box) return;
-  if(box.style.display !== 'none'){ box.style.display = 'none'; return; }
-  if(!box.firstChild){
-    if(!window.ScorrCardStripHtml) return;   // shared file not loaded -- no strip, never four hand-rolled buttons
-    var html = window.ScorrCardStripHtml(row.getAttribute('data-card-strip'), '');
-    if(!html) return;
-    box.innerHTML = html;
-  }
-  box.style.display = '';
-}
+/* cc#2098/cc#2101: tap-to-reveal C.A.R.D strip for OPEN and CLOSED position rows -- same shared
+   component already live on GVM/Home/My Portfolio (scorr_card_strip.js, cc#789/803/805), never
+   re-implemented here. The toggle logic itself (pure DOM, zero page-specific coupling) now lives
+   in the shared scorr_position_row.js so mobile/tcscan.html reuses it too. Rows stay a clean dense
+   list (founder ask); the strip renders lazily, inline, on tap -- not always-visible like the GVM
+   hero card, which would not fit this list's density. */
+function cardStripToggle(row){ return window.ScorrPositionRow.cardStripToggle(row); }
 function posRow(p){
   var side = (p.side||'').toUpperCase(), sl = side==='SHORT'?'short':'long';
   var ax = trkAxis(p);
@@ -1774,16 +1722,14 @@ var CHIP_WORDS = { sector_week:'sector', sector_month:'sector-m', rsi_weekly:'rs
   mom_2d:'2d', week_return:'week', month_return:'month', week_index_52:'52w', gvm_score:'gvm', volume_ratio:'vol', vol_ratio:'vol', vol_trend:'vol', day_1d:'day', hourly_pct:'hour',
   s1_touch:'s1', r1_touch:'r1', cmp_lt_pp:'< pivot', room:'room', s2_clearance:'s2', fall_from_r1:'r1 fall', ma9_vs_ma21:'ma9/21', year_return:'year', range_3d:'range' };
 function chipWord(k){ return CHIP_WORDS[k] || String(k||'').replace(/_/g,' ').slice(0, 9); }
-/* cc#2099: TC_CANON_V2_FINAL bands, client-side (same precedent as the deleted Home capsule's
-   breadthTcBand -- server ships raw score100, client buckets it). Score is this basket's OWN
-   bucket only (server-side join, v8_endpoints._tc_score100_for_basket), never a best-of-four pick. */
-function fnTcBand(score){
-  if(score == null) return null;
-  if(score >= 84) return 'strong';
-  if(score >= 65) return 'valid';
-  if(score >= 50) return 'watch';
-  return 'fail';
-}
+/* cc#2099/cc#2101: TC_CANON_V2_FINAL bands (STRONG>=84/VALID>=65/WATCH>=50/else FAIL) now live in
+   the shared scorr_position_row.js -- pure number-in/string-out, zero markup or token coupling, so
+   it is a safe wholesale share (mobile/tcscan.html uses the identical thresholds). fnTcCapsule
+   itself (the MARKUP) stays LOCAL and unchanged below -- its dash-state span deliberately uses
+   this page's own var(--chalk)/var(--mono) aliases (matching the original GVM column's em-dash
+   exactly, cc#2099), which are v8.html-local names the shared module cannot assume another page
+   defines the same way. TC Scanner gets its own analogous local version instead of this one. */
+function fnTcBand(score){ return window.ScorrPositionRow.fnTcBand(score); }
 function fnTcCapsule(score){
   var band = fnTcBand(score);
   if(!band) return '<span style="font-family:var(--mono);font-size:12.5px;font-weight:800;color:var(--chalk)">—</span>';
