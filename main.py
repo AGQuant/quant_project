@@ -906,6 +906,8 @@ from equity_cmp_poll import router as equity_cmp_poll_router   # cc#2094: equity
 app.include_router(equity_cmp_poll_router)
 from custom_alerts import router as custom_alerts_router   # cc#2095: Custom Alerts V1, multi-condition builder
 app.include_router(custom_alerts_router)
+from v8_unrealised_daily import router as v8_unrealised_daily_router   # cc#2097: first stored unrealised P&L history, reads book_canon (rule 13), never a second formula
+app.include_router(v8_unrealised_daily_router)
 from screener_expectations import router as screener_expectations_router   # cc#1865: append-only screener expectations snapshot (write-on-upload hook lives in gvm_nightly.py) + V-button endpoint
 app.include_router(screener_expectations_router)
 from v8_approved_trades import router as v8_approved_trades_router   # cc#1867 Home APPROVED TRADES slider; cc#1928 source = trade_alerts.approved_at joined to the still-OPEN V8 position (v8_book_canon formula, no second compute path)

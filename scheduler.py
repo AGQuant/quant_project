@@ -1727,6 +1727,29 @@ def _bg_custom_alerts_live():
         raise
 
 
+_v8_unreal_snapshot_ran_today = None
+def _bg_v8_unrealised_snapshot():
+    """cc#2097 item 3: once per trading day, snapshot the canon unrealised figures
+    (v8_book_canon.book_canon -- rule 13, never a second formula) into v8_unrealised_daily --
+    the first-ever stored unrealised P&L history. 15:35 IST, 5 min after close, matching the
+    existing "close + 5" convention (cc_task #89's yahoo EOD refresh) -- unrealised only needs
+    the day's last live cmp mark, not the EOD engine's own output, so it does not need to wait
+    for v8_eod at 15:45 the way _bg_dma_state_eod does."""
+    global _v8_unreal_snapshot_ran_today
+    today = _ist_now().date()
+    if _v8_unreal_snapshot_ran_today == today: return _Skip.already_ran()
+    try:
+        import v8_unrealised_daily
+        with _conn() as conn:
+            res = v8_unrealised_daily.snapshot_unrealised_daily(conn)
+        log.info(f"v8_unrealised_snapshot: {res}")
+        _v8_unreal_snapshot_ran_today = today
+        return res
+    except Exception as e:
+        log.error(f"v8_unrealised_snapshot: {e}")
+        raise
+
+
 _dma_state_eod_ran_today = None
 def _bg_dma_state_eod():
     """cc#1682 POST-CLOSE pass: one minute behind _bg_v8_eod (15:45), so today's raw_prices EOD
@@ -5305,6 +5328,11 @@ async def _scheduler_loop():
         # missed. The job's own _ran_today guard stops it firing twice once it succeeds.
         if now.weekday() < 5 and _is_trading_day(now.date()) and h >= 15 and m % 5 == 0:
             _spawn(_bg_custom_alerts_daily)
+        # cc#2097: unrealised daily snapshot, 5 min after close -- same slot convention as the
+        # yahoo EOD refresh below, does not need to wait for v8_eod (15:45) since it only reads
+        # the day's last live cmp mark via book_canon, not the EOD engine's own output.
+        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 35:
+            _spawn(_bg_v8_unrealised_snapshot)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         # cc#1175: QSR at 15:55 — after the 15:35 close refresh and after v8_eod at
         # 15:45, so the returns bands and the S1 touch read today. Trading-day gated
