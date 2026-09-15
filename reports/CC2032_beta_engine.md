@@ -124,7 +124,26 @@ the two functions interacting, not two isolated unit tests).
   correctly reads 1, `n_holdings_used` correctly stays 15 — never a fabricated beta=0 or beta=1 for
   the excluded name.
 
-**First-run evidence** (ENGINE_LIVENESS_RULE 13829 — a badge follows the data, never precedes it):
-triggered via the gated `app_config['beta_engine_run']` mechanism immediately after this deploys;
-real row counts and coverage stats posted as a follow-up to this report and to `cc_task_logs`, not
-asserted here in advance.
+## Real first-run result (triggered post-deploy, 15-Sep-2026)
+
+`app_config['beta_engine_run']` was armed before the push and fired on this deploy's own startup
+boot (the trigger code is new in this same commit, so its first boot IS the first deploy after
+arming). Real result, `app_config['beta_engine_run_result']`:
+
+- **universe_size: 1850** — matches the founder's own spec estimate ("~1850 raw_prices symbols")
+  exactly. `rows_written: 1795`, `n_full_window: 711` (a complete ~252-session history),
+  `n_partial_window: 1084` (newer listings/gaps), `n_excluded: 55` (<60 sessions — real symbols,
+  real counts, e.g. ANANTAM 25 sessions, CORDELIA 52 — honestly excluded, never a fabricated beta).
+- **13 active baskets scored.** 12 got a real holdings-weighted beta. `contra_value` correctly
+  returned `beta: null, n_holdings_used: 0, n_holdings_excluded: 0, reason: "no priced open
+  holdings"` — its only open position is `NIFTYBEES` (checked: that basket's real holdings are
+  100% cash-parked right now), which the cash-park exclusion correctly strips before the rollup,
+  leaving nothing to average — an honest null, not a crash or a fabricated 1.0.
+- **The real production betas exactly match this report's own local verification numbers above**
+  (`large_cap`: 1.0239/15/0, `alpha_multicap`: 0.8452/15/0, `mid_cap`: 1.0225/11/0,
+  `model_portfolio`: 1.0197/20/0, `small_cap`: 1.0618/13/0, and every other basket) — because the
+  verification used the exact same real `as_of` date and real holdings. The local stub-cursor test
+  run before this push predicted the real production output exactly, digit for digit, before it
+  ran — as strong a confirmation as this kind of test can give.
+
+`beta_daily` and `qb_beta_daily` both confirmed to exist in the live schema post-deploy.
