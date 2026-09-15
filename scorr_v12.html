@@ -267,7 +267,16 @@ function renderResults(res){
   if(!res){document.getElementById('results').innerHTML='<div class="empty">No result.</div>';return;}
   if(res.error){document.getElementById('results').innerHTML='<div class="empty">'+res.error+'</div>';return;}
   const s=res.stats||{};
-  const pit=res.pit_partial?'<span class="pill a" title="Fundamental/GVM filters used the current snapshot; point-in-time GVM (gvm_ft) lands with Phases 2-4">PIT_PARTIAL</span>':'<span class="pill g">PIT exact</span>';
+  let pit;
+  if(res.pit_flag==='point_in_time_gvm'){
+    const n=res.pit_universe_note||{};
+    const cnt=(n.candidate_pool_size!=null)?(' · pool '+n.candidate_pool_size+', today would pass '+n.current_snapshot_pass_count):'';
+    pit='<span class="pill a" title="GVM/G/V/M thresholds are re-checked as-of EACH rebalance date against real point-in-time history (cc#2085/cc#2092). Other criteria and the candidate pool still use today\'s snapshot.">PIT_GVM'+cnt+'</span>';
+  }else if(res.pit_partial){
+    pit='<span class="pill a" title="Fundamental/GVM filters used the current snapshot for this basket (a non-GVM criterion is present, so no historical record exists to check it against).">PIT_PARTIAL</span>';
+  }else{
+    pit='<span class="pill g">PIT exact</span>';
+  }
   const minn=(res.honesty&&res.honesty.min_n_badge)?'<span class="pill a">min-n &lt;50 trades</span>':'';
   let html='<div class="row" style="margin-top:14px">'+pit+' '+minn+'<span class="pill b">'+res.benchmark+'</span><span class="pill b">'+res.rebalances+' rebalances · '+res.years+'y</span><span class="pill b">'+res.universe_size+' universe</span></div>';
   html+='<div class="cards">'+

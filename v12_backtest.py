@@ -9,9 +9,26 @@ RSI/EMA gates + min/max stocks), equal-weight, and between rebalances apply the 
 Equity is walked DAILY on the benchmark trading calendar so drawdown/Sharpe are honest.
 
 POINT-IN-TIME (spec fix_4 + honesty doctrine): momentum/ROC + RSI/EMA gates come from raw_prices,
-which ARE point-in-time. Fundamental/GVM universe filters currently resolve against the CURRENT
-snapshot (gvm_ft / as-of fundamentals land with Phases 2-4) — so the result is flagged
-PIT_PARTIAL and the front end must show that badge. Frozen universes are exact.
+which ARE point-in-time. Frozen universes are exact. Filtered universes are now SPLIT (cc#2085,
+15-Sep-2026, built on cc#2092's real point-in-time gvm_history):
+  - A universe_ref.filters set touching ONLY gvm/g_score/v_score/m_score resolves those
+    thresholds point-in-time, as-of EACH rebalance date, against gvm_history (any method — the
+    cc#2092 backfill_pit_v2 rows for the past, the live method=NULL rows for anything recent
+    enough to be covered by them). pit_flag="point_in_time_gvm".
+  - Any OTHER filter key (roe/roce/pe/growth rates/mcap_rank/... — the other 20 of 24 keys in
+    v12_endpoints._UNI_COLS) has no historical record anywhere in this codebase — gvm_history
+    stores only the four GVM-family scores, nothing else. Those criteria stay resolved against
+    TODAY's screener_raw/input_raw snapshot, same as before. pit_flag stays "current_snapshot"
+    when such a key is present (even if gvm/g_score/etc. are ALSO in the same filter set) — a
+    partial fix reported honestly is not the same as claiming full point-in-time.
+  - Either way, the CANDIDATE POOL (which symbols are even considered) is intersected with the
+    canonical top-750 universe (scrape_universe.universe_symbols(), SCRAPE_UNIVERSE_TOP750_CANON_V1)
+    — cc#2092's point-in-time gvm_history only covers that universe, and the founder's own 14-Sep
+    ruling accepted a bounded universe ("backtesting can be done on 850/732 companies, that is
+    fine") over chasing full coverage. This does NOT reconstruct which stocks were actually in the
+    top-750 AT each past date (today's membership is used throughout) — a real, separate,
+    unresolved layer of the same survivorship question, stated here rather than implied fixed.
+  - Frozen and manual-list universes are unaffected (already exact / already a literal list).
 
 The shared basket-definition validator + universe vocabulary live in v12_endpoints (single source).
 
@@ -33,7 +50,8 @@ import psycopg
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from v12_endpoints import _uni_where, _UNI_BASE, _validate_basket_def   # single vocabulary + validator
+from v12_endpoints import _uni_where, _UNI_BASE, _UNI_COLS, _validate_basket_def   # single vocabulary + validator
+from scrape_universe import universe_symbols   # cc#2085: canonical top-750, same table cc#2092 built history for
 
 router = APIRouter()
 _DB = os.getenv("DATABASE_URL", "")
@@ -151,26 +169,98 @@ def _load_weekly_atr(cur, symbols, start, end, period=14):
     return s
 
 
+_GVM_PIT_KEYS = {"gvm", "g_score", "v_score", "m_score"}   # cc#2085: the only 4 of 24 _UNI_COLS
+# keys gvm_history actually has a historical record for -- everything else in _UNI_COLS (roe,
+# roce, pe, growth rates, mcap_rank, ...) has no point-in-time source anywhere in this codebase.
+
+
 def _resolve_universe(cur, universe_ref):
-    """(symbols, pit_flag). Frozen universes are exact; filtered ones resolve against the current
-    snapshot (PIT_PARTIAL until gvm_ft / as-of fundamentals land)."""
+    """(symbols, pit_flag, gvm_filters). Frozen universes are exact (gvm_filters=None). A filtered
+    universe whose filter set touches ONLY gvm/g_score/v_score/m_score gets pit_flag=
+    "point_in_time_gvm" and gvm_filters carries those thresholds back to the caller, which re-checks
+    them per rebalance date against gvm_history (cc#2085, built on cc#2092's real point-in-time
+    backfill) -- deliberately NOT baked into this SQL, or a stock that fails TODAY's GVM would be
+    excluded even if it genuinely passed the floor at some past rebalance date, reintroducing the
+    exact bias this exists to remove. The candidate POOL (everything else -- segments, if any) is
+    still resolved against today's screener_raw/input_raw snapshot and intersected with the
+    canonical top-750 (scrape_universe.universe_symbols()) -- cc#2092 only has history for that
+    universe. Any OTHER _UNI_COLS key present (roe/pe/growth/mcap_rank/...) has no historical
+    record at all, so the whole result falls back to pit_flag="current_snapshot", gvm_filters=None
+    -- a partial fix is reported as partial, never silently upgraded."""
     filters = None
     if isinstance(universe_ref, int):
         cur.execute("SELECT definition FROM v12_universes WHERE id=%s", (universe_ref,))
         r = cur.fetchone()
         if not r:
-            return [], "universe_not_found"
+            return [], "universe_not_found", None
         defn = r[0] or {}
         if defn.get("frozen_symbols"):
-            return [s.upper() for s in defn["frozen_symbols"]], "frozen"
+            return [s.upper() for s in defn["frozen_symbols"]], "frozen", None
         filters = defn.get("filters", {})
     elif isinstance(universe_ref, dict):
         filters = universe_ref.get("filters", universe_ref)
     else:
-        return [], "bad_universe_ref"
-    where, params, _ = _uni_where(filters or {})
+        return [], "bad_universe_ref", None
+    filters = filters or {}
+    gvm_filters = {k: v for k, v in filters.items() if k in _GVM_PIT_KEYS and isinstance(v, dict)}
+    other_range_keys = [k for k in filters if k not in _GVM_PIT_KEYS and k != "segments" and k in _UNI_COLS]
+    if gvm_filters and not other_range_keys:
+        pool_filters = {k: v for k, v in filters.items() if k not in _GVM_PIT_KEYS}
+        where, params, _ = _uni_where(pool_filters)
+        cur.execute("SELECT g.symbol " + _UNI_BASE + where, params)
+        candidates = {r[0].upper() for r in cur.fetchall()} & universe_symbols(cur)
+        return sorted(candidates), "point_in_time_gvm", gvm_filters
+    where, params, _ = _uni_where(filters)
     cur.execute("SELECT g.symbol " + _UNI_BASE + where + " ORDER BY g.gvm_score DESC NULLS LAST", params)
-    return [r[0].upper() for r in cur.fetchall()], "current_snapshot"
+    return [r[0].upper() for r in cur.fetchall()], "current_snapshot", None
+
+
+def _load_gvm_pit_series(cur, symbols, start, end):
+    """cc#2085: point-in-time (gvm, g, v, m) series, sourced from gvm_history regardless of
+    method -- the cc#2092 backfill_pit_v2 rows cover the past, the live method IS NULL rows cover
+    anything recent enough to be covered by them; both are genuinely as-of their own score_date by
+    construction, just produced by different processes at different times (the same principle
+    _load_series already applies to raw_prices, which never checks which feed wrote a row).
+    Reuses _Series completely unchanged -- its "value" is a 4-tuple here instead of a scalar."""
+    s = _Series()
+    if not symbols:
+        return s
+    cur.execute("""SELECT symbol, score_date, g_score, v_score, m_score, gvm_score FROM gvm_history
+                   WHERE symbol = ANY(%s) AND score_date BETWEEN %s AND %s
+                   ORDER BY symbol, score_date""", (list(symbols), start, end))
+    cur_sym, buf = None, []
+    for sym, d, g, v, m, gvm in cur.fetchall():
+        if sym != cur_sym:
+            if cur_sym is not None:
+                s.add(cur_sym, buf)
+            cur_sym, buf = sym, []
+        buf.append((d, (float(g) if g is not None else None, float(v) if v is not None else None,
+                         float(m) if m is not None else None, float(gvm) if gvm is not None else None)))
+    if cur_sym is not None:
+        s.add(cur_sym, buf)
+    return s
+
+
+def _passes_gvm_pit(gvm_series, sym, d, gvm_filters):
+    """Point-in-time gvm/g_score/v_score/m_score threshold check, as-of date d. No history yet for
+    this symbol at this date -> excluded (ABSENT, not FAILED, per the cc#1822 convention the
+    card's own spec cites -- a symbol with no GVM score yet cannot be said to have passed a floor
+    it was never scored against)."""
+    vals = gvm_series.as_of(sym, d)
+    if vals is None:
+        return False
+    g, v, m, gvm = vals
+    field_map = {"gvm": gvm, "g_score": g, "v_score": v, "m_score": m}
+    for key, rng in gvm_filters.items():
+        val = field_map.get(key)
+        if val is None:
+            return False
+        lo, hi = rng.get("min"), rng.get("max")
+        if lo is not None and val < lo:
+            return False
+        if hi is not None and val > hi:
+            return False
+    return True
 
 
 def _rebalance_dates(cal, start, end, freq):
@@ -236,12 +326,22 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
     bench_sym = _BENCH.get(str(benchmark).upper(), "NIFTY50")
 
     with _conn() as conn, conn.cursor() as cur:
-        universe, pit_flag = _resolve_universe(cur, basket_def.get("universe_ref"))
+        universe, pit_flag, gvm_filters = _resolve_universe(cur, basket_def.get("universe_ref"))
         if manual:
             universe = [s.upper() for s in manual]
             pit_flag = "manual_list"
+            gvm_filters = None
         if not universe:
             return {"error": "empty universe", "pit_flag": pit_flag}
+        candidate_pool_size = len(universe)   # cc#2085: pre-PIT-filter count, for the transparency note
+        current_snapshot_pass_count = None
+        if gvm_filters:
+            # cc#2085: how many of the SAME candidate pool would pass on TODAY's snapshot alone --
+            # the direct "here is the bias size" comparison the founder's own ruling asked for.
+            today_where, today_params, _ = _uni_where(gvm_filters)
+            cur.execute("SELECT COUNT(*) " + _UNI_BASE + today_where + " AND g.symbol = ANY(%s)",
+                        today_params + [universe])
+            current_snapshot_pass_count = cur.fetchone()[0]
         # benchmark trading calendar
         cur.execute("""SELECT price_date, close FROM raw_prices
                        WHERE symbol=%s AND price_date BETWEEN %s AND %s AND close IS NOT NULL
@@ -255,6 +355,7 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         load_start = start - timedelta(days=400)
         series = _load_series(cur, universe, load_start, end)
         atr_series = _load_weekly_atr(cur, universe, load_start, end, period=14) if atr_stop else None
+        gvm_pit_series = _load_gvm_pit_series(cur, universe, load_start, end) if gvm_filters else None
 
     rebals = _rebalance_dates(cal, start, end, freq)
     if len(rebals) < 2:
@@ -277,7 +378,14 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
 
     def _rank_universe(d):
         scored = []
+        gvm_pass = 0
         for sym in universe:
+            if gvm_filters is not None:
+                # cc#2085: point-in-time GVM floor, re-checked fresh at EVERY rebalance date --
+                # never resolved once before the walk starts (that was the whole bug).
+                if not _passes_gvm_pit(gvm_pit_series, sym, d, gvm_filters):
+                    continue
+                gvm_pass += 1
             r = _blend_roc(series, sym, d, roc_def)
             if r is None:
                 continue
@@ -285,12 +393,12 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
                 continue
             scored.append((sym, r))
         scored.sort(key=lambda x: x[1], reverse=True)
-        return scored
+        return scored, gvm_pass
 
     # initial rebalance
     def _do_rebalance(d):
         nonlocal holdings, equity
-        scored = _rank_universe(d)
+        scored, gvm_pass = _rank_universe(d)
         ranks = {sym: i + 1 for i, (sym, _) in enumerate(scored)}
         # exits: drop holdings that fell out of rank_fall_y, breached trailing peak, or lost gate
         keep = {}
@@ -363,8 +471,13 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
                 open_pos[s] = {"entry_date": str(d), "entry_px": ep, "weight": tw, "entry_atr": entry_atr}
                 peak_since_entry[s] = ep if ep else 0
         holdings = new_holdings
-        rebalance_log.append({"date": str(d), "n": len(target), "turnover": round(turnover, 4),
-                              "holdings": target})
+        log_row = {"date": str(d), "n": len(target), "turnover": round(turnover, 4), "holdings": target}
+        if gvm_filters is not None:
+            # cc#2085: how many of the candidate pool genuinely passed the GVM floor AS OF this
+            # date -- the founder-visible number that shows the point-in-time universe moving
+            # over the walk, not a single static count.
+            log_row["gvm_pit_pass_count"] = gvm_pass
+        rebalance_log.append(log_row)
 
     _do_rebalance(rebals[0])
 
@@ -389,9 +502,25 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
 
     years = max((cal[-1] - cal[start_i]).days / 365.25, 1e-9)
     pack = _stats_pack(equity_series, bench_series, trades, years, equity)
+    pit_universe_note = None
+    if gvm_filters is not None:
+        # cc#2085: the founder's own explicit ask -- "state the point-in-time universe size
+        # actually used and how it differs from the full current universe" -- real counts, not a
+        # bare flag. current_snapshot_pass_count is the direct "size of the bias" comparison:
+        # how many of this same candidate pool pass the identical thresholds TODAY.
+        pit_universe_note = {
+            "mode": "point_in_time_gvm",
+            "gvm_filters_applied": gvm_filters,
+            "candidate_pool_size": candidate_pool_size,
+            "current_snapshot_pass_count": current_snapshot_pass_count,
+            "note": ("gvm/g_score/v_score/m_score thresholds are re-checked as-of EACH rebalance "
+                     "date against gvm_history; other criteria (segments, if any) and the "
+                     "candidate pool itself still use today's screener_raw/input_raw snapshot."),
+        }
     return {
         "pit_flag": pit_flag,
-        "pit_partial": pit_flag in ("current_snapshot",),
+        "pit_partial": pit_flag in ("current_snapshot", "point_in_time_gvm"),
+        "pit_universe_note": pit_universe_note,   # cc#2085: real counts, only present when active
         "atr_stop_active": bool(atr_stop),   # cc#2088: true only when exit.atr_stop was set
         "universe_size": len(universe), "benchmark": bench_sym,
         "start": str(cal[start_i]), "end": str(cal[-1]), "years": round(years, 2),
