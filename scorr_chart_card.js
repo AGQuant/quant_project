@@ -64,8 +64,13 @@
   // It is the one bounded TF with a depth gate: /api/candles?tf=3Y refuses a symbol with under
   // ~2.5 years of sessions (kind=unavailable) rather than serving a shorter series labelled 3Y,
   // and the pill greys out with that reason — it is never hidden and never falls back to ALL.
-  var TF = { "5m": null, "1W": 7, "1M": 30, "3M": 90, "1Y": 365, "3Y": 1095, "ALL": 1825 };
-  var TF_ORDER = ["5m", "1W", "1M", "3M", "1Y", "3Y", "ALL"];
+  // cc#2103: 3M and 3Y dropped from the row (founder screenshot: TF row overflowed/squeezed on
+  // phone). TF_3Y_REASON/_3yCache/_probe3Y/_apply3Y and the "3Y" TF map entry's depth-gate sibling
+  // in _load()'s EOD URL builder are left in place, deliberately unreachable now (no button can set
+  // _tf to "3Y" anymore) rather than torn out — cc#2103's own scope note allows this as optional
+  // cleanup, not required.
+  var TF = { "5m": null, "1W": 7, "1M": 30, "1Y": 365, "ALL": 1825 };
+  var TF_ORDER = ["5m", "1W", "1M", "1Y", "ALL"];
   var TF_LABEL = { "5m": "1D" };   // internal key -> shown label; everything else shows its key
   var TF_3Y_REASON = "Under 3 years of listed history";   // fallback text; the server reason wins
   // cc#806 FOUNDER RULE: pivots render ONLY on 5m and 1M/3M/6M. Rolling levels lose meaning at 1Y+,
@@ -74,10 +79,10 @@
   // button state and what is actually drawn can never disagree.
   // cc#990: re-based onto the new keys — pivots on 1D/1W/1M/3M, greyed on 1Y/ALL. Same cc#806
   // rule (rolling levels lose meaning at long scales), expressed against the row that now exists.
-  var PIV_TFS = { "5m": 1, "1W": 1, "1M": 1, "3M": 1 };
+  var PIV_TFS = { "5m": 1, "1W": 1, "1M": 1 };
   function _pivOk() { return !!PIV_TFS[_tf]; }
 
-  var _chart = null, _series = null, _sym = null, _tf = "3M", _theme = "light";
+  var _chart = null, _series = null, _sym = null, _tf = "1M", _theme = "light";
   var _gvmSeries = null;            // cc#779: GVM quality-trend line (secondary fixed 0-10 axis)
   var _channelUpper = null, _channelLower = null;   // cc#1555: trend-channel line series (primary scale)
   var _verdict = null;              // cc#779: cached trend verdict for the current symbol+timeframe
@@ -290,11 +295,26 @@ var _full = false;                // cc#779: fullscreen state
     ov.style.cssText = "position:fixed;inset:0;z-index:12000;background:rgba(10,16,25,.5);display:none;align-items:center;justify-content:center;padding:16px";
     ov.innerHTML =
       '<div id="scorrChartBoxWrap" style="border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.32);width:min(94vw,640px);max-height:88vh;overflow:hidden;display:flex;flex-direction:column">' +
-        '<div id="scorrChartHead" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid">' +
+        /* cc#2103: #scorrChartHead gains flex-wrap (was nowrap) and #scorrChartTfs gains
+           flex-basis:100%. Root cause, confirmed by measuring real rendered rects at 360/390px
+           before changing anything (Playwright, both empty and populated title/H-L/verdict
+           content): #scorrChartTfs carries the TF pills AND the Pivots/Fib/Channel/GVM toggle
+           buttons (11 elements pre-trim) in ONE flex container that shares its nowrap parent row
+           with the title/H-L/verdict/maximize/close. On a nowrap row that whole button cluster
+           gets squeezed into whatever width is left -- as little as 65px wide, measured -- and its
+           OWN flex-wrap then folds those 11 buttons into as many as 11 cramped internal rows
+           (header height up to 312px) rather than one clean row; trimming TF_ORDER alone (7->5
+           items, item 1) did NOT fix this in the same measurement (still 6-9 rows squeezed into a
+           77-107px column) -- the container needed to change regardless of button count. Giving
+           the button cluster flex-basis:100% forces it onto its OWN full-width line the instant it
+           cannot share the first line, which flex-wrap on the parent now allows: re-measured at
+           2 rows spanning the full ~294-357px card width, zero clipped buttons, at every
+           TF-count/content/width combination tested. */
+        '<div id="scorrChartHead" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;flex-wrap:wrap">' +
           '<b id="scorrChartTitle" style="font-size:14px"></b>' +
           '<span id="scorrChartHL" style="margin-left:6px;font-size:11.5px"></span>' +
           '<span id="scorrChartVerdict" style="margin-left:6px"></span>' +   /* cc#779 trend badge */
-          '<span style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end" id="scorrChartTfs"></span>' +
+          '<span style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;flex-basis:100%" id="scorrChartTfs"></span>' +
           '<button id="scorrChartFull" title="Maximize (Esc to exit)" style="border:none;background:none;font-size:15px;line-height:1;cursor:pointer;margin-left:4px">&#9974;</button>' +
           '<button id="scorrChartClose" style="border:none;background:none;font-size:20px;line-height:1;cursor:pointer;margin-left:4px">&times;</button>' +
         '</div>' +
@@ -604,7 +624,7 @@ var _full = false;                // cc#779: fullscreen state
       var on = _ov[o[0]] && !pivBlocked;
       b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
         ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) + (pivBlocked ? ";opacity:.4;cursor:not-allowed" : "");
-      b.title = pivBlocked ? "Pivots shown on 1D–3M — rolling levels lose meaning at longer scales" : o[2];
+      b.title = pivBlocked ? "Pivots shown on 1D–1M — rolling levels lose meaning at longer scales" : o[2];
       if (!pivBlocked) b.onclick = function () { _toggleOv(o[0]); };
       host.appendChild(b);
     });
@@ -1264,9 +1284,17 @@ var _full = false;                // cc#779: fullscreen state
     // outside futures_universe by design — that endpoint is Fyers-feed-backed only). Never Fyers
     // for this path, never a DB write — chart_oneday_endpoints.py's own docstring states why.
     var viaYahoo = isIntraday && _futCache[_sym] === false;
+    // cc#2103: sessions=3 (was 5) -- comfortably over the 100-bar window this now trims to (a full
+    // NSE session is ~75 five-min bars) with a spare session of margin for a short/partial day,
+    // while still cutting the fetch nearly in half. /api/intraday/ has no bars= param (checked
+    // gvm_market_endpoints.py directly -- sessions is the only window control it exposes) and
+    // /api/chart/oneday/ is a deliberately single-purpose "latest session" endpoint (its own
+    // docstring: ONE canonical Yahoo fetch, no caller grows its own params) -- do_not_touch prefers
+    // a client-side trim over widening either endpoint's contract, so the actual 100-bar cap is
+    // applied uniformly below, after the two sources converge into one `data` array.
     var url = isIntraday
       ? (viaYahoo ? "/api/chart/oneday/" + encodeURIComponent(_sym)
-                  : "/api/intraday/" + encodeURIComponent(_sym) + "?sessions=5")
+                  : "/api/intraday/" + encodeURIComponent(_sym) + "?sessions=3")
       : "/api/candles/" + encodeURIComponent(_sym) + "?days=" + TF[tf] + (tf === "3Y" ? "&tf=3Y" : "");   // cc#1566: 3Y carries the depth gate
     _getJSON(url).then(function (rows) {
       if (stale()) return;                       // a response for a symbol/timeframe we left
@@ -1290,7 +1318,12 @@ var _full = false;                // cc#779: fullscreen state
       if (isIntraday) {
         data = (rows || []).map(function (r) {
           return { time: Math.floor(new Date(String(r.ts).replace(" ", "T") + "+05:30").getTime() / 1000), open: +r.open, high: +r.high, low: +r.low, close: +r.close, volume: +r.volume, _day: String(r.ts).slice(0, 10) };   // cc#755: volume + session date for VWAP
-        }).filter(function (d) { return isFinite(d.close) && isFinite(d.time); });
+        }).filter(function (d) { return isFinite(d.close) && isFinite(d.time); })
+          .slice(-100);   // cc#2103: rolling 100-bar window -- both the Fyers path (rows already
+                           // ASC by ts) and the Yahoo path (unwrapped from rows.bars above, same
+                           // ASC order) flow through this one mapping, so one trim covers both; a
+                           // thinner session (partial day, short history) just yields fewer than
+                           // 100 rather than being padded.
       } else {
         data = (rows || []).map(function (r) { return { time: r.date, open: +r.open, high: +r.high, low: +r.low, close: +r.close }; })
           .filter(function (d) { return isFinite(d.close); });
@@ -1331,8 +1364,11 @@ var _full = false;                // cc#779: fullscreen state
       _loadVerdict();     // cc#779: trend-strength badge, recomputed for THIS timeframe
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_positionFx); } catch (e) {}   // cc#750: keep fib bands aligned on pan/zoom
       try { c.timeScale().subscribeVisibleLogicalRangeChange(_maybeBackfill); } catch (e) {}   // cc#1492: own handler, never merged into _positionFx
+      // cc#2043 note: the source label now follows viaYahoo -- it read a hardcoded "(F&O feed)"
+      // unconditionally before this card, which was already wrong for a non-futures symbol served
+      // via the Yahoo path; fixed here since this exact line is being touched for the 100-bar wording.
       msg.textContent = isIntraday
-        ? "5-min · last 5 sessions · IST (F&O feed)"
+        ? "5-min · last 100 bars · IST" + (viaYahoo ? " (Yahoo)" : " (F&O feed)")
         : tf + " · daily · raw_prices (IST)";
       window.addEventListener("resize", _onResize);
     }).catch(function () { if (stale()) return; msg.textContent = "Chart failed to load."; });
@@ -1789,7 +1825,7 @@ var _full = false;                // cc#779: fullscreen state
     document.getElementById("scorrChartHL").textContent = "";
     _paintCard4();   // cc#1871 item 5: the C/A/R/D capsule, symbol fixed for this open()
     document.addEventListener("keydown", _esc);
-    _tf = "3M";
+    _tf = "1M";   // cc#2103: was 3M
     _gvmMode = "gvm"; _gvmCache = null; _gvmCacheKey = null;   // cc#1501: every open starts on full GVM
     // cc#1591 (R3, CHART_CARD_GVM_PILLAR_TOGGLE_V1 34463): a caller may open WITH the score overlay
     // on — the app GVM page's "tap for price chart" lands on price + GVM line, toggle G/V/M from
