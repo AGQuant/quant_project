@@ -408,7 +408,39 @@ def _passes_filter(value, mn, mx) -> bool:
 #     04-Aug) and a stale mom_2d band of [-4,-2] where cc#854 restored [-4,-1].
 # br_stock_passcount was already registry-driven (cc#607 Phase A) and was the only one that could
 # not drift. This makes the other three the same shape, so the class is gone rather than the case.
-def _registry_passcount(basket: str, rows, custom):
+# cc#2099: FUNNEL "closest to qualifying" TC-score capsule. Each basket reads its OWN bucket's
+# latest tick today from tc_universe_ticks (TC_CANON_V2_FINAL) -- NEVER a best-of-four cross-side
+# pick. Best-of-four is mobile_home2.py's Home-breadth capsule, deliberately side-agnostic for a
+# sheet with no basket context; the funnel is already basket-scoped (fnBasket), so reading that
+# basket's own side is the consistent choice, confirmed against how TC is read everywhere else in
+# this file (basket-scoped, never cross-side) before wiring this in.
+_TC_BUCKET_BY_BASKET = {"buy_reversal": "BUY-REV", "buy_momentum": "BUY-MOM",
+                        "sell_reversal": "SELL-REV", "sell_momentum": "SELL-MOM"}
+
+
+def _tc_score100_for_basket(cur, basket: str) -> dict:
+    """symbol -> latest score100 ticked TODAY (IST) in this basket's own bucket. Same CTE shape as
+    mobile_home2.py's proven tc_universe_ticks read, narrowed to one bucket (no best-of-four
+    DISTINCT ON needed -- one bucket, one row per symbol per tick). A symbol with no tick today is
+    simply absent from the dict -- never fabricated as 0 or carried forward from a prior day."""
+    bucket = _TC_BUCKET_BY_BASKET.get(basket)
+    if not bucket:
+        return {}
+    from datetime import datetime as _dt, timezone as _tzu
+    from zoneinfo import ZoneInfo as _ZI
+    _ist = _ZI("Asia/Kolkata")
+    _day0 = _dt.now(_ist).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(_tzu.utc)
+    cur.execute("""
+        WITH t AS (
+            SELECT symbol, score100, ts, MAX(ts) OVER (PARTITION BY symbol) AS last_ts
+            FROM tc_universe_ticks WHERE bucket = %s AND ts >= %s
+        )
+        SELECT symbol, score100 FROM t WHERE ts = last_ts
+    """, (bucket, _day0))
+    return {sym: round(float(score), 1) for sym, score in cur.fetchall() if score is not None}
+
+
+def _registry_passcount(basket: str, rows, custom, tc_scores=None):
     """Evaluate EVERY registry gate for every stock, and nothing else.
 
     `custom` maps each custom-leg key to fn(stock_dict) -> (passed: bool, actual). A registry key
@@ -417,6 +449,7 @@ def _registry_passcount(basket: str, rows, custom):
     been quietly one gate short for a month.
     """
     reg = BASKET_FILTERS.get(basket, [])
+    tc_scores = tc_scores or {}
     out = []
     for s in rows:
         passed, failed, actuals = [], [], {}
@@ -436,6 +469,7 @@ def _registry_passcount(basket: str, rows, custom):
                     "passed_filters": passed, "failed_filters": failed,
                     "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                         "day_1d": s.get("day_1d"),   # cc#1614: the app funnel table Day % column
+                    "tc_score100": tc_scores.get(s["symbol"]),   # cc#2099: FUNNEL capsule
                     "v21_pass": None, "actuals": actuals})
     out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1),
              reverse=True)
@@ -2109,6 +2143,7 @@ def br_stock_passcount():
             syms     = [r["symbol"] for r in all_rows]
             prior4_low = _basket_prior4_low(cur, syms)
             today_low  = _basket_day_low_today(cur)
+            tc_scores  = _tc_score100_for_basket(cur, "buy_reversal")
             out = []
             for s in all_rows:
                 sym = s["symbol"]
@@ -2134,6 +2169,7 @@ def br_stock_passcount():
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                         "day_1d": s.get("day_1d"),   # cc#1614: the app funnel table Day % column
+                            "tc_score100": tc_scores.get(sym),   # cc#2099: FUNNEL capsule
                             "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_reversal", "score_date": str(date.today()),
@@ -2324,8 +2360,10 @@ def sr_stock_passcount():
                     return True, room          # NULL-passes off-market, as before
                 return tgt is not None, room
 
+            tc_scores = _tc_score100_for_basket(cur, "sell_reversal")
             out = _registry_passcount("sell_reversal", all_rows,
-                                      {"r1_touch": _r1t, "fall_from_r1": _fall, "room": _room})
+                                      {"r1_touch": _r1t, "fall_from_r1": _fall, "room": _room},
+                                      tc_scores)
         return {"basket": "sell_reversal", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("sell_reversal"), "stocks": out,
                 "v21_enabled": False, **_basket_meta("sell_reversal")}
@@ -2494,8 +2532,10 @@ def sm_stock_passcount():
                 pct = (c - s2) / c * 100.0
                 return pct >= 3.0, round(pct, 2)
 
+            tc_scores = _tc_score100_for_basket(cur, "sell_momentum")
             out = _registry_passcount("sell_momentum", all_rows,
-                                      {"cmp_lt_pp": _cmp_lt_pp, "s2_clearance": _s2c})
+                                      {"cmp_lt_pp": _cmp_lt_pp, "s2_clearance": _s2c},
+                                      tc_scores)
         return {"basket": "sell_momentum", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": _n_filters("sell_momentum"), "stocks": out,
                 "v21_enabled": False, **_basket_meta("sell_momentum")}
@@ -2717,8 +2757,10 @@ def bm_stock_passcount():
                 v = v21.get(s["symbol"], {}).get("hourly_pct")
                 return (v is not None and float(v) > 0.0), v
 
+            tc_scores = _tc_score100_for_basket(cur, "buy_momentum")
             out = _registry_passcount("buy_momentum", all_rows,
-                                      {"s1_touch": _s1, "pp_band": _pp, "hourly_pct": _hp})
+                                      {"s1_touch": _s1, "pp_band": _pp, "hourly_pct": _hp},
+                                      tc_scores)
 
             # SCORE layer, second and separate. Only a stock clearing every hard gate is scored,
             # mirroring the handler — a score on a stock the engine never scored would be fiction.

@@ -242,6 +242,13 @@ body{ --field:#0A0A0C; }
 #v8p .dp-foot{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:6px}
 /* funnel: stage rows, per the ref */
 #v8p .fn .seg{margin-bottom:14px}
+/* cc#2099: closestTable() TC-score capsule, replacing the GVM column. Locked band treatment per
+   cc#1958 (STRONG/VALID/WATCH/FAIL) -- tokens only, no raw hex/rgba (THEME_TOKEN_LOCK, cc#1185). */
+#v8p .fn-tc{display:inline-block;font-family:var(--mono);font-size:var(--type-105);font-weight:700;padding:var(--space-1) var(--space-6);border-radius:var(--radius-4);border:var(--bw-1) solid currentColor;background:transparent}
+#v8p .fn-tc-strong{color:var(--win);background:color-mix(in srgb, var(--win) 14%, transparent);font-weight:800}
+#v8p .fn-tc-valid{color:var(--win)}
+#v8p .fn-tc-watch{color:var(--muted);font-weight:700}
+#v8p .fn-tc-fail{color:var(--loss)}
 #v8p .stage{display:grid;grid-template-columns:110px 1fr 46px;gap:10px;align-items:center;margin:9px 0}
 #v8p .stage .sn{font-family:var(--mono);font-size:10.5px;letter-spacing:1px;color:var(--mute);text-transform:uppercase}
 #v8p .stage .sb{height:18px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(5px 0,100% 0,100% 100%,0 100%,0 5px)}
@@ -1686,6 +1693,21 @@ var CHIP_WORDS = { sector_week:'sector', sector_month:'sector-m', rsi_weekly:'rs
   mom_2d:'2d', week_return:'week', month_return:'month', week_index_52:'52w', gvm_score:'gvm', volume_ratio:'vol', vol_ratio:'vol', vol_trend:'vol', day_1d:'day', hourly_pct:'hour',
   s1_touch:'s1', r1_touch:'r1', cmp_lt_pp:'< pivot', room:'room', s2_clearance:'s2', fall_from_r1:'r1 fall', ma9_vs_ma21:'ma9/21', year_return:'year', range_3d:'range' };
 function chipWord(k){ return CHIP_WORDS[k] || String(k||'').replace(/_/g,' ').slice(0, 9); }
+/* cc#2099: TC_CANON_V2_FINAL bands, client-side (same precedent as the deleted Home capsule's
+   breadthTcBand -- server ships raw score100, client buckets it). Score is this basket's OWN
+   bucket only (server-side join, v8_endpoints._tc_score100_for_basket), never a best-of-four pick. */
+function fnTcBand(score){
+  if(score == null) return null;
+  if(score >= 84) return 'strong';
+  if(score >= 65) return 'valid';
+  if(score >= 50) return 'watch';
+  return 'fail';
+}
+function fnTcCapsule(score){
+  var band = fnTcBand(score);
+  if(!band) return '<span style="font-family:var(--mono);font-size:12.5px;font-weight:800;color:var(--chalk)">—</span>';
+  return '<span class="fn-tc fn-tc-'+band+'">'+score.toFixed(1)+'</span>';
+}
 function closestTable(pc, total){
   /* close = within three checks of the full set (5+ of 8 today): the near stage and the rung under it */
   var near = Math.max(1, total-3), st = (pc.stocks||[]).filter(function(r){ return num(r.passed) && r.passed >= near; }).slice(0, 10);
@@ -1698,10 +1720,10 @@ function closestTable(pc, total){
     return '<div data-fn-sym="'+esc(r.symbol)+'" role="button" style="display:grid;grid-template-columns:96px 1fr 44px 52px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line);cursor:pointer">'
       + '<div style="min-width:0"><div style="font-weight:800;font-size:13px;color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(r.symbol)+'</div><div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px">'+(chips || '<span style="font-family:var(--mono);font-size:9px;color:var(--gold)">all pass</span>')+'</div></div>'
       + '<div><div style="height:12px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden;clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)"><i style="position:absolute;left:0;top:0;bottom:0;width:'+w.toFixed(0)+'%;background:linear-gradient(90deg,var(--gold-lo),'+(full?'var(--gold-hi)':'var(--gold)')+')"></i></div><div style="font-family:var(--mono);font-size:9.5px;color:var(--mute);margin-top:2px">'+r.passed+' / '+total+(pc.v21_enabled && r.v21_pass === false ? ' · V21 no' : '')+'</div></div>'
-      + '<div style="font-family:var(--mono);font-size:12.5px;font-weight:800;text-align:right;color:'+(num(r.gvm_score) && r.gvm_score >= 7.5 ? 'var(--gold)' : 'var(--chalk)')+'">'+(num(r.gvm_score) ? r.gvm_score.toFixed(1) : '—')+'</div>'
+      + '<div style="text-align:right">'+fnTcCapsule(num(r.tc_score100) ? r.tc_score100 : null)+'</div>'
       + '<div class="'+sgn(r.day_1d)+'" style="font-family:var(--mono);font-size:12px;font-weight:700;text-align:right">'+(num(r.day_1d) ? pct(r.day_1d, 1) : '—')+'</div></div>';
   }).join('');
-  return head + '<div style="display:grid;grid-template-columns:96px 1fr 44px 52px;gap:8px;font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--dim);padding-bottom:2px"><span>SYMBOL · MISSES</span><span>PASSED</span><span style="text-align:right">GVM</span><span style="text-align:right">DAY %</span></div>' + rows;
+  return head + '<div style="display:grid;grid-template-columns:96px 1fr 44px 52px;gap:8px;font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--dim);padding-bottom:2px"><span>SYMBOL · MISSES</span><span>PASSED</span><span style="text-align:right">TC</span><span style="text-align:right">DAY %</span></div>' + rows;
 }
 function renderFunnel(){
   var el = document.getElementById('sec-funnel'), bks = fnBaskets();
