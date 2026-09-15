@@ -844,6 +844,13 @@ PWA_JS = """
         sac.src = '/scorr_alert_create.js';
         document.head.appendChild(sac);
       }
+      // cc#2095: the bell's new "+ CUSTOM ALERT" button opens window.ScorrCustomAlertCreate --
+      // same guard-against-double-injection pattern as scorr_alert_create.js just above.
+      if (!document.querySelector('script[src*="/scorr_custom_alert_create.js"]')) {
+        var cac = document.createElement('script');
+        cac.src = '/scorr_custom_alert_create.js';
+        document.head.appendChild(cac);
+      }
     }
 
     // cc#1203 push 4: the shared Theme pill, far right of the same bar.
@@ -2647,6 +2654,9 @@ SCORR_MODEL_PORTFOLIO_JS = _read_root_js("scorr_model_portfolio.js")
 # lifted out of trade_alerts_web.html so trade_wall_web.html can open the SAME form rather than a
 # hand copy of it. ALERTS_PURE_DISPLAY_V1 (session_log 40507) moved creation off the Alerts page.
 SCORR_ALERT_CREATE_JS = _read_root_js("scorr_alert_create.js")
+# cc#2095: the Custom Alerts V1 categorized picker + condition builder (window.ScorrCustomAlertCreate),
+# same repo-root-file serve pattern, mounted alongside scorr_alert_create.js everywhere the bell is.
+SCORR_CUSTOM_ALERT_CREATE_JS = _read_root_js("scorr_custom_alert_create.js")
 
 
 @router.get("/index_tape_card.js")
@@ -2902,6 +2912,11 @@ def pwa_scorr_analysis_card_js():
 @router.get("/scorr_alert_create.js")
 def pwa_scorr_alert_create_js():
     return Response(SCORR_ALERT_CREATE_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_custom_alert_create.js")
+def pwa_scorr_custom_alert_create_js():
+    return Response(SCORR_CUSTOM_ALERT_CREATE_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_cockpit_card.js")

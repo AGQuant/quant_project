@@ -357,6 +357,17 @@ def list_alerts(status: str = "all", limit: int = 200):
                     log.warning("list_alerts: resolve_close_state failed for id=%s (%s)", r.get("id"), e)
                     r["closed"], r["closed_at"], r["close_price"], r["instrument"] = False, None, None, "EQUITY"
         unseen = _attach_seen(cur, rows)   # cc#1717: seen flag per row + the bell's badge count
+        # cc#2095: Custom Alerts V1 -- ADD triggered custom_alerts rows alongside trade_alerts
+        # (do_not_touch: this endpoint's own trade_alerts rendering is untouched above). Appended
+        # AFTER _attach_seen so their namespaced 'c123' ids never reach trade_alert_seen's
+        # integer-keyed lookup; triggered_for_bell() stamps them seen=True itself (v1 scope: they
+        # never move unseen_count, computed already, above, from trade_alerts rows only).
+        if status in ("all", "triggered"):
+            try:
+                import custom_alerts
+                rows = rows + custom_alerts.triggered_for_bell(cur)
+            except Exception as e:
+                log.warning("list_alerts: custom_alerts merge failed (%s) -- trade_alerts rows still ship", e)
     return {"status_filter": status, "count": len(rows), "alerts": rows,
             "unseen_count": unseen, "seen_count": sum(1 for r in rows if r.get("seen"))}
 

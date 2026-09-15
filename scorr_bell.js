@@ -108,6 +108,15 @@
   // cc#2030: a feed row shows WHAT HAPPENED since it triggered — still waiting on a decision,
   // approved, or dismissed — since the feed spans all three outcomes (see feedAlerts() above).
   function feedRow(a){
+    // cc#2095: a Custom Alert row has no single direction/price -- it renders its condition
+    // chain instead of the direction pill. Everything else (link, layout, opacity rule) stays
+    // identical so the two row types read as one feed, not a bolt-on.
+    if(a.alert_type === 'custom'){
+      return '<a href="' + alertsUrl() + '" style="display:block;padding:10px 12px;border-bottom:1px solid var(--line,var(--edge,#2A2A31));text-decoration:none;color:inherit">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><b style="font-size:14px">' + esc(a.symbol) + '</b>'
+        + '<span style="font:700 10px/1 ui-monospace,monospace;letter-spacing:1px;padding:4px 7px;border-radius:6px;color:var(--gold,var(--pulse,#D4AF37));border:1px solid currentColor">CUSTOM</span></div>'
+        + '<div style="margin-top:4px;font:12px/1.4 ui-monospace,monospace;color:var(--chalk,var(--muted,#F5F2EA))">' + esc(a.condition_summary || 'condition met') + ' — triggered ' + istStamp(a.triggered_at) + '</div></a>';
+    }
     var dir = String(a.direction || '').toUpperCase(), sell = dir === 'SELL' || dir === 'SHORT';
     var outcome = a.status === 'approved'
         ? ('approved' + (a.approved_price != null ? ' @ ' + px(a.approved_price) : '') + (a.approved_at ? ' · ' + istStamp(a.approved_at) : ''))
@@ -145,6 +154,12 @@
     // this guard exists only so a genuinely missing script fails silently, never a raw
     // ReferenceError thrown at the founder.
   }
+  // cc#2095: same mount pattern as openCreate() above -- window.ScorrCustomAlertCreate ships as
+  // its own plain <script> alongside ScorrAlertCreate, same guard reasoning.
+  function openCustomCreate(){
+    close();
+    if(window.ScorrCustomAlertCreate) window.ScorrCustomAlertCreate.open(load);
+  }
   function render(){
     var box = document.getElementById('scorr-bell-box'); if(!box) return;
     var m = manualAlerts(), feed = feedAlerts(), pendCount = m.pending.length;
@@ -168,12 +183,14 @@
     var foot = '<div style="padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">'
       + '<button type="button" data-bell-set style="padding:11px;border-radius:10px;font:800 11.5px/1 ui-monospace,monospace;letter-spacing:.5px;cursor:pointer;border:1px solid var(--gold,var(--pulse,#D4AF37));background:var(--gold,var(--pulse,#D4AF37));color:var(--well,#131316)">＋ SET ALERT</button>'
       + '<button type="button" data-bell-view style="padding:11px;border-radius:10px;font:800 11.5px/1 ui-monospace,monospace;letter-spacing:.5px;cursor:pointer;border:1px solid var(--line,var(--edge,#2A2A31));background:transparent;color:var(--chalk,var(--muted,#F5F2EA))">'
-      + (state.view === 'pending' ? '← RECENT' : 'VIEW ALERTS' + (pendCount ? ' (' + pendCount + ')' : '')) + '</button></div>';
+      + (state.view === 'pending' ? '← RECENT' : 'VIEW ALERTS' + (pendCount ? ' (' + pendCount + ')' : '')) + '</button>'
+      + '<button type="button" data-bell-custom style="grid-column:1 / -1;padding:11px;border-radius:10px;font:800 11.5px/1 ui-monospace,monospace;letter-spacing:.5px;cursor:pointer;border:1px solid var(--line,var(--edge,#2A2A31));background:transparent;color:var(--chalk,var(--muted,#F5F2EA))">＋ CUSTOM ALERT (multi-condition)</button></div>';
     box.innerHTML = head + '<div style="max-height:min(60vh,420px);overflow-y:auto">' + body + '</div>' + foot;
     var moreBtn = box.querySelector('[data-bell-more]');
     if(moreBtn) moreBtn.addEventListener('click', function(){ state.feedExpanded = true; render(); });
     box.querySelector('[data-bell-view]').addEventListener('click', function(){ state.view = state.view === 'pending' ? 'feed' : 'pending'; state.feedExpanded = false; render(); });
     box.querySelector('[data-bell-set]').addEventListener('click', openCreate);
+    box.querySelector('[data-bell-custom]').addEventListener('click', openCustomCreate);
   }
   function close(){ var ov = document.getElementById('scorr-bell-ov'); if(ov) ov.remove(); state.open = false; }
   // cc#1696 scope 4: ONE component, two anchor modes. The app mounts the bell top-right of a

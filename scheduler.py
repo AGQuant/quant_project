@@ -1679,6 +1679,54 @@ def _bg_v8_eod():
     except Exception as e: log.error(f"v8_eod: {e}")
     finally: _eod_running = False
 
+_custom_alerts_daily_ran_today = None
+def _bg_custom_alerts_daily():
+    """cc#2095: Custom Alerts V1 daily pass -- every active alert, full chain. DATA-GATED, not a
+    fixed clock time (spec's own instruction: "a late EOD run cannot make this job read
+    yesterday's numbers"): custom_alerts.run_daily_eval checks MAX(v8_metrics.computed_at)::date
+    itself and returns skipped=... before that gate clears, so this is safe to offer on a 5-min
+    retry window (see the dispatch site) rather than one fixed minute -- if v8_eod runs late, the
+    next retry a few minutes later just finds it fresh instead of missing the day entirely. Only
+    sets the ran-today guard once it actually evaluated (a skip does not consume today's run)."""
+    global _custom_alerts_daily_ran_today
+    today = _ist_now().date()
+    if _custom_alerts_daily_ran_today == today: return _Skip.already_ran()
+    try:
+        import custom_alerts
+        with _conn() as conn, conn.cursor() as cur:
+            custom_alerts._ensure_tables(cur)
+            conn.commit()
+            res = custom_alerts.run_daily_eval(cur)
+            conn.commit()
+        if res.get("skipped"):
+            return res   # not yet fresh -- retry next tick, guard NOT set
+        log.info(f"custom_alerts_daily: {res}")
+        _custom_alerts_daily_ran_today = today
+        return res
+    except Exception as e:
+        log.error(f"custom_alerts_daily: {e}")
+        raise
+
+
+def _bg_custom_alerts_live():
+    """cc#2095: Custom Alerts V1 live pass -- every 5 min market hours, full chain, only for
+    alerts carrying >=1 live_5min condition (custom_alerts.run_live_eval does the filtering).
+    Shares the same evaluate_alert() the daily pass uses -- not a second evaluator."""
+    try:
+        import custom_alerts
+        with _conn() as conn, conn.cursor() as cur:
+            custom_alerts._ensure_tables(cur)
+            conn.commit()
+            res = custom_alerts.run_live_eval(cur)
+            conn.commit()
+        if res.get("evaluated"):
+            log.info(f"custom_alerts_live: {res}")
+        return res
+    except Exception as e:
+        log.error(f"custom_alerts_live: {e}")
+        raise
+
+
 _dma_state_eod_ran_today = None
 def _bg_dma_state_eod():
     """cc#1682 POST-CLOSE pass: one minute behind _bg_v8_eod (15:45), so today's raw_prices EOD
@@ -5194,6 +5242,7 @@ async def _scheduler_loop():
             _spawn(_bg_smartgain_mtm)         # cc#123: refresh SmartGain LTP/MTM from live cmp_prices
             _spawn(_bg_trade_alerts_check)    # cc#1504: manual trade_alerts pending->triggered price sweep
             _spawn(_bg_equity_cmp_poll)       # cc#2094: equity-only Yahoo live price (trade_alerts + QB), same 5-min beat
+            _spawn(_bg_custom_alerts_live)    # cc#2095: Custom Alerts V1 live-leg re-evaluation, same 5-min beat
             _spawn(_bg_fut_rest_fallback)     # cc#770: REST futures fallback when native WS fut leg is dark
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             _spawn(_bg_tc_scanner)            # cc#464 engine; cc#1746 / 39467: every 5 min (was the m%15 slot below)
@@ -5250,6 +5299,12 @@ async def _scheduler_loop():
         # instead of yesterday's (see _bg_dma_state_eod's own doc comment for why the offset).
         if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 46:
             _spawn(_bg_dma_state_eod)
+        # cc#2095: Custom Alerts V1 daily pass -- data-gated inside the job itself (v8_metrics
+        # freshness), so this is a RETRY WINDOW (every 5 min from 15:00 IST, trading days), not a
+        # single fixed minute -- a late v8_eod still gets picked up the same day instead of being
+        # missed. The job's own _ran_today guard stops it firing twice once it succeeds.
+        if now.weekday() < 5 and _is_trading_day(now.date()) and h >= 15 and m % 5 == 0:
+            _spawn(_bg_custom_alerts_daily)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         # cc#1175: QSR at 15:55 — after the 15:35 close refresh and after v8_eod at
         # 15:45, so the returns bands and the S1 touch read today. Trading-day gated

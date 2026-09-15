@@ -457,6 +457,7 @@ _MOBILE_HEAD = (
     + b'<script src="/scorr_card_common.js?v=' + _BUILD_B + b'" defer></script>'  # cc#805: shared card primitives (must precede every consumer)
     + b'<script src="/scorr_bell.js?v=' + _BUILD_B + b'" defer></script>'   # cc#1634: shared notification bell (self-contained, mounts on [data-scorr-bell])
     + b'<script src="/scorr_alert_create.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2030: the bell's own Set Alert button opens this (cc#1831, relocated off Wall of Trades by cc#2029) -- every app page now needs it loaded, not just the two pages that used to carry it inline
+    + b'<script src="/scorr_custom_alert_create.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2095: the bell's new "+ CUSTOM ALERT" button opens this -- same every-app-page reasoning as scorr_alert_create.js just above
     + b'<script src="/scorr_mobile_cards.js?v=' + _BUILD_B + b'" defer></script>'  # cc#859 Part A: shared mobile section card (cc#862/#863 import it, never redefine it)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
     + b'<script src="/scorr_segment_results.js?v=' + _BUILD_B + b'" defer></script>'  # cc#1191: SEGMENT RESULTS popout — AFTER the strip, which it calls per row
@@ -704,7 +705,10 @@ async def auth_gate(request: Request, call_next):
                     b"scorr_model_portfolio.js",
                     # cc#1831: added WITH its script tag in trade_wall_web.html, in this same commit
                     # (cc#1060 rule) — the shared "+ New alert" manual/custom alert creation card.
-                    b"scorr_alert_create.js"):
+                    b"scorr_alert_create.js",
+                    # cc#2095: added WITH its script tag in _MOBILE_HEAD above, in this same commit
+                    # (cc#1060 rule) — the Custom Alerts V1 categorized picker + condition builder.
+                    b"scorr_custom_alert_create.js"):
             body = body.replace(b'src="/' + _js + b'"',
                                 b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
         # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,
@@ -900,6 +904,8 @@ from wot_option_approve import router as wot_option_approve_router   # cc#2081: 
 app.include_router(wot_option_approve_router)
 from equity_cmp_poll import router as equity_cmp_poll_router   # cc#2094: equity-only Yahoo live-price poll, replaces the Fyers ad-hoc-subscribe plan in cc#2041/cc#2042
 app.include_router(equity_cmp_poll_router)
+from custom_alerts import router as custom_alerts_router   # cc#2095: Custom Alerts V1, multi-condition builder
+app.include_router(custom_alerts_router)
 from screener_expectations import router as screener_expectations_router   # cc#1865: append-only screener expectations snapshot (write-on-upload hook lives in gvm_nightly.py) + V-button endpoint
 app.include_router(screener_expectations_router)
 from v8_approved_trades import router as v8_approved_trades_router   # cc#1867 Home APPROVED TRADES slider; cc#1928 source = trade_alerts.approved_at joined to the still-OPEN V8 position (v8_book_canon formula, no second compute path)
