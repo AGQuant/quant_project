@@ -462,18 +462,29 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         scored, gvm_pass = _rank_universe(d)
         ranks = {sym: i + 1 for i, (sym, _) in enumerate(scored)}
         # exits: drop holdings that fell out of rank_fall_y, breached trailing peak, or lost gate
+        # cc#2093 (founder decision 15-Sep-2026, delegated via Fable): keep/forced_exit_reason
+        # below now ACTUALLY drive an exit -- previously computed here and never read again (the
+        # dead-code bug this card fixes). rank_fall_y checked first, trail second, matching the
+        # order these conditions were already evaluated in -- first-hit wins the recorded reason
+        # on the rare case both breach the same cycle.
         keep = {}
+        forced_exit_reason = {}
         for sym, w in holdings.items():
             px = series.as_of(sym, d)
             drop = False
+            reason = None
             if rank_fall_y and ranks.get(sym, 10 ** 9) > int(rank_fall_y):
                 drop = True
+                reason = "rank_fall_y"
             if trail and px is not None:
                 pk = peak_since_entry.get(sym, px)
                 if px <= pk * (1 - float(trail) / 100.0):
                     drop = True
+                    reason = reason or "trailing_peak_pct"
             if not drop:
                 keep[sym] = w
+            else:
+                forced_exit_reason[sym] = reason
         # target = top_x names (respect min/max), preferring already-held to reduce turnover
         target = [s for s, _ in scored[:max(top_x, 0)]]
         if len(target) < min_stocks:
@@ -481,15 +492,27 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         target = target[:max_stocks]
         tw = (1.0 / len(target)) if target else 0.0
         new_holdings = {s: tw for s in target}
-        # cc#2088: ATR-stop forced exits. Unlike trailing_peak_pct/rank_fall_y above (their
-        # `keep` dict is intentionally untouched -- this card's own instruction is to leave
-        # exit.trailing_peak_pct exactly as it behaves today for baskets already using it),
-        # atr_stop must genuinely force an exit -- its own verify clause requires showing a real
-        # ATR-triggered exit, not just a computed-but-inert signal. Applied here, after the
-        # ranked target list, as a hard override: a position that hits its ATR stop/target closes
-        # even if still top-ranked. A stopped-out slot goes to cash (no reweight/backfill) until
-        # the next rebalance re-ranks fresh -- the simplest, most literal reading of "stopped out".
         exit_reason = {}
+        # cc#2093: trailing_peak_pct/rank_fall_y forced exits -- a position that breached its
+        # trailing stop or fell below the rank_fall_y threshold closes even if still top-ranked
+        # (this rebalance's own `target` can still include it, since target is ranking-only and
+        # does not know about a breach). Freed slot goes to CASH -- new_holdings' other weights
+        # are NOT rescaled up, so the vacated share stays uninvested until the next rebalance --
+        # founder's explicit choice (matching cc#2088's atr_stop convention below for
+        # consistency, and its own "no reweight/backfill" reasoning applies here verbatim).
+        for sym, reason in forced_exit_reason.items():
+            # exit_reason recorded unconditionally, not just when still in new_holdings: a
+            # symbol that ALSO fell out of the top-X ranking this cycle still breached its
+            # trailing stop / rank_fall_y threshold, and the trade log should say so rather
+            # than mislabel it "rotation" just because rotation would have removed it anyway.
+            exit_reason[sym] = reason
+            new_holdings.pop(sym, None)
+        # cc#2088: ATR-stop forced exits. atr_stop must genuinely force an exit -- its own verify
+        # clause requires showing a real ATR-triggered exit, not just a computed-but-inert signal.
+        # Applied here, after the ranked target list, as a hard override: a position that hits its
+        # ATR stop/target closes even if still top-ranked. A stopped-out slot goes to cash (no
+        # reweight/backfill) until the next rebalance re-ranks fresh -- the simplest, most literal
+        # reading of "stopped out".
         if atr_stop:
             mult = float(atr_stop.get("mult", 2))
             tgt_mult = atr_stop.get("target_mult")
