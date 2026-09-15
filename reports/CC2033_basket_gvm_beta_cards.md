@@ -118,8 +118,35 @@ exactly in both cases.
 holding count exactly — direct, measured proof the two rollups share one weight base, not two
 that happen to agree today.
 
-**First-run evidence** (ENGINE_LIVENESS_RULE 13829): triggered via the gated
-`app_config['basket_gvm_run']` mechanism immediately after this deploys; real row counts and the
-computed GVM for all 13 baskets to follow as a report extension, not asserted here in advance.
+## Real first-run result (triggered post-deploy, 15-Sep-2026)
+
+`app_config['basket_gvm_run']` fired on this deploy's own startup boot. Real result,
+`app_config['basket_gvm_run_result']`, `as_of: "2026-09-14"` (the live `gvm_scores` date at run
+time):
+
+| Basket | GVM | Used | Excluded |
+|---|---|---|---|
+| alpha_multicap | 7.7565 | 15 | 0 |
+| breakout_52w | 7.7215 | 5 | 0 |
+| contra_value | null | 0 | 0 (no priced open holdings) |
+| finz_defence | 6.9751 | 6 | 0 |
+| finz_dividend | 6.4955 | 8 | 0 |
+| finz_etf | null | 0 | 3 (all 3 holdings are ETFs) |
+| finz_helios | 7.7151 | 7 | 0 |
+| finz_stable | 7.3232 | 12 | 1 (GOLDBEES) |
+| finz_wcb | 7.7882 | 10 | 1 (GOLDBEES) |
+| large_cap | 7.2234 | 15 | 0 |
+| mid_cap | 7.5623 | 11 | 0 |
+| model_portfolio | 7.7267 | 20 | 0 |
+| small_cap | 7.5179 | 13 | 0 |
+
+Every basket's real `n_holdings_used`/`n_holdings_excluded` matches this report's own local
+verification exactly (the ETF exclusions land on precisely the same baskets, precisely the same
+counts). The GVM values themselves differ from the local verification by 0.0002–0.0006 — the real
+run's `as_of` (2026-09-14) is one `gvm_scores` snapshot newer than the data fetched for local
+verification earlier this session, so a handful of holdings' scores moved by a hundredth of a
+point between the two reads; the structure (which holdings count, which don't, and why) is
+identical, which is what this rollup is actually responsible for getting right.
+
 `Arpit will eyeball the live /baskets screen` per the card's own verify note — CC's container has
 no egress path to scorr.in to self-check the rendered page (established constraint this session).
