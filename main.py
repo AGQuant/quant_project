@@ -898,6 +898,8 @@ from beta_engine import router as beta_engine_router   # cc#2032: nightly per-st
 app.include_router(beta_engine_router)
 from wot_option_approve import router as wot_option_approve_router   # cc#2081: WOT "Approve Option" -- independent option-leg approval, sidecar table, no live WS (see file docstring)
 app.include_router(wot_option_approve_router)
+from equity_cmp_poll import router as equity_cmp_poll_router   # cc#2094: equity-only Yahoo live-price poll, replaces the Fyers ad-hoc-subscribe plan in cc#2041/cc#2042
+app.include_router(equity_cmp_poll_router)
 from screener_expectations import router as screener_expectations_router   # cc#1865: append-only screener expectations snapshot (write-on-upload hook lives in gvm_nightly.py) + V-button endpoint
 app.include_router(screener_expectations_router)
 from v8_approved_trades import router as v8_approved_trades_router   # cc#1867 Home APPROVED TRADES slider; cc#1928 source = trade_alerts.approved_at joined to the still-OPEN V8 position (v8_book_canon formula, no second compute path)

@@ -556,6 +556,7 @@ _basket_gvm_running = False
 # cc#190: 15:20 gate-rebalance day-lock
 _gate_rebalance_ran_today: Optional[date] = None
 _qb_intraday_mark_running = False
+_equity_cmp_poll_running = False   # cc#2094: equity-only Yahoo live-price poll, 5-min market-hours
 _global_fetching = False
 _global_intraday_fetching = False
 _v10_running = False
@@ -1488,6 +1489,22 @@ def _bg_qb_intraday_mark():
         log.info(f"qb_intraday_mark: {res.get('marked')}/{res.get('symbols')}")
     except Exception as e: log.error(f"qb_intraday_mark: {e}")
     finally: _qb_intraday_mark_running = False
+
+def _bg_equity_cmp_poll():
+    """cc#2094: equity-only live price via Yahoo, 5-min market-hours -- founder-dictated
+    replacement for the Fyers ad-hoc-subscribe plan in cc#2041/cc#2042 (superseded). Scoped to
+    symbols NOT in futures_universe; writes cmp_prices(source='yahoo') plus refreshes
+    quant_paper_positions for the equity-only QB subset. See equity_cmp_poll.py."""
+    global _equity_cmp_poll_running
+    if _equity_cmp_poll_running: return
+    _equity_cmp_poll_running = True
+    try:
+        import equity_cmp_poll
+        res = equity_cmp_poll.run_equity_cmp_poll()
+        log.info(f"equity_cmp_poll: universe={res.get('universe_size')} quoted={res.get('quoted')} "
+                 f"cmp_written={res.get('cmp_written')} qb_marked={res.get('qb_marked')}")
+    except Exception as e: log.error(f"equity_cmp_poll: {e}")
+    finally: _equity_cmp_poll_running = False
 
 def _bg_v21_killswitch():
     """Nightly 16:10 IST job. cc#875: now the STATE/LOG DIVERGENCE GUARD ONLY.
@@ -5176,6 +5193,7 @@ async def _scheduler_loop():
             _spawn(_bg_tc_lite)               # cc_task #77: TC Lite screener (09:30-15:15 gate inside)
             _spawn(_bg_smartgain_mtm)         # cc#123: refresh SmartGain LTP/MTM from live cmp_prices
             _spawn(_bg_trade_alerts_check)    # cc#1504: manual trade_alerts pending->triggered price sweep
+            _spawn(_bg_equity_cmp_poll)       # cc#2094: equity-only Yahoo live price (trade_alerts + QB), same 5-min beat
             _spawn(_bg_fut_rest_fallback)     # cc#770: REST futures fallback when native WS fut leg is dark
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             _spawn(_bg_tc_scanner)            # cc#464 engine; cc#1746 / 39467: every 5 min (was the m%15 slot below)
