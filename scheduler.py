@@ -549,6 +549,8 @@ _upivots_ran_today: Optional[date] = None   # cc#342: full-universe v8_paper_piv
 _qb_eod_ran_today: Optional[date] = None
 _ut_ran_today: Optional[date] = None   # cc#154: universe_technicals nightly guard
 _qb_eod_running = False
+_beta_engine_ran_today: Optional[date] = None   # cc#2032: nightly per-stock + basket beta
+_beta_engine_running = False
 # cc#190: 15:20 gate-rebalance day-lock
 _gate_rebalance_ran_today: Optional[date] = None
 _qb_intraday_mark_running = False
@@ -3366,6 +3368,29 @@ def _bg_qb_eod():
     except Exception as e: log.error(f"qb_eod: {e}")
     finally: _qb_eod_running = False
 
+
+def _bg_beta_engine():
+    # cc#2032: nightly per-stock beta (vs NIFTY50, trailing 252 sessions) + each active basket's
+    # holdings-weighted rollup. Scheduled AFTER raw_prices' EOD close (01:00) and AFTER
+    # quant_paper_positions.current_value is marked fresh by _bg_qb_eod (01:15) -- same
+    # "prices->QB->GVM" dependency order this file's own 01:00-01:45 batch already documents.
+    global _beta_engine_ran_today, _beta_engine_running
+    today = _ist_now().date()
+    if _beta_engine_ran_today == today: return _Skip.already_ran()
+    if _beta_engine_running: return _Skip.already_running()
+    if not _is_trading_day(today): return _Skip.not_trading_day()
+    _beta_engine_running = True
+    try:
+        import beta_engine
+        res = beta_engine.run_beta_engine()
+        if not res.get("ok"):
+            raise RuntimeError(res.get("error") or (res.get("stock_result") or {}).get("error") or "unknown")
+        _beta_engine_ran_today = today
+        return res
+    finally:
+        _beta_engine_running = False
+
+
 def _bg_fu_sync():
     global _fu_sync_ran_this_week
     today = _ist_now().date()
@@ -5227,6 +5252,7 @@ async def _scheduler_loop():
         if h == 1 and m == 0:   _spawn(_bg_yahoo_daily_sync)
         if h == 1 and m == 5:   _spawn(_bg_lot_sync)   # cc#314: nightly Fyers lot-size audit (day-locked)
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
+        if h == 1 and m == 20:  _spawn(_bg_beta_engine)   # cc#2032: after QB marks, before GVM
         if h == 1 and m == 30:  _spawn(_bg_gvm)
         # cc#1175: QSR exits at 01:45, FIFTEEN MINUTES BEHIND the GVM recompute
         # above, because the quality-break exit reads that recompute. Before it,

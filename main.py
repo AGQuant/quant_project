@@ -894,6 +894,8 @@ from bhavcopy_diagnostic import router as bhavcopy_diagnostic_router   # cc#1858
 app.include_router(bhavcopy_diagnostic_router)
 from option_iv_history import router as option_iv_history_router   # cc#1858 step 5/7: forward-storage + resumable backfill of option IV at ATM+-10 (no writes to fo_eod)
 app.include_router(option_iv_history_router)
+from beta_engine import router as beta_engine_router   # cc#2032: nightly per-stock beta vs NIFTY50 + Quant Basket holdings-weighted rollup
+app.include_router(beta_engine_router)
 from screener_expectations import router as screener_expectations_router   # cc#1865: append-only screener expectations snapshot (write-on-upload hook lives in gvm_nightly.py) + V-button endpoint
 app.include_router(screener_expectations_router)
 from v8_approved_trades import router as v8_approved_trades_router   # cc#1867 Home APPROVED TRADES slider; cc#1928 source = trade_alerts.approved_at joined to the still-OPEN V8 position (v8_book_canon formula, no second compute path)

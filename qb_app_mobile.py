@@ -269,11 +269,13 @@ def mobile_qb_detail(request: Request, basket: str = "alpha_multicap", window: s
                  "cap": reg.get("max_stocks"), "now": len(stock_pos),
                  "cash_pct": round(cash / total * 100, 1) if total else None},
         "holdings": {"rows": [{"symbol": p["symbol"], "segment": p["segment"], "sector": p["sector"], "cap": p["cap"],
-                               "weight_pct": p["weight_pct"], "pnl_pct": _f(p.get("pnl_pct")), "gvm": _f(p.get("gvm"))}
+                               "weight_pct": p["weight_pct"], "pnl_pct": _f(p.get("pnl_pct")), "gvm": _f(p.get("gvm")),
+                               "beta": _f(p.get("beta"))}
                               for p in pos[:RAIL_CAP]], "count": len(pos)},
         "mix": {"cap": mix("cap"), "sector": mix("sector")},
         "history": {"rows": hist, "count": n_hist},
         "value": summ.get("market_value"), "unrealised": summ.get("unrealised_pnl"),
+        "basket_beta": summ.get("basket_beta"),   # cc#2032: holdings-weighted, None until the engine has run
     }
 
 
@@ -294,6 +296,7 @@ def mobile_qb_holdings(request: Request, basket: str = "alpha_multicap"):
                      "pnl_pct": _f(p.get("pnl_pct")), "day_pct": _f(p.get("day_pct")), "gvm": _f(p.get("gvm")),
                      "entry": _f(p.get("entry_price")), "entry_date": str(p.get("entry_date") or ""),
                      "stop": _f(p.get("stop_loss_price")), "price": _f(p.get("current_price")),
-                     "qty": _f(p.get("qty")), "value": _f(p.get("current_value"))})
+                     "qty": _f(p.get("qty")), "value": _f(p.get("current_value")),
+                     "beta": _f(p.get("beta"))})   # cc#2032
     rows.sort(key=lambda r: -(r["weight_pct"] or 0))
     return {"basket": basket, "label": _label(basket), "rows": rows, "count": len(rows)}

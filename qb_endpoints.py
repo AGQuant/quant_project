@@ -349,6 +349,17 @@ def qb_positions(basket_name: str = "large_cap", status: str = "open"):
                 cp = r.get("current_price")
                 r["day_pct"] = (round((float(cp) - float(pc)) / float(pc) * 100, 2)
                                 if (pc not in (None, 0) and cp is not None) else None)
+            # cc#2032: beta, read-only LEFT JOIN on (symbol, latest d) -- never blocks the row if
+            # beta is absent (new listing, <60 sessions of history): None, not a fabricated 0/1.
+            betas = {}
+            if syms:
+                # DISTINCT ON symbol, latest d each -- a symbol's own most recent row, independent
+                # of whether every other symbol in the list shares that exact date.
+                cur.execute("""SELECT DISTINCT ON (symbol) symbol, beta FROM beta_daily
+                               WHERE symbol = ANY(%s) ORDER BY symbol, d DESC""", (syms,))
+                betas = {s: (float(b) if b is not None else None) for s, b in cur.fetchall()}
+            for r in rows:
+                r["beta"] = betas.get(r["symbol"])
             return rows
     except Exception as e:
         return {"error": str(e)}
@@ -406,6 +417,12 @@ def qb_summary(basket_name: str = "large_cap"):
         "SELECT COUNT(*) AS cnt, ROUND(SUM(pnl),2) AS real_pnl "
         "FROM quant_paper_positions WHERE basket_name=%s AND status LIKE 'exited%%'",
         (basket_name,), single=True)
+    # cc#2032: holdings-weighted basket beta, latest qb_beta_daily row for this basket -- read-
+    # only, never blocks the summary if beta hasn't run yet (None, not a fabricated number).
+    beta_row = api_query(
+        "SELECT beta, n_holdings_used, n_holdings_excluded FROM qb_beta_daily "
+        "WHERE basket_name=%s ORDER BY nav_date DESC LIMIT 1",
+        (basket_name,), single=True) or {}
     return {
         "basket":           basket_name,
         "open_positions":   open_pos.get("cnt", 0),
@@ -414,6 +431,9 @@ def qb_summary(basket_name: str = "large_cap"):
         "closed_positions": closed_pos.get("cnt", 0),
         "realised_pnl":     closed_pos.get("real_pnl", 0),
         "total_pnl":        round((open_pos.get("unreal_pnl") or 0) + (closed_pos.get("real_pnl") or 0), 2),
+        "basket_beta":            beta_row.get("beta"),
+        "basket_beta_n_used":     beta_row.get("n_holdings_used"),
+        "basket_beta_n_excluded": beta_row.get("n_holdings_excluded"),
     }
 
 
