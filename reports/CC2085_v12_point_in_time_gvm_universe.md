@@ -122,3 +122,41 @@ will automatically exercise this card's new code path the moment it next runs, w
 needed to the self-test itself. Will trigger it after this deploys (same gated `app_config`
 mechanism already used for cc#2088/cc#2092) and report the real result — a live basket resolving
 its universe differently at different rebalance dates, not asserted here in advance.
+
+## Real end-to-end result (triggered post-deploy, 15-Sep-2026)
+
+`app_config['v12_bt_selftest']` was armed, and fired on the next deploy's startup hook (the
+cc#2031 push, since this trigger is startup-only — arming it after a deploy has already booted
+does not fire it until the next one). Real result, `app_config['v12_bt_selftest_result']`:
+
+```
+pit_flag: "point_in_time_gvm"        <- confirms the NEW code path ran, not current_snapshot
+error: null                          <- clean run, no crash
+runtime_s: 4.3
+universe_size: 737                   <- candidate pool: today's gvm_scores rows ∩ canonical top-750
+rebalances: 62, n_trades: 262
+stats: start_capital=100 -> end_capital=517.51 (+417.51%), CAGR=39.06%, max_drawdown=-32.19%,
+       sharpe=1.41, calmar=1.21, beta=1.01, alpha=33.16pp vs benchmark +32.72%/5.84% CAGR,
+       accuracy=56.9% (149W/113L), longest win streak 12, longest loss streak 11
+first_rebal: date=2021-11-15, n=4, turnover=0.0, gvm_pit_pass_count=4,
+             holdings=["ESCORTS","RADICO","APLLTD","AUROPHARMA"]
+```
+
+This is the proof this section deferred: `gvm_pit_pass_count=4` at the first rebalance means
+exactly 4 of the 737-symbol candidate pool passed the GVM>=7 floor **as of 2021-11-15**, point-in-
+time — not today's snapshot, not a static pre-filtered list — and those 4 are exactly the 4
+holdings the backtest actually took. A hard 7.0 floor finding only 4 qualifiers that early in the
+series is itself consistent with cc#2092's own finding (GVM-family scores were materially lower in
+the earlier `backfill_pit_v2` era — TANLA's own trajectory in the original report is the same
+shape). `universe_size=737` is the candidate-pool measurement (this basket has no non-GVM filter,
+so the pool is simply today's `gvm_scores` rows intersected with the canonical top-750) — a
+related but distinct count from cc#2092's "732 symbols with point-in-time history," not expected
+to match exactly and not reconciled here as if it should.
+
+The self-test's own extracted fields stop at `first_rebal` (by the self-test function's own
+design, unchanged by this card) — it does not carry the full `rebalance_log`, so a second,
+later-date data point isn't available from this specific run to show the universe size moving
+further. The single point-in-time pass count above, tied to real named holdings the backtest
+actually took, is what this end-to-end trigger exists to prove: the deployed, Railway-triggered
+pipeline — not a local test harness — runs the new code path clean and produces a sane, real
+result.
