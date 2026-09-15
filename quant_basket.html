@@ -567,6 +567,7 @@ async function init(){
       const d=bmap[key]||{};
       const r=rmap[key]||{};
       const ret=d.return_pct, alp=d.alpha, pnl=d.pnl||0, pos=d.positions||0;
+      const gvm=d.basket_gvm, beta=d.basket_beta;   // cc#2033: basket-list card front, next to Return
       const reb=r.next_rebalance?(r.next_rebalance+'').split('T')[0]:'—';
       const mv=d.market_value;
       const crit=BCRITERIA[key];
@@ -616,6 +617,8 @@ async function init(){
         <div class="bc-chartpanel" data-panel="${key}" style="display:none"></div>
         <div class="bc-metrics">
           <div class="bc-m"><div class="mk">Return</div><div class="mv ${c(ret)}">${pct(ret)}</div></div>
+          <div class="bc-m"><div class="mk">GVM</div><div class="mv neu">${gvm==null?'—':(+gvm).toFixed(2)}</div></div>
+          <div class="bc-m"><div class="mk">Beta</div><div class="mv neu">${beta==null?'—':(+beta).toFixed(2)}</div></div>
           <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv ${c(alp)}">${pct(alp)}</div></div>
           <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv ${c(pnl)}">${f(pnl)}</div></div>
           <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv neu">${f(mv)}</div></div>

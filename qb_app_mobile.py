@@ -150,6 +150,14 @@ def _card(conn, cur, basket, reg):
     nav = _nav(conn, basket, "MAX")
     pts = nav.get("points") or []
     min_one = sum(_f(p.get("current_price")) or 0 for p in pos) if pos else None
+    # cc#2033: basket-list card GVM + beta, latest row each -- sibling tables (qb_beta_daily from
+    # cc#2032, qb_gvm_daily new this card), read-only, null-safe (absent -> hidden on the card).
+    cur.execute("SELECT beta FROM qb_beta_daily WHERE basket_name=%s ORDER BY nav_date DESC LIMIT 1", (basket,))
+    r = cur.fetchone()
+    basket_beta = _f(r[0]) if r else None
+    cur.execute("SELECT gvm FROM qb_gvm_daily WHERE basket_name=%s ORDER BY nav_date DESC LIMIT 1", (basket,))
+    r = cur.fetchone()
+    basket_gvm = _f(r[0]) if r else None
     return {
         "basket": basket, "label": _label(basket), "why": WHY.get(basket) or (reg.get("notes") or ""),
         "type": reg.get("type") or "Quant",
@@ -159,6 +167,7 @@ def _card(conn, cur, basket, reg):
         "return_pct": nav.get("basket_return_pct"), "bench_pct": nav.get("benchmark_return_pct"),
         "enough_history": bool(nav.get("enough_history")), "spark": _spark(pts),
         "names": len(pos),
+        "basket_beta": basket_beta, "basket_gvm": basket_gvm,
     }
 
 

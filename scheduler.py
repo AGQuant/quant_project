@@ -551,6 +551,8 @@ _ut_ran_today: Optional[date] = None   # cc#154: universe_technicals nightly gua
 _qb_eod_running = False
 _beta_engine_ran_today: Optional[date] = None   # cc#2032: nightly per-stock + basket beta
 _beta_engine_running = False
+_basket_gvm_ran_today: Optional[date] = None    # cc#2033: nightly basket-level holdings-weighted GVM
+_basket_gvm_running = False
 # cc#190: 15:20 gate-rebalance day-lock
 _gate_rebalance_ran_today: Optional[date] = None
 _qb_intraday_mark_running = False
@@ -3391,6 +3393,27 @@ def _bg_beta_engine():
         _beta_engine_running = False
 
 
+def _bg_basket_gvm():
+    # cc#2033: basket-level holdings-weighted GVM, for the basket-list card front. Scheduled AFTER
+    # the 01:30 GVM recompute (_bg_gvm) so today's gvm_scores are fresh -- unlike _bg_beta_engine
+    # above (01:20), which has no gvm_scores dependency and runs earlier.
+    global _basket_gvm_ran_today, _basket_gvm_running
+    today = _ist_now().date()
+    if _basket_gvm_ran_today == today: return _Skip.already_ran()
+    if _basket_gvm_running: return _Skip.already_running()
+    if not _is_trading_day(today): return _Skip.not_trading_day()
+    _basket_gvm_running = True
+    try:
+        import beta_engine
+        res = beta_engine.run_basket_gvm_engine()
+        if not res.get("ok"):
+            raise RuntimeError(res.get("error") or "unknown")
+        _basket_gvm_ran_today = today
+        return res
+    finally:
+        _basket_gvm_running = False
+
+
 def _bg_fu_sync():
     global _fu_sync_ran_this_week
     today = _ist_now().date()
@@ -5254,6 +5277,7 @@ async def _scheduler_loop():
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
         if h == 1 and m == 20:  _spawn(_bg_beta_engine)   # cc#2032: after QB marks, before GVM
         if h == 1 and m == 30:  _spawn(_bg_gvm)
+        if h == 1 and m == 38:  _spawn(_bg_basket_gvm)   # cc#2033: after GVM recompute settles, before pivots
         # cc#1175: QSR exits at 01:45, FIFTEEN MINUTES BEHIND the GVM recompute
         # above, because the quality-break exit reads that recompute. Before it,
         # the sweep would test yesterday's GVM and report it as tonight's.

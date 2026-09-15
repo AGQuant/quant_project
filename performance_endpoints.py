@@ -89,18 +89,35 @@ def performance_qb():
         cur.execute("SELECT to_char(MAX(updated_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', "
                     "'DD-Mon-YYYY HH24:MI') FROM quant_paper_positions WHERE status='open'")
         asof = cur.fetchone()
+        # cc#2033: basket-list card GVM + beta, next to the existing return% figure -- read-only
+        # latest-row reads of cc#2032/cc#2033's own tables, sibling tables joined at read time
+        # (qb_gvm_daily is not a qb_beta_daily column -- see beta_engine.py's own docstring for why).
+        cur.execute("SELECT DISTINCT ON (basket_name) basket_name, beta, n_holdings_used, n_holdings_excluded "
+                    "FROM qb_beta_daily ORDER BY basket_name, nav_date DESC")
+        beta_by_basket = {r[0]: {"beta": _num(r[1]), "beta_n_used": r[2], "beta_n_excluded": r[3]}
+                           for r in cur.fetchall()}
+        cur.execute("SELECT DISTINCT ON (basket_name) basket_name, gvm, n_holdings_used, n_holdings_excluded "
+                    "FROM qb_gvm_daily ORDER BY basket_name, nav_date DESC")
+        gvm_by_basket = {r[0]: {"gvm": _num(r[1]), "gvm_n_used": r[2], "gvm_n_excluded": r[3]}
+                         for r in cur.fetchall()}
     names = set(pnl_by_basket) | set(open_count) | set(nav_by_basket)
     baskets = []
     for name in names:
         nv = nav_by_basket.get(name, {})
         ret = nv.get("return_pct")
         mv = nv.get("market_value")
+        bb = beta_by_basket.get(name, {})
+        bg = gvm_by_basket.get(name, {})
         baskets.append({
             "basket": name, "pnl": pnl_by_basket.get(name),
             "return_pct": round(ret, 2) if ret is not None else None,
             "positions": open_count.get(name, 0),
             "market_value": round(mv, 0) if mv is not None else None,
             "nav_date": nv.get("nav_date"),
+            "basket_beta": bb.get("beta"), "basket_beta_n_used": bb.get("beta_n_used"),
+            "basket_beta_n_excluded": bb.get("beta_n_excluded"),
+            "basket_gvm": bg.get("gvm"), "basket_gvm_n_used": bg.get("gvm_n_used"),
+            "basket_gvm_n_excluded": bg.get("gvm_n_excluded"),
         })
     baskets.sort(key=lambda b: (b["pnl"] is None, -(b["pnl"] or 0)))
     total_pnl = round(sum(v for v in pnl_by_basket.values() if v is not None), 0) if pnl_by_basket else 0.0

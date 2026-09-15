@@ -56,6 +56,18 @@ SCHEDULING -- registers via the SAME AST-derived enumeration every other schedul
 TRIGGER for a first real run inside this session (sandbox has no HTTP path to prod, same pattern
   as bhavcopy_diagnostic.py / option_iv_history.py / gvm_history_pit_backfill.py): app_config flag
   'beta_engine_run'='run', claimed atomically on deploy startup, runs in a daemon thread.
+
+AMENDED cc#2033 (15-Sep-2026): basket-list card GVM. compute_all_basket_gvm() reuses this file's
+  own _basket_weights() (cc#2032's original per-basket weighting, extracted unchanged so beta and
+  GVM cannot drift onto two different weighting paths), scored against gvm_scores (the live
+  current-snapshot GVM table). A genuine data-source correction found before building: the card's
+  spec named quant_basket.gvm_score as the source -- that table is EMPTY (0 rows) in production;
+  gvm_scores is the real one, confirmed by checking real held-symbol coverage (checked: all but
+  three ETF holdings, which are not scored equities, have a real score). Own gated trigger
+  ('basket_gvm_run'), own table (qb_gvm_daily, a sibling of qb_beta_daily rather than a column on
+  it -- qb_beta_daily already has real production data and MAINTENANCE_LOCK_RULE gates ALTER
+  TABLE), own scheduler.py slot AFTER the 01:30 GVM recompute (unlike beta, which runs at 01:20
+  and needs no gvm_scores dependency).
 """
 import logging
 import math
@@ -93,6 +105,15 @@ def _ensure_tables(cur):
     cur.execute("""CREATE INDEX IF NOT EXISTS beta_daily_d_idx ON beta_daily (d)""")
     cur.execute("""CREATE TABLE IF NOT EXISTS qb_beta_daily (
         basket_name TEXT NOT NULL, nav_date DATE NOT NULL, beta NUMERIC,
+        n_holdings_used INT, n_holdings_excluded INT, computed_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (basket_name, nav_date))""")
+    # cc#2033: sibling table, not a qb_beta_daily column -- qb_beta_daily is itself a table CC
+    # created minutes earlier this same session with one real write already in it; an ALTER TABLE
+    # to add a gvm column would hit the same MAINTENANCE_LOCK_RULE gate cc#2032's own report cited
+    # for qb_nav_daily, so the two stay sibling tables sharing (basket_name, nav_date), joined at
+    # read time -- see performance_endpoints.py / qb_app_mobile.py.
+    cur.execute("""CREATE TABLE IF NOT EXISTS qb_gvm_daily (
+        basket_name TEXT NOT NULL, nav_date DATE NOT NULL, gvm NUMERIC,
         n_holdings_used INT, n_holdings_excluded INT, computed_at TIMESTAMPTZ DEFAULT NOW(),
         PRIMARY KEY (basket_name, nav_date))""")
 
@@ -190,23 +211,43 @@ def compute_all_stock_betas(cur, as_of: Optional[date] = None) -> Dict:
             "window_start": window_start, "window_end": window_end}
 
 
+def _active_baskets(cur) -> List[str]:
+    """Registry-derived (quant_basket_registry.is_active), never a hardcoded basket list --
+    the ONE enumeration both compute_all_basket_betas and compute_all_basket_gvm (cc#2033) use."""
+    cur.execute("SELECT basket_name FROM quant_basket_registry WHERE is_active=TRUE ORDER BY basket_name")
+    return [r[0] for r in cur.fetchall()]
+
+
+def _basket_weights(cur, basket_name: str) -> List[Tuple[str, float]]:
+    """[(symbol, weight)] for every CURRENTLY OPEN, non-cash-park position in this basket --
+    weight = current_value / total open non-cash-park value, the SAME weight
+    qb_app_mobile.py's own weight_pct already computes at read time. THE ONE weight computation
+    cc#2032's basket_beta and cc#2033's basket_gvm both use (cc#2033's own explicit instruction:
+    "identical weighting source/logic... do not invent a second weighting path") -- extracted
+    here so the two rollups cannot silently drift apart; behaviour is byte-for-byte identical to
+    cc#2032's original inline version (re-verified after this extraction, see CC2033 report).
+    Empty list when the basket has no priced open holdings (all cash-parked, or none)."""
+    cur.execute("""SELECT symbol, current_value FROM quant_paper_positions
+                   WHERE basket_name=%s AND status='open'""", (basket_name,))
+    pos = [(r[0], float(r[1] or 0)) for r in cur.fetchall() if r[0] not in CASH_PARK_SYMBOLS]
+    total_value = sum(v for _, v in pos)
+    if not pos or total_value <= 0:
+        return []
+    return [(sym, value / total_value) for sym, value in pos]
+
+
 def compute_all_basket_betas(cur, as_of: date) -> Dict:
     """Holdings-weighted beta per ACTIVE basket, from that basket's CURRENT open positions and
-    today's beta_daily. Registry-derived (quant_basket_registry.is_active), never a hardcoded
-    basket list."""
-    cur.execute("SELECT basket_name FROM quant_basket_registry WHERE is_active=TRUE ORDER BY basket_name")
-    baskets = [r[0] for r in cur.fetchall()]
+    today's beta_daily."""
+    baskets = _active_baskets(cur)
     results = []
     for name in baskets:
-        cur.execute("""SELECT symbol, current_value FROM quant_paper_positions
-                       WHERE basket_name=%s AND status='open'""", (name,))
-        pos = [(r[0], float(r[1] or 0)) for r in cur.fetchall() if r[0] not in CASH_PARK_SYMBOLS]
-        total_value = sum(v for _, v in pos)
-        if not pos or total_value <= 0:
+        weights = _basket_weights(cur, name)
+        if not weights:
             results.append({"basket": name, "beta": None, "n_holdings_used": 0,
                              "n_holdings_excluded": 0, "reason": "no priced open holdings"})
             continue
-        syms = [s for s, _ in pos]
+        syms = [s for s, _ in weights]
         cur.execute("""SELECT symbol, beta FROM beta_daily
                        WHERE symbol = ANY(%s) AND d = (
                            SELECT MAX(d) FROM beta_daily WHERE symbol = ANY(%s) AND d <= %s)""",
@@ -214,8 +255,7 @@ def compute_all_basket_betas(cur, as_of: date) -> Dict:
         beta_map = {r[0]: float(r[1]) for r in cur.fetchall() if r[1] is not None}
 
         weight_num, weight_den, used, excluded = 0.0, 0.0, 0, 0
-        for sym, value in pos:
-            w = value / total_value       # cc#2032: SAME weight source as qb_app_mobile's own weight_pct
+        for sym, w in weights:
             b = beta_map.get(sym)
             if b is None:
                 excluded += 1
@@ -234,6 +274,73 @@ def compute_all_basket_betas(cur, as_of: date) -> Dict:
                          n_holdings_excluded=EXCLUDED.n_holdings_excluded, computed_at=NOW()""",
                     (name, as_of, basket_beta, used, excluded))
     return {"baskets": len(baskets), "results": results}
+
+
+def compute_all_basket_gvm(cur, as_of: date) -> Dict:
+    """cc#2033: holdings-weighted GVM per ACTIVE basket -- same _basket_weights() as beta above,
+    scored against gvm_scores (the LIVE current-snapshot GVM table -- NOT quant_basket.gvm_score,
+    which was found EMPTY, 0 rows, before this card: a real data-source correction, not the spec's
+    literal source). A holding with no gvm_scores row (an ETF like GOLDBEES/SILVERBEES/MID150BEES,
+    which are not scored equities) is excluded from both the numerator and denominator, same
+    never-fabricate handling as beta."""
+    baskets = _active_baskets(cur)
+    results = []
+    for name in baskets:
+        weights = _basket_weights(cur, name)
+        if not weights:
+            results.append({"basket": name, "gvm": None, "n_holdings_used": 0,
+                             "n_holdings_excluded": 0, "reason": "no priced open holdings"})
+            continue
+        syms = [s for s, _ in weights]
+        cur.execute("""SELECT symbol, gvm_score FROM gvm_scores
+                       WHERE symbol = ANY(%s) AND score_date = (
+                           SELECT MAX(score_date) FROM gvm_scores WHERE symbol = ANY(%s) AND score_date <= %s)""",
+                    (syms, syms, as_of))
+        gvm_map = {r[0]: float(r[1]) for r in cur.fetchall() if r[1] is not None}
+
+        weight_num, weight_den, used, excluded = 0.0, 0.0, 0, 0
+        for sym, w in weights:
+            g = gvm_map.get(sym)
+            if g is None:
+                excluded += 1
+                continue
+            weight_num += w * g
+            weight_den += w
+            used += 1
+        basket_gvm = round(weight_num / weight_den, 4) if weight_den > 0 else None
+        results.append({"basket": name, "gvm": basket_gvm, "n_holdings_used": used,
+                         "n_holdings_excluded": excluded})
+        cur.execute("""INSERT INTO qb_gvm_daily
+                       (basket_name, nav_date, gvm, n_holdings_used, n_holdings_excluded, computed_at)
+                       VALUES (%s,%s,%s,%s,%s,NOW())
+                       ON CONFLICT (basket_name, nav_date) DO UPDATE SET
+                         gvm=EXCLUDED.gvm, n_holdings_used=EXCLUDED.n_holdings_used,
+                         n_holdings_excluded=EXCLUDED.n_holdings_excluded, computed_at=NOW()""",
+                    (name, as_of, basket_gvm, used, excluded))
+    return {"baskets": len(baskets), "results": results}
+
+
+def run_basket_gvm_engine(as_of: Optional[date] = None) -> Dict:
+    """cc#2033 nightly pass: ensure tables, compute every active basket's holdings-weighted GVM
+    for the latest gvm_scores date (default) or a given as_of. Scheduled AFTER the 01:30 IST GVM
+    recompute (scheduler._bg_gvm) so today's gvm_scores are fresh -- see scheduler._bg_basket_gvm.
+    Never raises -- caller gets {ok:False, error}."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            _ensure_tables(cur)
+            conn.commit()
+            if as_of is None:
+                cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+                r = cur.fetchone()
+                as_of = r[0] if r and r[0] else None
+            if as_of is None:
+                return {"ok": False, "error": "gvm_scores is empty"}
+            gvm_res = compute_all_basket_gvm(cur, as_of)
+            conn.commit()
+        return {"ok": True, "as_of": str(as_of), "gvm_result": gvm_res}
+    except Exception as e:
+        log.error(f"basket_gvm run failed: {e}")
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
 
 
 def run_beta_engine() -> Dict:
@@ -328,3 +435,78 @@ def beta_status(x_admin_token: Optional[str] = Header(None)):
         n_qb, max_nav = cur.fetchone()
     return {"running": _running, "beta_daily_rows": n_beta, "beta_daily_latest": str(max_d) if max_d else None,
             "qb_beta_daily_rows": n_qb, "qb_beta_daily_latest": str(max_nav) if max_nav else None}
+
+
+# ── cc#2033: basket GVM rollup -- own gated trigger, own flag, INDEPENDENT of beta's above.
+# Runs on its own later schedule slot (scheduler._bg_basket_gvm, after the 01:30 GVM recompute),
+# so it needs its own claim/thread machinery rather than piggy-backing on beta's -- the two must
+# be able to fire on different deploys/times without one blocking the other.
+FLAG_KEY_GVM = "basket_gvm_run"
+_running_gvm = False
+
+
+def _run_bg_gvm():
+    try:
+        out = run_basket_gvm_engine()
+        with _conn() as conn, conn.cursor() as cur:
+            import json
+            cur.execute("""INSERT INTO app_config(key,value,updated_at) VALUES(%s,%s,NOW())
+                           ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()""",
+                        (f"{FLAG_KEY_GVM}_result", json.dumps(out, default=str)[:60000]))
+            cur.execute("UPDATE app_config SET value='done', updated_at=NOW() WHERE key=%s", (FLAG_KEY_GVM,))
+            conn.commit()
+    except Exception as e:
+        log.error(f"basket_gvm background run crashed: {e}")
+    finally:
+        global _running_gvm
+        _running_gvm = False
+
+
+def _claim_flag_gvm() -> bool:
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT value FROM app_config WHERE key=%s
+                           AND (value='run' OR (value='claimed' AND updated_at < NOW() - INTERVAL '10 minutes'))
+                           FOR UPDATE""", (FLAG_KEY_GVM,))
+            r = cur.fetchone()
+            if r:
+                cur.execute("UPDATE app_config SET value='claimed', updated_at=NOW() WHERE key=%s", (FLAG_KEY_GVM,))
+            conn.commit()
+        return r is not None
+    except Exception as e:
+        log.error(f"basket_gvm flag claim failed: {e}")
+        return False
+
+
+def _maybe_start_gvm() -> bool:
+    global _running_gvm
+    if _running_gvm:
+        return False
+    _running_gvm = True
+    threading.Thread(target=_run_bg_gvm, name="cc2033-basket-gvm", daemon=True).start()
+    return True
+
+
+@router.on_event("startup")
+async def _startup_trigger_gvm():
+    if _claim_flag_gvm():
+        _maybe_start_gvm()
+
+
+@router.post("/api/admin/basket_gvm/run")
+def basket_gvm_run(x_admin_token: Optional[str] = Header(None)):
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(403, "invalid admin token")
+    started = _maybe_start_gvm()
+    return {"started": started, "already_running": not started}
+
+
+@router.get("/api/admin/basket_gvm/status")
+def basket_gvm_status(x_admin_token: Optional[str] = Header(None)):
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(403, "invalid admin token")
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*), MAX(nav_date) FROM qb_gvm_daily")
+        n_gvm, max_nav = cur.fetchone()
+    return {"running": _running_gvm, "qb_gvm_daily_rows": n_gvm,
+            "qb_gvm_daily_latest": str(max_nav) if max_nav else None}
