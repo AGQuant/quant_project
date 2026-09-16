@@ -94,6 +94,7 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <div class="ov-box">
     <h2>Approve <span id="apLvlSym"></span></h2>
     <div class="s" id="apLvlMsg">Set a target and stop loss before this approval completes. Edit or leave blank.</div>
+    <div class="s" id="apLvlRef" style="margin-top:4px"></div>
     <div class="ov-row"><span>Target price</span><input class="ov-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlTarget" placeholder="optional"></div>
     <div class="ov-row"><span>Stop loss</span><input class="ov-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlStop" placeholder="optional"></div>
     <button class="btn2" id="apLvlGo" onclick="apLvlConfirm()" style="margin-top:var(--space-12)">Confirm approval</button>
@@ -172,6 +173,21 @@ function draw(d, append){
    trade_wall_web.html (approve_signal, then approved/levels only if a level was entered), same
    pre-fill source. Dismiss is untouched — no sheet, same act() path as before this card. */
 var AP_LVL={id:null,btn:null};
+/* cc#2120 Part A: "SYMBOL label, last traded VALUE at HH:MM IST", e.g. "CAMS futures, last
+   traded 704.35 at 12:20 IST". rp.label already says when a futures row fell back to spot
+   ("spot (no futures bar)") or when nothing resolves, so this never prints a spot number as if
+   it were futures. */
+function apLvlRefTxt(rp,sym){
+  if(!rp) return '';
+  if(rp.value==null) return rp.note?esc(rp.note):'';
+  /* cc#2120: DAY-PRECISION HONESTY RULE -- a STALE-tier price (raw_prices.price_date, no time
+     component) must never print a fabricated HH:MM -- slicing chars 11:16 off a bare 10-char date
+     string silently yielded a dangling "at  IST" before this check. */
+  var t=!rp.ts?'':(rp.ts_precision==='day'?'on '+rp.ts.slice(0,10):'at '+String(rp.ts).slice(11,16)+' IST');
+  var txt=esc(sym)+' '+esc(rp.label)+', last traded '+f2(rp.value)+(t?' '+t:'');
+  if(rp.stale) txt+=' · stale (>15 min)';
+  return txt;
+}
 function apLvlOpen(id,btn){
   var e=find(id); if(!e) return;
   if(!(Q.aw&&Q.aw.open)){ var m=document.getElementById('am-'+id); if(m) m.textContent='not recorded: '+((Q.aw&&Q.aw.reason)||'approvals 09:15–15:15 IST'); return; }
@@ -180,14 +196,20 @@ function apLvlOpen(id,btn){
   document.getElementById('apLvlTarget').value=''; document.getElementById('apLvlStop').value='';
   document.getElementById('apLvlGo').disabled=false; document.getElementById('apLvlGo').textContent='Confirm approval';
   document.getElementById('apLvlMsg').textContent='checking '+e.engine+' for a stored level…';
+  document.getElementById('apLvlRef').textContent='';
   document.getElementById('apLvlOv').classList.add('open');
-  fetch('/api/tradewall/prefill-levels?engine='+encodeURIComponent(e.engine||'')+'&symbol='+encodeURIComponent(e.symbol)+'&entry_ts='+encodeURIComponent((e.entry&&e.entry.ts)||''),{credentials:'same-origin'})
+  fetch('/api/tradewall/prefill-levels?engine='+encodeURIComponent(e.engine||'')+'&symbol='+encodeURIComponent(e.symbol)+'&entry_ts='+encodeURIComponent((e.entry&&e.entry.ts)||'')+'&instrument='+encodeURIComponent(e.instrument||''),{credentials:'same-origin'})
     .then(function(r){return r.json();}).then(function(d){
       if(AP_LVL.id!==id) return;
       if(d&&d.target_price!=null) document.getElementById('apLvlTarget').value=d.target_price;
       if(d&&d.stop_loss!=null) document.getElementById('apLvlStop').value=d.stop_loss;
       document.getElementById('apLvlMsg').textContent=(d&&(d.target_price!=null||d.stop_loss!=null))?('Pre-filled from '+e.engine+' — edit or leave as is.'):'No stored level for this engine — enter manually or leave blank.';
-    }).catch(function(){ if(AP_LVL.id===id) document.getElementById('apLvlMsg').textContent='No stored level for this engine — enter manually or leave blank.'; });
+      document.getElementById('apLvlRef').innerHTML=apLvlRefTxt(d&&d.reference_price,e.symbol);
+    }).catch(function(){
+      if(AP_LVL.id!==id) return;
+      document.getElementById('apLvlMsg').textContent='No stored level for this engine — enter manually or leave blank.';
+      document.getElementById('apLvlRef').textContent='';
+    });
 }
 function apLvlClose(){ document.getElementById('apLvlOv').classList.remove('open'); AP_LVL.id=null; AP_LVL.btn=null; }
 function apLvlConfirm(){

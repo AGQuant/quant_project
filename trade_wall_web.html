@@ -257,6 +257,7 @@
   <div class="ov-box">
     <h2>Approve <span id="apLvlSym"></span></h2>
     <div class="s" id="apLvlMsg">Set a target and stop loss before this approval completes. Edit or leave blank.</div>
+    <div class="s" id="apLvlRef" style="margin-top:4px"></div>
     <div class="ov-row"><span>Target price</span><input class="aplvl-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlTarget" placeholder="optional"></div>
     <div class="ov-row"><span>Stop loss</span><input class="aplvl-in" type="number" step="0.05" min="0" inputmode="decimal" id="apLvlStop" placeholder="optional"></div>
     <button class="tw-btn ov-close" id="apLvlGo" onclick="apLvlConfirm()">Confirm approval</button>
@@ -1356,6 +1357,21 @@ document.addEventListener('click', function(ev){
    /api/tradewall/approved/levels (cc#1735) with the alert id the approve call just returned.
    Dismiss is untouched: no popup, same twAct path as before this card. */
 var AP_LVL = { id: null, btn: null };
+/* cc#2120 Part A: the reference-price line -- "SYMBOL label, last traded VALUE at HH:MM IST",
+   e.g. "CAMS futures, last traded 704.35 at 12:20 IST". rp.label already says when a futures row
+   fell back to spot ("spot (no futures bar)") or when nothing resolves at all, so this never
+   silently prints a spot number as if it were futures. */
+function apLvlRefTxt(rp, sym){
+  if (!rp) return '';
+  if (rp.value == null) return rp.note ? esc(rp.note) : '';
+  /* cc#2120: DAY-PRECISION HONESTY RULE -- a STALE-tier price (raw_prices.price_date, no time
+     component) must never be run through the HH:MM formatter: a bare "2026-09-15" parses as UTC
+     midnight and twStampTime would print a fabricated "05:30 IST" that never happened. */
+  var t = !rp.ts ? '' : (rp.ts_precision === 'day' ? 'on ' + rp.ts.slice(0, 10) : 'at ' + twStampTime(rp.ts) + ' IST');
+  var txt = esc(sym) + ' ' + esc(rp.label) + ', last traded ' + px2(rp.value) + (t ? ' ' + t : '');
+  if (rp.stale) txt += ' · stale (>15 min)';
+  return txt;
+}
 function apLvlOpen(id, btn){
   var e = twFind(id); if (!e) return;
   if (!(STATE.approvalWindow && STATE.approvalWindow.open)){
@@ -1371,9 +1387,11 @@ function apLvlOpen(id, btn){
   document.getElementById('apLvlStop').value = '';
   document.getElementById('apLvlGo').disabled = false; document.getElementById('apLvlGo').textContent = 'Confirm approval';
   document.getElementById('apLvlMsg').textContent = 'checking ' + e.engine + ' for a stored level…';
+  document.getElementById('apLvlRef').textContent = '';
   document.getElementById('apLvlOv').classList.add('open');
   fetchWithTimeout('/api/tradewall/prefill-levels?engine=' + encodeURIComponent(e.engine || '')
-      + '&symbol=' + encodeURIComponent(e.symbol) + '&entry_ts=' + encodeURIComponent((e.entry && e.entry.ts) || ''))
+      + '&symbol=' + encodeURIComponent(e.symbol) + '&entry_ts=' + encodeURIComponent((e.entry && e.entry.ts) || '')
+      + '&instrument=' + encodeURIComponent(e.instrument || ''))
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (AP_LVL.id !== id) return;   /* popup moved to a different row while this was in flight */
@@ -1382,8 +1400,13 @@ function apLvlOpen(id, btn){
       document.getElementById('apLvlMsg').textContent = (d && (d.target_price != null || d.stop_loss != null))
         ? 'Pre-filled from ' + e.engine + ' — edit or leave as is.'
         : 'No stored level for this engine — enter manually or leave blank.';
+      document.getElementById('apLvlRef').innerHTML = apLvlRefTxt(d && d.reference_price, e.symbol);
     })
-    .catch(function(){ if (AP_LVL.id === id) document.getElementById('apLvlMsg').textContent = 'No stored level for this engine — enter manually or leave blank.'; });
+    .catch(function(){
+      if (AP_LVL.id !== id) return;
+      document.getElementById('apLvlMsg').textContent = 'No stored level for this engine — enter manually or leave blank.';
+      document.getElementById('apLvlRef').textContent = '';
+    });
 }
 function apLvlClose(){
   document.getElementById('apLvlOv').classList.remove('open');

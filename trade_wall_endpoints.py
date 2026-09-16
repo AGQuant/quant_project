@@ -1373,9 +1373,66 @@ def tradewall_engine_rules(request: Request):
         return wall_engine_rules(cur)
 
 
+def _stale_futures_bar(bar_ts):
+    """cc#2120 A3: True only when `bar_ts` (naive IST, straight off intraday_prices) is >~15 min
+    old AND the market is trading right now -- an old bar outside market hours is expected, not
+    suspicious. Both sides of the comparison are naive IST: _ist_now() uses the identical
+    convention (see its own docstring), which avoids the naive-vs-timestamptz mismatch this exact
+    card's own ground-truthing against trade_alerts.approved_at hit before any code was written."""
+    if bar_ts is None:
+        return False
+    import nse_holidays
+    import nse_session
+    now = _ist_now()
+    if not (nse_holidays.is_trading_day(now.date())
+            and nse_session.MARKET_OPEN <= (now.hour, now.minute) <= nse_session.MARKET_CLOSE):
+        return False
+    age_min = (now - bar_ts).total_seconds() / 60.0
+    return age_min > 15
+
+
+def _ref_block(inst, value, ts, source, label, stale, note):
+    """cc#2120: THE DAY-PRECISION HONESTY RULE (this file's own doctrine, stated above for the
+    wall's event union) applies here too. raw_prices.price_date (the STALE tier, reached when
+    nothing live exists) is a DATE with no time component -- stringifying it and handing it to a
+    frontend HH:MM formatter would silently FABRICATE a clock time (a bare "2026-09-15" parses as
+    UTC midnight, which a naive formatter prints as 05:30 IST -- an event that never happened,
+    caught in this card's own Playwright verification before it shipped). `ts_precision` tells the
+    frontend which format is honest: 'minute' prints "at HH:MM IST", 'day' prints "on YYYY-MM-DD",
+    never both from the same value."""
+    return {"instrument": inst, "value": value,
+            "ts": str(ts) if ts is not None else None,
+            "ts_precision": ("minute" if hasattr(ts, "hour") else "day") if ts is not None else None,
+            "source": source, "label": label, "stale": stale, "note": note}
+
+
+def _reference_price(cur, sym, inst):
+    """cc#2120 Part A: the reference-price block for the Approve popup -- see the endpoint
+    docstring below for the full reasoning. FUTURES reads ONLY cmp_resolver.resolve_fut_cmp
+    (fyers_fut); if no futures bar exists it falls back to the spot resolver but labels the
+    fallback explicitly, never a silent substitution (the cc#811 failure mode). EQUITY reads the
+    existing spot resolver directly."""
+    import cmp_resolver
+    if inst == "FUTURES":
+        fut = cmp_resolver.resolve_fut_cmp(cur, sym)
+        if fut.get("cmp") is not None:
+            return _ref_block("FUTURES", fut["cmp"], fut["ts"], fut["source"], "futures",
+                               _stale_futures_bar(fut["ts"]), None)
+        spot = cmp_resolver.resolve_cmp(cur, sym)
+        if spot.get("cmp") is not None:
+            return _ref_block("FUTURES", spot["cmp"], spot.get("ts"), spot.get("source"),
+                               "spot (no futures bar)", False,
+                               "no futures bar for " + sym + " yet -- showing spot instead")
+        return _ref_block("FUTURES", None, None, "NO_FUT_BAR", "no price available", False,
+                           "no futures or spot price available for " + sym + " right now")
+    spot = cmp_resolver.resolve_cmp(cur, sym)
+    return _ref_block("EQUITY", spot.get("cmp"), spot.get("ts"), spot.get("source"), "spot",
+                       False, None)
+
+
 @router.get("/api/tradewall/prefill-levels")
 @_json_safe
-def tradewall_prefill_levels(request: Request, engine: str = "", symbol: str = "", entry_ts: str = ""):
+def tradewall_prefill_levels(request: Request, engine: str = "", symbol: str = "", entry_ts: str = "", instrument: str = ""):
     """cc#2027: pre-fill target/stop for the Approve popup -- DIRECT COLUMN VALUES ONLY, never a
     computed or guessed number. v8_paper_positions and tc_scanner_holds already store the engine's
     OWN price levels per open position (verified against real rows: 22/22 open V8 positions carry
@@ -1388,33 +1445,47 @@ def tradewall_prefill_levels(request: Request, engine: str = "", symbol: str = "
     target/stop_loss column at all, confirmed); Investment Scanner has no target leg at all (its
     own engine-rules text says so); Screeners has no separate exit threshold in config; QB Basket
     carries no Approve button in the first place. A null here means the popup leaves that field
-    blank and editable, per the card's own instruction -- it is never filled with an inferred price."""
+    blank and editable, per the card's own instruction -- it is never filled with an inferred price.
+
+    cc#2120 Part A: also returns `reference_price`, the LAST TRADED price for the instrument
+    actually being approved. `instrument` (FUTURES/EQUITY) is the SAME field every wall row
+    already carries (STATE.instrument / e.instrument client-side) -- passed through as a query
+    param rather than re-derived here, because a symbol's OWN futures_universe membership is not
+    the same question as which instrument THIS SIGNAL is on (e.g. an equity QB Basket position on
+    an F&O-eligible name is still an equity position, not a futures one). See _reference_price and
+    _stale_futures_bar above for the FUTURES/EQUITY/no-bar/staleness logic."""
     g = _guard(request)
     if g:
         return g
     eng = (engine or "").strip()
     sym = (symbol or "").strip().upper()
     ts = (entry_ts or "").strip()
+    inst = (instrument or "").strip().upper()
     target = stop = None
-    if sym and ts:
+    ref_price = None
+    if sym:
         with _conn() as conn, conn.cursor() as cur:
-            if eng == "V8":
-                cur.execute("SELECT target, stop_loss FROM v8_paper_positions "
-                            "WHERE symbol = %s AND entry_ts = %s AND status = 'OPEN'", (sym, ts))
-                r = cur.fetchone()
-                if r:
-                    target = float(r[0]) if r[0] is not None else None
-                    stop = float(r[1]) if r[1] is not None else None
-            elif eng == "TC Scanner":
-                cur.execute("SELECT target, sl FROM tc_scanner_holds "
-                            "WHERE symbol = %s AND entry_ts = %s AND exit_ts IS NULL", (sym, ts))
-                r = cur.fetchone()
-                if r:
-                    target = float(r[0]) if r[0] is not None else None
-                    stop = float(r[1]) if r[1] is not None else None
-            # Index Intel / Investment Scanner / Screeners / QB Basket: no fixed per-row price
-            # level exists to read -- target/stop stay null, deliberately, not computed.
-    return {"engine": eng, "symbol": sym, "target_price": target, "stop_loss": stop}
+            if ts:
+                if eng == "V8":
+                    cur.execute("SELECT target, stop_loss FROM v8_paper_positions "
+                                "WHERE symbol = %s AND entry_ts = %s AND status = 'OPEN'", (sym, ts))
+                    r = cur.fetchone()
+                    if r:
+                        target = float(r[0]) if r[0] is not None else None
+                        stop = float(r[1]) if r[1] is not None else None
+                elif eng == "TC Scanner":
+                    cur.execute("SELECT target, sl FROM tc_scanner_holds "
+                                "WHERE symbol = %s AND entry_ts = %s AND exit_ts IS NULL", (sym, ts))
+                    r = cur.fetchone()
+                    if r:
+                        target = float(r[0]) if r[0] is not None else None
+                        stop = float(r[1]) if r[1] is not None else None
+                # Index Intel / Investment Scanner / Screeners / QB Basket: no fixed per-row price
+                # level exists to read -- target/stop stay null, deliberately, not computed.
+            if inst in ("FUTURES", "EQUITY"):
+                ref_price = _reference_price(cur, sym, inst)
+    return {"engine": eng, "symbol": sym, "target_price": target, "stop_loss": stop,
+            "reference_price": ref_price}
 
 
 @router.get("/m/trades", response_class=HTMLResponse)

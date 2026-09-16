@@ -231,3 +231,40 @@ def resolve_cmp_many(cur, symbols):
         else:
             out[s] = _pack(None, None, "STALE", None)
     return out
+
+
+def resolve_fut_cmp(cur, symbol):
+    """cc#2120 (PRICING_INSTRUMENT_CORRECTNESS_V1): the FUTURES counterpart to resolve_cmp(), for
+    a caller that already KNOWS the position is a futures instrument (the wall's own `instrument`
+    field, set per-row in trade_wall_endpoints.py). Same return shape as resolve_cmp ({cmp,
+    prev_close, day_pct, source, ts, live}) so a caller can swap it in without reshaping its
+    reader.
+
+    Deliberately SEPARATE from resolve_cmp and SPOT_SOURCES, never merged into them. cc#811
+    permanently removed 'fyers_fut' from SPOT_SOURCES after finding the old
+    `source IN ('fyers_eq','fyers_fut') ORDER BY ts DESC LIMIT 1` query was a coin-flip between
+    spot and futures for every F&O symbol (both carry a bar at the identical ts). This function is
+    the deliberate opposite of that bug: it reads ONLY fyers_fut, for a caller that has already
+    made the instrument choice rather than leaving it to chance.
+
+    NO fallback tier here, on purpose. resolve_cmp's cache/Yahoo/STALE tiers all bottom out on a
+    SPOT number -- silently falling back to one of them from inside this function would
+    reintroduce the exact mixed-leg bug cc#2120 exists to fix (a futures entry marked against a
+    spot CMP). A symbol with no fyers_fut bar returns cmp=None, source='NO_FUT_BAR', and the
+    CALLER decides whether/how to show a clearly-labelled spot number instead -- see
+    trade_wall_endpoints.py's prefill-levels reference-price block for that fallback."""
+    symbol = (symbol or "").strip().upper()
+    if not symbol:
+        return _pack(None, None, "NO_FUT_BAR", None)
+    cur.execute("""SELECT close, ts FROM intraday_prices
+                   WHERE symbol=%s AND source='fyers_fut' AND timeframe='5m' AND close IS NOT NULL
+                   ORDER BY ts DESC LIMIT 1""", (symbol,))
+    r = cur.fetchone()
+    if not r or r[0] is None:
+        return _pack(None, None, "NO_FUT_BAR", None)
+    bar_date = r[1].date() if hasattr(r[1], "date") else None
+    cur.execute("SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::date")
+    today = cur.fetchone()[0]
+    is_today = (bar_date == today)
+    return _pack(r[0], _prev_close(cur, symbol, before=bar_date),
+                 "fyers_fut", r[1], live=is_today)
