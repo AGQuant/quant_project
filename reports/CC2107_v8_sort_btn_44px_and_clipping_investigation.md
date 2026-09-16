@@ -69,10 +69,41 @@ but every real chip's own content already exceeds that width today, so it is cur
 left alone rather than fixed pre-emptively for a case that isn't happening). cc#2106's own
 chart-glyph fix — separate task, not duplicated here.
 
+## Update — resolved further under cc#2108's new screenshot rule
+cc#2108 (founder-set immediately after this card) requires a real Playwright screenshot, actually
+looked at, before any UI task counts as done. Applied it retroactively to this card's own fix
+(not required — cc#2108 only mandates cc#2100-2104 stay unretrofitted — but this card's own
+"open, unconfirmed discrepancy" note made it the obvious first thing to check with the new tool).
+
+**The screenshot found a real problem the DOM measurements above could not see.** At 375px with
+the real 6-chip data, "Buy Rev 4" — the chip sitting exactly at the scrollable edge — is sliced
+flush by the container boundary with nothing past it: no fade, no partial-next-chip peek, no
+visual cue that `overflow-x:auto` (confirmed working) has more content to reveal. Every DOM
+assertion in this card passed because the mechanism genuinely works — the sort button never
+leaves the viewport, the row is genuinely scrollable — but a person looking at the phone has no
+way to *know* that, and would describe exactly what the founder's own screenshot showed: a chip
+"truncated with no visible way to reach it."
+
+**Fixed**: `#open-filter-bar .filter-row1 .filters` gains a right-edge fade (`position:relative` +
+`::after{background:linear-gradient(to right, transparent, var(--field))}`, 22px wide). Not a
+reuse of the codebase's existing `.hscroll-fade` utility — that one's gradient is hardcoded to a
+light/white fade (`rgba(255,255,255,...)`), wrong for this app's dark-only mobile surface
+(cc#1064); this fades to `var(--field)`, `#open-filter-bar`'s own real background, so it blends
+rather than drawing a bright edge on a dark bar. Same visual technique, same establishe magnitude
+(22px vs. `.hscroll-fade`'s own 26px), correct color for this context.
+
+**Re-screenshotted and looked again, per the rule's own step 3** (fix, then re-screenshot before
+marking done): the hard cut is gone — the chip's edge now blends into the sort button's backdrop
+instead of terminating abruptly. Subtle by design (a loud gradient would fight the panel's own
+dark tone), but present and directly visible on inspection, not just present in the CSS.
+
+Verification for this follow-up specifically: `node --check` clean; theme ratchets still delta 0
+(fallback 41→41, raw 179→179); `git diff --stat` still shows only `mobile/v8.html`.
+
 ## Live check still needed (Arpit)
 CC is network-blocked from scorr.in. After this deploys, please confirm with a fresh screenshot
-whether the sort button and the last filter chip are now both fully visible and reachable. If the
-clipping is fully gone, this card is done. If it persists even with the button now at its real
-32px, that confirms something else — outside what CC could see or reproduce from code and an
-isolated render — is still involved, and it would need a fresh screenshot plus (if possible) a
-hard-refresh check to rule out a stale client cache before the next investigation step.
+that the sort button and the filter row both read as fully visible and reachable now — the 44px
+button-size bug is fixed and verified, and the missing scroll-hint (found via cc#2108's new
+screenshot step) is now fixed and re-verified by an actual look, not just DOM assertions. If
+anything still looks wrong, that would point to something outside what CC's own rendering can see
+from here — worth a hard-refresh check to rule out a stale client cache before going further.

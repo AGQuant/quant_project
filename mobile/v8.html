@@ -153,7 +153,15 @@ body{ --field:#0A0A0C; }
    on this page, which are NOT part of this card's scope and must not shrink. */
 #open-filter-bar{position:sticky;top:0;z-index:6;background:var(--field);padding-top:var(--space-4);margin:var(--space-10) 0 0}   /* item 2: pins below the page header, list scrolls under it -- #v8p .top is display:none (theme_mobile.css), so this bar is the only sticky header on the page */
 #open-filter-bar .filter-row1{display:flex;align-items:center;gap:var(--space-8)}
-#open-filter-bar .filter-row1 .filters{flex:1;min-width:0;margin:0 0 var(--space-8)}
+#open-filter-bar .filter-row1 .filters{flex:1;min-width:0;margin:0 0 var(--space-8);position:relative}
+/* cc#2108: a real screenshot (the new standing rule this card exists to add) showed what the
+   cc#2107 DOM measurements could not -- the row scrolls correctly (overflow-x:auto already there),
+   but a chip sitting AT the scrollable edge is sliced flush with no visual cue that more exists
+   past it, reading exactly as the founder described it: "truncated with no visible way to reach
+   it." NOT the shared .hscroll-fade utility (mobile.css) -- its gradient is hardcoded to a light/
+   white fade, wrong for this app's dark-only mobile surface (cc#1064); this fades to var(--field),
+   #open-filter-bar's own real background, so it blends instead of drawing a bright edge. */
+#open-filter-bar .filter-row1 .filters::after{content:'';position:absolute;top:0;right:0;bottom:0;width:22px;pointer-events:none;background:linear-gradient(to right, transparent, var(--field))}
 #open-filter-bar .chip{font-size:12px;padding:4px var(--space-10);min-height:32px;display:inline-flex;align-items:center;border-radius:999px;clip-path:none}   /* item 1: compact pill, item 3: hit box stays >=32px via min-height even though the visual box is smaller */
 #open-filter-bar .chip.gd{background:var(--gold-d);border-color:color-mix(in srgb, var(--gold) 40%, transparent);color:var(--gold)}   /* selected = accent fill, per item 1 */
 #open-filter-bar .filters .chip:not(.gd){background:transparent}   /* unselected chips stay outline-only, per item 1 */
