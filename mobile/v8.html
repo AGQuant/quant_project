@@ -157,7 +157,21 @@ body{ --field:#0A0A0C; }
 #open-filter-bar .chip{font-size:12px;padding:4px var(--space-10);min-height:32px;display:inline-flex;align-items:center;border-radius:999px;clip-path:none}   /* item 1: compact pill, item 3: hit box stays >=32px via min-height even though the visual box is smaller */
 #open-filter-bar .chip.gd{background:var(--gold-d);border-color:color-mix(in srgb, var(--gold) 40%, transparent);color:var(--gold)}   /* selected = accent fill, per item 1 */
 #open-filter-bar .filters .chip:not(.gd){background:transparent}   /* unselected chips stay outline-only, per item 1 */
-#open-filter-bar .sort-btn{flex:none;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:var(--well);border:1px solid var(--line);border-radius:8px;color:var(--mute);font-size:15px;cursor:pointer}
+/* cc#2107 item 3: same MOBILE_UX_STANDARD_V1 collision cc#2106 fixed on .kw-c -- .sort-btn is a
+   bare <button>, so mobile.css's locked button{min-width/min-height:var(--mux-tap)} (44px) was
+   silently overriding this rule's own explicit 32px (min-width/min-height are a floor on width/
+   height regardless of specificity). Confirmed via the real cascade, same as cc#2106: computed
+   width/height measured 44px, not 32px, before this fix. min-width:0;min-height:0 restores the
+   real 32px button; the ::before below keeps a 44px invisible hit-zone so it still meets the
+   site's own locked tap-target standard. NOTE (stated honestly, not glossed over): this fixes a
+   real, confirmed 12px oversize on the button itself, but does NOT reproduce the full "cut off at
+   the screen edge" clipping from the founder's screenshot in isolated testing, even stress-tested
+   at 320px with 6 baskets/30 rows -- #open-filter-bar .filter-row1 .filters{flex:1;min-width:0}
+   with overflow-x:auto on .filters (line 150) robustly absorbs any amount of chip overflow
+   without ever pushing .sort-btn past the viewport in every real-data test run. See the card's
+   report for what that means for the rest of the symptom. */
+#open-filter-bar .sort-btn{flex:none;width:32px;height:32px;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;background:var(--well);border:1px solid var(--line);border-radius:8px;color:var(--mute);font-size:15px;cursor:pointer;position:relative}
+#open-filter-bar .sort-btn::before{content:'';position:absolute;top:50%;left:50%;width:var(--mux-tap);height:var(--mux-tap);transform:translate(-50%,-50%)}
 #v8p .filters::-webkit-scrollbar{display:none}
 #v8p .filters .chip{flex:none}
 /* 2 · OPEN POSITIONS — rows are .slab.dense from the shared sheet; inner names prefixed (see top) */
