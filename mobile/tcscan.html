@@ -18,15 +18,26 @@
 .asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
 .pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
 .sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
-.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
+.sec h2{font-size:var(--type-115);font-weight:700;color:var(--muted);letter-spacing:var(--track-em3);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
 .hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
 .hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
-.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.hero .eye{font-size:var(--type-10);font-weight:600;color:var(--muted);letter-spacing:var(--track-em3)}
 .hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
 .hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
-.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
-.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
-.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+/* cc#2105 item 3b: single-row-with-dividers treatment (mockup .stats/.stat) -- ONE outer
+   background+border+radius instead of 3 separate boxed cells, flex:1 cells with a border-left
+   divider between them (.cell+.cell), no divider on the outer edges. */
+.kg{display:flex;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden;margin-top:var(--space-12)}
+.cell{flex:1;padding:var(--space-10) var(--space-10) var(--space-12)}
+.cell+.cell{border-left:var(--bw-1) solid var(--edge)}
+.cell .k{font-size:var(--type-9);font-weight:600;color:var(--muted);letter-spacing:var(--track-em3);margin-bottom:var(--space-3)}
+.cell .v{font-size:var(--type-135);font-weight:700}
+.cell .s{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2)}
+/* thin win-rate bar under Long/Short only -- Net pts passes no barPct (a point total has no
+   0-100% ratio to visualize), so .bar is simply absent there, per the card's own item 3b note. */
+.cell .bar{height:3px;border-radius:var(--radius-2);background:var(--hi);margin-top:var(--space-6);overflow:hidden}
+.cell .bar i{display:block;height:100%;border-radius:var(--radius-2)}
+.cell .bar i.long{background:var(--win)}.cell .bar i.short{background:var(--loss)}
 .seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
 .seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
 .lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
@@ -44,11 +55,24 @@
 .scorr-prow .nm{font-size:var(--type-125);font-weight:800}
 .scorr-prow .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
 .scorr-prow .nm .tag.b{color:var(--win)}.scorr-prow .nm .tag.s{color:var(--loss)}
-.scorr-prow .v{text-align:right;flex:none}
+/* cc#2105 item 1: pct + rupee/lot on ONE line -- .v becomes a flex row instead of stacking
+   two block divs; .n/.c markup is unchanged, only their container's layout. */
+.scorr-prow .v{text-align:right;flex:none;display:flex;align-items:baseline;gap:var(--space-6)}
 .scorr-prow .v .n{font-size:var(--type-15);font-weight:800;line-height:1}
-.scorr-prow .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
-.scorr-prow .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}
+.scorr-prow .v .c{font-size:var(--type-9);color:var(--muted);font-weight:700}
+/* cc#2105 item 2: TC capsule moves into the sub line, pushed to the far right via .tcw's
+   margin-left:auto -- same flex-row-with-auto-margin idiom the mockup's own .subline/.tcscore use. */
+.scorr-prow .sub{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}
 .scorr-prow .sub b{color:var(--ink);font-weight:700}
+.scorr-prow .sub .tcw{margin-left:auto}
+/* cc#2105 item 3a: two-tone reward/risk background tint on the trk bar, split at the entry
+   tick. Same color-mix(...,14%,transparent) idiom scorr_position_row.js's own .fn-tc-strong
+   already uses for a pale token-derived tint -- no new hex literal. Zone <i> elements are
+   inserted FIRST in positionRow()'s trk markup (before .tfill), so plain DOM order (neither
+   has a z-index) keeps them behind .tfill/.z/.cmp/.lbl, exactly as the card requires. */
+.scorr-prow .trk .zone{position:absolute;top:0;bottom:0}
+.scorr-prow .trk .zone.win{background:color-mix(in srgb, var(--win) 14%, transparent)}
+.scorr-prow .trk .zone.loss{background:color-mix(in srgb, var(--loss) 14%, transparent)}
 /* exit-reason badge -- same .tag.res.{t|s|g} shape mobile/v8.html's resTag() uses, this page's own
    tokens (v8.html's --up/--down/--amber are v8-local aliases this page does not define). */
 .tag.res{background:var(--hi);color:var(--muted);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-8);padding:var(--space-1) var(--space-5);font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase}
@@ -134,22 +158,47 @@ function positionRow(r){
     var slFrac = SPR.trkFrac(r.sl, ax), slEnd = slFrac <= 0.5 ? 'l' : 'r', tgtEnd = slEnd==='l' ? 'r' : 'l';
     var pnlCls = r.pnl_pct==null ? 'flat' : (r.pnl_pct>0 ? 'win' : r.pnl_pct<0 ? 'loss' : 'flat');
     var fillFrom = (fz == null ? fc : fz);
+    /* cc#2105 item 3a: win/loss background zones, split at the entry tick. ax.lo/ax.hi are built
+       from exactly {target, sl} (trkAxis above), so slFrac is always exactly 0 or 1 -- SL sits at
+       one extreme of the axis, target at the other, by construction, never a partial fraction.
+       tgtFrac is therefore just the opposite extreme. No zones without a real entry fraction (fz
+       null -- unknown/non-finite entry) -- same "nothing rendered instead of a guess" rule
+       tcTrkLabels already applies to its own ENTRY tick. */
+    var zones = '';
+    if (fz != null) {
+      var tgtFrac = 1 - slFrac;
+      var lossL = Math.min(fz, slFrac), lossW = Math.abs(fz - slFrac);
+      var winL = Math.min(fz, tgtFrac), winW = Math.abs(fz - tgtFrac);
+      zones = '<i class="zone loss" style="left:'+Math.round(lossL*100)+'%;width:'+Math.round(lossW*100)+'%"></i>'
+        + '<i class="zone win" style="left:'+Math.round(winL*100)+'%;width:'+Math.round(winW*100)+'%"></i>';
+    }
     trk = '<div class="trk pnl-'+pnlCls+'">'
+      + zones
       + '<i class="tfill" style="left:'+Math.round(Math.min(fillFrom,fc)*100)+'%;width:'+Math.round(Math.abs(fc-fillFrom)*100)+'%"></i>'
       + (fz==null?'':'<i class="z" style="left:'+Math.round(fz*100)+'%"></i>')
       + '<i class="cmp" style="left:'+Math.round(fc*100)+'%"></i>'
       + tcTrkLabels(r, fz, fc, slEnd, tgtEnd)
       + '</div>';
   }
-  var sub = 'in '+f2(r.entry)+(live?(r.cmp!=null?' → now <b>'+f2(r.cmp)+'</b>':' · no price'):' → out <b>'+f2(r.exit)+'</b>')
-    +' · '+esc(dmt(live?r.entry_ts:r.exit_ts));
+  /* cc#2105 item 2: sub-line leads with the CURRENT marker (cmp, or out+exit) rather than
+     restating "in {entry} -> ...": entry is already on the bar itself (tcTrkLabels' ENTRY tick,
+     unchanged by this card, both live and closed), so repeating it here would just be the same
+     number twice. Matches the mockup's own lean "cmp 156.65 - timestamp" shape while staying
+     correct for the closed case the mockup never depicted (out <exit> - timestamp, no cmp). */
+  var subMain = live ? (r.cmp!=null ? 'cmp <b>'+f2(r.cmp)+'</b>' : 'no price') : 'out <b>'+f2(r.exit)+'</b>';
+  var sub = subMain + ' · ' + esc(dmt(live?r.entry_ts:r.exit_ts));
+  var tc = '<span class="tcw">'+SPR.fnTcCapsule(r.score)+'</span>';
   // item 3: no marker/flag signal source exists for TC Scanner (unlike V8's mkFired/mkKeys) -- that
   // slot is simply not rendered, per the card's own explicit allowance, never fabricated.
-  var mkrow = SPR.fnTcCapsule(r.score) + tcTagRes(r.exit_reason);
+  // cc#2105: the TC capsule moved up into .sub (above) -- mkrow now carries only the exit-reason
+  // tag, do_not_touch's own instruction (tcTagRes stays in mkrow, unaffected by this card). Empty
+  // for every OPEN row (tcTagRes returns '' for reason==='OPEN'); the bare <div> then collapses to
+  // zero height same as it always has, nothing new to guard.
+  var mkrow = tcTagRes(r.exit_reason);
   return '<div class="scorr-prow '+ud(r.pnl_pct)+'" data-card-strip="'+esc(r.symbol)+'">'
     + '<div class="hd"><div class="nm">'+esc(r.symbol)+'<span class="tag '+(r.side==='BUY'?'b':'s')+'">'+(r.side==='BUY'?'Long':'Short')+'</span></div>'
-    + '<div class="v"><div class="n '+cls(r.pnl_pct)+'">'+pct(r.pnl_pct)+'</div><div class="c">'+(r.pnl_rs!=null?inr(r.pnl_rs,true)+' / lot':'no lot')+'</div></div></div>'
-    + '<div class="sub">'+sub+'</div>'
+    + '<div class="v"><div class="n '+cls(r.pnl_pct)+'">'+pct(r.pnl_pct)+'</div><div class="c">'+(r.pnl_rs!=null?'('+inr(r.pnl_rs,true)+'/lot)':'(no lot)')+'</div></div></div>'
+    + '<div class="sub">'+sub+tc+'</div>'
     + trk
     + '<div class="mkrow">'+mkrow+'</div>'
     + '<div class="rowstrip" style="display:none"></div></div>';
@@ -165,12 +214,32 @@ function sortOpen(rows){
   else if(OSORT==='old') r.sort(function(a,b){return String(a.entry_ts||'').localeCompare(String(b.entry_ts||''));});
   return r;
 }
+/* cc#2105 item 3b: one cell of the single-row .kg strip. barPct/barCls are only passed for
+   Long/Short (a real 0-100 win-rate); Net pts passes null for both, so .bar is simply absent --
+   "Net pts has no ratio to bar" per the card's own scope note, never a fabricated ratio. */
+function statCell(label, valTxt, valCls, subTxt, barPct, barCls){
+  var bar = barPct!=null ? '<div class="bar"><i class="'+barCls+'" style="width:'+barPct+'%"></i></div>' : '';
+  return '<div class="cell"><div class="k">'+esc(label)+'</div><div class="v'+(valCls?' '+valCls:'')+'">'+valTxt+'</div>'
+    + (subTxt?'<div class="s">'+esc(subTxt)+'</div>':'') + bar + '</div>';
+}
 function draw(){
   var d=D, o=d.open||{}, c=d.closed||{}, ob=o.book||{}, cb=c.book||{}, rec=d.record||{}, rb=rec.BUY||{}, rs=rec.SELL||{}, sp=d.spec||{};
   var openRows=sortOpen(pick(o)), closedRows=pick(c);
   var net=(rb.net_pts_pct||0)+(rs.net_pts_pct||0);
+  var totalClosed=(rb.closed||0)+(rs.closed||0);
   var h='<div class="hero"><div class="eye">TC scanner · paper book · one lot per signal</div><div class="big"><div class="r">'+(o.count||0)+'</div><div class="n">open now · unrealised <b class="'+cls(ob.unrealised_rs_one_lot)+'">'+inr(ob.unrealised_rs_one_lot,true)+'</b><br>'+(ob.priced||0)+' of '+(ob.n||0)+' priced'+(ob.rows_without_cmp?' · '+ob.rows_without_cmp+' without a price':'')+'</div></div>'
-    +'<div class="kg"><div class="cell"><div class="k">Long record</div><div class="v">'+(rb.wr_pct!=null?rb.wr_pct+'% of '+rb.closed:'—')+'</div></div><div class="cell"><div class="k">Short record</div><div class="v">'+(rs.wr_pct!=null?rs.wr_pct+'% of '+rs.closed:'—')+'</div></div><div class="cell"><div class="k">Net pts</div><div class="v '+cls(net)+'">'+pct(net,1)+'</div></div></div></div>';
+    // cc#2105 item 3b: single-row-with-dividers .kg strip via statCell() -- real wins/closed
+    // counts from record.BUY/SELL (tc_scanner_endpoints.py _stats(), confirmed real fields, not
+    // invented) feed the sub line + win-rate bar; Net pts keeps the existing sign-aware cls(net)
+    // colouring rather than the mockup's own hardcoded-green sample value (that reads green only
+    // because its one demo figure happened to be positive, same caution the card's own evidence
+    // section already applies to the TC score scale -- never port a mockup's sample-data artifact
+    // as if it were a rule).
+    +'<div class="kg">'
+      + statCell('Long record', (rb.wr_pct!=null?rb.wr_pct+'%':'—'), '', (rb.closed?rb.wins+' of '+rb.closed:null), rb.wr_pct, 'long')
+      + statCell('Short record', (rs.wr_pct!=null?rs.wr_pct+'%':'—'), '', (rs.closed?rs.wins+' of '+rs.closed:null), rs.wr_pct, 'short')
+      + statCell('Net pts', pct(net,1), cls(net), totalClosed+' signal'+(totalClosed===1?'':'s'), null, '')
+    +'</div></div>';
   h+='<div class="sec"><h2>Book</h2><span class="hint">since '+esc(dm(rb.since||rs.since))+'</span></div>';
   h+='<div class="seg" id="side">'+['ALL','LONG','SHORT'].map(function(s){return '<span data-s="'+s+'"'+(s===SIDE?' class="on"':'')+'>'+s.charAt(0)+s.slice(1).toLowerCase()+'</span>';}).join('')+'</div>';
   h+='<div class="sec"><h2>Open</h2><span class="hint">'+openRows.length+'</span></div>';
