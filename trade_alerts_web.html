@@ -34,6 +34,11 @@
   .tab .n{font-size:10.5px;font-weight:800;opacity:.72}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden}
   .meta{font-size:11px;color:var(--dim);padding:12px 16px 0;line-height:1.5}
+  .meta-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .meta-row .meta{flex:1}
+  .scrollhint{font-family:ui-monospace,monospace;font-size:9px;font-weight:700;letter-spacing:.08em;
+    color:var(--mut);border:1px solid var(--line);border-radius:5px;padding:2px 7px 2px 6px;
+    white-space:nowrap;margin:12px 16px 0 0}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:10px}
   table{width:100%;border-collapse:collapse;font-size:13px;min-width:820px}
   thead th{position:sticky;top:0;background:var(--panel);text-align:left;padding:7px 10px;
@@ -42,6 +47,10 @@
   tbody td{padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
   tbody tr:hover{background:var(--card2)}
   .num{text-align:right;font-variant-numeric:tabular-nums}
+  /* cc#2121 scope 4: the P&L colour invariant -- green positive, red negative, on Unrealised P&L
+     and Potential Left only. Same rule, same colours, as trade_wall_web.html's .pos/.neg. */
+  .pos{color:var(--grn)} .neg{color:var(--red)}
+  .tw-cmp-lbl{display:block;font-size:10px;color:var(--mut)}
   .sym{font-weight:800}
   .long{color:var(--grn);font-weight:700} .short{color:var(--red);font-weight:700}
   .empty{padding:26px 8px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.6}
@@ -96,7 +105,11 @@
   <div class="tabs" id="tabsBook"></div>
 
   <div class="card">
-    <div class="meta" id="meta">Loading…</div>
+    <!-- cc#2121 visual_verify_gate: nine founder columns is a lot for a phone -- a static hint,
+         not the TC Scanner's overflow-detecting toggle (out of proportion for this card's scope),
+         but the same "SCROLL ->" wording/class so it reads as one product. Sibling of #meta, not a
+         child: render()'s textContent assignment on #meta would otherwise wipe this out. -->
+    <div class="meta-row"><div class="meta" id="meta">Loading…</div><span class="scrollhint">SCROLL &rarr;</span></div>
     <div class="scroll"><table id="tbl">
       <thead id="thead"></thead>
       <tbody id="body"></tbody>
@@ -144,13 +157,11 @@ var INSTRUMENTS = ['EQUITY', 'FUTURES', 'OPTIONS'];
 var INSTRUMENT_LABEL = { EQUITY: 'Equity', FUTURES: 'Future', OPTIONS: 'Options' };  // founder's own words
 var BOOKS = ['open', 'closed'];
 var BOOK_LABEL = { open: 'Open', closed: 'Closed' };
-/* cc#1693 (founder 04-Sep screenshot: "Hide When and Notes column and show only Action column
-   along with TC score replacing notes"). HIDE, not delete -- same shape as SHOW_VOL_TILES /
-   SHOW_GATE_CHIP (scorr_v10_signal.html). One line each to restore. WHEN's information is not
-   lost: it is already in ACTION for approved rows; NOTES text is kept as a title= tooltip on the
-   SYMBOL cell so a founder note stays reachable on hover. Untouched by cc#2082 -- unrelated toggle. */
-var SHOW_ALERT_WHEN = false;
-var SHOW_ALERT_NOTES = false;
+/* cc#1693 (founder 04-Sep screenshot) toggled a "When" column and a "Notes" column off, keeping
+   Action/TC score. cc#2121 (founder 16-Sep) supersedes the WHEN half of that: Date/Time is now
+   one of the founder's own nine named columns, PERMANENT, not a restorable toggle -- see
+   dtCell()/rowHtml() below. NOTES is untouched by this card: still a title= tooltip on the SYMBOL
+   cell (unchanged), never a column, per cc#1693's own original call. */
 /* cc#1693: TC /100 -- the SAME per-symbol, side-aware score the V8 dashboard Open Positions TC
    column reads, GET /api/trade-check/position-stars-v2 (tc_position_stars_v2.py). Built as OWN
    {symbol|dir_side: item}, not the raw LONG/SHORT-keyed dict the endpoint returns, so the lookup
@@ -176,6 +187,63 @@ function istStamp(ts){
   return i.getDate() + ' ' + mo + ' · ' + hh + ':' + mm;
 }
 function fmtPx(v){ return v == null ? '—' : Number(v).toLocaleString('en-IN', {maximumFractionDigits: 2}); }
+function pctFmt(v){ return v == null ? '—' : (Number(v) >= 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
+/* cc#2121: signed rupee, same convention as trade_wall_web.html's inrS() -- sign always shown on
+   a P&L figure (unlike a plain price, which is never negative). */
+function inr(v){ if (v == null) return '—'; var n = Number(v); return (n < 0 ? '−' : '+') + '₹' + Math.abs(Math.round(n)).toLocaleString('en-IN'); }
+
+/* cc#2121 (founder 16-Sep): Tag / CMP / Qty / Date-Time / Unrealised P&L / Potential Left --
+   every value here is SERVER-SUPPLIED (trade_alerts_endpoints.py's _fill_alert_columns), this
+   page computes nothing, per its own subline's promise. */
+function tagCell(a){
+  return '<td class="al-tag" title="' + esc(a.tag_title || '') + '">' + esc(a.tag || '—') + '</td>';
+}
+function cmpCell(a){
+  if (a.cmp == null) return '<td class="num">—</td>';
+  var ttl = 'source: ' + (a.cmp_source || '?') + (a.cmp_ts ? ' as of ' + a.cmp_ts + ' IST' : '') + (a.cmp_live ? ' · live' : '');
+  return '<td class="num" title="' + esc(ttl) + '">' + fmtPx(a.cmp) + '</td>';
+}
+function qtyCell(a){
+  if (a.qty == null) return '<td class="num" title="no lot size in futures_universe for ' + esc(a.symbol) + '">—</td>';
+  return '<td class="num">' + Number(a.qty).toLocaleString('en-IN') + (a.qty_basis === 'equity' ? '' : ' <span class="tw-cmp-lbl">1 lot</span>') + '</td>';
+}
+function dtCell(a){
+  return '<td class="al-tag">' + esc(istStamp(a.approved_at)) + '</td>';
+}
+/* cc#2121 scope 4/5: P&L colour invariant (green positive / red negative) lives ONLY on these two
+   cells. Basis values match trade_wall_web.html's own vocabulary (cc#1763) exactly: 'equity'
+   (percent only), 'one-lot' (rupee, futures_universe.lot_size), 'no-lot' (rupee blank, percent
+   labelled), 'no-cmp' (both blank). A closed row's figure is REALISED (against close_price,
+   already the server's `mark`) and the hover says so -- never left silently under an
+   "Unrealised" header once the position is out. */
+function pnlCell(a){
+  var label = a.closed ? 'realised' : 'unrealised';
+  if (a.pnl_basis === 'no-cmp')
+    return '<td class="num" title="no CMP for ' + esc(a.symbol) + ' — blank rather than a stale or substituted mark"></td>';
+  if (a.pnl_basis === 'equity'){
+    if (a.unrealised_pnl_pct == null) return '<td class="num">—</td>';
+    return '<td class="num ' + (a.unrealised_pnl_pct >= 0 ? 'pos' : 'neg') + '" title="equity: percent only, ' + label + ' (cc#1763)">' + pctFmt(a.unrealised_pnl_pct) + '</td>';
+  }
+  if (a.pnl_basis === 'no-lot'){
+    if (a.unrealised_pnl_pct == null) return '<td class="num">—</td>';
+    return '<td class="num ' + (a.unrealised_pnl_pct >= 0 ? 'pos' : 'neg') + '" title="no lot size in futures_universe for ' + esc(a.symbol) + ' — rupees blank, percent on price alone">'
+      + pctFmt(a.unrealised_pnl_pct) + '<span class="tw-cmp-lbl">no lot size · %</span></td>';
+  }
+  if (a.unrealised_pnl == null) return '<td class="num">—</td>';
+  var ttl = label + ': entry ' + fmtPx(a.approved_price) + ' → ' + (a.closed ? 'close ' + fmtPx(a.close_price) : 'CMP ' + fmtPx(a.cmp))
+    + ' x ' + Number(a.qty).toLocaleString('en-IN') + ' (1 lot)';
+  return '<td class="num ' + (a.unrealised_pnl >= 0 ? 'pos' : 'neg') + '" title="' + esc(ttl) + '">' + inr(a.unrealised_pnl)
+    + '<span class="tw-cmp-lbl">' + (a.unrealised_pnl_pct != null ? pctFmt(a.unrealised_pnl_pct) + ' · ' : '') + (a.closed ? 'realised' : '1 lot') + '</span></td>';
+}
+function potLeftCell(a){
+  if (a.closed) return '<td class="num" title="closed — no target left to reach"></td>';
+  if (a.potential_left_pct == null) return '<td class="num" title="no target resolved for this alert"></td>';
+  if (a.pnl_basis === 'equity' || a.potential_left == null)
+    return '<td class="num ' + (a.potential_left_pct >= 0 ? 'pos' : 'neg') + '" title="percent to target, on price alone">' + pctFmt(a.potential_left_pct) + '</td>';
+  var ttl = 'to target ' + fmtPx(a.target) + ' (' + esc(a.level_source || '?') + ' level) x ' + Number(a.qty).toLocaleString('en-IN') + ' (1 lot)';
+  return '<td class="num ' + (a.potential_left >= 0 ? 'pos' : 'neg') + '" title="' + esc(ttl) + '">'
+    + inr(a.potential_left) + '<span class="tw-cmp-lbl">' + pctFmt(a.potential_left_pct) + ' · 1 lot</span></td>';
+}
 
 /* cc#1693: TC /100 cell, built to MATCH v8_dashboard.html's tcCell() exactly (same headline,
    same cap, same tooltip shape) rather than reinvent it. Em dash when no row exists for that
@@ -195,13 +263,18 @@ function tcAlertCell(a){
     : '';
   return '<td title="' + esc(sideTip) + '"><span class="tc-num">' + Number(t.best_any_score100).toFixed(0) + '</span>' + cap + '</td>';
 }
+/* cc#2121: the two P&L headers state the one-lot basis, matching the TC Scanner Closed Book's own
+   header + title verbatim (v8_dashboard.html ~9974: '<th title="one lot per signal
+   (futures_universe.lot_size), display only">P&amp;L &#8377; (1 lot)</th>'), extended to say the
+   Equity side is percent-only rather than silently omitting it. */
+var PNL_TH_TITLE = 'Futures/Options: one lot (futures_universe.lot_size) x price move, display only. Equity: percent only, on price alone.';
 function theadHtml(){
   var asof = scorrAsofStamp(TC_ASOF);
-  var tcHdr = 'TC /100' + (asof.txt ? '<span class="th-asof">as of ' + esc(asof.txt) + '</span>' : '');
-  return '<tr><th>Symbol</th><th>Dir</th><th>Status</th><th>Engine</th><th>Trigger</th>'
-    + (SHOW_ALERT_WHEN ? '<th>When</th>' : '')
-    + (SHOW_ALERT_NOTES ? '<th>Notes</th>' : '<th>' + tcHdr + '</th>')
-    + '<th>Action</th></tr>';
+  var tcHdr = 'TC /100' + (asof.txt ? '<span class="th-asof">as of ' + asof.txt + '</span>' : '');
+  return '<tr><th>Symbol</th><th>Tag</th><th>Dir</th><th>Entry</th><th>CMP</th><th>Qty</th><th>Date/Time</th>'
+    + '<th>' + tcHdr + '</th>'
+    + '<th title="' + esc(PNL_TH_TITLE) + '">Unrealised P&amp;L &#8377; (1 lot)</th>'
+    + '<th title="' + esc(PNL_TH_TITLE) + '">Potential Left &#8377; (1 lot)</th></tr>';
 }
 
 /* cc#2082: counts are over the WHOLE approved book regardless of the OTHER row's current
@@ -232,33 +305,30 @@ function rowHtml(a){
      separate QB rebalance_due template are all DELETED, not hidden, per this card's own verify
      clause ("grep confirms zero Approve/Dismiss/override markup or handlers remain"). */
   var dirCls = a.direction === 'BUY' ? 'long' : 'short';
-  /* cc#1531: a signal-approved row (approve_signal — never was 'triggered') carries a sentinel
-     trigger_price/trigger_condition, not a real watch level. Suppress the trigger cell for those
-     rows only; a manual triggered -> approved alert keeps its real trigger context. */
-  var isSignalApproval = !a.triggered_at;
-  var trig = isSignalApproval ? '—'
-    : ('crosses ' + (a.trigger_condition === 'ABOVE' ? '≥ ' : '≤ ') + fmtPx(a.trigger_price));
-  var when = 'approved ' + (a.approved_at ? istStamp(a.approved_at) : '') + ' @ ' + fmtPx(a.approved_price)
-    + (a.approved_via ? ' · via ' + a.approved_via : '');
-  var trigSub = when ? '<span class="al-tag2">' + esc(when) + '</span>' : '';
-  /* cc#2082 item 3: the Book split rides in the same Action cell as the approval badge -- Closed
-     shown as a second, distinct badge (.al-badge.no, the same "settled/no further action" visual
-     family Dismissed already used pre-this-card) alongside Approved, never replacing it: a closed
-     row is still, factually, an approved trade. */
-  var act = '<div class="twa"><span class="al-badge ok">Approved' + (a.approved_price != null ? ' @ ' + fmtPx(a.approved_price) : '')
-      + (a.approved_at ? ' · ' + istStamp(a.approved_at) : '') + '</span>'
-      + (a.closed ? ('<span class="al-badge no">Closed' + (a.closed_at ? ' · ' + istStamp(a.closed_at) : '')
-                     + (a.close_price != null ? ' @ ' + fmtPx(a.close_price) : '') + '</span>') : '')
-      + (a.notes && /override before trigger/.test(a.notes) ? '<span class="al-why">founder override before trigger</span>' : '') + '</div>';
+  /* cc#2121 scope 2: STATUS and TRIGGER columns are deleted -- every row is APPROVED by
+     construction (cc#2082) so a column with one value on every row was noise, and a
+     signal-approved row's TRIGGER was always an em dash (cc#1531). The approved/closed badge
+     moves onto the SYMBOL cell instead of owning a full column: "Approved" itself said nothing
+     row-to-row so it is dropped; "Closed" is the one state that must stay visible even before any
+     horizontal scroll, so it survives as a small inline badge next to the symbol. The founder-
+     override note (previously its own .al-why badge) is not lost -- it is already the literal
+     text `notes` carries (approve_alert writes "override before trigger" into it), and the SYMBOL
+     cell's title= already surfaces `notes` on hover, unchanged from before this card. */
+  var closedBadge = a.closed
+    ? ('<span class="al-badge no" title="closed' + (a.closed_at ? ' ' + istStamp(a.closed_at) : '')
+       + (a.close_price != null ? ' @ ' + fmtPx(a.close_price) : '') + '">Closed</span>')
+    : '';
   return '<tr id="al-' + a.id + '">'
-    + '<td class="sym"' + (a.notes ? ' title="' + esc(a.notes) + '"' : '') + '>' + esc(a.symbol) + '</td>'
+    + '<td class="sym"' + (a.notes ? ' title="' + esc(a.notes) + '"' : '') + '>' + esc(a.symbol) + ' ' + closedBadge + '</td>'
+    + tagCell(a)
     + '<td class="' + dirCls + '">' + esc(a.direction) + '</td>'
-    + '<td><span class="al-st approved">APPROVED</span></td>'
-    + '<td>' + (a.source_engine ? '<span class="al-eng">' + esc(a.source_engine) + '</span>' : '<span class="al-tag">manual</span>') + '</td>'
-    + '<td class="al-tag">' + esc(trig) + trigSub + '</td>'
-    + (SHOW_ALERT_WHEN ? '<td class="al-tag">' + esc(when) + '</td>' : '')
-    + (SHOW_ALERT_NOTES ? '<td class="al-notes">' + esc(a.notes || '') + '</td>' : tcAlertCell(a))
-    + '<td>' + act + '</td>'
+    + '<td class="num">' + fmtPx(a.approved_price) + '</td>'
+    + cmpCell(a)
+    + qtyCell(a)
+    + dtCell(a)
+    + tcAlertCell(a)
+    + pnlCell(a)
+    + potLeftCell(a)
     + '</tr>';
 }
 
@@ -274,7 +344,7 @@ function render(){
   document.getElementById('meta').textContent =
     'showing ' + view.length + ' of ' + STATE.alerts.length + ' approved alerts · '
     + INSTRUMENT_LABEL[STATE.instrument] + ' · ' + BOOK_LABEL[STATE.book];
-  var cols = 5 + (SHOW_ALERT_WHEN ? 1 : 0) + 2;   // symbol/dir/status/engine/trigger + when? + (tc-or-notes) + action
+  var cols = 10;   // symbol/tag/dir/entry/cmp/qty/datetime/tc/unrealised/potential-left
   document.getElementById('body').innerHTML = view.length
     ? view.map(rowHtml).join('')
     : '<tr><td colspan="' + cols + '" class="empty">No ' + INSTRUMENT_LABEL[STATE.instrument].toLowerCase()
@@ -300,7 +370,7 @@ function load(){
     .catch(function(e){
       document.getElementById('meta').textContent = 'Could not load alerts — ' + e.message;
       document.getElementById('body').innerHTML =
-        '<tr><td colspan="7" class="empty">Could not load alerts. '
+        '<tr><td colspan="10" class="empty">Could not load alerts. '
         + '<button class="tw-btn" onclick="load()">Retry</button></td></tr>';
     });
 }

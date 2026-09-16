@@ -292,6 +292,99 @@ async def create_alert(req: Request):
     return {"status": "ok", "alert": row, "cmp_at_create": res.get("cmp")}
 
 
+def _fill_alert_columns(cur, r, st, origin, lot_sizes):
+    """cc#2121 (founder 16-Sep, screenshot of the web Alerts page): TAG / QTY / CMP / TARGET-STOP /
+    UNREALISED P&L / POTENTIAL LEFT, computed ONCE here so the web page and the app screen render
+    the same numbers -- the Alerts page's own subline promises it "computes nothing of its own".
+
+    Basis convention matched to the Wall of Trades' OWN locked rule (cc#1763), not invented in
+    parallel -- see trade_wall_web.html's pnlCell/rsCell/pctCell: a FUTURES/OPTIONS row (not
+    instrument=='EQUITY') is ONE LOT (futures_universe.lot_size) and gets a rupee figure; an
+    EQUITY row is PERCENT ONLY on both P&L columns, even when a rupee could technically be
+    computed (founder, verbatim, this card: "Qty 1 lot for Future, P&L data for future show in
+    value while Equity % (qty 1)"). A futures symbol with no lot_size row: rupee stays blank,
+    percent still prints -- pnl_basis='no-lot', never a substituted qty of 1 or the engine's own
+    position size.
+
+    potential_left reuses v8_dashboard.html's own formula VERBATIM (~3786-3787), not a second
+    derivation: (target-cmp)*qty for LONG, (cmp-target)*qty for SHORT; the percent divides by CMP,
+    not entry -- matched exactly, including that choice of denominator.
+
+    target/stop/level_source come from `st` (resolve_close_state, cc#1781 -- already computed by
+    the caller for the closed/instrument fields) -- no second precedence chain. CMP is
+    instrument-aware per cc#2120: a FUTURES row reads cmp_resolver.resolve_fut_cmp (fyers_fut),
+    falling back to the spot resolver honestly, only when no futures bar exists right now."""
+    import cmp_resolver
+    import v8_book_canon
+
+    is_equity = (r["instrument"] == "EQUITY")
+    is_short = (r.get("direction") == "SELL")
+
+    # TAG: the founder's own word, and his own examples (sell_momentum / sell_reversal /
+    # buy_reversal) are the RAW basket strings -- shown as such, not softened into origin's own
+    # "Momentum short"-style style_word (that phrase goes in the hover instead, where it adds
+    # context without replacing the label he asked for).
+    r["tag"] = origin.get("basket") or origin.get("style_word") or r.get("source_engine") or "Manual"
+    _sw = origin.get("style_word")
+    r["tag_title"] = ((_sw + " · ") if (_sw and _sw != r["tag"]) else "") + (r.get("source_engine") or "manual alert")
+
+    r["target"] = st.get("target")
+    r["stop"] = st.get("stop")
+    r["level_source"] = st.get("level_source")
+
+    if is_equity:
+        r["qty"], r["qty_basis"] = 1, "equity"
+    else:
+        lot = lot_sizes.get(r["symbol"])
+        r["qty"], r["qty_basis"] = (lot, "one-lot") if lot else (None, "no-lot")
+
+    # CMP -- only for an OPEN row; a closed row marks against close_price instead (below).
+    cmp_v = cmp_ts = cmp_source = cmp_live = None
+    if not r["closed"]:
+        res = None
+        if cmp_resolver.is_futures_engine(r.get("source_engine")):
+            res = cmp_resolver.resolve_fut_cmp(cur, r["symbol"])
+            if res.get("cmp") is None:
+                res = None
+        if res is None:
+            res = cmp_resolver.resolve_cmp(cur, r["symbol"])
+        cmp_v = res.get("cmp")
+        cmp_ts = str(res.get("ts")) if res.get("ts") is not None else None
+        cmp_source = res.get("source")
+        cmp_live = bool(res.get("live"))
+    r["cmp"], r["cmp_ts"], r["cmp_source"], r["cmp_live"] = cmp_v, cmp_ts, cmp_source, cmp_live
+
+    entry = r.get("approved_price")
+
+    # cc#2121 scope 5: a closed row's P&L is REALISED against close_price -- the frontend labels
+    # this off r["closed"], already served. Potential Left is meaningless once the position is
+    # out, so it is None on every closed row, never a stale live figure.
+    mark = r["close_price"] if r["closed"] else cmp_v
+
+    if r["closed"]:
+        r["potential_left"], r["potential_left_pct"] = None, None
+    elif r["target"] is not None and mark is not None:
+        tgt = r["target"]
+        r["potential_left_pct"] = round(((mark - tgt) if is_short else (tgt - mark)) / mark * 100, 2)
+        r["potential_left"] = (None if (is_equity or r["qty"] is None)
+                                else round(((mark - tgt) if is_short else (tgt - mark)) * r["qty"], 2))
+    else:
+        r["potential_left"], r["potential_left_pct"] = None, None
+
+    if entry is not None and mark is not None and entry:
+        r["unrealised_pnl_pct"] = round((mark - entry) / entry * 100 * (-1.0 if is_short else 1.0), 2)
+        if is_equity:
+            r["unrealised_pnl"], r["pnl_basis"] = None, "equity"
+        elif r["qty"] is None:
+            r["unrealised_pnl"], r["pnl_basis"] = None, "no-lot"
+        else:
+            side = "SHORT" if is_short else "LONG"
+            r["unrealised_pnl"] = v8_book_canon.unrealised_rupees(entry, mark, side, r["qty"])
+            r["pnl_basis"] = "one-lot"
+    else:
+        r["unrealised_pnl"], r["unrealised_pnl_pct"], r["pnl_basis"] = None, None, "no-cmp"
+
+
 @router.get("/api/alerts/list")
 def list_alerts(status: str = "all", limit: int = 200):
     status = (status or "all").strip().lower()
@@ -337,8 +430,18 @@ def list_alerts(status: str = "all", limit: int = 200):
         # (pending/triggered/dismissed never reach the pure-display page any more, and the
         # resolver's origin lookup is real per-row DB work -- no reason to spend it on rows that
         # will not render there).
+        # cc#2121: founder's 9-column table needs a lot_size per FUTURES/OPTIONS symbol (QTY = ONE
+        # LOT, his own ruling) -- batched once for every approved row's symbol, not one query per
+        # row.
+        approved_syms = sorted({r["symbol"] for r in rows if r["status"] == "approved"})
+        lot_sizes = {}
+        if approved_syms:
+            cur.execute("SELECT symbol, lot_size FROM futures_universe WHERE symbol = ANY(%s) AND is_active = true",
+                        (approved_syms,))
+            lot_sizes = {s: (int(l) if l is not None else None) for s, l in cur.fetchall()}
         for r in rows:
             if r["status"] == "approved":
+                st, origin = {}, {}
                 try:
                     st = resolve_close_state(cur, r)
                     r["closed"] = bool(st.get("closed"))
@@ -356,6 +459,7 @@ def list_alerts(status: str = "all", limit: int = 200):
                 except Exception as e:   # a resolver hiccup must not blank the whole list
                     log.warning("list_alerts: resolve_close_state failed for id=%s (%s)", r.get("id"), e)
                     r["closed"], r["closed_at"], r["close_price"], r["instrument"] = False, None, None, "EQUITY"
+                _fill_alert_columns(cur, r, st, origin, lot_sizes)
         unseen = _attach_seen(cur, rows)   # cc#1717: seen flag per row + the bell's badge count
         # cc#2095: Custom Alerts V1 -- ADD triggered custom_alerts rows alongside trade_alerts
         # (do_not_touch: this endpoint's own trade_alerts rendering is untouched above). Appended
@@ -1141,18 +1245,36 @@ def alerts_ideas(limit: int = 100):
         raws = cur.fetchall()
         rows = [_row(r) for r in raws]
         syms = sorted({r["symbol"] for r in rows})
+        import cmp_resolver
+        import v8_book_canon
         live = {}
         if syms:
             try:
-                import cmp_resolver
                 live = cmp_resolver.resolve_cmp_many(cur, syms) or {}
             except Exception as e:
                 log.warning("ideas: resolve_cmp_many failed (%s) — cards ship without cmp", e)
+        # cc#2121: QTY = futures_universe.lot_size for a FUT/OPT card, batched once -- same source
+        # as trade_alerts_endpoints._fill_alert_columns (the web Alerts table), never a second
+        # per-row query.
+        lot_sizes = {}
+        if syms:
+            cur.execute("SELECT symbol, lot_size FROM futures_universe WHERE symbol = ANY(%s) AND is_active = true",
+                        (syms,))
+            lot_sizes = {s: (int(l) if l is not None else None) for s, l in cur.fetchall()}
         ideas, hidden = [], 0
         for raw, row in zip(raws, rows):
             sym, direction = row["symbol"], row["direction"]
             created_at, triggered_at, approved_at = _ist_naive(raw[7]), _ist_naive(raw[8]), _ist_naive(raw[9])
+            # cc#2120/cc#2121: a FUTURES-engine signal is priced off fyers_fut, never spot -- the
+            # SAME instrument-aware CMP every other surface (the Approve popup, approve_signal, the
+            # Wall's pnl_approved, the web Alerts table) now uses, so this card's own cross-surface
+            # check ("must agree") holds by construction. Falls back to the already-fetched batch
+            # spot value, honestly, only when no futures bar exists right now.
             hit = live.get(sym) or {}
+            if cmp_resolver.is_futures_engine(row.get("source_engine")):
+                fut_hit = cmp_resolver.resolve_fut_cmp(cur, sym)
+                if fut_hit.get("cmp") is not None:
+                    hit = fut_hit
             cmp_v = _fnum(hit.get("cmp"))
             card = {
                 "id": row["id"], "symbol": sym, "direction": direction,
@@ -1253,6 +1375,19 @@ def alerts_ideas(limit: int = 100):
                     card.update({"target": st["target"], "stop": st["stop"],
                                  "to_target_pct": _to_target_pct(ref_price, st["target"], direction),
                                  "track": _track(entry, st["stop"], st["target"], ref_price)})
+            # cc#2121 founder ruling (this card, verbatim): "Qty 1 lot for Future, P&L data for
+            # future show in value while Equity % (qty 1)". Mirrors trade_alerts_endpoints.
+            # _fill_alert_columns's formula exactly -- v8_book_canon.unrealised_rupees on the SAME
+            # entry/mark/side/qty inputs -- never a second derivation. since_pct/to_target_pct
+            # above are untouched (still percent, every instrument) -- this only ADDS the rupee
+            # figure for FUT/OPT, never removes the percent any card already had.
+            is_fo = card["instrument"] in ("FUT", "OPT")
+            qty_v = 1 if not is_fo else lot_sizes.get(sym)
+            card["qty"] = qty_v
+            card["qty_basis"] = "equity" if not is_fo else ("one-lot" if qty_v else "no-lot")
+            card["unrealised_pnl"] = (v8_book_canon.unrealised_rupees(
+                entry, ref_price, "SHORT" if direction == "SELL" else "LONG", qty_v)
+                if (is_fo and qty_v and entry is not None and ref_price is not None) else None)
             ideas.append(card)
         if mirrored:
             conn.commit()                      # cc#1781: the engine mirrors written by this read
