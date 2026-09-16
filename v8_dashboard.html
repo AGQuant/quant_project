@@ -8799,6 +8799,9 @@ window.iiCsbToggleBasis = csbToggleBasis;
 window.iiCsbToggleVolr = csbToggleVolr;
 window.iiRecSym = recSetSym; window.iiRecMore = recMore; window.iiRecChart = iiRecChart;   /* cc#1597: the log's toggles, load more, chart glyph */
 window.iiIpChart = function(k){ openIdxChart(k); };   /* the shared chart card, index mode (cc#1059) */
+window.openIdxChart = openIdxChart;   /* cc#2124: the index-tape header's inline onclick="openIdxChart(...)"
+   (~line 6649) resolves in global scope, not this IIFE's -- same bug class as cc#2118. iiIpChart
+   above is a differently-named wrapper, not this function, so it never covered the inline call. */
 
 /* cc#1151 verify E: rStrikeOI() REMOVED. cc#1152 verify D: oiHisto() REMOVED. cc#1522: their
    successor oiLadder() is now removed too — the ported oiCard() above renders the chain. */
