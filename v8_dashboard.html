@@ -7714,8 +7714,14 @@ function oiCard(name, oi, mp){
   return '<div class="card oi">'
     + '<div class="vfhd oihd"><h3>Max Pain ' + esc(name) + '</h3><span class="sp"></span>'
     + '<span class="asof oiasof' + (ao.stale ? ' stale' : '') + '">' + esc(aoTxt) + '</span>'
+    // cc#2116: explicit web parity button, reuses the existing .ib class (same header, same
+    // button family as the (i) button beside it) rather than inventing a new one. Label/placement
+    // are CC's choice, not founder-specified -- stated in the task result, expect a correction.
+    + '<button type="button" class="ib" onclick="chainPopupOpen(\'' + esc(name) + '\')" aria-label="Open option chain" style="width:auto;padding:0 8px;font-size:9px;letter-spacing:.03em">CHAIN</button>'
     + '<button type="button" class="ib" onclick="iiOiRead(\'' + esc(name) + '\')" aria-label="Read this card">i</button></div>'
-    + '<div class="oib">' + cols + spotLine + tags + '</div>'
+    // cc#2116: the chart body is ALSO a tap target, matching the app's existing cc#2003 behaviour
+    // -- one function, two entry points (the button is the discoverable one, this is app parity).
+    + '<div class="oib" role="button" tabindex="0" aria-label="Open full option chain" style="cursor:pointer" onclick="chainPopupOpen(\'' + esc(name) + '\')">' + cols + spotLine + tags + '</div>'
     + spotLb
     + xs
     + story

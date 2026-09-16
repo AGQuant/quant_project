@@ -3311,10 +3311,14 @@ function oiCard(name, oi, mp, bare){
   /* cc#1575: the (i) opens the READ sheet (headline, read, evidence line, caveats from
      /api/oi/structure) with the how-to-read guide underneath — one tap, both. */
   var ib = '<button type="button" class="oiib" onclick="oiRead(\'' + esc(name) + '\')" aria-label="Read this card">i</button>';
+  /* cc#2116: explicit chain button, app parity with the cc#2003 chart-tap below -- reuses .oiib
+     (same family as the (i) button) rather than inventing a new class. Label/placement are CC's
+     choice, not founder-specified -- stated in the task result, expect a correction. */
+  var chainBtn = '<button type="button" class="oiib" onclick="chainPopupOpen(\'' + esc(name) + '\')" aria-label="Open option chain" style="width:auto;padding:0 8px;font-size:9px;letter-spacing:.03em">CHAIN</button>';
   var header = bare
-    ? '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">' + stamp + ib + '</div>'
+    ? '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">' + stamp + chainBtn + ib + '</div>'
     : '<div class="grp"><h3>Max Pain ' + esc(name) + '</h3>'
-      + '<span style="display:inline-flex;align-items:center;gap:8px">' + stamp + ib + '</span></div>';
+      + '<span style="display:inline-flex;align-items:center;gap:8px">' + stamp + chainBtn + ib + '</span></div>';
   /* cc#2003 (founder 12-Sep-2026 ~08:15 IST): the chart area itself is now a SECOND, larger tap
      target opening the full option chain as a popup overlay (chainPopupOpen -> scorr_cockpit_card.js
      -> the SAME cc#2004 chain-grid component the D-button uses, one implementation). Additive: the
