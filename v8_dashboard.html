@@ -2918,7 +2918,10 @@ function markerFiredFor(x){
   // cc#1880: chan included here too so this parallel computation can never disagree with
   // markerFlag()'s own fired0 — no new quick-filter chip added (out of this card's scope, which
   // is the SYMBOL-column glyph only), but the shared fired object stays complete either way.
-  const f0={stars:PIVOT_STARS[sym]||null, act:PIVOT_ACT[sym]||null, dma:PIVOT_DMA[sym]||null, tcs:PIVOT_TCS[sym]||null, chan:PIVOT_CHAN[sym]||null};
+  // cc#2115: dma1m included here too, same reason cc#1880 added chan — a parallel computation
+  // must never disagree with markerFlag()'s own fired0. Unlike chan (no quick-filter chip, out of
+  // that card's scope), dma1m DOES get its own mchip pair below (this card's own scope item 3).
+  const f0={stars:PIVOT_STARS[sym]||null, act:PIVOT_ACT[sym]||null, dma:PIVOT_DMA[sym]||null, dma1m:PIVOT_DMA1M[sym]||null, tcs:PIVOT_TCS[sym]||null, chan:PIVOT_CHAN[sym]||null};
   return window.ScorrMarkerFlagFilter?window.ScorrMarkerFlagFilter(f0,side):f0;
 }
 function markerKeysFor(x){
@@ -2929,6 +2932,9 @@ function markerKeysFor(x){
   // cc#1682: one key per STATE colour, not one 'dma' key — the chip row below is now two chips
   // (5>20 / 5<20) and each must filter independently.
   if(f.dma)ks.add(f.dma.star_color==='GREEN'?'dmaUp':'dmaDn');
+  // cc#2115: same one-key-per-colour shape as dma above, distinct keys (dma1mUp/dma1mDn) so the
+  // state chips and the window-cross chips filter independently.
+  if(f.dma1m)ks.add(f.dma1m.color==='GREEN'?'dma1mUp':'dma1mDn');
   return ks;
 }
 function rowHasMarkerFilter(x){ if(!MASTER_MARKERS.size)return true; const ks=markerKeysFor(x); for(const k of MASTER_MARKERS){ if(ks.has(k))return true; } return false; }
@@ -3688,10 +3694,12 @@ function renderMaster(){
   // single choice is not a filter, it is furniture.
   // cc#1602: marker quick-filter chips, counted over `open` (the side + basket filtered rows, before
   // the marker filter itself) so the count says how many rows the chip would give you.
-  const _mkCounts={tcs:0,s1:0,r1:0,act:0,dma:0,dmaUp:0,dmaDn:0};
+  const _mkCounts={tcs:0,s1:0,r1:0,act:0,dma:0,dmaUp:0,dmaDn:0,dma1mUp:0,dma1mDn:0};
   open.forEach(x=>{ const f=markerFiredFor(x);
     if(f.tcs)_mkCounts.tcs++; if(f.stars){ if(f.stars.star_color==='BLUE')_mkCounts.s1++; else _mkCounts.r1++; }
-    if(f.act)_mkCounts.act++; if(f.dma){ _mkCounts.dma++; if(f.dma.star_color==='GREEN')_mkCounts.dmaUp++; else _mkCounts.dmaDn++; } });
+    if(f.act)_mkCounts.act++; if(f.dma){ _mkCounts.dma++; if(f.dma.star_color==='GREEN')_mkCounts.dmaUp++; else _mkCounts.dmaDn++; }
+    // cc#2115: independent of the dma state counts above — a symbol can carry both.
+    if(f.dma1m){ if(f.dma1m.color==='GREEN')_mkCounts.dma1mUp++; else _mkCounts.dma1mDn++; } });
   // Tooltip = the legend line served by the engine (MK_LEGEND, the same strings the (i) popover
   // prints) matched by its family word — never retyped here; no legend yet -> the title alone.
   const _legLine=(...words)=>{ const L=Array.isArray(MK_LEGEND)?MK_LEGEND:[]; return L.find(t=>words.some(w=>String(t).toLowerCase().indexOf(w)>=0))||''; };
@@ -3704,6 +3712,9 @@ function renderMaster(){
   // green count and a red count, independently clickable/clearable, matching every other family's
   // OR-among-chosen / AND-with-side-basket rule (setMasterMarker toggles a Set entry either way).
   const _dmaTip=_legLine('square','dma')||'5DMA above/below 20DMA';
+  // cc#2115: own tooltip text and own glyph (up/down arrow \u2014 star/bolt/square/triangle are all
+  // already spoken for by the other five families), same two-chip-per-colour shape as dma above.
+  const _dma1mTip=_legLine('arrow','last month')||'5DMA crossed 20DMA within the last month';
   const markerGroup=`<div class="mkq-grp" style="display:flex;gap:4px;margin-left:auto;flex:0 1 auto;justify-content:flex-end">`
     + mchip('tcs','\u2605','#F5B94A','TC strong',_mkCounts.tcs,_legLine('amber','strong')||'TC strong','rgba(245,185,74,.16)')
     + mchip('s1','\u2605','#4d7cfe','S1 reversal',_mkCounts.s1,_legLine('blue')||'S1 reversal','rgba(77,124,254,.16)')
@@ -3711,6 +3722,8 @@ function renderMaster(){
     + mchip('act','\u26a1','var(--txt)','Volume confirm',_mkCounts.act,_legLine('\u26a1','volume')||'Volume confirm \u2014 2+ of 4 volume checks','rgba(77,124,254,.12)')
     + mchip('dmaUp','\u25a0','#0a9e63','5>20',_mkCounts.dmaUp,_dmaTip,'rgba(10,158,99,.16)')
     + mchip('dmaDn','\u25a0','#f87171','5<20',_mkCounts.dmaDn,_dmaTip,'rgba(248,113,113,.16)')
+    + mchip('dma1mUp','\u2191','#0a9e63','5M>20',_mkCounts.dma1mUp,_dma1mTip,'rgba(10,158,99,.16)')
+    + mchip('dma1mDn','\u2193','#f87171','5M<20',_mkCounts.dma1mDn,_dma1mTip,'rgba(248,113,113,.16)')
     + `</div>`;
   // The basket chips and the marker group share ONE wrapping flex row; the group's flex-basis makes
   // it drop to its own line below ~1000px (inline, so the theme counter sees no new rule). With a single basket in view
@@ -4296,7 +4309,7 @@ function _banChip(x){return x&&x.banned?' <span class="badge" style="background:
 // set as a trade rule (9 trades / 55.6% WR, and 53 / 34.0% / -0.75 EV without the Nifty gate), so
 // NO copy here — glyph, title or aria-label — may say buy, sell, entry or target. The tooltip text
 // is built SERVER-SIDE by v8_pivot_star.star_note() so the wording cannot drift on this surface.
-let PIVOT_STARS={}, PIVOT_ACT={}, PIVOT_DMA={}, PIVOT_TCS={}, PIVOT_CHAN={}, MK_LEGEND=null;
+let PIVOT_STARS={}, PIVOT_ACT={}, PIVOT_DMA={}, PIVOT_DMA1M={}, PIVOT_TCS={}, PIVOT_CHAN={}, MK_LEGEND=null;
 async function loadPivotStars(){
   try{
     const d=await getJSON('/api/v8/pivot_star');
@@ -4310,6 +4323,10 @@ async function loadPivotStars(){
     // page (the marker-count block below, the shared scorr_card_common.js filter/colour/detail
     // functions) keeps its existing field name unchanged.
     PIVOT_DMA={}; (d.dma_state||d.dma_cross||[]).forEach(x=>{PIVOT_DMA[x.symbol]=Object.assign({},x,{star_color:x.color});});
+    // cc#2115: DMA_CROSS_WINDOW_1M, own map — a symbol can carry the state square AND this marker
+    // at once (cc#933's rule). No star_color alias needed: this is new code, not an existing
+    // reader expecting that name, so the endpoint's own `color` field is used directly below.
+    PIVOT_DMA1M={}; (d.dma_cross_1m||[]).forEach(x=>{PIVOT_DMA1M[x.symbol]=x;});
     // cc#1540: the amber TC_STRONG stars, fourth list.
     PIVOT_TCS={}; (d.tc_strong||[]).forEach(t=>{PIVOT_TCS[t.symbol]=t;});
     // cc#1880: GREEN TRIANGLE channel-rejection markers, fifth list — same one-map-per-family
@@ -4318,7 +4335,7 @@ async function loadPivotStars(){
     MK_LEGEND=d.legend||null;
     const m={}; (d.stars||[]).forEach(s=>{ m[s.symbol]=s; });
     PIVOT_STARS=m;
-  }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; PIVOT_DMA={}; PIVOT_TCS={}; PIVOT_CHAN={}; }   // a failed marker fetch must never blank a signal table
+  }catch(e){ PIVOT_STARS={}; PIVOT_ACT={}; PIVOT_DMA={}; PIVOT_DMA1M={}; PIVOT_TCS={}; PIVOT_CHAN={}; }   // a failed marker fetch must never blank a signal table
   // cc#1008: the maps load async, after the open-positions pane has already painted once. Repaint it
   // so the pivot/activity markers appear on the rows without waiting for the 5-min auto-refresh.
   try{ if(cache&&cache.paper&&document.getElementById('panel0')) renderMasterPanels(); }catch(e){}

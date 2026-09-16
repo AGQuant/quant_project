@@ -1557,6 +1557,12 @@ window.ScorrMarkerFlagFilter = function (fired, posSide) {
   return {
     stars: (fired.stars && fired.stars.direction === starWant) ? fired.stars : null,
     dma: fired.dma || null,
+    // cc#2115: same unfiltered-by-side treatment as dma above, same reasoning — a window-cross is
+    // "did 5DMA cross 20DMA in the last month", true/false independent of which way the position
+    // is held. Pass-through only: this does NOT enter ScorrMarkerFlagColor/DetailHtml's own
+    // glyph-priority decision below (out of cc#2115's scope, which is the mchip filter row on
+    // v8_dashboard.html, not the single consolidated symbol-column glyph).
+    dma1m: fired.dma1m || null,
     act: fired.act || null,
     tcs: fired.tcs || null,
     chan: (fired.chan && fired.chan.direction === chanWant) ? fired.chan : null

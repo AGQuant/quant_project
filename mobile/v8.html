@@ -454,7 +454,7 @@ var URLS = {
 var STATE = { mood:null, book:null, sectors:null, n50:null, daylog:null, funnel:null, paper:null, pass:{}, fetchedAt:null };
 /* cc#1610: marker maps keyed by symbol (the four lists /api/v8/pivot_star serves, plus the TC
    score rows) and the marker quick-filter set — in memory for the visit only. */
-var MK = { stars:{}, act:{}, dma:{}, tcs:{}, legend:null, tcRows:[] };
+var MK = { stars:{}, act:{}, dma:{}, dma1m:{}, tcs:{}, legend:null, tcRows:[] };
 var openMarkers = {};
 var MOOD_EV_OPEN = false;   /* cc#1874: Market Mood's Evidence disclosure -- closed by default, in-memory for the visit, survives the 5-min poll re-render */
 function getJ(url){
@@ -821,7 +821,7 @@ function heldLabel(p){
    the glyph and to ScorrMarkerDetail (body-level sheet, cc#1582) on tap — nothing is decided here. */
 function mkFired(p){
   var sym = p.symbol, side = String(p.side || '').toUpperCase();
-  var f0 = { stars: MK.stars[sym] || null, act: MK.act[sym] || null, dma: MK.dma[sym] || null, tcs: MK.tcs[sym] || null };
+  var f0 = { stars: MK.stars[sym] || null, act: MK.act[sym] || null, dma: MK.dma[sym] || null, dma1m: MK.dma1m[sym] || null, tcs: MK.tcs[sym] || null };
   return window.ScorrMarkerFlagFilter ? window.ScorrMarkerFlagFilter(f0, side) : f0;
 }
 function mkKeys(p){
@@ -831,6 +831,9 @@ function mkKeys(p){
   if(f.act) ks.act = 1;
   // cc#1682: one key per STATE colour, matching the two-chip split below.
   if(f.dma) ks[f.dma.star_color === 'GREEN' ? 'dmaUp' : 'dmaDn'] = 1;
+  // cc#2115: same one-key-per-colour shape as dma above, distinct keys so the state chips and the
+  // window-cross chips filter independently.
+  if(f.dma1m) ks[f.dma1m.color === 'GREEN' ? 'dma1mUp' : 'dma1mDn'] = 1;
   return ks;
 }
 /* cc#2100 item 5: small labelled chips for whatever fired on THIS row -- reuses mkKeys(p) (already
@@ -881,18 +884,25 @@ var MK_CHIP_DEFS = [
   ['r1', '\u2605', '#f87171', 'R1 mirror'],
   ['act', '\u26a1', 'var(--txt)', 'Vol/OI'],
   ['dmaUp', '\u25a0', '#0a9e63', '5>20'],
-  ['dmaDn', '\u25a0', '#f87171', '5<20']
+  ['dmaDn', '\u25a0', '#f87171', '5<20'],
+  // cc#2115: own glyph (up/down arrow \u2014 star/bolt/square/triangle already taken by the other
+  // five families), same two-chip-per-colour shape as dmaUp/dmaDn above.
+  ['dma1mUp', '\u2191', '#0a9e63', '5M>20'],
+  ['dma1mDn', '\u2193', '#f87171', '5M<20']
 ];
 function renderMarkerChips(rows){
   var el = document.getElementById('open-markers'); if(!el) return;
-  var c = { tcs:0, s1:0, r1:0, act:0, dma:0, dmaUp:0, dmaDn:0 };
+  var c = { tcs:0, s1:0, r1:0, act:0, dma:0, dmaUp:0, dmaDn:0, dma1mUp:0, dma1mDn:0 };
   rows.forEach(function(p){ var f = mkFired(p);
     if(f.tcs) c.tcs++; if(f.stars){ if(f.stars.star_color === 'BLUE') c.s1++; else c.r1++; }
-    if(f.act) c.act++; if(f.dma){ c.dma++; if(f.dma.star_color === 'GREEN') c.dmaUp++; else c.dmaDn++; } });
+    if(f.act) c.act++; if(f.dma){ c.dma++; if(f.dma.star_color === 'GREEN') c.dmaUp++; else c.dmaDn++; }
+    // cc#2115: independent of the dma state counts above \u2014 a symbol can carry both.
+    if(f.dma1m){ if(f.dma1m.color === 'GREEN') c.dma1mUp++; else c.dma1mDn++; } });
   var L = Array.isArray(MK.legend) ? MK.legend : [];
   var leg = function(){ var ws = Array.prototype.slice.call(arguments); var hit = ''; L.some(function(t){ if(ws.some(function(w){ return String(t).toLowerCase().indexOf(w) >= 0; })){ hit = t; return true; } return false; }); return hit; };
   // cc#1682: two chips, one per STATE colour, not one combined 'dma' chip.
   var dmaTip = leg('square', 'dma') || '5DMA above/below 20DMA';
+  var dma1mTip = leg('arrow', 'last month') || '5DMA crossed 20DMA within the last month';
   var defOf = function(key){ var d = null; MK_CHIP_DEFS.some(function(x){ if(x[0]===key){ d=x; return true; } return false; }); return d; };
   var chip = function(key, n, tip){
     var d = defOf(key), icon = d[1], col = d[2], title = d[3], on = !!openMarkers[key];
@@ -905,6 +915,8 @@ function renderMarkerChips(rows){
     + chip('act', c.act, leg('\u26a1', 'volume'))
     + chip('dmaUp', c.dmaUp, dmaTip)
     + chip('dmaDn', c.dmaDn, dmaTip)
+    + chip('dma1mUp', c.dma1mUp, dma1mTip)
+    + chip('dma1mDn', c.dma1mDn, dma1mTip)
     + '<span class="chip" data-mk-legend="1" title="What the flags mean" aria-label="Marker legend">?</span>';
 }
 /* cc#1868 item 5 (founder 09-Sep-2026): replaces bkTag() (a separate coloured basket badge) --
@@ -1873,13 +1885,17 @@ function load(){
     /* cc#1610: the marker maps, the same four lists + legend the web loads (loadPivotStars). A
        failed marker fetch leaves the maps empty — rows render without flags, never blank. */
     var mk = res[7] || {}, tcq = res[8] || {};
-    MK = { stars:{}, act:{}, dma:{}, tcs:{}, legend: mk.legend || null, tcRows: (tcq.rows || []) };
+    MK = { stars:{}, act:{}, dma:{}, dma1m:{}, tcs:{}, legend: mk.legend || null, tcRows: (tcq.rows || []) };
     (mk.stars || []).forEach(function(x){ MK.stars[x.symbol] = x; });
     (mk.activity || []).forEach(function(x){ MK.act[x.symbol] = x; });
     // cc#1682: dma_state is the current key (dma_cross kept one release as an alias, same list).
     // The endpoint's own field is `color`; star_color is added here so mkKeys/mkFlag/the shared
     // scorr_card_common.js reader keep the field name they already use.
     (mk.dma_state || mk.dma_cross || []).forEach(function(x){ MK.dma[x.symbol] = Object.assign({}, x, {star_color: x.color}); });
+    // cc#2115: DMA_CROSS_WINDOW_1M, own map — a symbol can carry the state square AND this marker
+    // at once (cc#933's rule). No star_color alias: new code, not an existing reader expecting
+    // that name, so the endpoint's own `color` field is used directly in mkKeys below.
+    (mk.dma_cross_1m || []).forEach(function(x){ MK.dma1m[x.symbol] = x; });
     (mk.tc_strong || []).forEach(function(x){ MK.tcs[x.symbol] = x; });
     var d = istNow();
     STATE.fetchedAt = d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+hhmm(d);

@@ -886,6 +886,141 @@ def evaluate_dma_state_universe(conn, target_date: Optional[date] = None) -> Lis
     return _score_dma_state(cands, closes, dates, live, met)
 
 
+# ── cc#2115 DMA_CROSS_WINDOW_1M (founder direct) — a THIRD marker family, additive to DMA_STATE_V1
+# above. The state square says "is 5DMA above or below 20DMA today"; this says "did the two lines
+# CROSS at any point in the last DMA_1M_WINDOW_DAYS trading sessions, and which way, most
+# recently" — the piece of context that tells a reader which of today's red squares are freshly
+# turned versus been-red-for-weeks. Genuinely absent for most symbols on most days (no flip in the
+# trailing window is the common case, not an error) — unlike the state square, which is defined
+# every day. Does NOT revive DMA_CROSS_V1 (cc#1539, retired by cc#1682) and does not read or write
+# DMA_ABOVE/DMA_BELOW rows; evaluate_dma_cross()/evaluate_dma_state()/evaluate_dma_state_universe()
+# are untouched, byte-identical, per the card's own do_not_touch.
+DMA_1M_WINDOW_DAYS = 21     # trading SESSIONS, not a calendar month — sidesteps weekend/holiday
+                            # roll logic entirely (the one half of the ask the founder did not
+                            # explicitly confirm — flagged back in the card result, not guessed).
+                            # Fetch limit (window_days + DMA_SLOW + 4-session buffer = 45 at this
+                            # default) is computed from the actual window_days argument at the one
+                            # call site below, not hardcoded here, so a caller passing a different
+                            # window still gets enough history for its own scan.
+
+
+def _fetch_dma_window_support(cur, d, syms, fetch_limit):
+    """The same batched reads _fetch_dma_state_support makes (close+date history, live CMP,
+    day_1d), over a WIDER close history than that helper's fixed DMA_FETCH=25 — a separate
+    function rather than parameterising _fetch_dma_state_support itself, which backs the two
+    DO_NOT_TOUCH state functions above and must not risk a behaviour change to either."""
+    ceiling_op = "<" if _ist_market_hours() else "<="
+    cur.execute(f"""
+        SELECT symbol, price_date, close FROM (
+            SELECT symbol, price_date, close,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+            FROM raw_prices
+            WHERE symbol = ANY(%s) AND close > 0 AND price_date {ceiling_op} %s
+        ) x WHERE rn <= %s
+        ORDER BY symbol, rn""", (syms, d, fetch_limit))
+    closes: Dict[str, List[float]] = {}
+    dates: Dict[str, List[date]] = {}
+    for sym, pdate, close in cur.fetchall():
+        closes.setdefault(sym, []).append(float(close))
+        dates.setdefault(sym, []).append(pdate)
+
+    live = {}
+    try:
+        import cmp_resolver
+        live = cmp_resolver.resolve_cmp_many(cur, syms)
+    except Exception as e:
+        log.warning("cc#2115 live CMP unavailable, using last close: %s", e)
+
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, day_1d FROM v8_metrics
+                   WHERE symbol = ANY(%s) AND score_date <= %s
+                   ORDER BY symbol, score_date DESC""", (syms, d))
+    met = {r[0]: _f(r[1]) for r in cur.fetchall()}
+
+    return closes, dates, live, met
+
+
+def _score_dma_cross_window(cands, closes, dates, live, met, window_days):
+    """The flip-scan itself, pure (no DB access). For each session offset t=0..window_days-1
+    (0 = the latest completed close, closes/dates are newest-first), repeats
+    evaluate_dma_cross()'s own single-day flip test — sma5/sma20 at t vs. sma5/sma20 at t+1 — and
+    stops at the FIRST match, which is therefore the MOST RECENT flip in the window. A symbol can
+    in principle whipsaw inside 21 sessions; only that latest flip is reported, per the card's own
+    instruction, never a count."""
+    out = []
+    for sym, basket in cands:
+        c = closes.get(sym) or []          # newest first
+        dts = dates.get(sym) or []
+        if len(c) < window_days + DMA_SLOW:
+            continue                        # insufficient history — never a guessed flip
+        found = None
+        for t in range(window_days):
+            sma5_t = sum(c[t:t + DMA_FAST]) / DMA_FAST
+            sma20_t = sum(c[t:t + DMA_SLOW]) / DMA_SLOW
+            sma5_y = sum(c[t + 1:t + DMA_FAST + 1]) / DMA_FAST
+            sma20_y = sum(c[t + 1:t + DMA_SLOW + 1]) / DMA_SLOW
+            if sma5_t > sma20_t and sma5_y <= sma20_y:
+                found = (t, "GREEN", "DMA_CROSS_UP_1M", "above", sma5_t, sma20_t)
+                break
+            if sma5_t < sma20_t and sma5_y >= sma20_y:
+                found = (t, "RED", "DMA_CROSS_DOWN_1M", "below", sma5_t, sma20_t)
+                break
+        if found is None:
+            continue                        # no flip anywhere in the window — nothing to mark
+        t, colour, direction, rel, sma5_v, sma20_v = found
+        flip_date = dts[t]
+        data_date = dts[0]                  # the latest close actually used — as of THIS date,
+                                             # same "may lag target_date" doc as _score_dma_state
+        cmp_v = (live.get(sym) or {}).get("cmp") if live else None
+        if cmp_v is None:
+            cmp_v = c[0]                    # last completed close — honest fallback
+        ago = "today" if t == 0 else (f"{t} session ago" if t == 1 else f"{t} sessions ago")
+        out.append({
+            "symbol": sym, "basket": basket,
+            "direction": direction, "star_color": colour,
+            "level_name": "5DMA_X_20DMA_1M",
+            "level_value": round(sma5_v, 2),    # the 5DMA AT THE FLIP, not today's
+            "pp": round(sma20_v, 2),            # the 20DMA AT THE FLIP — column reuse, same idiom
+                                                 # as the state marker's own pp=20DMA
+            "cmp_at_star": round(float(cmp_v), 2),
+            "day_1d": met.get(sym),
+            "flip_date": flip_date,
+            "sessions_ago": t,
+            "data_date": data_date,
+            # FACTS ONLY, same wall as star_note(): no buy/sell/entry/target wording.
+            "note": f"5DMA crossed {rel} 20DMA on {flip_date.strftime('%d-%b')}, {ago}",
+        })
+    return out
+
+
+def evaluate_dma_cross_window(conn, window_days: int = DMA_1M_WINDOW_DAYS,
+                               target_date: Optional[date] = None) -> List[Dict[str, Any]]:
+    """GREEN/RED marker: the 5/20DMA flipped at some point in the last `window_days` trading
+    sessions, reporting the MOST RECENT flip's direction and date (cc#2115). PURE READ.
+
+    Same open-book candidate set as evaluate_dma_state() — a symbol not currently OPEN is never
+    evaluated, matching every other marker family in this file."""
+    d = target_date or _ist_now().date()
+    with conn.cursor() as cur:
+        _retired, _ = retired_baskets(cur)   # resolved BEFORE the main query: same cursor
+        cur.execute("""
+            SELECT DISTINCT ON (p.symbol) p.symbol, p.basket
+            FROM v8_paper_positions p
+            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+            WHERE p.status = 'OPEN'
+              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+              AND NOT (p.basket = ANY(%(retired)s))
+            ORDER BY p.symbol, p.entry_ts DESC""", {"retired": _retired})
+        cands = [(r[0], r[1]) for r in cur.fetchall()]
+        if not cands:
+            return []
+        syms = [c[0] for c in cands]
+        # Sized off the ACTUAL window_days argument, not the DMA_1M_FETCH default constant — a
+        # caller passing a wider window still gets enough history for its own scan.
+        fetch_limit = window_days + DMA_SLOW + 4
+        closes, dates, live, met = _fetch_dma_window_support(cur, d, syms, fetch_limit)
+    return _score_dma_cross_window(cands, closes, dates, live, met, window_days)
+
+
 # ── cc#1540 TC_STRONG_V1 (founder direct 31-Aug; cadence amended same day, log 4292) ──────────
 # An AMBER star when Trade Check's score is above 80% AND rising against its own 3-day trailing
 # average. Unlike the other three families this needs HISTORY: no persistence of a Trade Check
@@ -1178,15 +1313,38 @@ def run_tick(conn=None) -> Dict[str, Any]:
                       x["level_name"], x["level_value"], x["pp"], x["cmp_at_star"], x["day_1d"]))
                 dwrote += cur.rowcount
         conn.commit()
-        log.info("cc#856/933/1682 pivot_star tick: %d pivot markers (%d new), %d activity (%d new), "
-                 "%d dma states (%d new)%s",
-                 len(stars), wrote, len(acts), awrote, len(dmas), dwrote,
-                 " (VALID ZERO-MARKER TICK)" if not stars and not acts and not dmas else "")
+        # cc#2115: DMA_CROSS_WINDOW_1M — a THIRD family, additive to the state squares above. Same
+        # write shape (data_date-keyed star_date, ON CONFLICT DO NOTHING first-fire-per-day), plus
+        # touched_dates carries the flip's own date (column reuse, same idiom cc#1880's channel
+        # markers already use for a single touch date). Genuinely zero rows on many ticks — most
+        # symbols have no flip in their trailing 21 sessions most days — that is a valid, not an
+        # error, outcome (ENGINE_LIVENESS_RULE: an explicitly logged valid-empty result is
+        # evidence, silence is not — covered by the zero_star_tick line below same as the others).
+        dma1m = evaluate_dma_cross_window(conn, target_date=d)
+        dma1m_wrote = 0
+        with conn.cursor() as cur:
+            for x in dma1m:
+                cur.execute("""
+                    INSERT INTO v8_pivot_star_log
+                      (star_date, first_seen_ts, symbol, basket, direction, star_color,
+                       level_name, level_value, pp, cmp_at_star, day_1d, touched_dates)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::date[])
+                    ON CONFLICT (symbol, star_date, direction) DO NOTHING
+                """, (x["data_date"], ts, x["symbol"], x["basket"], x["direction"], x["star_color"],
+                      x["level_name"], x["level_value"], x["pp"], x["cmp_at_star"], x["day_1d"],
+                      [str(x["flip_date"])]))
+                dma1m_wrote += cur.rowcount
+        conn.commit()
+        log.info("cc#856/933/1682/2115 pivot_star tick: %d pivot markers (%d new), %d activity "
+                 "(%d new), %d dma states (%d new), %d dma cross-1m (%d new)%s",
+                 len(stars), wrote, len(acts), awrote, len(dmas), dwrote, len(dma1m), dma1m_wrote,
+                 " (VALID ZERO-MARKER TICK)" if not stars and not acts and not dmas and not dma1m else "")
         return {"ok": True, "date": str(d), "evaluated": len(stars), "new_rows": wrote,
                 "activity": len(acts), "activity_new_rows": awrote,
                 "dma_state": len(dmas), "dma_state_new_rows": dwrote,
                 "dma_cross": len(dmas), "dma_cross_new_rows": dwrote,   # alias, one release (cc#1682 scope 4)
-                "zero_star_tick": not stars and not acts and not dmas, "scope": EVAL_SCOPE}
+                "dma_cross_1m": len(dma1m), "dma_cross_1m_new_rows": dma1m_wrote,
+                "zero_star_tick": not stars and not acts and not dmas and not dma1m, "scope": EVAL_SCOPE}
     except Exception as e:
         log.exception("cc#856 pivot_star tick failed")
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -1428,6 +1586,55 @@ def pivot_star(star_date: Optional[str] = None):
             except Exception as e:
                 log.warning("cc#1682 dma-state log-read failed: %s", e)
                 dma = []
+            # cc#2115: DMA_CROSS_WINDOW_1M — a SIXTH list, additive to dma_state above (own key,
+            # own map, per cc#933's one-map-per-family rule: a symbol can carry the state square
+            # AND this marker at once). Same LOG-read/DISPLAY_PARITY doctrine, same open-book
+            # scoping, same DISTINCT-ON-latest-per-symbol shape as the dma_state block above, for
+            # the identical reason: a window-cross row's own data_date legitimately lags the
+            # resolved star_date during market hours (same gate as dma_state). UNLIKE dma_state,
+            # this marker is NOT defined every day — most symbols have no flip in their last 21
+            # sessions on most days — so "latest row ever" alone could resurrect a flip that has
+            # since aged out of the window if the scheduler ever stalled. A 4-calendar-day
+            # staleness bound (covers one normal weekend plus a Monday holiday, well short of the
+            # 21-session window itself) keeps a stale row from lingering indefinitely without a
+            # live re-evaluation here, which DISPLAY_PARITY forbids.
+            dma1m = []
+            try:
+                with conn.cursor() as d1cur:
+                    _dma1m_retired, _ = retired_baskets(d1cur)
+                    d1cur.execute("""
+                        WITH book AS (
+                            SELECT DISTINCT ON (p.symbol) p.symbol
+                            FROM v8_paper_positions p
+                            LEFT JOIN app_config c ON c.key = 'v8_paper_rebuild_cutover_ts'
+                            WHERE p.status = 'OPEN'
+                              AND (c.value IS NULL OR p.entry_ts >= c.value::timestamp)
+                              AND NOT (p.basket = ANY(%(retired)s))
+                            ORDER BY p.symbol, p.entry_ts DESC
+                        )
+                        SELECT DISTINCT ON (g.symbol) g.symbol, g.direction, g.star_color,
+                               g.level_value, g.pp, g.star_date, g.touched_dates
+                        FROM v8_pivot_star_log g
+                        JOIN book b ON b.symbol = g.symbol
+                        WHERE g.direction IN ('DMA_CROSS_UP_1M','DMA_CROSS_DOWN_1M')
+                          AND g.star_date >= (%(d)s::date - INTERVAL '4 days')
+                        ORDER BY g.symbol, g.star_date DESC""", {"retired": _dma1m_retired, "d": d})
+                    for sym, dirn, col, lv, ppv, sdate, tdates in d1cur.fetchall():
+                        rel = "above" if dirn == "DMA_CROSS_UP_1M" else "below"
+                        lvf, ppf = _f(lv), _f(ppv)
+                        fdate = tdates[0] if tdates else None
+                        dma1m.append({
+                            "symbol": sym, "direction": dirn, "color": col,
+                            "dma5": lvf, "dma20": ppf,
+                            "flip_date": str(fdate) if fdate else None,
+                            "data_date": str(sdate) if sdate else None,
+                            # FACTS ONLY — same wall as every other marker note.
+                            "note": (f"5DMA crossed {rel} 20DMA on {fdate.strftime('%d-%b')}"
+                                     if fdate else f"5DMA crossed {rel} 20DMA in the last month"),
+                        })
+            except Exception as e:
+                log.warning("cc#2115 dma_cross_1m log-read failed: %s", e)
+                dma1m = []
             # cc#1540: TC_STRONG amber stars — the fourth list, LOG read like the others.
             tcs = []
             try:
@@ -1494,6 +1701,8 @@ def pivot_star(star_date: Optional[str] = None):
                 # SAME list for one release so neither surface breaks mid-sprint (scope item 4).
                 "dma_state": dma, "dma_state_count": len(dma),
                 "dma_cross": dma, "dma_cross_count": len(dma),
+                # cc#2115: own key, own map — additive to dma_state, never merged into it.
+                "dma_cross_1m": dma1m, "dma_cross_1m_count": len(dma1m),
                 "tc_strong": tcs, "tc_strong_count": len(tcs),
                 "channel_reject": chan, "channel_reject_count": len(chan),
                 "scope": EVAL_SCOPE,
@@ -1531,6 +1740,7 @@ def pivot_star(star_date: Optional[str] = None):
                     "Green/red square = 5DMA above/below 20DMA",
                     "Green triangle = touched the 5-min channel band (last 3 trading days) and "
                     "reversed 1%+ off that touch",
+                    "Up/down arrow = 5DMA crossed 20DMA within the last month, most recent flip",
                 ],
             }
     except Exception as e:
