@@ -28,15 +28,15 @@
     + '#scorrCacOv.open{display:flex}'
     + '#scorrCacOv .cac-box{background:var(--panel,#0e1016);border:1px solid var(--line,#2a2a31);'
     + 'border-radius:12px;max-width:480px;width:100%;padding:18px;box-sizing:border-box;'
-    + "font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--txt,#e9e9ee);"
+    + "font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--cac-txt,var(--txt,#e9e9ee));"
     + 'max-height:88vh;overflow-y:auto}'
     + '#scorrCacOv .cac-box *{box-sizing:border-box}'
     + '#scorrCacOv h2{font-size:14px;margin:0 0 4px}'
-    + '#scorrCacOv .cac-s{font-size:11px;color:var(--mut,#8a8a93);margin-bottom:12px;line-height:1.45}'
-    + '#scorrCacOv .cac-lb{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--mut,#8a8a93);'
+    + '#scorrCacOv .cac-s{font-size:11px;color:var(--cac-mut,var(--mut,#8a8a93));margin-bottom:12px;line-height:1.45}'
+    + '#scorrCacOv .cac-lb{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--cac-mut,var(--mut,#8a8a93));'
     + 'text-transform:uppercase;margin:12px 0 6px}'
     + '#scorrCacOv .cac-in{width:100%;min-height:40px;border-radius:8px;border:1px solid var(--line2,#33333c);'
-    + 'background:var(--card2,#17181f);color:var(--txt,#e9e9ee);font-family:inherit;font-size:13px;padding:9px 11px}'
+    + 'background:var(--card2,#17181f);color:var(--cac-txt2,var(--txt,#e9e9ee));font-family:inherit;font-size:13px;padding:9px 11px}'
     + '#scorrCacOv .cac-res{border:1px solid var(--line,#2a2a31);border-radius:8px;margin-top:6px;'
     + 'overflow:hidden;max-height:180px;overflow-y:auto}'
     + '#scorrCacOv .cac-ri{display:flex;justify-content:space-between;gap:10px;align-items:baseline;'
@@ -44,34 +44,34 @@
     + '#scorrCacOv .cac-ri:hover{background:var(--card2,#17181f)}'
     + '#scorrCacOv .cac-ri:last-child{border-bottom:none}'
     + '#scorrCacOv .cac-ri b{font-size:12.5px}'
-    + '#scorrCacOv .cac-ri span{font-size:10.5px;color:var(--mut,#8a8a93)}'
+    + '#scorrCacOv .cac-ri span{font-size:10.5px;color:var(--cac-mut,var(--mut,#8a8a93))}'
     + '#scorrCacOv .cac-cond{border:1px solid var(--line2,#33333c);border-radius:10px;padding:10px;margin-top:10px;position:relative}'
     + '#scorrCacOv .cac-join{position:absolute;top:-12px;right:10px;display:flex;border:1px solid var(--blu,#4d7cfe);'
     + 'border-radius:8px;overflow:hidden;background:var(--panel,#0e1016)}'
     + '#scorrCacOv .cac-join button{font:800 9.5px ui-monospace,monospace;padding:4px 8px;border:none;'
-    + 'background:transparent;color:var(--mut,#8a8a93);cursor:pointer}'
+    + 'background:transparent;color:var(--cac-mut,var(--mut,#8a8a93));cursor:pointer}'
     + '#scorrCacOv .cac-join button.on{background:var(--blu,#4d7cfe);color:#fff}'
     + '#scorrCacOv .cac-metricbtn{width:100%;text-align:left;padding:9px 11px;border-radius:8px;'
-    + 'border:1px solid var(--line2,#33333c);background:var(--card2,#17181f);color:var(--txt,#e9e9ee);'
+    + 'border:1px solid var(--line2,#33333c);background:var(--card2,#17181f);color:var(--cac-txt2,var(--txt,#e9e9ee));'
     + 'font-size:12.5px;cursor:pointer}'
-    + '#scorrCacOv .cac-metricbtn.picked{border-color:var(--blu,#4d7cfe);color:#fff}'
+    + '#scorrCacOv .cac-metricbtn.picked{border-color:var(--blu,#4d7cfe);font-weight:700}'   /* cc#2138: was color:#fff -- white on the light field bg (1.13:1). Text keeps the field's own token; the blue border + weight say "picked". */
     + '#scorrCacOv .cac-row2{display:flex;gap:8px;margin-top:8px}'
     + '#scorrCacOv .cac-row2 .cac-seg{display:inline-flex;border:1px solid var(--line2,#33333c);border-radius:8px;overflow:hidden}'
     + '#scorrCacOv .cac-seg button{font:700 10.5px ui-monospace,monospace;padding:6px 10px;border:none;'
-    + 'background:transparent;color:var(--mut,#8a8a93);cursor:pointer;min-height:34px}'
+    + 'background:transparent;color:var(--cac-mut,var(--mut,#8a8a93));cursor:pointer;min-height:34px}'
     + '#scorrCacOv .cac-seg button.on{background:var(--blu,#4d7cfe);color:#fff}'
     + '#scorrCacOv .cac-row2 input{flex:1;min-width:0}'
     + '#scorrCacOv .cac-rm{margin-top:8px;font-size:10.5px;color:var(--red,#ff5c6c);background:none;'
     + 'border:none;cursor:pointer;padding:2px 0}'
     + '#scorrCacOv .cac-add{width:100%;margin-top:10px;padding:9px;border-radius:9px;border:1px dashed var(--line2,#33333c);'
-    + 'background:transparent;color:var(--mut,#8a8a93);font-size:12px;cursor:pointer}'
+    + 'background:transparent;color:var(--cac-mut,var(--mut,#8a8a93));font-size:12px;cursor:pointer}'
     + '#scorrCacOv .cac-err{margin-top:10px;font-size:11.5px;color:var(--red,#ff5c6c);line-height:1.5}'
     + '#scorrCacOv .cac-go{width:100%;min-height:42px;margin-top:16px;border-radius:10px;'
     + 'border:1px solid var(--blu,#4d7cfe);background:var(--blu,#4d7cfe);color:#fff;font-weight:800;'
     + 'font-size:13px;font-family:inherit;cursor:pointer}'
     + '#scorrCacOv .cac-go[disabled]{opacity:.5;cursor:default}'
     + '#scorrCacOv .cac-cancel{margin-top:10px;width:100%;padding:8px 16px;border-radius:9px;'
-    + 'border:1px solid var(--line,#2a2a31);background:var(--panel,#0e1016);color:var(--txt,#e9e9ee);'
+    + 'border:1px solid var(--line,#2a2a31);background:var(--panel,#0e1016);color:var(--cac-txt,var(--txt,#e9e9ee));'
     + 'font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}';
 
   function _injectStyle() {
@@ -302,8 +302,42 @@
     });
   }
 
+  /* cc#2138: the modal's text colour, resolved by EVIDENCE at every open. The two token systems
+     disagree on the NAME of the text colour: the web contract (scorr_web_tokens.css) calls it --txt
+     and uses --ink as a page background; app body themes (scorr_themes.css) call it --ink and have
+     no --txt, so on an app light theme --txt falls through to r5's chalk and the whole box read
+     white-on-white (measured 1.14:1). The modal has TWO surfaces -- the box (--panel) and the fields
+     (--card2) -- and on an app light theme they sit on opposite sides (white box, dark fields), so
+     each surface gets its own text pick: the first candidate token whose luminance sits opposite
+     that surface's. No usable token -> the CSS falls back to the same var() it always used. */
+  function _lum(hex) {
+    hex = (hex || '').trim().replace(/^#/, '');
+    if (hex.length === 3) hex = hex.replace(/./g, function (c) { return c + c; });
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+    return parseInt(hex.slice(0, 2), 16) * 0.299 + parseInt(hex.slice(2, 4), 16) * 0.587 + parseInt(hex.slice(4, 6), 16) * 0.114;
+  }
+  function _paintTokens() {
+    if (!_ov) return;
+    ['--cac-txt', '--cac-txt2', '--cac-mut'].forEach(function (k) { _ov.style.removeProperty(k); });
+    try {
+      var cs = getComputedStyle(document.body);
+      var val = function (n) { return (cs.getPropertyValue(n) || '').trim(); };
+      var pick = function (names, bgHex) {
+        var bl = _lum(bgHex); if (bl == null) return null;
+        for (var i = 0; i < names.length; i++) { var v = val(names[i]), l = _lum(v); if (l != null && (bl < 110) !== (l < 110)) return v; }
+        return null;
+      };
+      var panel = val('--panel'), card2 = val('--card2') || panel;
+      var t = pick(['--txt', '--ink'], panel), t2 = pick(['--txt', '--ink'], card2), m = pick(['--mut', '--muted'], panel);
+      if (t) _ov.style.setProperty('--cac-txt', t);
+      if (t2) _ov.style.setProperty('--cac-txt2', t2);
+      if (m) _ov.style.setProperty('--cac-mut', m);
+    } catch (e) {}
+  }
+
   function open(onCreated) {
     _build();
+    _paintTokens();
     _onCreated = (typeof onCreated === 'function') ? onCreated : null;
     STATE = { sym: null, conds: [_newCond()], busy: false, pickerFor: null };
     document.getElementById('cacQ').value = '';
