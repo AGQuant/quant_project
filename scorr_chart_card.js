@@ -590,26 +590,32 @@ var _full = false;                // cc#779: fullscreen state
     // timeframe buttons
     var host = document.getElementById("scorrChartTfs");
     host.innerHTML = "";
+    /* cc#2110: TF_ORDER.forEach's pill-button loop replaced with a single native <select>. A
+       select has a fixed, small footprint regardless of option count or surrounding header
+       width -- structurally immune to the wrap/squeeze class of bug cc#2103's flex-wrap fix still
+       missed on a real device (founder screenshot: portrait showed only "ALL", fullscreen showed
+       all 5 pills correctly -- identical markup/logic, a narrow-width real-device rendering gap
+       Playwright's own rect measurements never caught, which is exactly why VISUAL_VERIFY_GATE_V1
+       (cc#2108) now exists). Kept as a genuine native <select>, not a custom popover -- no new
+       rendering surface to get wrong; the OS's own dropdown chrome is the proven-reliable part
+       here. The disabled/3Y-depth-gate branch this loop used to carry is not ported forward: 3Y
+       was dropped from TF_ORDER entirely in cc#2103, so it was already dead on every real path. */
+    var futOk = _futCache[_sym] !== false;   // undefined (not probed) or true => allow; false => on-demand Yahoo path
+    var tfSel = document.createElement("select");
+    tfSel.className = "scorr-tf-sel";
+    tfSel.setAttribute("aria-label", "Timeframe");
+    tfSel.style.cssText = "width:56px;padding:4px 4px 4px 8px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line + ";background:" + p.btn + ";color:" + p.mut;
     TF_ORDER.forEach(function (k) {
-      var b = document.createElement("button");
-      b.textContent = TF_LABEL[k] || k; b.setAttribute("data-tf", k);   // cc#990: label, not key
-      var is5 = (k === "5m");
-      var futOk = _futCache[_sym] !== false;   // undefined (not probed) or true => allow; false => on-demand Yahoo path
-      var y3 = (k === "3Y") ? _3yCache[_sym] : null;   // cc#1566: null = not probed yet => allow
-      // cc#2043 UNIVERSAL RULE: 1D is no longer disabled for a non-futures symbol -- _load() below
-      // routes it through the canonical Yahoo on-demand fetch instead of the Fyers-backed
-      // /api/intraday/ endpoint (which is empty for anything outside futures_universe). futOk still
-      // decides WHICH source _load() calls, just never whether the pill is clickable.
-      var disabled = !!(y3 && y3.ok === false);
-      var on = (k === _tf);
-      b.style.cssText = "padding:4px 9px;border-radius:7px;font:700 11.5px/1 -apple-system,Segoe UI,sans-serif;cursor:pointer;border:1px solid " + p.line +
-        ";background:" + (on ? p.btnOn : p.btn) + ";color:" + (on ? "#fff" : p.mut) +
-        (disabled ? ";opacity:.4;cursor:not-allowed" : "");
-      if (disabled) b.title = (y3 && y3.reason) || TF_3Y_REASON;   // cc#1566: the reason IS the tooltip
-      else if (is5 && !futOk) b.title = "1D (5-min) via Yahoo Finance -- this symbol is not on the live futures feed";
-      if (!disabled) b.onclick = function () { _load(k); };
-      host.appendChild(b);
+      var o = document.createElement("option");
+      o.value = k; o.textContent = TF_LABEL[k] || k;   // cc#990: label, not key
+      if (k === _tf) o.selected = true;
+      // cc#2043 UNIVERSAL RULE: 1D is never disabled for a non-futures symbol -- _load() routes it
+      // through the canonical Yahoo on-demand fetch instead. This tooltip is informational only.
+      if (k === "5m" && !futOk) o.title = "1D (5-min) via Yahoo Finance -- this symbol is not on the live futures feed";
+      tfSel.appendChild(o);
     });
+    tfSel.onchange = function () { _load(tfSel.value); };
+    host.appendChild(tfSel);
     // cc#730: Pivots / Fib overlay toggles (mirror the V8 card). cc#806: pivots are suppressed on every
     // timeframe longer than 6M (see PIV_TFS), not just ALL — rolling levels lose meaning well before
     // full history. Fib is unaffected: its swing is derived from the loaded range, so it stays valid.
