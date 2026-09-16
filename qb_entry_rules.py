@@ -188,10 +188,17 @@ def tc_score_rise_1w(conn, symbol: str, as_of: Optional[date] = None,
             "window_sessions": window_sessions}
 
 
-def monthly_rsi_above(conn, symbol: str, threshold: float = 70) -> Dict[str, Any]:
-    """Condition (b). v8_metrics.rsi_month, latest score_date -- deliberately NOT
-    universe_technicals (shorter history, only from 2026-07-03; v8_metrics goes back to
-    2025-06-02, per the card's own instruction to pick the deeper source -- confirmed, 331 dates)."""
+def monthly_rsi_check(conn, symbol: str, direction: str = "above",
+                       threshold: float = 70) -> Dict[str, Any]:
+    """Condition (b) (cc#2126 entry) and its mirror (cc#2127 exit, monthly_rsi_exit) -- ONE read
+    path, direction parameterised, not a second query (cc#2127's own explicit instruction: "Same
+    deep-history source as cc#2126's entry RSI condition -- reuse the same read path"). Renamed
+    from cc#2126's original monthly_rsi_above to monthly_rsi_check when cc#2127 needed the same
+    query in the opposite direction -- nothing outside this module called the old name yet
+    (checked before renaming), so this is a safe, zero-caller-impact rename, not a breaking one.
+    v8_metrics.rsi_month, latest score_date -- deliberately NOT universe_technicals (shorter
+    history, only from 2026-07-03; v8_metrics goes back to 2025-06-02, per cc#2126's own
+    instruction to pick the deeper source -- confirmed, 331 dates)."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT rsi_month, score_date FROM v8_metrics
@@ -201,23 +208,29 @@ def monthly_rsi_above(conn, symbol: str, threshold: float = 70) -> Dict[str, Any
         row = cur.fetchone()
     if not row:
         return {"passes": False, "value": None, "score_date": None, "no_data": True,
-                "threshold": threshold}
+                "threshold": threshold, "direction": direction}
     value, score_date = row
-    return {"passes": bool(value is not None and float(value) >= threshold),
-            "value": float(value) if value is not None else None,
-            "score_date": str(score_date), "threshold": threshold, "no_data": False}
+    v = float(value) if value is not None else None
+    passes = v is not None and (v >= threshold if direction == "above" else v <= threshold)
+    return {"passes": bool(passes), "value": v, "score_date": str(score_date),
+            "threshold": threshold, "direction": direction, "no_data": False}
 
 
 _EMA_PAIRS = {"5_20": (5, 20), "20_50": (20, 50)}
 
 
-def ema_crossover(conn, symbol: str, pair: str = "5_20", as_of: Optional[date] = None,
-                   window_days: int = 21) -> Dict[str, Any]:
-    """Condition (c). Modelled on evaluate_dma_cross_window()'s pattern (cc#2115,
-    v8_pivot_star.py) -- a CROSS, not a state: fires on the session the fast/slow EMA relationship
-    FLIPS UP within the trailing window_days trading sessions, not every day it holds (same
-    distinction cc#1682/cc#1539 drew for DMA), and reports the most recent such flip. Its own
-    function, in this file -- reuses only _ema(), the shared pure EMA-math helper, never
+def ema_crossover(conn, symbol: str, pair: str = "5_20", direction: str = "bull",
+                   as_of: Optional[date] = None, window_days: int = 21) -> Dict[str, Any]:
+    """Condition (c) (cc#2126 entry, direction='bull') and its bearish mirror (cc#2127 exit,
+    ema_crossover_exit, direction='bear') -- ONE crossover-detection function, direction as a
+    parameter, not a second implementation (cc#2127's own explicit instruction). Modelled on
+    evaluate_dma_cross_window()'s pattern (cc#2115, v8_pivot_star.py) -- a CROSS, not a state:
+    fires on the session the fast/slow EMA relationship FLIPS in the requested direction within
+    the trailing window_days trading sessions, not every day it holds (same distinction
+    cc#1682/cc#1539 drew for DMA), and reports the most recent flip found (either direction,
+    labelled) even when it doesn't match what the caller asked for -- so a caller can see "it
+    crossed, just the wrong way" rather than an undifferentiated False. Its own function, in this
+    file -- reuses only _ema(), the shared pure EMA-math helper, never
     evaluate_dma_cross_window()/evaluate_dma_state() themselves, so the DMA marker is never at
     risk of a parameterised-reuse regression (the card's own do_not_touch). pair: '5_20' or
     '20_50', matching the founder's own two named pairs ("20 over 50 or 5 over 20")."""
@@ -235,7 +248,7 @@ def ema_crossover(conn, symbol: str, pair: str = "5_20", as_of: Optional[date] =
     closes = [float(r[1]) for r in rows]
     if len(closes) < slow + 2:
         return {"passes": False, "insufficient_history": True, "cross_date": None,
-                "direction": None, "pair": pair}
+                "detected_direction": None, "pair": pair, "direction": direction}
     start_i = max(slow, len(closes) - window_days - 1)
     series = []   # [(date, ema_fast, ema_slow)], oldest first, one entry per trading day in window
     for i in range(start_i, len(closes)):
@@ -244,18 +257,19 @@ def ema_crossover(conn, symbol: str, pair: str = "5_20", as_of: Optional[date] =
         if ef is None or es is None:
             continue
         series.append((dates[i], ef, es))
-    cross_date, direction = None, None
+    cross_date, detected_direction = None, None
     for i in range(1, len(series)):
         prev_diff = series[i - 1][1] - series[i - 1][2]
         cur_diff = series[i][1] - series[i][2]
         if prev_diff <= 0 and cur_diff > 0:
-            cross_date, direction = series[i][0], "bull"
+            cross_date, detected_direction = series[i][0], "bull"
         elif prev_diff >= 0 and cur_diff < 0:
-            cross_date, direction = series[i][0], "bear"
-    return {"passes": cross_date is not None and direction == "bull",
+            cross_date, detected_direction = series[i][0], "bear"
+    return {"passes": cross_date is not None and detected_direction == direction,
             "insufficient_history": False,
             "cross_date": str(cross_date) if cross_date else None,
-            "direction": direction, "pair": pair, "window_days": window_days}
+            "detected_direction": detected_direction, "pair": pair, "direction": direction,
+            "window_days": window_days}
 
 
 # ── the combinator ────────────────────────────────────────────────────────────────────────────
@@ -263,7 +277,8 @@ def ema_crossover(conn, symbol: str, pair: str = "5_20", as_of: Optional[date] =
 def combine_conditions(results: List[Dict[str, Any]], combinator: str = "OR") -> Dict[str, Any]:
     """Condition (3), the COMBINATOR. `results` is a list of
     {"key": str, "included": bool, "passes": bool} -- one entry per condition the caller
-    evaluated (any subset of tc_score_rise_1w / monthly_rsi_above / ema_crossover). A condition
+    evaluated (any subset of tc_score_rise_1w / monthly_rsi_check / ema_crossover, entry or exit --
+    cc#2127 reuses this same combinator unchanged for its own six exit conditions). A condition
     with included=False contributes NOTHING -- no ghost AND/OR term, matching the card's own
     verify requirement. combinator: 'ALL' (AND) or 'ANY' (OR) over the INCLUDED conditions only.
     Proof property the card's verify list asks for: running ANY always returns a pass count >=
