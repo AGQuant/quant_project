@@ -2645,6 +2645,29 @@ def _bg_gvm():
                                         duration_ms=int((time.time() - _tc_t0) * 1000))
         except Exception as _re:
             log.warning(f"record_run(tc_scanner_score_daily) failed: {_re}")
+
+        # cc#2134 -- Investment Score (IC V2 /10) for the whole universe, CHAINED here because its
+        # two inputs are both settled by this point: raw_prices' EOD ingest (18:30-20:30 IST) and
+        # the gvm_scores/gvm_history rebuild that opened this block. A fixed slot could only guess
+        # at that. Runs LAST in the chain -- it is the longest step (~1,800 compute() calls, minutes)
+        # and nothing downstream waits on it. A scoring failure must never mark the GVM run bad.
+        _is_t0 = time.time()
+        _is_status, _is_err = "ok", None
+        try:
+            import investment_score_eod
+            _is_res = investment_score_eod.run()
+            log.info("cc#2134 investment_score_eod: %s", {k: v for k, v in _is_res.items() if k != "errors"})
+            if _is_res.get("status") != "ok":
+                _is_status, _is_err = "warn", _is_res.get("note")
+        except Exception as e:
+            _is_status, _is_err = "error", str(e)[:400]
+            log.error(f"cc#2134 investment_score_eod: {e}")
+        try:
+            import scheduler_master
+            scheduler_master.record_run("investment_score_eod", _is_status, error=_is_err,
+                                        duration_ms=int((time.time() - _is_t0) * 1000))
+        except Exception as _re:
+            log.warning(f"record_run(investment_score_eod) failed: {_re}")
     except Exception as e: log.error(f"gvm: {e}")
 
 def _bg_gvm_backfill():

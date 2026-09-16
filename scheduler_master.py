@@ -201,6 +201,12 @@ _CHAINED_JOBS = [
      "cadence_human": "nightly, chained immediately after gvm_recompute (and after gvm_coverage_guard)",
      "module": "qb_entry_rules.py", "function": "compute_tc_scanner_score_daily", "service": "app",
      "category": "chained"},
+    # cc#2134: Investment Score EOD (IC V2 /10 for the whole gvm_scores universe) -- last in the
+    # same chain, after tc_scanner_score_daily. Listed for the same reason as the two above.
+    {"job_name": "investment_score_eod",
+     "cadence_human": "nightly, chained last after gvm_recompute (after tc_scanner_score_daily)",
+     "module": "investment_score_eod.py", "function": "run", "service": "app",
+     "category": "chained"},
 ]
 
 

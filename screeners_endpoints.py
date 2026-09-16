@@ -139,8 +139,30 @@ def screener_detail(screen_id: int):
                         r["live"] = bool(q.get("live"))
                 except Exception as e:
                     log.warning(f"screener_detail cmp overlay: {e}")
+
+            # cc#2134: Investment Score overlay -- score10 + band from investment_check_v2_scores at
+            # its LATEST score_date, joined by symbol. A symbol with no row (first day, or outside
+            # the GVM universe) gets null, which the page renders as '--'. Never a computed value.
+            inv_date = None
+            if rows:
+                try:
+                    cur.execute("SELECT MAX(score_date) FROM investment_check_v2_scores")
+                    inv_date = cur.fetchone()[0]
+                    if inv_date:
+                        cur.execute("""SELECT symbol, score10, band FROM investment_check_v2_scores
+                                       WHERE score_date=%s AND symbol = ANY(%s)""",
+                                    (inv_date, [r["symbol"].upper() for r in rows]))
+                        inv = {s: (sc, b) for s, sc, b in cur.fetchall()}
+                        for r in rows:
+                            sc, b = inv.get(r["symbol"].upper(), (None, None))
+                            r["inv_score"] = float(sc) if sc is not None else None
+                            r["inv_band"] = b
+                except Exception as e:
+                    conn.rollback()
+                    log.warning(f"screener_detail inv score overlay: {e}")
         return {"status": "ok", "id": _id, "name": name, "sort_key": sort_key,
-                "columns": cols, "rows": rows, "members": len(rows)}
+                "columns": cols, "rows": rows, "members": len(rows),
+                "inv_score_date": str(inv_date) if inv_date else None}
     except HTTPException:
         raise
     except Exception as e:

@@ -45,6 +45,15 @@
   .pos{color:var(--grn)} .neg{color:var(--red)} .zero{color:var(--mut)}
   .live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);
             margin-left:5px;vertical-align:middle}
+  /* cc#2134: Investment Score band chip -- the SAME band colours the /check page uses for IC V2
+     (scorr_check.html bandChip): STRONG_BUY green on grn-d, ACCUMULATE blue, WATCH amber, AVOID muted. */
+  .inv{display:inline-flex;align-items:baseline;gap:6px;justify-content:flex-end}
+  .inv b{font-variant-numeric:tabular-nums}
+  .band{font-size:9px;font-weight:800;letter-spacing:.06em;padding:2px 6px;border-radius:5px;
+        border:1px solid var(--line2);color:var(--mut);white-space:nowrap}
+  .band.STRONG_BUY{color:var(--grn);border-color:var(--grn);background:var(--grn-d)}
+  .band.ACCUMULATE{color:var(--blu);border-color:var(--blu)}
+  .band.WATCH{color:var(--amber);border-color:var(--amber)}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
   /* cc#1516: tap-to-sort headers — same convention as the v10 cards (cc#1430/1437): neutral ↕ on
      every sortable header so a touch reader knows it is tappable, single ▲/▼ on the active one. */
@@ -192,12 +201,13 @@ function renderScreen(d){
     DAY:    function(r){ return (r.day_pct==null||isNaN(Number(r.day_pct)))?null:Number(r.day_pct); },
     GVM:    function(r){ var v=(r.metrics||{}).gvm_score;
                          return (v==null||isNaN(Number(v)))?null:Number(v); },
+    INV:    function(r){ return (r.inv_score==null||isNaN(Number(r.inv_score)))?null:Number(r.inv_score); },
     ADDED:  function(r){ if(!r.first_seen) return null;
                          var t=new Date(r.first_seen+'T00:00:00').getTime();
                          return isNaN(t)?null:t; }
   };
-  var defDir = { SYMBOL:1, CMP:-1, DAY:-1, GVM:-1, ADDED:-1 };
-  var labels = { SYMBOL:'Symbol', CMP:'CMP', DAY:'Day%', GVM:'GVM', ADDED:'Added On' };
+  var defDir = { SYMBOL:1, CMP:-1, DAY:-1, GVM:-1, INV:-1, ADDED:-1 };
+  var labels = { SYMBOL:'Symbol', CMP:'CMP', DAY:'Day%', GVM:'GVM', INV:'Inv Score', ADDED:'Added On' };
   shown.forEach(function(c){
     var k = 'm_'+c.key;   // prefixed so a screen field can never collide with a fixed key
     getters[k] = (function(key){ return function(r){
@@ -212,9 +222,12 @@ function renderScreen(d){
 
 function paintScreen(){
   var d = VIEW.d, shown = VIEW.shown;
-  // Sr · Symbol (+ C·A·R·D strip) · CMP · Day% · GVM · <screen's own fields> · Added On
+  // Sr · Symbol (+ C·A·R·D strip) · CMP · Day% · GVM · Inv Score · <screen's own fields> · Added On
+  // cc#2134: Inv Score = invest_check_v2 score10 + band, persisted EOD (investment_check_v2_scores
+  // at its latest score_date, joined server-side). '--' when the symbol has no row -- never derived.
   var head = ['<th>Sr</th>', scrTh('Symbol','SYMBOL',''), scrTh('CMP','CMP','num'),
-              scrTh('Day%','DAY','num'), scrTh('GVM','GVM','num')];
+              scrTh('Day%','DAY','num'), scrTh('GVM','GVM','num'),
+              scrTh('Inv Score'+(d.inv_score_date?' · '+fmtDate(d.inv_score_date):''),'INV','num')];
   shown.forEach(function(c){ head.push(scrTh(c.label,'m_'+c.key,'num')); });
   head.push(scrTh('Added On','ADDED',''));
   document.getElementById('head').innerHTML = head.join('');
@@ -241,6 +254,10 @@ function paintScreen(){
              + (r.live?'<span class="live-dot" title="live tick"></span>':'')+'</td>');
     tds.push('<td class="num '+cls(r.day_pct)+'">'+fmtGrowth(r.day_pct)+'</td>');
     tds.push('<td class="num">'+(m.gvm_score==null?'--':Number(m.gvm_score).toFixed(2))+'</td>');
+    tds.push('<td class="num">'+(r.inv_score==null ? '--'
+             : '<span class="inv"><b>'+Number(r.inv_score).toFixed(2)+'</b>'
+               +(r.inv_band?'<span class="band '+esc(r.inv_band)+'">'+esc(String(r.inv_band).replace('_',' '))+'</span>':'')
+               +'</span>')+'</td>');
     shown.forEach(function(c){
       var v = m[c.key];
       tds.push('<td class="num'+(c.fmt==='growth'?' '+cls(v):'')+'">'
