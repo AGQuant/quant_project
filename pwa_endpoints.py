@@ -395,6 +395,13 @@ PWA_JS = """
     ['/result-corner', '\\u2263', 'Results'],
     ['/sector', '\\u2297', 'Sector'],
     ['/quant-basket', '\\u25eb', 'QB'],
+    // cc#2123 (founder 16-Sep "Universe filter should be full page category wise... You are
+    // building a Quant Basket Engine not screener"): a NEW, separate Universe builder -- pool
+    // selector + GVM/component-score filters live, six more categories visible as "coming".
+    // Placed directly after QB (adjacent-tool convention, same as Alerts/Trades and Options next
+    // to Screeners/Invest Scan above). v12_endpoints.py / scorr_v12.html and their own nav
+    // entries are untouched -- this is a new page, not a replacement.
+    ['/qb/universe2', '\\u2b1a', 'QB Universe'],
     ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],
     // cc#824 (founder 02-Aug): Screeners — the 8 predefined screens as a standing destination.
     // ONE entry, added ONCE. This array renders in two form factors (desktop top bar and the mobile

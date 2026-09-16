@@ -40,6 +40,7 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
 from qb_discretionary_rebalance import router as qb_discretionary_router  # cc#1715: need-basis rebalance for discretionary baskets
+from qb_universe_builder import router as qb_universe_builder_router  # cc#2123: Quant Basket Universe builder V1
 from gvm_report_endpoints import router as gvm_report_router
 from gvm_market_endpoints import router as gvm_market_router
 from gvm_universe_pivots import router as gvm_universe_pivots_router
@@ -278,6 +279,7 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/digest",      # cc#846
                      "/trades",      # cc#991: Wall of Trades (web renderer)
                      "/alerts",      # cc#1536: Alerts (web renderer, the approve surface)
+                     "/qb/universe2", # cc#2123: Quant Basket Universe builder V1
                      "/options",     # cc#2038: Option Strategy Builder (web renderer)
                      "/adaptive",   # cc#392/394/398/426/442/467/525/603/651: no-store + theme/logout pills
                      "/room",       # cc#1086: Fable Room viewer
@@ -297,6 +299,7 @@ PROTECTED.add("/digest")   # cc#846: gate + no-store
 PROTECTED.add("/trades")   # cc#991: Wall of Trades, web — gate + no-store
 PROTECTED.add("/alerts")   # cc#1536: Alerts, web — gate + no-store
 PROTECTED.add("/options")  # cc#2038: Option Strategy Builder, web — gate + no-store
+PROTECTED.add("/qb/universe2")  # cc#2123: Quant Basket Universe builder V1 — gate + no-store
 PROTECTED.add("/intel")    # cc#1754: Intel standalone page — gate + no-store (same as /news, which now 301s to it)
 # cc#2013 P0: three web pages were live with NO gate at all -- served to anyone, no password. Found by
 # set difference of app_route_map (crawl=true) minus PROTECTED, re-derived by CC from the source, not
@@ -844,6 +847,7 @@ app.include_router(v8_router)
 app.include_router(v8_futures_router)
 app.include_router(qb_router)
 app.include_router(qb_discretionary_router)
+app.include_router(qb_universe_builder_router)  # cc#2123: Quant Basket Universe builder V1
 app.include_router(gvm_nightly_router)
 app.include_router(gvm_report_router)
 app.include_router(gvm_market_router)
@@ -1637,6 +1641,7 @@ NAV_REGISTRY = {
     "/structure":    ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/performance":  ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/quant-basket": ("QB (curated Quant Basket)", "nav"),
+    "/qb/universe2": ("QB Universe builder (cc#2123 V1)", "nav"),
     # cc#1523: Intel de-listed from the site nav — now a V8 tab-row embed pane (the cc#853 Digest
     # placement). Route unchanged, still PROTECTED + injected; /m/intel app entry untouched.
     # cc#1747: Intel is back on the site nav (slot 3, after V8) as '/dashboard#intel' — the same V8

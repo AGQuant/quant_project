@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quant Basket Universe</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 64px}
+  h1{font-size:19px;font-weight:800;margin:4px 0 2px}
+  .sub{font-size:12px;color:var(--mut);margin-bottom:16px;line-height:1.5}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .card h2{font-size:13px;font-weight:800;margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em;color:var(--txt)}
+  .pool-grp{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:10px 0 6px}
+  .pool-grp:first-child{margin-top:0}
+  .pool-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .pool-row:hover{background:var(--card2)}
+  .pool-row.on{background:rgba(77,124,254,.12);border-color:var(--blu)}
+  .pool-row input{margin:0}
+  .pool-name{font-size:13px;font-weight:700;flex:1}
+  .pool-count{font-size:12.5px;font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums}
+  .pool-note{font-size:10.5px;color:var(--amber);margin-left:24px;margin-top:-4px;margin-bottom:2px;display:none}
+  .pool-note.show{display:block}
+  .badge-stale{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+    padding:2px 7px;border-radius:5px;background:rgba(245,185,74,.14);color:var(--amber);margin-left:8px}
+  .cat-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
+  .cat-hd:last-child{border-bottom:none}
+  .cat-title{font-size:13px;font-weight:800}
+  .cat-count{font-size:11px;color:var(--mut);margin-left:8px;font-weight:600}
+  .cat-add{font-size:11px;font-weight:800;padding:4px 10px;border-radius:7px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--blu);cursor:pointer}
+  .cat-add[disabled]{opacity:.4;cursor:not-allowed}
+  .cat-coming{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);
+    background:var(--card2);padding:2px 8px;border-radius:5px}
+  .cat-body{padding:8px 0 4px}
+  .picker{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
+  .picker button{font-size:11.5px;font-weight:700;padding:6px 11px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--txt);cursor:pointer}
+  .picker button:hover{border-color:var(--blu)}
+  .frow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:var(--card2);border-radius:8px;margin-bottom:6px}
+  .frow .fname{font-size:12.5px;font-weight:700;min-width:150px}
+  .frow input[type=number]{width:80px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
+  .frow input[type=text]{flex:1;min-width:140px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
+  .frow select{padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
+  .frow .rm{margin-left:auto;font-size:11px;font-weight:800;color:var(--red);background:transparent;border:none;cursor:pointer;padding:4px 6px}
+  .count-bar{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:12px 14px;background:var(--panel2);border-radius:10px;margin-bottom:10px}
+  .count-num{font-size:22px;font-weight:800;color:var(--blu);cursor:pointer;text-decoration:underline dotted}
+  .count-arrow{font-size:14px;color:var(--mut)}
+  .count-sub{font-size:11.5px;color:var(--mut)}
+  .binding{font-size:11.5px;color:var(--amber);margin-top:4px}
+  .run-btn{padding:10px 20px;border-radius:9px;border:1px solid var(--blu);background:var(--blu);color:#fff;
+    font-size:13px;font-weight:800;cursor:pointer;min-height:40px}
+  .as-of{font-size:11px;color:var(--dim);margin-top:8px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  thead th{text-align:left;padding:7px 9px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--mut);border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:7px 9px;border-bottom:1px solid var(--line2);white-space:nowrap}
+  .empty{padding:16px;text-align:center;color:var(--mut);font-size:12px}
+  .scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Quant Basket Universe</h1>
+  <div class="sub">
+    Pick a pool, then narrow it with filters. Every value here is the current EOD snapshot
+    (gvm_scores as of its latest score_date) — this is a Quant Basket engine, not a screener.
+    <b>V1</b>: pool selection + GVM/component-score filters are live. The other six categories
+    (Sector, Price/Momentum, Change/Delta, Quarterly Results, Alpha/Risk, Quality/Valuation) are
+    shown below so you can see the full shape of the page — they are not wired to real filtering
+    yet.
+  </div>
+
+  <div class="card">
+    <h2>1 — Pool</h2>
+    <div id="pools">Loading…</div>
+  </div>
+
+  <div class="card">
+    <h2>2 — Filters</h2>
+    <div id="categories"></div>
+  </div>
+
+  <div class="card">
+    <div class="count-bar" id="countBar">
+      <span class="count-sub">Pick a pool to see how many stocks qualify.</span>
+    </div>
+    <button class="run-btn" id="runBtn" onclick="runPreview()">Run preview</button>
+    <div class="as-of" id="asOf"></div>
+    <div id="resultsWrap" style="display:none">
+      <div class="scroll"><table id="resultsTbl"><thead id="resultsHead"></thead><tbody id="resultsBody"></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<script src="/scorr_card_common.js"></script>
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function num2(v){ return v==null||isNaN(+v)?'—':(+v).toFixed(2); }
+function fmtPx(v){ return v==null||isNaN(+v)?'—':(+v).toLocaleString('en-IN',{maximumFractionDigits:2}); }
+
+/* cc#2123: CAT_1 -- the only category wired to real filtering in this push. Each entry names the
+   backend param pair (min/max or a bare list param for verdict), the display column key in the
+   /preview response, and its header label -- used both to build the +picker and to render the
+   dynamic results table (only columns for filters actually applied, per the card's own instruction). */
+var CAT1_FILTERS = [
+  {key:'gvm', label:'GVM Score', kind:'range', col:'gvm_score'},
+  {key:'g', label:'G Score', kind:'range', col:'g_score'},
+  {key:'v', label:'V Score', kind:'range', col:'v_score'},
+  {key:'m', label:'M Score', kind:'range', col:'m_score'},
+  {key:'verdict', label:'Verdict', kind:'list', col:'verdict', options:['Excellent','Good','Average','Poor']},
+  {key:'seg_rank', label:'Rank within Segment', kind:'range', col:'seg_rank'},
+];
+var CATEGORIES_COMING = [
+  {name:'Sector & Segment', n:5},
+  {name:'Price & Momentum', n:5},
+  {name:'Change & Delta', n:7},
+  {name:'Quarterly Results (YoY)', n:6},
+  {name:'Alpha & Risk', n:5},
+  {name:'Quality, Valuation, Size & Ownership', n:6},
+];
+
+var STATE = { pools:[], pool:null, active:{}, lastResult:null };
+
+function loadPools(){
+  fetchWithTimeout('/api/qb/universe2/pools').then(function(r){return r.json();}).then(function(d){
+    STATE.pools = d.pools || [];
+    renderPools();
+  }).catch(function(e){ document.getElementById('pools').innerHTML = '<div class="empty">Could not load pools — '+esc(e.message)+'</div>'; });
+}
+function renderPools(){
+  var groups = {cap_band:[], fo:[], nifty500:[]};
+  STATE.pools.forEach(function(p){ (groups[p.group]||(groups[p.group]=[])).push(p); });
+  var h = '';
+  h += '<div class="pool-grp">Cap Band</div>';
+  (groups.cap_band||[]).forEach(function(p){ h += poolRow(p); });
+  h += '<div class="pool-grp">All F&amp;O Stocks</div>';
+  (groups.fo||[]).forEach(function(p){ h += poolRow(p); });
+  h += '<div class="pool-grp">Nifty 500</div>';
+  (groups.nifty500||[]).forEach(function(p){ h += poolRow(p); });
+  document.getElementById('pools').innerHTML = h;
+}
+function poolRow(p){
+  var on = STATE.pool === p.key;
+  var stale = p.stale ? '<span class="badge-stale" title="'+esc(p.stale_note||'')+'">stale since '+esc((p.built_at||'').slice(0,10))+'</span>' : '';
+  var noteTxt = [p.note, p.stale_note].filter(Boolean).join(' ');
+  var note = noteTxt ? '<div class="pool-note show">'+esc(noteTxt)+'</div>' : '';
+  return '<label class="pool-row'+(on?' on':'')+'" onclick="pickPool(\''+p.key+'\')">'
+    + '<input type="radio" name="pool" '+(on?'checked':'')+'>'
+    + '<span class="pool-name">'+esc(p.label)+stale+'</span>'
+    + '<span class="pool-count">'+p.count.toLocaleString('en-IN')+'</span></label>' + note;
+}
+function pickPool(key){ STATE.pool = key; renderPools(); updateCountBar(); }
+
+function renderCategories(){
+  var h = catHtml('cat1', 'GVM & Component Scores', CAT1_FILTERS.length, true);
+  CATEGORIES_COMING.forEach(function(c, i){ h += catHtml('coming'+i, c.name, c.n, false); });
+  document.getElementById('categories').innerHTML = h;
+  renderCat1Body();
+}
+function catHtml(id, name, n, live){
+  var activeN = live ? Object.keys(STATE.active).length : 0;
+  return '<div class="cat-hd">'
+    + '<div><span class="cat-title">'+esc(name)+'</span><span class="cat-count">'+(live? activeN+' active of '+n : n+' filters')+'</span></div>'
+    + (live ? '' : '<span class="cat-coming">Coming</span>')
+    + '</div>'
+    + (live ? '<div class="cat-body" id="'+id+'-body"></div>' : '');
+}
+function renderCat1Body(){
+  var host = document.getElementById('cat1-body'); if (!host) return;
+  var picker = '<div class="picker">' + CAT1_FILTERS.filter(function(f){ return !STATE.active[f.key]; }).map(function(f){
+    return '<button onclick="addFilter(\''+f.key+'\')">+ '+esc(f.label)+'</button>';
+  }).join('') + '</div>';
+  var rows = Object.keys(STATE.active).map(function(k){ return filterRowHtml(CAT1_FILTERS.filter(function(f){return f.key===k;})[0]); }).join('');
+  host.innerHTML = picker + rows;
+}
+function addFilter(key){
+  STATE.active[key] = { min:'', max:'', list:[], note:'' };
+  renderCategories();
+}
+function removeFilter(key){ delete STATE.active[key]; renderCategories(); updateCountBar(); }
+function filterRowHtml(f){
+  var st = STATE.active[f.key];
+  var inputs;
+  if (f.kind === 'range'){
+    inputs = '<input type="number" step="0.01" placeholder="min" value="'+esc(st.min)+'" onchange="setFilterVal(\''+f.key+'\',\'min\',this.value)">'
+      + '<span style="color:var(--mut)">to</span>'
+      + '<input type="number" step="0.01" placeholder="max" value="'+esc(st.max)+'" onchange="setFilterVal(\''+f.key+'\',\'max\',this.value)">';
+  } else {
+    inputs = (f.options||[]).map(function(o){
+      var checked = st.list.indexOf(o) >= 0;
+      return '<label style="font-size:11.5px;display:inline-flex;align-items:center;gap:4px;margin-right:8px">'
+        + '<input type="checkbox" '+(checked?'checked':'')+' onchange="toggleListVal(\''+f.key+'\',\''+o+'\',this.checked)">'+esc(o)+'</label>';
+    }).join('');
+  }
+  return '<div class="frow"><span class="fname">'+esc(f.label)+'</span>' + inputs
+    + '<input type="text" placeholder="note — why this gate (optional)" value="'+esc(st.note)+'" onchange="setFilterVal(\''+f.key+'\',\'note\',this.value)">'
+    + '<button class="rm" onclick="removeFilter(\''+f.key+'\')">Remove</button></div>';
+}
+function setFilterVal(key, field, val){ STATE.active[key][field] = val; }
+function toggleListVal(key, val, on){
+  var l = STATE.active[key].list;
+  var i = l.indexOf(val);
+  if (on && i < 0) l.push(val);
+  if (!on && i >= 0) l.splice(i, 1);
+}
+
+function updateCountBar(){
+  var bar = document.getElementById('countBar');
+  if (!STATE.pool){ bar.innerHTML = '<span class="count-sub">Pick a pool to see how many stocks qualify.</span>'; return; }
+  var p = STATE.pools.filter(function(x){ return x.key === STATE.pool; })[0];
+  bar.innerHTML = '<span class="count-sub">'+esc(p ? p.label : STATE.pool)+' pool: <b>'+(p?p.count.toLocaleString('en-IN'):'—')+'</b> — click Run preview to apply filters</span>';
+}
+
+function buildQuery(){
+  var q = ['pool=' + encodeURIComponent(STATE.pool)];
+  Object.keys(STATE.active).forEach(function(key){
+    var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0];
+    var st = STATE.active[key];
+    if (f.kind === 'range'){
+      if (st.min !== '') q.push(key + '_min=' + encodeURIComponent(st.min));
+      if (st.max !== '') q.push(key + '_max=' + encodeURIComponent(st.max));
+    } else if (st.list.length){
+      st.list.forEach(function(v){ q.push('verdict=' + encodeURIComponent(v)); });
+    }
+  });
+  return q.join('&');
+}
+
+function runPreview(){
+  if (!STATE.pool){ alert('Pick a pool first.'); return; }
+  var btn = document.getElementById('runBtn'); btn.disabled = true; btn.textContent = 'Running…';
+  fetchWithTimeout('/api/qb/universe2/preview?' + buildQuery() + '&limit=500')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      btn.disabled = false; btn.textContent = 'Run preview';
+      if (d.error){ document.getElementById('countBar').innerHTML = '<span class="count-sub">Error — '+esc(d.error)+'</span>'; return; }
+      STATE.lastResult = d;
+      var bar = document.getElementById('countBar');
+      bar.innerHTML = '<span class="count-num" onclick="toggleResults()">'+d.pool_count.toLocaleString('en-IN')+'</span>'
+        + '<span class="count-arrow">→</span>'
+        + '<span class="count-num" onclick="toggleResults()">'+d.count.toLocaleString('en-IN')+' pass</span>'
+        + (d.binding_filter ? '<div class="binding" style="width:100%">binding filter: '+esc(d.binding_filter.filter)+' cuts to '+d.binding_filter.cut_to+'</div>' : '');
+      document.getElementById('asOf').textContent = 'as of ' + (d.as_of_date || '—') + ' (EOD gvm_scores snapshot)';
+      renderResults(d);
+    })
+    .catch(function(e){
+      btn.disabled = false; btn.textContent = 'Run preview';
+      document.getElementById('countBar').innerHTML = '<span class="count-sub">Could not run preview — '+esc(e.message)+'</span>';
+    });
+}
+function toggleResults(){
+  var w = document.getElementById('resultsWrap');
+  w.style.display = (w.style.display === 'none') ? '' : 'none';
+}
+function renderResults(d){
+  var appliedKeys = Object.keys(STATE.active);
+  var cols = [{h:'Symbol', k:'symbol'}, {h:'Company', k:'company_name'}, {h:'Segment', k:'segment'}];
+  appliedKeys.forEach(function(key){
+    var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0];
+    if (f.col === 'verdict') { if (!cols.some(function(c){return c.k==='verdict';})) cols.push({h:'Verdict', k:'verdict'}); }
+    else cols.push({h:f.label, k:f.col});
+  });
+  if (!appliedKeys.length) cols.push({h:'GVM', k:'gvm_score'}, {h:'Segment Rank', k:'seg_rank'});
+  document.getElementById('resultsHead').innerHTML = '<tr>' + cols.map(function(c){return '<th>'+esc(c.h)+'</th>';}).join('') + '</tr>';
+  var rows = d.rows || [];
+  document.getElementById('resultsBody').innerHTML = rows.length
+    ? rows.map(function(r){
+        return '<tr>' + cols.map(function(c){
+          var v = r[c.k];
+          if (c.k === 'symbol') return '<td><strong>'+esc(v)+'</strong></td>';
+          if (c.k === 'company_name' || c.k === 'segment' || c.k === 'verdict') return '<td>'+esc(v||'—')+'</td>';
+          if (c.k === 'seg_rank') return '<td>'+(v!=null?v:'—')+'</td>';
+          return '<td>'+num2(v)+'</td>';
+        }).join('') + '</tr>';
+      }).join('')
+    : '<tr><td colspan="'+cols.length+'" class="empty">'+(d.binding_filter ? esc(d.binding_filter.filter)+' cut every stock' : 'No stocks pass')+'</td></tr>';
+}
+
+loadPools();
+renderCategories();
+</script>
+</body>
+</html>
