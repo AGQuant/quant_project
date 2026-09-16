@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCORR — QB Builder: Universe step — design mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241; --well:#0D1428;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.26);
+  --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+  --grn:#2FD48B; --grn-d:rgba(47,212,139,.13);
+  --red:#FF5C6C; --red-d:rgba(255,92,108,.12);
+  --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
+  --amber-bg:rgba(245,185,74,.08); --amber-bd:rgba(245,185,74,.4); --amber-row:rgba(245,185,74,.1);
+  --blu-row:rgba(77,124,254,.1); --blu-chip:rgba(77,124,254,.14); --blu-chip-bd:rgba(77,124,254,.3);
+  --violet-bg:rgba(155,124,255,.1); --violet-bd:rgba(155,124,255,.3);
+  --flat:#2a3350; --shadow:0 18px 44px rgba(3,7,20,.5);
+  --font:'Sora',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace; --r:16px;
+  --card:#121A33; --mast:#060B16; --hover:rgba(148,166,210,.05); --on-accent:#0A0F1E;
+}
+html[data-theme="light"] {
+  --bg:#F5F7FB; --bg2:#EEF1F8; --panel:#FFFFFF; --panel2:#F7F9FD; --well:#EEF1F8;
+  --line:rgba(23,40,80,.10); --line2:rgba(23,40,80,.18);
+  --txt:#17203A; --mut:#5B6785; --dim:#93A0BE;
+  --grn:#0E9F62; --grn-d:rgba(14,159,98,.10);
+  --red:#DE3A52; --red-d:rgba(222,58,82,.09);
+  --blu:#3563E9; --cyan:#0E93B0; --amber:#B47B10; --violet:#6E4FE0;
+  --amber-bg:rgba(180,123,16,.07); --amber-bd:rgba(180,123,16,.35); --amber-row:rgba(180,123,16,.08);
+  --blu-row:rgba(53,99,233,.08); --blu-chip:rgba(53,99,233,.10); --blu-chip-bd:rgba(53,99,233,.3);
+  --violet-bg:rgba(110,79,224,.08); --violet-bd:rgba(110,79,224,.3);
+  --flat:#D5DAE8; --shadow:0 10px 28px rgba(23,40,80,.08);
+  --card:#FFFFFF; --mast:#07111F; --hover:rgba(7,17,31,.03); --on-accent:#FFFFFF;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--txt)}
+body{font-family:var(--font);min-height:100vh}
+.mono{font-family:var(--mono)}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px 60px}
+
+.notice{background:var(--amber-bg);border-bottom:1px solid var(--amber-bd);padding:9px 20px;font-size:12.5px;color:var(--amber);text-align:center}
+.notice b{color:var(--txt)}
+.mast{background:var(--mast);border-bottom:1px solid var(--line);padding:13px 20px;display:flex;justify-content:space-between;align-items:center}
+.logo{font-weight:800;font-size:17px;color:#fff}
+.logo span{color:var(--amber)}
+.themebtn{background:var(--panel2);border:1px solid var(--line2);color:var(--txt);font-family:var(--font);font-size:12px;font-weight:600;padding:6px 12px;border-radius:20px;cursor:pointer}
+
+.headzone{padding:22px 0 4px}
+h1{font-size:19px;font-weight:700}
+.sub{color:var(--mut);font-size:12.5px;margin-top:5px}
+
+/* stepper */
+.stepper{display:flex;gap:6px;margin:20px 0 0;background:var(--panel);border:1px solid var(--line);border-radius:12px 12px 0 0;padding:0 8px}
+.step{flex:1;text-align:center;padding:12px 4px;font-size:11.5px;font-weight:600;color:var(--dim);border-bottom:2px solid transparent}
+.step .n{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--panel2);color:var(--dim);font-size:9.5px;margin-right:4px}
+.step.active{color:var(--txt);border-bottom-color:var(--blu)}
+.step.active .n{background:var(--blu);color:#fff}
+
+.body{background:var(--panel);border:1px solid var(--line);border-top:none;border-radius:0 0 var(--r) var(--r);box-shadow:var(--shadow);padding:22px}
+
+.sectionlbl{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:0 0 10px}
+.sectionlbl.top{margin-top:0}
+.sectionlbl .count{font-weight:400;text-transform:none;color:var(--dim);font-size:10.5px}
+
+/* pool - compact */
+.pool{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.poolrow{display:flex;align-items:center;gap:9px;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.poolrow:last-child{border-bottom:none}
+.poolrow:hover{background:var(--hover)}
+.radio{width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);flex:0 0 auto}
+.poolrow.sel .radio{border-color:var(--blu);background:radial-gradient(circle,var(--blu) 0 4px,transparent 5px)}
+.poolmain{flex:1;display:flex;align-items:baseline;gap:8px;min-width:0}
+.poolname{font-size:12.5px;font-weight:600;white-space:nowrap}
+.poolcaption{font-size:9.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stalebadge{font-size:8.5px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-bd);padding:1px 6px;border-radius:9px;font-weight:700;flex:0 0 auto}
+.poolcount{font-size:13px;font-weight:700;flex:0 0 auto}
+
+/* filters redesigned */
+.filterlist{border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:6px}
+.frow{border-bottom:1px solid var(--line)}
+.frow:last-child{border-bottom:none}
+.fhead{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}
+.fhead:hover{background:var(--hover)}
+.plusbtn{width:20px;height:20px;border-radius:6px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--mut);flex:0 0 auto;transition:transform .15s}
+.frow.open .plusbtn{transform:rotate(45deg);color:var(--blu);border-color:var(--blu-chip-bd);background:var(--blu-chip)}
+.fname{font-size:12.5px;font-weight:600;flex:1}
+.rowcomb{display:flex;background:var(--well);border:1px solid var(--line2);border-radius:7px;overflow:hidden;flex:0 0 auto;margin:0 10px}
+.rowcomb span{padding:3px 9px;font-size:9.5px;font-weight:700;cursor:pointer;color:var(--dim)}
+.rowcomb span.sel{background:var(--blu);color:#fff}
+.fstatus{font-size:10.5px;color:var(--dim);width:64px;text-align:right;flex:0 0 auto}
+.fstatus.applied{color:var(--grn);font-weight:700}
+.fbody{display:none;padding:2px 12px 14px 42px}
+.frow.open .fbody{display:block}
+.finputs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.finputs input{background:var(--well);border:1px solid var(--line2);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:12px;padding:6px 9px;width:80px}
+.finputs .to{font-size:11px;color:var(--dim)}
+.applywrap{display:flex;align-items:center;gap:6px;margin-left:8px;cursor:pointer;user-select:none}
+.tick{width:16px;height:16px;border-radius:4px;border:2px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+.tick.on{background:var(--grn);border-color:var(--grn)}
+.applylabel{font-size:11px;color:var(--mut);font-weight:600}
+.passcount{margin-top:8px;font-size:11.5px;color:var(--grn);font-weight:700;display:none}
+.passcount.show{display:block}
+.passcount .of{color:var(--mut);font-weight:400}
+
+.resultbar{margin-top:16px;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-radius:10px;background:var(--grn-d);border:1px solid var(--grn-d)}
+.resultbar .rl{font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.resultbar .rv{font-size:20px;font-weight:800;color:var(--grn)}
+.resultbar .rv .of{font-size:12px;color:var(--mut);font-weight:600}
+
+.navfoot{display:flex;justify-content:space-between;margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.navfoot button{font-family:var(--font);font-weight:700;font-size:12.5px;padding:9px 16px;border-radius:8px;cursor:pointer;border:1px solid var(--line2);background:var(--panel2);color:var(--txt)}
+.navfoot button.next{background:var(--blu);border:none;color:#fff}
+footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
+</style>
+</head>
+<body>
+
+<div class="notice">🎨 <b>DESIGN MOCKUP — Universe step only</b> — reflects cc#2132/cc#2133 refinements: compact pool, collapsible filters (+ to expand), tick-to-apply, live pass-count instead of notes, per-row AND/OR toggle (middle of each filter row). Counts shown are illustrative, not live.</div>
+
+<div class="mast">
+  <div class="logo">SC<span>O</span>RR</div>
+  <button class="themebtn" onclick="toggleTheme()">☀ / 🌙 Theme</button>
+</div>
+
+<div class="wrap">
+  <div class="headzone">
+    <h1>Build a Basket</h1>
+    <div class="sub">Step 1 of 6 — pick a pool, then narrow it with filters.</div>
+  </div>
+
+  <div class="stepper">
+    <div class="step active"><span class="n">1</span>Universe</div>
+    <div class="step"><span class="n">2</span>Entry</div>
+    <div class="step"><span class="n">3</span>Exit</div>
+    <div class="step"><span class="n">4</span>Risk Mgmt</div>
+    <div class="step"><span class="n">5</span>Backtest</div>
+    <div class="step"><span class="n">6</span>Deploy</div>
+  </div>
+
+  <div class="body">
+    <div class="sectionlbl top">1 — Pool</div>
+    <div class="pool">
+      <div class="poolrow" data-n="100"><div class="radio"></div><div class="poolmain"><span class="poolname">Large Cap</span></div><div class="poolcount">100</div></div>
+      <div class="poolrow" data-n="149"><div class="radio"></div><div class="poolmain"><span class="poolname">Mid Cap</span></div><div class="poolcount">149</div></div>
+      <div class="poolrow" data-n="744"><div class="radio"></div><div class="poolmain"><span class="poolname">Small Cap</span><span class="poolcaption">748 raw · 4 no GVM score</span></div><div class="poolcount">744</div></div>
+      <div class="poolrow" data-n="732"><div class="radio"></div><div class="poolmain"><span class="poolname">Micro Cap</span><span class="poolcaption">761 raw · 29 no GVM score</span></div><div class="poolcount">732</div></div>
+      <div class="poolrow" data-n="205"><div class="radio"></div><div class="poolmain"><span class="poolname">All F&O Stocks</span><span class="poolcaption">208 raw · 3 no GVM score</span></div><div class="poolcount">205</div></div>
+      <div class="poolrow sel" data-n="497"><div class="radio"></div><div class="poolmain"><span class="poolname">Nifty 500</span><span class="stalebadge">STALE SINCE 2026-06-02</span><span class="poolcaption">500 raw · 3 no GVM score</span></div><div class="poolcount">497</div></div>
+    </div>
+
+    <div class="sectionlbl" style="margin-top:22px">2 — GVM & Component Filters <span class="count" id="activecount">0 active of 6</span></div>
+    <div class="filterlist" id="filterlist">
+      <div class="frow" data-base="497" data-pass="312">
+        <div class="fhead" onclick="toggleRow(this)">
+          <div class="plusbtn">+</div><div class="fname">GVM Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
+        </div>
+        <div class="fbody">
+          <div class="finputs">
+            <input placeholder="min" value="7.5"><span class="to">to</span><input placeholder="max">
+            <div class="applywrap" onclick="event.stopPropagation();toggleApply(this)"><div class="tick">✓</div><span class="applylabel">Apply</span></div>
+          </div>
+          <div class="passcount">312 <span class="of">of 497 pass</span></div>
+        </div>
+      </div>
+      <div class="frow" data-base="497" data-pass="401">
+        <div class="fhead" onclick="toggleRow(this)">
+          <div class="plusbtn">+</div><div class="fname">G Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
+        </div>
+        <div class="fbody">
+          <div class="finputs">
+            <input placeholder="min"><span class="to">to</span><input placeholder="max">
+            <div class="applywrap" onclick="event.stopPropagation();toggleApply(this)"><div class="tick">✓</div><span class="applylabel">Apply</span></div>
+          </div>
+          <div class="passcount">401 <span class="of">of 497 pass</span></div>
+        </div>
+      </div>
+      <div class="frow" data-base="497" data-pass="288">
+        <div class="fhead" onclick="toggleRow(this)">
+          <div class="plusbtn">+</div><div class="fname">V Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
+        </div>
+        <div class="fbody">
+          <div class="finputs">
+            <input placeholder="min"><span class="to">to</span><input placeholder="max">
+            <div class="applywrap" onclick="event.stopPropagation();toggleApply(this)"><div class="tick">✓</div><span class="applylabel">Apply</span></div>
+          </div>
+          <div class="passcount">288 <span class="of">of 497 pass</span></div>
+        </div>
+      </div>
+      <div class="frow" data-base="497" data-pass="356">
+        <div class="fhead" onclick="toggleRow(this)">
+          <div class="plusbtn">+</div><div class="fname">M Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
+        </div>
+        <div class="fbody">
+          <div class="finputs">
+            <input placeholder="min" value="7"><span class="to">to</span><input placeholder="max">
+            <div class="applywrap" onclick="event.stopPropagation();toggleApply(this)"><div class="tick">✓</div><span class="applylabel">Apply</span></div>
+          </div>
+          <div class="passcount">356 <span class="of">of 497 pass</span></div>
+        </div>
+      </div>
+      <div class="frow" data-base="497" data-pass="190">
+        <div class="fhead" onclick="toggleRow(this)">
+          <div class="plusbtn">+</div><div class="fname">Verdict</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
+        </div>
+        <div class="fbody">
+          <div class="finputs">
+            <input placeholder="e.g. STRONG_BUY" style="width:160px">
+            <div class="applywrap" onclick="event.stopPropagation();toggleApply(this)"><div class="tick">✓</div><span class="applylabel">Apply</span></div>
+          </div>
+          <div class="passcount">190 <span class="of">of 497 pass</span></div>
+        </div>
+      </div>
+      <div class="frow" data-base="497" data-pass="120">
+        <div class="fhead" onclick="toggleRow(this)">
+          <div class="plusbtn">+</div><div class="fname">Rank within Segment</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
+        </div>
+        <div class="fbody">
+          <div class="finputs">
+            <input placeholder="min" value="1"><span class="to">to</span><input placeholder="max" value="10">
+            <div class="applywrap" onclick="event.stopPropagation();toggleApply(this)"><div class="tick">✓</div><span class="applylabel">Apply</span></div>
+          </div>
+          <div class="passcount">120 <span class="of">of 497 pass</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="resultbar">
+      <div class="rl">Universe after filters</div>
+      <div class="rv" id="resultval">497 <span class="of">stocks</span></div>
+    </div>
+
+    <div class="navfoot"><span></span><button class="next">Next: Entry →</button></div>
+  </div>
+  <footer>SCORR — QB Builder Universe step, design reference · not connected to live data</footer>
+</div>
+
+<script>
+document.querySelectorAll('.poolrow').forEach(r=>r.addEventListener('click',()=>{
+  document.querySelectorAll('.poolrow').forEach(x=>x.classList.remove('sel'));
+  r.classList.add('sel');
+  recalc();
+}));
+function toggleRow(head){
+  head.parentElement.classList.toggle('open');
+}
+function toggleApply(wrap){
+  const tick=wrap.querySelector('.tick');
+  const row=wrap.closest('.frow');
+  const status=row.querySelector('.fstatus');
+  const pc=row.querySelector('.passcount');
+  const on=tick.classList.toggle('on');
+  status.textContent = on ? 'applied' : 'not applied';
+  status.classList.toggle('applied', on);
+  pc.classList.toggle('show', on);
+  recalc();
+}
+function setRowComb(el){
+  const wrap=el.parentElement;
+  wrap.querySelectorAll('span').forEach(s=>s.classList.remove('sel'));
+  el.classList.add('sel');
+  const row=wrap.closest('.frow');
+  row.dataset.comb = el.textContent.trim();
+  recalc();
+}
+function recalc(){
+  const pool = document.querySelector('.poolrow.sel');
+  const base = pool ? parseInt(pool.dataset.n) : 497;
+  const applied = [...document.querySelectorAll('.frow')].filter(r=>r.querySelector('.tick').classList.contains('on'));
+  document.getElementById('activecount').textContent = applied.length + ' active of 6';
+  // illustrative combine only: each row now carries its OWN AND/OR flag (dataset.comb, default AND)
+  // instead of one global switch. AND-flagged rows narrow the running result; OR-flagged rows widen
+  // it. Not a real query -- just enough to make the per-row toggle visibly do something.
+  let result = base;
+  applied.forEach(r=>{
+    const flag = r.dataset.comb || 'AND';
+    const passFrac = parseInt(r.dataset.pass) / parseInt(r.dataset.base);
+    if(flag==='AND'){
+      result = Math.round(result * passFrac);
+    } else {
+      const rowPassAbs = Math.round(base * passFrac);
+      result = Math.min(base, Math.round(result + rowPassAbs * (1 - result / base)));
+    }
+  });
+  document.getElementById('resultval').innerHTML = result + ' <span class="of">stocks</span>';
+}
+function toggleTheme(){
+  const html=document.documentElement;
+  const cur=html.getAttribute('data-theme');
+  html.setAttribute('data-theme', cur==='light' ? 'dark' : 'light');
+}
+if(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches){
+  document.documentElement.setAttribute('data-theme','light');
+}
+recalc();
+</script>
+</body>
+</html>
