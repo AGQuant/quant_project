@@ -53,14 +53,21 @@ Two causes, both fixed in `mobile/tcscan.html` CSS only (markup and numbers unto
    cut off. Measured in the harness (computed `clip-path` was the polygon). Reset at (0,5,0):
    `:root:root .scorr-prow .v .c{clip-path:none; …}`. r5's own `.c` panels elsewhere are untouched.
 
-## Item 3 — sheet text follows the theme's own token
+## Item 3 — sheet text follows the theme's own token (chosen by evidence, not by name)
 `#scorrChartTitle` (and the peers pane's segment label, symbol names, sort-active header, GVM
-value) now use `var(--ink, <palette>)` / `var(--muted, <palette>)`: the theme's own text pair
-(declared by every theme in `scorr_themes.css` and by `scorr_theme_r5.css`), with the old guessed
-palette only as fallback for a host page that defines no token. Verified: on `aquawhite` the title
-computes to `rgb(14, 26, 32)` = that theme's `--ink` (#0E1A20), luminance 23 (dark text on white);
-on `goldnight` it is `#F5F2EA` = its `--ink`. Dark theme not regressed. Written as a JS string
-join, so the source carries no `var(--x, #literal)` fallback (ratchet: 0 new).
+value) now take the theme's own text token instead of a palette guessed from panel luminance.
+**The two token systems disagree on the name** — checked, not assumed: app body themes
+(`scorr_themes.css`) call the text colour `--ink` and define no `--txt`; the web contract
+(`scorr_web_tokens.css`, injected on web pages) calls it `--txt` and uses `--ink` as a page
+*background* (#F5F7FB on light). A first cut that read `var(--ink)` was therefore right on the app
+and would have painted white-on-white on the V8 dashboard's light theme — caught by extending the
+harness to the web token file before this card was closed, and fixed in the same card. `_tok()`
+reads the candidates (`--ink`, `--txt`; `--muted`, `--mut`) off `body`'s computed style and takes
+the first whose luminance sits on the opposite side of the panel's; a token that would vanish
+against the panel is skipped; no usable token → the old palette. Verified on all four:
+`aquawhite` → `--ink` #0E1A20 (dark on white); `goldnight` → `--ink` #F5F2EA; web light
+(`html[data-theme=light]` + web tokens) → `--txt` #17203A; web dark → `--txt` #E9EEFB. Written in
+JS, so the source carries no `var(--x, #literal)` fallback (ratchet: 0 new).
 
 ## Item 4 — D / W / M table
 The Peers pane was **already** a table with Day / Week / Month sortable headers (cc#987, cc#2102) —

@@ -267,8 +267,27 @@ var _full = false;                // cc#779: fullscreen state
   // falls back to the guessed palette where a host page defines no token at all. The founder saw
   // the "MCX" header label wash out on a light theme: a palette guessed from --panel luminance is
   // one step removed from the theme; the theme's own text token is the theme.
-  function _ink(p) { return "var(--ink, " + p.txt + ")"; }
-  function _mutd(p) { return "var(--muted, " + p.mut + ")"; }
+  // The two token systems disagree on the NAME: app body themes (scorr_themes.css) call the text
+  // colour --ink and have no --txt; the web contract (scorr_web_tokens.css) calls it --txt and uses
+  // --ink as a page background (#F5F7FB on light). So the token is chosen by EVIDENCE, not by name:
+  // the first candidate whose luminance sits on the opposite side of the panel's is the text
+  // colour; a token that would vanish against the panel is skipped; no usable token -> palette.
+  function _tok(p, names, fallback) {
+    try {
+      var cs = getComputedStyle(document.body);
+      var panelHex = (cs.getPropertyValue("--panel") || "").trim() || (cs.getPropertyValue("--field") || "").trim();
+      var pl = _hexLuminance(panelHex);
+      if (pl == null) return fallback;
+      for (var i = 0; i < names.length; i++) {
+        var v = (cs.getPropertyValue(names[i]) || "").trim();
+        var l = _hexLuminance(v);
+        if (l != null && (pl < 110) !== (l < 110)) return v;
+      }
+    } catch (e) {}
+    return fallback;
+  }
+  function _ink(p) { return _tok(p, ["--ink", "--txt"], p.txt); }
+  function _mutd(p) { return _tok(p, ["--muted", "--mut"], p.mut); }
   function _pal() {
     return _theme === "dark"
       ? { panel: "#1c2536", line: "#2a3548", txt: "#e8ecf2", mut: "#9aa4b5", sub: "#5a6781", grid: "rgba(150,160,180,.14)", btn: "#0f1623", btnOn: "#4d7cfe" }
