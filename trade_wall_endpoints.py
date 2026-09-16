@@ -974,6 +974,24 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
             if a:
                 e["state"] = a["status"]
                 _apx = float(a["approved_price"]) if a["approved_price"] is not None else None
+                _pnl_ok = (e["src"] in ("v8open", "tc") and e["status"] == "open" and a["status"] == "approved")
+                # cc#2120: pnl_approved is the WALL's OWN "P&L since approval" figure, built from
+                # trade_alerts.approved_price -- the V8_PNL_CANON_V1-protected canon (rule 13) has
+                # no concept of a trade_alerts approval at all, so this was never canon output to
+                # begin with. e["cmp"] itself (the canon's own open_marks spot CMP, used for the
+                # general indicative e["pnl"] on every V8 row) is NOT touched here and stays
+                # exactly as the canon computed it -- rule 13 forbids any surface recomputing that
+                # locally. This only swaps the MARK for this one supplementary figure, and only for
+                # an approved FUTURES-instrument row with a real futures bar available right now,
+                # so the entry (_apx) and the mark come from the SAME instrument -- falls back to
+                # e["cmp"] unchanged rather than silently blanking a figure that already had a mark.
+                _pnl_cmp = e.get("cmp")
+                if _pnl_ok:
+                    import cmp_resolver
+                    if cmp_resolver.is_futures_engine(e["engine"]):
+                        _fut = cmp_resolver.resolve_fut_cmp(cur, e["symbol"])
+                        if _fut.get("cmp") is not None:
+                            _pnl_cmp = _fut["cmp"]
                 e["approval"] = {"id": a["id"],
                                  "approved_price": _apx,
                                  "approved_at": a["approved_ist"].strftime("%Y-%m-%d %H:%M:%S") if a["approved_ist"] else None,
@@ -985,9 +1003,8 @@ def tradewall(request: Request, limit: int = 40, cursor: str = "", instrument: s
                                  # cc#1763: a TC Scanner open row is position-sized at ONE LOT now, so
                                  # its approved column fills the same way (x lot_size); still None
                                  # without a CMP or a lot.
-                                 "pnl_approved": (v8_book_canon.unrealised_rupees(_apx, e.get("cmp"), e["side"], e["qty"])
-                                                  if (e["src"] in ("v8open", "tc") and e["status"] == "open"
-                                                      and a["status"] == "approved") else None),
+                                 "pnl_approved": (v8_book_canon.unrealised_rupees(_apx, _pnl_cmp, e["side"], e["qty"])
+                                                  if _pnl_ok else None),
                                  "pnl_approved_basis": ("approved_price@approved_at -> cmp, x one lot (futures_universe.lot_size)"
                                                         if e["src"] == "tc" else
                                                         "approved_price@approved_at -> cmp_as_of, x position qty")}

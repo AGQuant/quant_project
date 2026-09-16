@@ -421,18 +421,29 @@ async def approve_alert(req: Request):
     override = bool(body.get("override"))
     with _conn() as conn, conn.cursor() as cur:
         _ensure_schema(conn)   # cc#1524: RETURNING reads the source columns
-        cur.execute("SELECT symbol, status FROM trade_alerts WHERE id = %s", (alert_id,))
+        cur.execute("SELECT symbol, status, source_engine FROM trade_alerts WHERE id = %s", (alert_id,))
         r = cur.fetchone()
         if not r:
             raise HTTPException(404, f"alert {alert_id} not found")
-        sym, cur_status = r
+        sym, cur_status, source_engine = r
         allowed = ("triggered", "pending") if override else ("triggered",)
         if cur_status not in allowed:
             raise HTTPException(409, f"alert {alert_id} is '{cur_status}' — "
                                      + ("only a pending or triggered alert can be approved with override"
                                         if override else "only a triggered alert can be approved"))
         import cmp_resolver
-        res = cmp_resolver.resolve_cmp(cur, sym)
+        # cc#2120: a FUTURES-instrument signal (source_engine in cmp_resolver.FUTURES_ENGINES) is
+        # priced off fyers_fut, never spot -- the mixed-leg bug this card exists to fix. Falls back
+        # to the spot resolver, honestly, only when no futures bar exists right now; price_source
+        # in the response below already says which resolver actually supplied the number, so the
+        # fallback is never silently indistinguishable from a genuine futures price.
+        res = None
+        if cmp_resolver.is_futures_engine(source_engine):
+            res = cmp_resolver.resolve_fut_cmp(cur, sym)
+            if res.get("cmp") is None:
+                res = None
+        if res is None:
+            res = cmp_resolver.resolve_cmp(cur, sym)
         price = (res or {}).get("cmp")
         if price is None:
             raise HTTPException(422, f"{sym} has no resolvable price right now — "
@@ -522,7 +533,20 @@ async def approve_signal(req: Request):
     with _conn() as conn, conn.cursor() as cur:
         _ensure_schema(conn)
         import cmp_resolver
-        res = cmp_resolver.resolve_cmp(cur, sym)
+        # cc#2120: a FUTURES-instrument signal (source_engine in cmp_resolver.FUTURES_ENGINES,
+        # e.g. V8 -- "the V8 universe IS the F&O futures list", trade_wall_endpoints.py's own
+        # words) is priced off fyers_fut, never spot. Before this fix EVERY approve_signal call
+        # recorded a spot price regardless of instrument -- the mixed-leg bug (entry and mark from
+        # different instruments) this card exists to fix. Falls back to the spot resolver,
+        # honestly, only when no futures bar exists right now; price_source in the response below
+        # already says which resolver actually supplied the number.
+        res = None
+        if cmp_resolver.is_futures_engine(source_engine):
+            res = cmp_resolver.resolve_fut_cmp(cur, sym)
+            if res.get("cmp") is None:
+                res = None
+        if res is None:
+            res = cmp_resolver.resolve_cmp(cur, sym)
         price = (res or {}).get("cmp")
         if price is None:
             raise HTTPException(422, f"{sym} has no resolvable price right now — approval "

@@ -233,6 +233,20 @@ def resolve_cmp_many(cur, symbols):
     return out
 
 
+# cc#2120: which wall engines are FUTURES instruments vs EQUITY, for a caller (approve_signal /
+# approve_alert in trade_alerts_endpoints.py) that only has source_engine, not the wall's own
+# per-row `instrument` field. Mirrors trade_wall_endpoints.py's own documented ENGINE/INSTRUMENT
+# MAP exactly -- V8's universe IS the F&O futures list (that file's own words), TC Scanner and
+# Index Intel trade futures too. Everything else, including an engine-less manual alert
+# (source_engine NULL -- there is exactly one such row in trade_alerts today, id=24, never
+# approved), is EQUITY: unchanged from today's behaviour, never a guess toward futures.
+FUTURES_ENGINES = {"V8", "TC Scanner", "Index Intel"}
+
+
+def is_futures_engine(source_engine):
+    return (source_engine or "").strip() in FUTURES_ENGINES
+
+
 def resolve_fut_cmp(cur, symbol):
     """cc#2120 (PRICING_INSTRUMENT_CORRECTNESS_V1): the FUTURES counterpart to resolve_cmp(), for
     a caller that already KNOWS the position is a futures instrument (the wall's own `instrument`
