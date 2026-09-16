@@ -309,6 +309,14 @@ var _full = false;                // cc#779: fullscreen state
            TF-count/content/width combination tested. */
         '<div id="scorrChartHead" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid;flex-wrap:wrap">' +
           '<b id="scorrChartTitle" style="font-size:14px"></b>' +
+          /* cc#2114: the timeframe <select> (cc#2110) lives here now, right after the title, on its
+             own -- not sharing #scorrChartTfs's row with the 4 overlay-toggle buttons. Founder
+             screenshot showed it rendering clipped/barely-visible at that row's left edge on a real
+             device (a narrow-width rendering gap Playwright never reproduced, same class cc#2110's
+             own move to a native select was meant to eliminate -- moving it to its own spot removes
+             the competition for width instead of chasing the exact mechanism again). Built fresh
+             each _paintChrome() the same way #scorrChartTfs's own children are. */
+          '<span id="scorrChartTfHost" style="display:inline-flex;align-items:center;margin-left:6px"></span>' +
           '<span id="scorrChartHL" style="margin-left:6px;font-size:11.5px"></span>' +
           '<span id="scorrChartVerdict" style="margin-left:6px"></span>' +   /* cc#779 trend badge */
           '<span style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;flex-basis:100%" id="scorrChartTfs"></span>' +
@@ -584,9 +592,10 @@ var _full = false;                // cc#779: fullscreen state
     document.getElementById("scorrChartClose").style.color = p.mut;
     var _fb = document.getElementById("scorrChartFull"); if (_fb) _fb.style.color = p.mut;   // cc#779
     document.getElementById("scorrChartMsg").style.color = p.sub;
-    // timeframe buttons
-    var host = document.getElementById("scorrChartTfs");
-    host.innerHTML = "";
+    // timeframe select -- cc#2114: its own host next to the title, no longer sharing
+    // #scorrChartTfs's row with the overlay-toggle buttons (see #scorrChartTfHost's comment above).
+    var tfHost = document.getElementById("scorrChartTfHost");
+    tfHost.innerHTML = "";
     /* cc#2110: TF_ORDER.forEach's pill-button loop replaced with a single native <select>. A
        select has a fixed, small footprint regardless of option count or surrounding header
        width -- structurally immune to the wrap/squeeze class of bug cc#2103's flex-wrap fix still
@@ -612,13 +621,15 @@ var _full = false;                // cc#779: fullscreen state
       tfSel.appendChild(o);
     });
     tfSel.onchange = function () { _load(tfSel.value); };
-    host.appendChild(tfSel);
-    // cc#730: Pivots / Fib overlay toggles (mirror the V8 card). cc#806: pivots are suppressed on every
-    // timeframe longer than 6M (see PIV_TFS), not just ALL — rolling levels lose meaning well before
-    // full history. Fib is unaffected: its swing is derived from the loaded range, so it stays valid.
-    var sep = document.createElement("span");
-    sep.style.cssText = "width:1px;height:16px;background:" + p.line + ";margin:0 2px;align-self:center";
-    host.appendChild(sep);
+    tfHost.appendChild(tfSel);
+    // overlay toggles -- cc#730: Pivots / Fib (mirror the V8 card). cc#806: pivots are suppressed on
+    // every timeframe longer than 6M (see PIV_TFS), not just ALL — rolling levels lose meaning well
+    // before full history. Fib is unaffected: its swing is derived from the loaded range, so it
+    // stays valid. cc#2114: the leading separator this row used to carry (dividing the TF select
+    // from these toggles WITHIN one shared row) is dropped -- the select is no longer in this row,
+    // so there is nothing left to divide from.
+    var host = document.getElementById("scorrChartTfs");
+    host.innerHTML = "";
     [["pivot", "Pivots", "Pivots — PP / R1 / R2 / S1 / S2 (v8_paper_pivots)"],
      ["fib", "Fib", "Fibonacci retracement levels (loaded-range swing, same as the V8 chart)"]].forEach(function (o) {
       var b = document.createElement("button");
@@ -1397,12 +1408,14 @@ var _full = false;                // cc#779: fullscreen state
     var box = document.getElementById("scorrChartBox");
     var pane = document.getElementById("scorrPeerPane");
     var tfs = document.getElementById("scorrChartTfs");
+    var tfHost = document.getElementById("scorrChartTfHost");   // cc#2114: the select moved here
     var msg = document.getElementById("scorrChartMsg");
     if (box) box.style.display = (k === "chart") ? "" : "none";
     if (pane) pane.style.display = (k === "peers") ? "" : "none";
     // Timeframe pills belong to the chart; hiding them on Peers stops them implying they filter
     // the table (they do not — the peer columns are fixed Day/Week/Month).
     if (tfs) tfs.style.display = (k === "chart") ? "" : "none";
+    if (tfHost) tfHost.style.display = (k === "chart") ? "" : "none";
     if (msg) msg.style.display = (k === "chart") ? "" : "none";
     _paintTabs();
     if (k === "peers") _loadPeers();
