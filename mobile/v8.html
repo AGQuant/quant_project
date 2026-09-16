@@ -291,8 +291,24 @@ body{ --field:#0A0A0C; }
    (kwInfoLines, folded into dlChartSheetHtml's footer). One visible, unambiguous affordance per
    box instead of a hidden whole-box tap plus a separate small (i). */
 #v8p .kw{position:relative}
-#v8p .kw-c{position:absolute;top:4px;right:4px;width:18px;height:18px;display:flex;align-items:center;justify-content:center;
+/* cc#2106 root cause, measured not guessed: mobile.css's own LOCKED MOBILE_UX_STANDARD_V1 (cc#336)
+   forces every <button> to a 44px min tap target on mobile widths
+   (button,a.btn,.btn,.chip,...{min-height:var(--mux-tap)} / button,a.btn,.btn,.chip{min-width:
+   var(--mux-tap)}, --mux-tap:44px) -- correct and locked site-wide, but min-width/min-height act
+   as a FLOOR on width/height regardless of selector specificity, so it silently won over this
+   button's own explicit 18px size. Confirmed by rendering the real cascade (all 6 stylesheets
+   this page loads) in a real browser and asking the browser itself which rules match .kw-c --
+   there is no competing .kw-c/.kw rule anywhere (grepped exhaustively); the bare `button` selector
+   in that one locked rule is the entire cause. min-width/min-height:0 opts this one decorative
+   icon out of that floor so it renders at its real 18px, no overlap on the label/value beneath
+   it -- and the ::before below restores an INVISIBLE 44px hit-zone centered on it, so the tappable
+   area still meets MOBILE_UX_STANDARD_V1's own 44px standard even though the visible circle stays
+   small. Confirmed harmless: the whole .kw box already carries the SAME data-kw-chart target as
+   this button (chartBtn boxes are whole-box tappable, cc#2097), so the hit-zone reaching into the
+   label below changes nothing about what a tap there resolves to. */
+#v8p .kw-c{position:absolute;top:4px;right:4px;width:18px;height:18px;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;
   border:1px solid var(--line);border-radius:50%;background:none;color:var(--mute);cursor:pointer;padding:0}
+#v8p .kw-c::before{content:'';position:absolute;top:50%;left:50%;width:var(--mux-tap);height:var(--mux-tap);transform:translate(-50%,-50%)}
 /* every kpi box becomes a tap target for its chart (item 3) -- cursor + a faint press affordance,
    no layout change, so this never collides with the (i) button sharing the same box. */
 #v8p .kw[data-kw-chart]{cursor:pointer}
