@@ -73,13 +73,26 @@
    Dropping the box's own padding/margin is also what reclaims the vertical space cc#2111 item 3
    asks for -- the content below simply flows up into the space the box's box-model no longer
    claims, no separate repositioning needed. */
-.scorr-prow .v{text-align:right;flex:none;display:flex;align-items:baseline;gap:var(--space-6);
-  position:static;background:none;border:none;border-radius:0;padding:0;margin-bottom:0;overflow:visible;cursor:default}
+/* cc#2130 item 2: the pct + rupee/lot pair STACKS again (column, right-aligned) -- on one line the
+   "(+₹11,006/lot)" tail ran past the card's right edge and clipped on a real device. The pct
+   headline keeps its size and sits above; the rupee line gets the full column width below it.
+   .nm shrinks (min-width:0) so a long symbol + tag can never push the value column off the card. */
+.scorr-prow .nm{min-width:0;flex:1 1 auto}
+.scorr-prow .v{text-align:right;flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:var(--space-2);
+  position:static;background:none;border:none;border-radius:0;padding:0;margin-bottom:0;overflow:visible;cursor:default;white-space:nowrap}
 .scorr-prow .v::before{display:none}
 .scorr-prow .v .n{font-size:var(--type-15);font-weight:800;line-height:1}
 .scorr-prow .v .c{font-size:var(--type-9);color:var(--muted);font-weight:700;
   position:static;background:none;border:none;border-radius:0;padding:0;margin-bottom:0;overflow:visible}
 .scorr-prow .v .c::before{display:none}
+/* cc#2130 item 2, THE ACTUAL CLIP: scorr_theme_r5.css (injected by main.py on every /m/* page,
+   after this page's own styles) carries `:root:root:not([data-theme="light"]) .c` -- a card rule
+   for the app's .c panels that also lands on this bare .c: clip-path polygon with a 16px corner
+   cut, border, background. At specificity (0,4,0) it beat the cc#2111 reset above ((0,3,0)),
+   so "(+₹11,006/lot)" rendered as a boxed ribbon with its top-right corner sliced off -- the
+   founder's screenshot. Measured in the harness: computed clip-path was the polygon, not none.
+   Outranked here at (0,5,0); r5's own .c panels elsewhere are untouched. */
+:root:root .scorr-prow .v .c{clip-path:none;background:none;border:none;border-radius:0;padding:0;margin:0;position:static;overflow:visible}
 /* cc#2105 item 2: TC capsule moves into the sub line, pushed to the far right via .tcw's
    margin-left:auto -- same flex-row-with-auto-margin idiom the mockup's own .subline/.tcscore use. */
 .scorr-prow .sub{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--type-95);color:var(--muted);margin-top:var(--space-6);line-height:1.45}
@@ -247,6 +260,12 @@ function draw(){
   var openRows=sortOpen(pick(o)), closedRows=pick(c);
   var net=(rb.net_pts_pct||0)+(rs.net_pts_pct||0);
   var totalClosed=(rb.closed||0)+(rs.closed||0);
+  // cc#2130 item 1: the headline becomes the RUPEE net at one lot per signal, since start --
+  // record.BUY/SELL.net_rs_one_lot from /api/mobile/tcscan (the per-row pnl_rs formula summed over
+  // the same closed rows, scanners_app_mobile._record). Net pts moves to the sub line; a book with
+  // no lot-priced row shows a dash, never a 0.
+  var netRsKnown = (rb.net_rs_one_lot!=null) || (rs.net_rs_one_lot!=null);
+  var netRs = netRsKnown ? (rb.net_rs_one_lot||0)+(rs.net_rs_one_lot||0) : null;
   var h='<div class="hero"><div class="eye">TC scanner · paper book · one lot per signal</div><div class="big"><div class="r">'+(o.count||0)+'</div><div class="n">open now · unrealised <b class="'+cls(ob.unrealised_rs_one_lot)+'">'+inr(ob.unrealised_rs_one_lot,true)+'</b><br>'+(ob.priced||0)+' of '+(ob.n||0)+' priced'+(ob.rows_without_cmp?' · '+ob.rows_without_cmp+' without a price':'')+'</div></div>'
     // cc#2105 item 3b: single-row-with-dividers .kg strip via statCell() -- real wins/closed
     // counts from record.BUY/SELL (tc_scanner_endpoints.py _stats(), confirmed real fields, not
@@ -258,7 +277,7 @@ function draw(){
     +'<div class="kg">'
       + statCell('Long record', (rb.wr_pct!=null?rb.wr_pct+'%':'—'), '', (rb.closed?rb.wins+' of '+rb.closed:null), rb.wr_pct, 'long')
       + statCell('Short record', (rs.wr_pct!=null?rs.wr_pct+'%':'—'), '', (rs.closed?rs.wins+' of '+rs.closed:null), rs.wr_pct, 'short')
-      + statCell('Net pts', pct(net,1), cls(net), totalClosed+' signal'+(totalClosed===1?'':'s'), null, '')
+      + statCell('Net P&L · 1 lot', inr(netRs,true), cls(netRs), pct(net,1)+' pts · '+totalClosed+' signal'+(totalClosed===1?'':'s'), null, '')
     +'</div></div>';
   h+='<div class="sec"><h2>Book</h2><span class="hint">since '+esc(dm(rb.since||rs.since))+'</span></div>';
   h+='<div class="seg" id="side">'+['ALL','LONG','SHORT'].map(function(s){return '<span data-s="'+s+'"'+(s===SIDE?' class="on"':'')+'>'+s.charAt(0)+s.slice(1).toLowerCase()+'</span>';}).join('')+'</div>';

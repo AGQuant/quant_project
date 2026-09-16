@@ -262,6 +262,13 @@ var _full = false;                // cc#779: fullscreen state
     } catch (e) {}
     return "light";
   }
+  // cc#2130 item 3: body text inside the sheet follows the LIVE theme's own text token (--ink /
+  // --muted, the pair every theme in scorr_themes.css and scorr_theme_r5.css declares) and only
+  // falls back to the guessed palette where a host page defines no token at all. The founder saw
+  // the "MCX" header label wash out on a light theme: a palette guessed from --panel luminance is
+  // one step removed from the theme; the theme's own text token is the theme.
+  function _ink(p) { return "var(--ink, " + p.txt + ")"; }
+  function _mutd(p) { return "var(--muted, " + p.mut + ")"; }
   function _pal() {
     return _theme === "dark"
       ? { panel: "#1c2536", line: "#2a3548", txt: "#e8ecf2", mut: "#9aa4b5", sub: "#5a6781", grid: "rgba(150,160,180,.14)", btn: "#0f1623", btnOn: "#4d7cfe" }
@@ -588,7 +595,7 @@ var _full = false;                // cc#779: fullscreen state
     var wrap = document.getElementById("scorrChartBoxWrap");
     wrap.style.background = p.panel; wrap.style.border = "1px solid " + p.line;
     document.getElementById("scorrChartHead").style.borderBottom = "1px solid " + p.line;
-    document.getElementById("scorrChartTitle").style.color = p.txt;
+    document.getElementById("scorrChartTitle").style.color = _ink(p);   // cc#2130 item 3
     document.getElementById("scorrChartClose").style.color = p.mut;
     var _fb = document.getElementById("scorrChartFull"); if (_fb) _fb.style.color = p.mut;   // cc#779
     document.getElementById("scorrChartMsg").style.color = p.sub;
@@ -1540,13 +1547,19 @@ var _full = false;                // cc#779: fullscreen state
       return;
     }
     var nar = _peerNarrow();
-    var head = '<div style="font-size:11px;color:' + p.mut + ';padding:2px 4px 8px">' +
-      '<b style="color:' + p.txt + '">' + d.segment + '</b> · ' + d.count + ' peers · ' + d.band_rule + '</div>';
+    var head = '<div style="font-size:11px;color:' + _mutd(p) + ';padding:2px 4px 8px">' +
+      '<b style="color:' + _ink(p) + '">' + d.segment + '</b> · ' + d.count + ' peers · ' + d.band_rule + '</div>';
 
     var pad = nar ? "5px 5px" : "6px 8px";
-    var tpad = nar ? "6px 5px" : "7px 8px";
+    var tpad = nar ? "7px 5px" : "8px 8px";
     var vfs = nar ? "11px" : "12px";
-    var th = 'padding:0;border-bottom:1px solid ' + p.line + ';text-align:right;white-space:nowrap';
+    // cc#2130 item 4: the D / W / M headers STAY ON SCREEN while the list scrolls -- sticky to the
+    // top of the table's own scroll box (which now owns the vertical scroll, see #scorrPeerScroll
+    // below). Without this the header row left the viewport after the first few peers and the
+    // remaining rows read as bare inline numbers with no column labels -- the founder's screenshot.
+    // Opaque panel backdrop so numbers never show through it; z-index above the pinned Symbol cells.
+    var th = 'padding:0;border-bottom:1px solid ' + p.line + ';text-align:right;white-space:nowrap;' +
+      'position:sticky;top:0;z-index:3;background-color:' + p.panel;
     var thBtn = 'display:block;width:100%;border:none;background:none;font-family:inherit;cursor:pointer;' +
       'padding:' + pad + ';font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;' +
       'text-align:right;white-space:nowrap;min-height:28px';
@@ -1557,13 +1570,15 @@ var _full = false;                // cc#779: fullscreen state
     // and Month figures were legible straight through the pinned symbol.
     // box-shadow (not border-right) draws the pinned edge without taking a pixel of layout.
     var stick = 'position:sticky;left:0;z-index:2;box-shadow:1px 0 0 ' + p.line + ';';
+    // cc#2130 item 4: the top-left header cell pins on BOTH axes (top from `th`, left here).
+    var stickTh = 'left:0;z-index:4;box-shadow:1px 0 0 ' + p.line + ';';
     var selfTint = p.btnOn + "1f";
     var stickSelfBg = 'background-color:' + p.panel + ';background-image:linear-gradient(' +
       selfTint + ',' + selfTint + ')';
 
     function hcell(key, label, left) {
       var on = (_peerSortCol === key);
-      var col = on ? p.txt : p.sub;
+      var col = on ? _ink(p) : _mutd(p);
       // scroll-snap on the header cells (cc#987): a pinned column OCCLUDES what slides under it,
       // and a half-covered "-33.09" reads as "33.09" — a sign flip on a finance number, which is
       // the one misread this table must not allow. Snapping makes the scroll come to rest on a
@@ -1573,7 +1588,7 @@ var _full = false;                // cc#779: fullscreen state
       // showed no glyph at all — plain text is not a visible tap affordance. A faint ⇅ now sits on
       // every sortable header always; it becomes the existing solid ▼/▲ once that column is active
       // — same buttons, same _peerSortBy, no second sort mechanism.
-      return '<th style="' + th + (left ? ';text-align:left;' + stick + 'background-color:' + p.panel
+      return '<th style="' + th + (left ? ';text-align:left;' + stickTh
                                         : ';scroll-snap-align:start') + '">' +
         '<button data-sortcol="' + key + '" aria-label="Sort by ' + label + '"' +
         ' style="' + thBtn + (left ? ';text-align:left' : '') + ';color:' + col + '">' + label +
@@ -1593,10 +1608,10 @@ var _full = false;                // cc#779: fullscreen state
       var symBg = r.is_self ? stickSelfBg : ('background-color:' + p.panel);
       return '<tr data-sym="' + r.symbol + '" style="' + selfBg + '">' +
         '<td style="' + td + ';text-align:left;' + stick + symBg + '">' +
-          '<div style="font-weight:' + (r.is_self ? "800" : "700") + ';color:' + p.txt + '">' +
+          '<div style="font-weight:' + (r.is_self ? "800" : "700") + ';color:' + _ink(p) + '">' +
             (r.is_futures ? _futCaret(p) : '') + r.symbol +
             (r.is_self ? ' <span style="font-size:9px;opacity:.7">THIS</span>' : '') + '</div>' +
-          '<div style="font-size:10px;color:' + p.sub + ';max-width:' + (nar ? "76px" : "200px") +
+          '<div style="font-size:10px;color:' + _mutd(p) + ';max-width:' + (nar ? "76px" : "200px") +
             ';overflow:hidden;text-overflow:ellipsis">' + (r.company_name || "") + '</div>' +
         '</td>' +
         '<td style="' + td + '">' + _pc(r.day_pct, nar) + '</td>' +
@@ -1606,7 +1621,7 @@ var _full = false;                // cc#779: fullscreen state
         // the score number beside its own pill, rather than two separate columns that used to
         // split them apart. GVM stays sortable via the header above (unchanged, still gvm on the
         // payload); this only changes which column the VALUE renders in.
-        '<td style="' + td + '"><span style="color:' + p.txt + ';font-weight:700">' +
+        '<td style="' + td + '"><span style="color:' + _ink(p) + ';font-weight:700">' +
           (r.gvm == null ? "—" : r.gvm.toFixed(2)) + '</span> ' + _bandChip(r.band) + '</td>' +
         '<td style="' + td + '"><button data-card="' + r.symbol + '" style="border:1px solid ' + p.line +
           ';background:' + p.btn + ';color:' + p.mut + ';border-radius:7px;padding:4px ' + (nar ? "7px" : "10px") +
@@ -1621,8 +1636,12 @@ var _full = false;                // cc#779: fullscreen state
     // needed — before the reader has scrolled anything.
     pane.innerHTML = head +
       '<div id="scorrPeerHint" style="display:none;font-size:9.5px;color:' + p.sub + ';padding:0 4px 6px"></div>' +
-      '<div id="scorrPeerScrollWrap" style="position:relative">' +
-        '<div id="scorrPeerScroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch;' +
+      // cc#2130 items 4+5: the table sits in its OWN rounded, bordered scroll box that owns the
+      // vertical scroll (max-height) so the sticky header above has a scroll container to pin to;
+      // the pane's outer max-height still bounds the whole tab. Border + radius + a touch more row
+      // padding is the "little cute" polish -- spacing and edges only, no colour system change.
+      '<div id="scorrPeerScrollWrap" style="position:relative;border:1px solid ' + p.line + ';border-radius:10px;overflow:hidden">' +
+        '<div id="scorrPeerScroll" style="overflow:auto;max-height:340px;-webkit-overflow-scrolling:touch;' +
           'scroll-snap-type:x proximity">' +
         '<table style="width:100%;border-collapse:collapse;min-width:' + (nar ? "380px" : "520px") + '">' +
         '<thead><tr>' +

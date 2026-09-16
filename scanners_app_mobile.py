@@ -40,17 +40,26 @@ def _fl(v):
 def _record(cur):
     """Since-start record over tc_scanner_holds — the same table the web holds endpoint reads,
     all closed rows, no date filter. WR counts TARGET exits as wins (the web's own rule)."""
+    # cc#2130 item 1: the since-start rupee total at ONE LOT per signal -- the same formula
+    # tc_scanner_endpoints._rs applies per row ((mark - entry) x lot_size, sign-aware, lot from
+    # futures_universe, rows without a lot counted not summed), aggregated over the same closed rows
+    # net_pts already sums. Not a new number, the existing per-row number added up. DISPLAY ONLY.
     cur.execute("""
-        SELECT side, COUNT(*) AS n,
-               SUM(CASE WHEN exit_reason LIKE 'TARGET%%' THEN 1 ELSE 0 END) AS wins,
-               ROUND(SUM(((exit_price - entry_price) / NULLIF(entry_price,0)) * 100 * CASE WHEN side='BUY' THEN 1 ELSE -1 END)::numeric, 2) AS net_pts,
-               MIN(entry_ts)::date AS since, MAX(exit_ts)::date AS last
-        FROM tc_scanner_holds WHERE exit_reason <> 'OPEN' AND exit_price IS NOT NULL AND entry_price IS NOT NULL
-        GROUP BY side""")
+        SELECT h.side, COUNT(*) AS n,
+               SUM(CASE WHEN h.exit_reason LIKE 'TARGET%%' THEN 1 ELSE 0 END) AS wins,
+               ROUND(SUM(((h.exit_price - h.entry_price) / NULLIF(h.entry_price,0)) * 100 * CASE WHEN h.side='BUY' THEN 1 ELSE -1 END)::numeric, 2) AS net_pts,
+               MIN(h.entry_ts)::date AS since, MAX(h.exit_ts)::date AS last,
+               COUNT(f.lot_size) AS rs_rows,
+               ROUND(SUM((h.exit_price - h.entry_price) * f.lot_size * CASE WHEN h.side='BUY' THEN 1 ELSE -1 END)::numeric, 2) AS net_rs
+        FROM tc_scanner_holds h
+        LEFT JOIN futures_universe f ON f.symbol = h.symbol AND f.lot_size IS NOT NULL
+        WHERE h.exit_reason <> 'OPEN' AND h.exit_price IS NOT NULL AND h.entry_price IS NOT NULL
+        GROUP BY h.side""")
     out = {}
-    for side, n, wins, net, since, last in cur.fetchall():
+    for side, n, wins, net, since, last, rs_rows, net_rs in cur.fetchall():
         out[side] = {"closed": int(n or 0), "wins": int(wins or 0), "wr_pct": round(int(wins or 0) / int(n) * 100, 1) if n else None,
-                     "net_pts_pct": _fl(net), "since": str(since) if since else None, "last": str(last) if last else None}
+                     "net_pts_pct": _fl(net), "since": str(since) if since else None, "last": str(last) if last else None,
+                     "net_rs_one_lot": _fl(net_rs), "rs_rows": int(rs_rows or 0)}
     return out
 
 
