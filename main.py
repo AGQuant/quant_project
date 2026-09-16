@@ -716,7 +716,17 @@ async def auth_gate(request: Request, call_next):
         # and the loop above only rewrites src= attributes. /static/scorr_themes.css is
         # served max-age=86400, so without a stamp a returning phone could hold yesterday's
         # palette for a full day — the cc#1060 failure exactly, one asset later.
-        for _css in (b"scorr_themes.css", b"scorr_appshell.css"):
+        # cc#2109: mobile_app.css joins the list — hardcoded as an unstamped <link> in all 30
+        # mobile/*.html templates (grepped directly: every one, exactly one tag each, no existing
+        # ?v= anywhere), the one shared stylesheet this app never build-stamped. CORRECTION to
+        # this card's own evidence, confirmed by reading the live route rather than assuming:
+        # mobile_endpoints.mobile_app_css() actually serves Cache-Control: no-store, not
+        # max-age=86400 like scorr_themes.css/scorr_appshell.css above — a compliant cache should
+        # never have held a stale copy of THIS specific file to begin with, so this stamp is
+        # defense-in-depth/consistency with its siblings, not a confirmed fix for a confirmed
+        # browser-cache bug on this file. See cc#2109's report for what was and was not confirmed
+        # to explain the founder's own screenshot.
+        for _css in (b"scorr_themes.css", b"scorr_appshell.css", b"mobile_app.css"):
             body = body.replace(b'href="/static/' + _css + b'"',
                                 b'href="/static/' + _css + b'?v=' + _BUILD_B + b'"')
         # cc#1066 · THE SAME HOLE, ON THE JS SIDE OF /static. The loop above stamps
