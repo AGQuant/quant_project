@@ -96,3 +96,24 @@ reported-working case) plus a post-interaction check:
 ## What did NOT change
 `_buildModal()`'s HTML structure, the Pivots/Fib/Channel/GVM overlay-toggle logic, the GVM pillar
 sub-row, `TF`/`TF_ORDER`/`PIV_TFS`/`TF_LABEL`, and every other function in the file.
+
+## Landing evidence (rule 15)
+`git ls-tree origin/main -- scorr_chart_card.js` blob sha `6d76873...` matches the local working
+tree's `git hash-object` exactly. `github_read` of the same path against `main` independently
+reports the identical sha (`6d768730045bee087e569947364c2e3b4a2df194`) and byte size (122152), and
+its returned content contains the new `scorr-tf-sel` select markup. Both checks agree — the commit
+is on `main`, not just pushed to the branch. Commit `125f2bd`.
+
+## One unrelated pre-existing dead-code note, found while confirming `data-tf` had no other live
+users — not caused by this card, not fixed here
+Grepped the whole file for `data-tf` after the edit, to make sure nothing else still expected pill
+markup. One hit: `_apply3Y()` (line ~1230) does `host.querySelector('[data-tf="3Y"]')` to grey out
+the 3Y pill once a depth probe (`_probe3Y()`, called unconditionally on every chart open, line
+~1848) comes back short. **This has been fully dead since cc#2103 removed "3Y" from `TF_ORDER`**
+— no button carrying `data-tf="3Y"` has existed since then, pill-based or (now) select-based, so
+`_apply3Y` has already been a silent no-op for every chart opened since that card, and this change
+does not alter that. What this change does NOT alter, but is worth flagging separately: the
+unconditional `_probe3Y(_sym)` network call (`GET /api/candles/{sym}?tf=3Y&probe=1`) still fires on
+every chart open regardless — its result has been discarded since cc#2103 too. Small, pre-existing,
+not a regression from this card, and out of this card's scope to fix silently — filing a separate
+low-priority cleanup cc_task rather than bundling an unrelated fix into a P0 UI card.
