@@ -193,36 +193,52 @@ def qb_universe2_preview(
     m_min: Optional[float] = None, m_max: Optional[float] = None,
     verdict: Optional[List[str]] = Query(None),
     seg_rank_min: Optional[int] = None, seg_rank_max: Optional[int] = None,
+    ops: Optional[str] = None,
     limit: int = 500,
 ):
     """cc#2123: pool -> optional CAT_1 filters -> count + ranked rows. Every value read straight
     off gvm_scores' own current snapshot (score_date = MAX) -- no intraday feed anywhere on this
     path, per the founder's separate EOD-basis ruling on this same card (there is no live-price
     join here at all to violate it). filters_applied + binding_filter let the caller show WHY a
-    count is what it is, per the card's own click-through requirement."""
+    count is what it is, per the card's own click-through requirement.
+
+    cc#2135: conditions are built PER FILTER ROW (a min and a max on the same score are one filter,
+    ANDed inside their own parentheses) because the page now applies, counts and combines whole
+    rows. `per_filter_counts` is each applied filter ALONE against the pool (the page's "N of M
+    pass" per row). `ops` = "verdict:OR,seg_rank:AND" gives each filter its own AND/OR; rows are
+    combined LEFT-TO-RIGHT in the page's fixed row order (_FILTER_ORDER) with explicit parentheses
+    at every step -- ((f1 OP f2) OP f3) -- the spec's stated default, flagged there for correction.
+    The first applied row's flag has nothing to its left and is ignored. Omitting `ops` means AND
+    everywhere, which is exactly what this endpoint did before this card."""
     if pool not in _POOL_SQL:
         return {"error": "unknown pool", "known": sorted(_POOL_SQL)}
     limit = max(1, min(int(limit), 2000))
 
-    conds, params, applied = [], {}, []
+    fconds, params, applied = {}, {}, []
 
     def rng(col, lo, hi, name):
+        parts = []
         if lo is not None:
-            conds.append(f"{col} >= %({name}_lo)s"); params[name + "_lo"] = lo; applied.append(name + "_min")
+            parts.append(f"{col} >= %({name}_lo)s"); params[name + "_lo"] = lo
         if hi is not None:
-            conds.append(f"{col} <= %({name}_hi)s"); params[name + "_hi"] = hi; applied.append(name + "_max")
+            parts.append(f"{col} <= %({name}_hi)s"); params[name + "_hi"] = hi
+        if parts:
+            fconds[name] = "(" + " AND ".join(parts) + ")"; applied.append(name)
 
     rng("gvm_score", gvm_min, gvm_max, "gvm")
     rng("g_score", g_min, g_max, "g")
     rng("v_score", v_min, v_max, "v")
     rng("m_score", m_min, m_max, "m")
-    rng("seg_rank", seg_rank_min, seg_rank_max, "seg_rank")
     if verdict:
-        conds.append("UPPER(verdict) = ANY(%(verdict)s)")
+        fconds["verdict"] = "(UPPER(verdict) = ANY(%(verdict)s))"
         params["verdict"] = [v.upper() for v in verdict]
         applied.append("verdict")
+    rng("seg_rank", seg_rank_min, seg_rank_max, "seg_rank")
 
-    where = (" AND " + " AND ".join(conds)) if conds else ""
+    op_map = _parse_ops(ops)
+    ordered = [k for k in _FILTER_ORDER if k in fconds]
+    expr, expr_text = _combine(ordered, fconds, op_map)
+    where = (" AND " + expr) if expr else ""
     sql = _CAT1_SQL.format(pool_sql=_POOL_SQL[pool], where=where)
     params["limit"] = limit
 
@@ -232,20 +248,27 @@ def qb_universe2_preview(
     # -- they can legitimately differ (e.g. F&O's 3 index futures carry no GVM score at all), and
     # using the raw count here would make a zero-filter preview look like it silently dropped
     # members that were never scoreable to begin with.
+    scored_count_sql = (
+        "WITH pool AS (" + _POOL_SQL[pool] + "), scored AS ("
+        "SELECT g.symbol, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, "
+        "RANK() OVER (PARTITION BY g.segment ORDER BY g.gvm_score DESC) AS seg_rank "
+        "FROM gvm_scores g JOIN pool p ON p.symbol = g.symbol "
+        "WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)) "
+        "SELECT COUNT(*) FROM scored WHERE 1=1")
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) FROM (" + _POOL_SQL[pool] + ") p WHERE EXISTS "
             "(SELECT 1 FROM gvm_scores g WHERE g.symbol = p.symbol "
             "AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores))")
         pool_count = cur.fetchone()[0]
-        cur.execute(
-            "WITH pool AS (" + _POOL_SQL[pool] + "), scored AS ("
-            "SELECT g.symbol, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, "
-            "RANK() OVER (PARTITION BY g.segment ORDER BY g.gvm_score DESC) AS seg_rank "
-            "FROM gvm_scores g JOIN pool p ON p.symbol = g.symbol "
-            "WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)) "
-            "SELECT COUNT(*) FROM scored WHERE 1=1" + where, params)
+        cur.execute(scored_count_sql + where, params)
         pass_count = cur.fetchone()[0]
+        # cc#2135: each applied filter ALONE against the pool -- real queries, one per applied
+        # filter, the same CTE as the combined count, never client-side arithmetic.
+        per_filter = {}
+        for k in ordered:
+            cur.execute(scored_count_sql + " AND " + fconds[k], params)
+            per_filter[k] = cur.fetchone()[0]
 
         cur.execute(sql, params)
         cols = [d[0] for d in cur.description]
@@ -253,51 +276,51 @@ def qb_universe2_preview(
         cur.execute("SELECT MAX(score_date) FROM gvm_scores")
         as_of = cur.fetchone()[0]
 
-    # cc#2123: which single filter cut the most -- run each APPLIED filter alone against the
-    # pool and report the smallest resulting count, so the founder sees the binding gate
-    # immediately rather than having to guess from the combined result.
+    # cc#2123: which single filter cut the most -- the smallest of the per-filter counts, so the
+    # founder sees the binding gate immediately rather than guessing from the combined result.
     binding = None
-    if applied and pool_count:
-        with _conn() as conn, conn.cursor() as cur:
-            best = None
-            for name in applied:
-                single_where = ""
-                single_params = {"limit": limit}
-                if name.endswith("_min") or name.endswith("_max"):
-                    base = name.rsplit("_", 1)[0]
-                    col = {"gvm": "gvm_score", "g": "g_score", "v": "v_score", "m": "m_score",
-                           "seg_rank": "seg_rank"}.get(base)
-                    if not col:
-                        continue
-                    key = base + ("_lo" if name.endswith("_min") else "_hi")
-                    if key not in params:
-                        continue
-                    op = ">=" if name.endswith("_min") else "<="
-                    single_where = f" AND {col} {op} %({key})s"
-                    single_params[key] = params[key]
-                elif name == "verdict":
-                    single_where = " AND UPPER(verdict) = ANY(%(verdict)s)"
-                    single_params["verdict"] = params["verdict"]
-                else:
-                    continue
-                cur.execute(
-                    "WITH pool AS (" + _POOL_SQL[pool] + "), scored AS ("
-                    "SELECT g.symbol, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, "
-                    "RANK() OVER (PARTITION BY g.segment ORDER BY g.gvm_score DESC) AS seg_rank "
-                    "FROM gvm_scores g JOIN pool p ON p.symbol = g.symbol "
-                    "WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)) "
-                    "SELECT COUNT(*) FROM scored WHERE 1=1" + single_where, single_params)
-                n = cur.fetchone()[0]
-                if best is None or n < best[1]:
-                    best = (name, n)
-            if best:
-                binding = {"filter": best[0], "cut_to": best[1], "cut_count": pool_count - best[1]}
+    if per_filter and pool_count:
+        k, n = min(per_filter.items(), key=lambda kv: kv[1])
+        binding = {"filter": k, "cut_to": n, "cut_count": pool_count - n}
 
     return {
         "pool": pool, "pool_label": _POOL_LABEL[pool], "pool_count": pool_count,
-        "count": pass_count, "filters_applied": applied, "binding_filter": binding,
+        "count": pass_count, "filters_applied": applied, "filter_order": ordered,
+        "ops": {k: op_map.get(k, "AND") for k in ordered}, "expression": expr_text,
+        "per_filter_counts": per_filter, "binding_filter": binding,
         "as_of_date": str(as_of) if as_of else None, "rows": rows,
     }
+
+
+# cc#2135: the page's fixed row order -- "left-to-right" in the combine below means top-to-bottom
+# on the page. Kept in ONE place so the page and the endpoint cannot disagree about it.
+_FILTER_ORDER = ("gvm", "g", "v", "m", "verdict", "seg_rank")
+
+
+def _parse_ops(ops: Optional[str]) -> dict:
+    """'gvm:AND,verdict:OR' -> {'gvm': 'AND', 'verdict': 'OR'}. Anything unrecognised is AND (the
+    spec's stated default)."""
+    out = {}
+    for part in (ops or "").split(","):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            out[k.strip()] = "OR" if v.strip().upper() == "OR" else "AND"
+    return out
+
+
+def _combine(ordered, fconds, op_map):
+    """Left-to-right in page order with explicit parentheses at every step: ((f1 OP2 f2) OP3 f3).
+    The first row's own flag has nothing to its left, so it is ignored. Pure -- no DB.
+    Returns (sql_fragment, readable_text)."""
+    expr, text = "", ""
+    for i, k in enumerate(ordered):
+        if i == 0:
+            expr, text = fconds[k], k
+            continue
+        op = op_map.get(k, "AND")
+        expr = f"({expr} {op} {fconds[k]})"
+        text = f"({text} {op} {k})"
+    return expr, text
 
 
 @router.get("/qb/universe2", response_class=HTMLResponse)

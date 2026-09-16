@@ -13,45 +13,62 @@
   .sub{font-size:12px;color:var(--mut);margin-bottom:16px;line-height:1.5}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
   .card h2{font-size:13px;font-weight:800;margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em;color:var(--txt)}
-  .pool-grp{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:10px 0 6px}
+  .card h2 .hcount{font-weight:600;text-transform:none;letter-spacing:0;color:var(--dim);font-size:11px;margin-left:8px}
+  /* cc#2135: compact pool rows -- one line each (name + caption + count), tight caption, no
+     separate note line. The caption keeps the full text (cc#2123 gap notes, cc#2125 ranking
+     date) -- it is smaller and single-line, not removed; the full text is also the title tooltip. */
+  .pool-grp{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:8px 0 4px}
   .pool-grp:first-child{margin-top:0}
-  .pool-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .pool-row{display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;min-width:0}
   .pool-row:hover{background:var(--card2)}
-  .pool-row.on{background:rgba(77,124,254,.12);border-color:var(--blu)}
-  .pool-row input{margin:0}
-  .pool-name{font-size:13px;font-weight:700;flex:1}
-  .pool-count{font-size:12.5px;font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums}
-  .pool-note{font-size:10.5px;color:var(--amber);margin-left:24px;margin-top:-4px;margin-bottom:2px;display:none}
-  .pool-note.show{display:block}
-  .badge-stale{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
-    padding:2px 7px;border-radius:5px;background:rgba(245,185,74,.14);color:var(--amber);margin-left:8px}
-  .cat-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
+  .pool-row.on{background:var(--card2);border-color:var(--blu)}
+  .pool-row input{margin:0;flex:0 0 auto}
+  .pool-main{flex:1;display:flex;align-items:baseline;gap:8px;min-width:0}
+  .pool-name{font-size:12.5px;font-weight:700;white-space:nowrap}
+  .pool-caption{font-size:9.5px;color:var(--dim);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .pool-count{font-size:12.5px;font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums;flex:0 0 auto}
+  .badge-stale{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+    padding:1px 6px;border-radius:9px;background:var(--card2);color:var(--amber);border:1px solid var(--amber);flex:0 0 auto}
+  /* cc#2135: filter rows -- collapsed by default, + expands in place, per-row AND/OR in the middle,
+     applied status on the right, tick-to-apply with a live pass-count in the body. */
+  .filterlist{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .frow{border-bottom:1px solid var(--line)}
+  .frow:last-child{border-bottom:none}
+  .fhead{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;min-width:0}
+  .fhead:hover{background:var(--card2)}
+  .plusbtn{width:20px;height:20px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--mut);flex:0 0 auto;transition:transform .15s}
+  .frow.open .plusbtn{transform:rotate(45deg);color:var(--blu);border-color:var(--blu)}
+  .fname{font-size:12.5px;font-weight:700;flex:1;min-width:0}
+  .rowcomb{display:flex;background:var(--card2);border:1px solid var(--line);border-radius:7px;overflow:hidden;flex:0 0 auto;margin:0 8px}
+  .rowcomb button{padding:3px 9px;font-size:9.5px;font-weight:800;cursor:pointer;color:var(--dim);background:transparent;border:none;font-family:inherit}
+  .rowcomb button.sel{background:var(--blu);color:#fff}
+  .fstatus{font-size:10.5px;color:var(--dim);width:68px;text-align:right;flex:0 0 auto}
+  .fstatus.applied{color:var(--grn);font-weight:800}
+  .fbody{display:none;padding:2px 12px 12px 42px}
+  .frow.open .fbody{display:block}
+  .finputs{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .finputs input[type=number]{width:80px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
+  .finputs .to{font-size:11px;color:var(--dim)}
+  .finputs label.opt{font-size:11.5px;display:inline-flex;align-items:center;gap:4px;margin-right:6px}
+  .applywrap{display:inline-flex;align-items:center;gap:6px;margin-left:6px;cursor:pointer;user-select:none;background:transparent;border:none;padding:0;font-family:inherit;color:var(--txt)}
+  .tick{width:16px;height:16px;border-radius:4px;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+  .tick.on{background:var(--grn);border-color:var(--grn)}
+  .applylabel{font-size:11px;color:var(--mut);font-weight:700}
+  .passcount{margin-top:8px;font-size:11.5px;color:var(--grn);font-weight:800;display:none}
+  .passcount.show{display:block}
+  .passcount .of{color:var(--mut);font-weight:400}
+  .cat-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
   .cat-hd:last-child{border-bottom:none}
   .cat-title{font-size:13px;font-weight:800}
   .cat-count{font-size:11px;color:var(--mut);margin-left:8px;font-weight:600}
-  .cat-add{font-size:11px;font-weight:800;padding:4px 10px;border-radius:7px;border:1px solid var(--line);
-    background:var(--panel2);color:var(--blu);cursor:pointer}
-  .cat-add[disabled]{opacity:.4;cursor:not-allowed}
   .cat-coming{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);
     background:var(--card2);padding:2px 8px;border-radius:5px}
-  .cat-body{padding:8px 0 4px}
-  .picker{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
-  .picker button{font-size:11.5px;font-weight:700;padding:6px 11px;border-radius:8px;border:1px solid var(--line);
-    background:var(--panel2);color:var(--txt);cursor:pointer}
-  .picker button:hover{border-color:var(--blu)}
-  .frow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:var(--card2);border-radius:8px;margin-bottom:6px}
-  .frow .fname{font-size:12.5px;font-weight:700;min-width:150px}
-  .frow input[type=number]{width:80px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
-  .frow input[type=text]{flex:1;min-width:140px;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
-  .frow select{padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
-  .frow .rm{margin-left:auto;font-size:11px;font-weight:800;color:var(--red);background:transparent;border:none;cursor:pointer;padding:4px 6px}
-  .count-bar{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:12px 14px;background:var(--panel2);border-radius:10px;margin-bottom:10px}
-  .count-num{font-size:22px;font-weight:800;color:var(--blu);cursor:pointer;text-decoration:underline dotted}
-  .count-arrow{font-size:14px;color:var(--mut)}
-  .count-sub{font-size:11.5px;color:var(--mut)}
+  .resultbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+  .resultbar .rl{font-size:11px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .resultbar .rv{font-size:20px;font-weight:800;color:var(--grn);cursor:pointer;text-decoration:underline dotted}
+  .resultbar .rv .of{font-size:12px;color:var(--mut);font-weight:600;text-decoration:none}
+  .expr{font-size:11px;color:var(--mut);margin-top:6px;font-family:ui-monospace,Menlo,monospace}
   .binding{font-size:11.5px;color:var(--amber);margin-top:4px}
-  .run-btn{padding:10px 20px;border-radius:9px;border:1px solid var(--blu);background:var(--blu);color:#fff;
-    font-size:13px;font-weight:800;cursor:pointer;min-height:40px}
   .as-of{font-size:11px;color:var(--dim);margin-top:8px}
   table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
   thead th{text-align:left;padding:7px 9px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
@@ -79,15 +96,18 @@
   </div>
 
   <div class="card">
-    <h2>2 — Filters</h2>
+    <h2>2 — GVM &amp; Component Filters <span class="hcount" id="activeCount">0 active of 6</span></h2>
+    <div class="filterlist" id="filterlist"></div>
     <div id="categories"></div>
   </div>
 
   <div class="card">
-    <div class="count-bar" id="countBar">
-      <span class="count-sub">Pick a pool to see how many stocks qualify.</span>
+    <div class="resultbar" id="resultBar">
+      <span class="rl">Universe after filters</span>
+      <span class="rv" id="resultVal">— <span class="of">pick a pool</span></span>
     </div>
-    <button class="run-btn" id="runBtn" onclick="runPreview()">Run preview</button>
+    <div class="expr" id="exprLine"></div>
+    <div class="binding" id="bindingLine"></div>
     <div class="as-of" id="asOf"></div>
     <div id="resultsWrap" style="display:none">
       <div class="scroll"><table id="resultsTbl"><thead id="resultsHead"></thead><tbody id="resultsBody"></tbody></table></div>
@@ -99,18 +119,18 @@
 <script>
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 function num2(v){ return v==null||isNaN(+v)?'—':(+v).toFixed(2); }
-function fmtPx(v){ return v==null||isNaN(+v)?'—':(+v).toLocaleString('en-IN',{maximumFractionDigits:2}); }
+function fmtN(v){ return v==null?'—':(+v).toLocaleString('en-IN'); }
 
-/* cc#2123: CAT_1 -- the only category wired to real filtering in this push. Each entry names the
-   backend param pair (min/max or a bare list param for verdict), the display column key in the
-   /preview response, and its header label -- used both to build the +picker and to render the
-   dynamic results table (only columns for filters actually applied, per the card's own instruction). */
+/* cc#2123: CAT_1 -- the only category wired to real filtering. cc#2135: every filter is a fixed
+   row on the page (collapsed until its + is pressed), in THIS order -- the same order the backend's
+   _FILTER_ORDER combines them, so "left-to-right" on the server is top-to-bottom here.
+   Verdict options are the real gvm_scores.verdict values (checked live: Excellent/Good/Average/Weak). */
 var CAT1_FILTERS = [
   {key:'gvm', label:'GVM Score', kind:'range', col:'gvm_score'},
   {key:'g', label:'G Score', kind:'range', col:'g_score'},
   {key:'v', label:'V Score', kind:'range', col:'v_score'},
   {key:'m', label:'M Score', kind:'range', col:'m_score'},
-  {key:'verdict', label:'Verdict', kind:'list', col:'verdict', options:['Excellent','Good','Average','Poor']},
+  {key:'verdict', label:'Verdict', kind:'list', col:'verdict', options:['Excellent','Good','Average','Weak']},
   {key:'seg_rank', label:'Rank within Segment', kind:'range', col:'seg_rank'},
 ];
 var CATEGORIES_COMING = [
@@ -122,7 +142,8 @@ var CATEGORIES_COMING = [
   {name:'Quality, Valuation, Size & Ownership', n:6},
 ];
 
-var STATE = { pools:[], pool:null, active:{}, lastResult:null };
+var STATE = { pools:[], pool:null, rows:{}, last:null, seq:0 };
+CAT1_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[]}; });
 
 function loadPools(){
   fetchWithTimeout('/api/qb/universe2/pools').then(function(r){return r.json();}).then(function(d){
@@ -146,124 +167,133 @@ function poolRow(p){
   var on = STATE.pool === p.key;
   var stale = p.stale ? '<span class="badge-stale" title="'+esc(p.stale_note||'')+'">stale since '+esc((p.built_at||'').slice(0,10))+'</span>' : '';
   var noteTxt = [p.note, p.stale_note].filter(Boolean).join(' ');
-  var note = noteTxt ? '<div class="pool-note show">'+esc(noteTxt)+'</div>' : '';
+  var caption = noteTxt ? '<span class="pool-caption" title="'+esc(noteTxt)+'">'+esc(noteTxt)+'</span>' : '';
   return '<label class="pool-row'+(on?' on':'')+'" onclick="pickPool(\''+p.key+'\')">'
     + '<input type="radio" name="pool" '+(on?'checked':'')+'>'
-    + '<span class="pool-name">'+esc(p.label)+stale+'</span>'
-    + '<span class="pool-count">'+p.count.toLocaleString('en-IN')+'</span></label>' + note;
+    + '<span class="pool-main"><span class="pool-name">'+esc(p.label)+'</span>'+stale+caption+'</span>'
+    + '<span class="pool-count">'+fmtN(p.count)+'</span></label>';
 }
-function pickPool(key){ STATE.pool = key; renderPools(); updateCountBar(); }
+function pickPool(key){ STATE.pool = key; renderPools(); refresh(); }
 
-function renderCategories(){
-  var h = catHtml('cat1', 'GVM & Component Scores', CAT1_FILTERS.length, true);
-  CATEGORIES_COMING.forEach(function(c, i){ h += catHtml('coming'+i, c.name, c.n, false); });
-  document.getElementById('categories').innerHTML = h;
-  renderCat1Body();
+/* ── filters (cc#2135) ───────────────────────────────────────────────────────────────────── */
+function renderFilters(){
+  document.getElementById('filterlist').innerHTML = CAT1_FILTERS.map(filterRowHtml).join('');
+  var n = appliedKeys().length;
+  document.getElementById('activeCount').textContent = n + ' active of ' + CAT1_FILTERS.length;
+  document.getElementById('categories').innerHTML = CATEGORIES_COMING.map(function(c){
+    return '<div class="cat-hd"><div><span class="cat-title">'+esc(c.name)+'</span><span class="cat-count">'+c.n+' filters</span></div><span class="cat-coming">Coming</span></div>';
+  }).join('');
 }
-function catHtml(id, name, n, live){
-  var activeN = live ? Object.keys(STATE.active).length : 0;
-  return '<div class="cat-hd">'
-    + '<div><span class="cat-title">'+esc(name)+'</span><span class="cat-count">'+(live? activeN+' active of '+n : n+' filters')+'</span></div>'
-    + (live ? '' : '<span class="cat-coming">Coming</span>')
-    + '</div>'
-    + (live ? '<div class="cat-body" id="'+id+'-body"></div>' : '');
-}
-function renderCat1Body(){
-  var host = document.getElementById('cat1-body'); if (!host) return;
-  var picker = '<div class="picker">' + CAT1_FILTERS.filter(function(f){ return !STATE.active[f.key]; }).map(function(f){
-    return '<button onclick="addFilter(\''+f.key+'\')">+ '+esc(f.label)+'</button>';
-  }).join('') + '</div>';
-  var rows = Object.keys(STATE.active).map(function(k){ return filterRowHtml(CAT1_FILTERS.filter(function(f){return f.key===k;})[0]); }).join('');
-  host.innerHTML = picker + rows;
-}
-function addFilter(key){
-  STATE.active[key] = { min:'', max:'', list:[], note:'' };
-  renderCategories();
-}
-function removeFilter(key){ delete STATE.active[key]; renderCategories(); updateCountBar(); }
 function filterRowHtml(f){
-  var st = STATE.active[f.key];
+  var st = STATE.rows[f.key];
   var inputs;
   if (f.kind === 'range'){
-    inputs = '<input type="number" step="0.01" placeholder="min" value="'+esc(st.min)+'" onchange="setFilterVal(\''+f.key+'\',\'min\',this.value)">'
-      + '<span style="color:var(--mut)">to</span>'
-      + '<input type="number" step="0.01" placeholder="max" value="'+esc(st.max)+'" onchange="setFilterVal(\''+f.key+'\',\'max\',this.value)">';
+    inputs = '<input type="number" step="0.01" placeholder="min" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">'
+      + '<span class="to">to</span>'
+      + '<input type="number" step="0.01" placeholder="max" value="'+esc(st.max)+'" onchange="setVal(\''+f.key+'\',\'max\',this.value)">';
   } else {
     inputs = (f.options||[]).map(function(o){
       var checked = st.list.indexOf(o) >= 0;
-      return '<label style="font-size:11.5px;display:inline-flex;align-items:center;gap:4px;margin-right:8px">'
-        + '<input type="checkbox" '+(checked?'checked':'')+' onchange="toggleListVal(\''+f.key+'\',\''+o+'\',this.checked)">'+esc(o)+'</label>';
+      return '<label class="opt"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleListVal(\''+f.key+'\',\''+o+'\',this.checked)">'+esc(o)+'</label>';
     }).join('');
   }
-  return '<div class="frow"><span class="fname">'+esc(f.label)+'</span>' + inputs
-    + '<input type="text" placeholder="note — why this gate (optional)" value="'+esc(st.note)+'" onchange="setFilterVal(\''+f.key+'\',\'note\',this.value)">'
-    + '<button class="rm" onclick="removeFilter(\''+f.key+'\')">Remove</button></div>';
+  var pc = passCountHtml(f.key);
+  return '<div class="frow'+(st.open?' open':'')+'" id="frow-'+f.key+'">'
+    + '<div class="fhead" onclick="toggleRow(\''+f.key+'\')">'
+    +   '<div class="plusbtn">+</div><div class="fname">'+esc(f.label)+'</div>'
+    +   '<div class="rowcomb" onclick="event.stopPropagation()" title="How this row combines with the rows above it (left-to-right, top-to-bottom)">'
+    +     '<button type="button" class="'+(st.op==='AND'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'AND\')">AND</button>'
+    +     '<button type="button" class="'+(st.op==='OR'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'OR\')">OR</button></div>'
+    +   '<div class="fstatus'+(st.applied?' applied':'')+'">'+(st.applied?'applied':'not applied')+'</div>'
+    + '</div>'
+    + '<div class="fbody"><div class="finputs">' + inputs
+    +   '<button type="button" class="applywrap" onclick="toggleApply(\''+f.key+'\')"><span class="tick'+(st.applied?' on':'')+'">✓</span><span class="applylabel">Apply</span></button>'
+    + '</div><div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div></div>'
+    + '</div>';
 }
-function setFilterVal(key, field, val){ STATE.active[key][field] = val; }
+function passCountHtml(key){
+  var d = STATE.last;
+  if (!d || !d.per_filter_counts || d.per_filter_counts[key] == null) return 'counting…';
+  return fmtN(d.per_filter_counts[key]) + ' <span class="of">of ' + fmtN(d.pool_count) + ' pass</span>';
+}
+function appliedKeys(){ return CAT1_FILTERS.map(function(f){return f.key;}).filter(function(k){ return STATE.rows[k].applied; }); }
+function toggleRow(key){ STATE.rows[key].open = !STATE.rows[key].open; renderFilters(); }
+function setOp(key, op){ STATE.rows[key].op = op; renderFilters(); if (STATE.rows[key].applied) refresh(); }
+function toggleApply(key){
+  var st = STATE.rows[key];
+  st.applied = !st.applied;
+  if (st.applied) st.open = true;
+  renderFilters();
+  refresh();
+}
+function setVal(key, field, val){ STATE.rows[key][field] = val; if (STATE.rows[key].applied) refresh(); }
 function toggleListVal(key, val, on){
-  var l = STATE.active[key].list;
+  var l = STATE.rows[key].list;
   var i = l.indexOf(val);
   if (on && i < 0) l.push(val);
   if (!on && i >= 0) l.splice(i, 1);
+  if (STATE.rows[key].applied) refresh();
 }
 
-function updateCountBar(){
-  var bar = document.getElementById('countBar');
-  if (!STATE.pool){ bar.innerHTML = '<span class="count-sub">Pick a pool to see how many stocks qualify.</span>'; return; }
-  var p = STATE.pools.filter(function(x){ return x.key === STATE.pool; })[0];
-  bar.innerHTML = '<span class="count-sub">'+esc(p ? p.label : STATE.pool)+' pool: <b>'+(p?p.count.toLocaleString('en-IN'):'—')+'</b> — click Run preview to apply filters</span>';
-}
-
+/* Only APPLIED rows go to the server; each carries its own AND/OR in `ops`. The server combines
+   them left-to-right in its own fixed row order (the same order as this page) with explicit
+   parentheses -- the count shown is always the server's, never computed here. */
 function buildQuery(){
   var q = ['pool=' + encodeURIComponent(STATE.pool)];
-  Object.keys(STATE.active).forEach(function(key){
+  var ops = [];
+  appliedKeys().forEach(function(key){
     var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0];
-    var st = STATE.active[key];
+    var st = STATE.rows[key];
     if (f.kind === 'range'){
       if (st.min !== '') q.push(key + '_min=' + encodeURIComponent(st.min));
       if (st.max !== '') q.push(key + '_max=' + encodeURIComponent(st.max));
-    } else if (st.list.length){
+    } else {
       st.list.forEach(function(v){ q.push('verdict=' + encodeURIComponent(v)); });
     }
+    ops.push(key + ':' + st.op);
   });
+  if (ops.length) q.push('ops=' + encodeURIComponent(ops.join(',')));
   return q.join('&');
 }
 
-function runPreview(){
-  if (!STATE.pool){ alert('Pick a pool first.'); return; }
-  var btn = document.getElementById('runBtn'); btn.disabled = true; btn.textContent = 'Running…';
+function refresh(){
+  if (!STATE.pool){
+    document.getElementById('resultVal').innerHTML = '— <span class="of">pick a pool</span>';
+    return;
+  }
+  var seq = ++STATE.seq;
   fetchWithTimeout('/api/qb/universe2/preview?' + buildQuery() + '&limit=500')
     .then(function(r){ return r.json(); })
     .then(function(d){
-      btn.disabled = false; btn.textContent = 'Run preview';
-      if (d.error){ document.getElementById('countBar').innerHTML = '<span class="count-sub">Error — '+esc(d.error)+'</span>'; return; }
-      STATE.lastResult = d;
-      var bar = document.getElementById('countBar');
-      bar.innerHTML = '<span class="count-num" onclick="toggleResults()">'+d.pool_count.toLocaleString('en-IN')+'</span>'
-        + '<span class="count-arrow">→</span>'
-        + '<span class="count-num" onclick="toggleResults()">'+d.count.toLocaleString('en-IN')+' pass</span>'
-        + (d.binding_filter ? '<div class="binding" style="width:100%">binding filter: '+esc(d.binding_filter.filter)+' cuts to '+d.binding_filter.cut_to+'</div>' : '');
+      if (seq !== STATE.seq) return;   // a newer request superseded this one
+      if (d.error){ document.getElementById('resultVal').innerHTML = '<span class="of">Error — '+esc(d.error)+'</span>'; return; }
+      STATE.last = d;
+      document.getElementById('resultVal').innerHTML = fmtN(d.count) + ' <span class="of">stocks of ' + fmtN(d.pool_count) + ' in ' + esc(d.pool_label) + '</span>';
+      document.getElementById('exprLine').textContent = d.expression ? ('evaluated: ' + d.expression) : '';
+      document.getElementById('bindingLine').textContent = d.binding_filter ? ('binding filter: ' + labelOf(d.binding_filter.filter) + ' alone leaves ' + fmtN(d.binding_filter.cut_to)) : '';
       document.getElementById('asOf').textContent = 'as of ' + (d.as_of_date || '—') + ' (EOD gvm_scores snapshot)';
+      renderFilters();
       renderResults(d);
     })
     .catch(function(e){
-      btn.disabled = false; btn.textContent = 'Run preview';
-      document.getElementById('countBar').innerHTML = '<span class="count-sub">Could not run preview — '+esc(e.message)+'</span>';
+      if (seq !== STATE.seq) return;
+      document.getElementById('resultVal').innerHTML = '<span class="of">Could not count — '+esc(e.message)+'</span>';
     });
 }
+function labelOf(key){ var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0]; return f ? f.label : key; }
 function toggleResults(){
   var w = document.getElementById('resultsWrap');
   w.style.display = (w.style.display === 'none') ? '' : 'none';
 }
 function renderResults(d){
-  var appliedKeys = Object.keys(STATE.active);
+  var keys = appliedKeys();
   var cols = [{h:'Symbol', k:'symbol'}, {h:'Company', k:'company_name'}, {h:'Segment', k:'segment'}];
-  appliedKeys.forEach(function(key){
+  keys.forEach(function(key){
     var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0];
     if (f.col === 'verdict') { if (!cols.some(function(c){return c.k==='verdict';})) cols.push({h:'Verdict', k:'verdict'}); }
     else cols.push({h:f.label, k:f.col});
   });
-  if (!appliedKeys.length) cols.push({h:'GVM', k:'gvm_score'}, {h:'Segment Rank', k:'seg_rank'});
+  if (!keys.length) cols.push({h:'GVM', k:'gvm_score'}, {h:'Segment Rank', k:'seg_rank'});
   document.getElementById('resultsHead').innerHTML = '<tr>' + cols.map(function(c){return '<th>'+esc(c.h)+'</th>';}).join('') + '</tr>';
   var rows = d.rows || [];
   document.getElementById('resultsBody').innerHTML = rows.length
@@ -276,11 +306,12 @@ function renderResults(d){
           return '<td>'+num2(v)+'</td>';
         }).join('') + '</tr>';
       }).join('')
-    : '<tr><td colspan="'+cols.length+'" class="empty">'+(d.binding_filter ? esc(d.binding_filter.filter)+' cut every stock' : 'No stocks pass')+'</td></tr>';
+    : '<tr><td colspan="'+cols.length+'" class="empty">'+(d.binding_filter ? esc(labelOf(d.binding_filter.filter))+' cut every stock' : 'No stocks pass')+'</td></tr>';
 }
+document.getElementById('resultVal').addEventListener('click', toggleResults);
 
 loadPools();
-renderCategories();
+renderFilters();
 </script>
 </body>
 </html>
