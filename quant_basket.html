@@ -227,6 +227,12 @@
   .rb-tbl tr.rb-sell td.rb-act{color:var(--red);font-weight:700}
   .rb-tbl tr.rb-buy td.rb-act{color:var(--grn);font-weight:700}
   .rb-none{font-size:11px;color:var(--dim);padding:6px 14px 8px;font-style:italic}
+  /* cc#2122: the AWAITING CONFIRMATION candidate table -- deliberately its own visual family
+     (amber tint, matching .rb-chip.await), never the sell/buy tables' red/green, so this block
+     can never be mistaken for an executed one at a glance. */
+  .rb-cand-note{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);padding:10px 14px 0}
+  .rb-rule{font-size:11px;color:var(--mut);padding:4px 14px 6px;font-style:italic}
+  .rb-tbl tr.rb-cand-row td{background:rgba(245,185,74,.06)}
   .rb-foot{font-size:11px;color:var(--mut);padding:8px 14px 10px;border-top:1px solid var(--line);white-space:normal}
   .rb-tag{display:inline-block;margin-left:6px;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:5px;background:rgba(148,166,210,.14);color:var(--mut);white-space:nowrap}
   .rb-ver{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;border:1px solid var(--line);color:var(--mut)}
@@ -894,6 +900,34 @@ function rbSideTable(rows,side){
       <td class="rb-act">${side==='sell'?'Full Sell':'Buy'}</td>
     </tr>`).join('')}</tbody></table>`;
 }
+/* cc#2122: the proposed-and-awaiting candidate list -- CANDIDATES ARE NOT BUYS. Each candidate
+   carries only symbol/rank/gvm/dgvm/segment/slot_value/etc, no price, no qty, no amount (checked
+   field by field against real rows: quant_rebalance_log id=411 large_cap and id=403 contra_value
+   both confirmed) -- slot_value is the intended rupee SLOT, not a traded amount, so it gets its
+   own labelled column, never a Price/Qty/Amount column with blanks in it, and no Buy pill. Field
+   shape differs BY BASKET ENGINE (large_cap candidates carry rank/dgvm/mcap_rank/rank_score;
+   contra_value's carry mcap/above_20dma instead, confirmed on the real rows) -- every cell here
+   is null-safe, a missing field prints em-dash rather than 'undefined' or a fabricated 0. */
+function rbCandTable(cands,b){
+  if(!cands||!cands.length) return '<div class="rb-none">No candidates</div>';
+  const first=cands[0]||{};
+  const topN=b.cap_max_stocks!=null?b.cap_max_stocks:cands.length;
+  const rule=`Top ${topN} by ${esc(b.entry_priority||"the basket's own selection rule")}`
+    +(first.slot_value!=null?` · equal weight, slot ${inr(first.slot_value)}`:'');
+  return `<div class="rb-cand-note">Proposed — awaiting confirmation, not yet bought</div>
+    <div class="rb-rule">${rule}</div>
+    <table class="rb-tbl rb-cand"><thead><tr>
+      <th>S.No</th><th>Stock</th><th>Rank</th><th>GVM</th><th>dGVM</th><th>Segment</th><th>Slot value</th>
+    </tr></thead><tbody>${cands.map((c,i)=>`<tr class="rb-cand-row">
+      <td>${i+1}</td>
+      <td><strong>${esc(c.symbol)}</strong></td>
+      <td>${c.rank!=null?c.rank:'—'}</td>
+      <td>${c.gvm!=null?num2(c.gvm):'—'}</td>
+      <td>${c.dgvm!=null?num2(c.dgvm):'—'}</td>
+      <td>${esc(c.segment||'—')}</td>
+      <td>${c.slot_value!=null?inr(c.slot_value):'—'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
 function rbBlockHtml(b){
   const f=b.footer||{};
   const chip=b.state==='DONE'?'done':(b.state==='AWAITING CONFIRMATION'?'await':'none');
@@ -902,14 +936,21 @@ function rbBlockHtml(b){
     const cm=f.cash_move, amt=cm.residual!=null?Math.round(+cm.residual).toLocaleString('en-IN'):inr(cm.amount);
     cash=` · ${cm.direction==='out'?'−':'+'}${esc(cm.symbol)} ${amt}${cm.direction==='out'?' (liquidated to cash)':' (cash residual)'}`;
   }else if(f.cash_after!=null){ cash=` · cash ${inr(f.cash_after)}`; }   // cc#1715: cash left after this rebalance
+  // cc#2122: AWAITING CONFIRMATION renders the candidate list INSTEAD of Sell/Buy -- a block that
+  // has not run has no sells/buys to show, and "No sells / No buys" on it was the exact defect
+  // this card fixes (the card face already said N candidates; this panel said zero). DONE and
+  // NO ACTION are byte-identical to before this card.
+  const body=b.state==='AWAITING CONFIRMATION'
+    ? rbCandTable(b.candidates,b)
+    : `<div class="rb-side sell">Sell</div>${rbSideTable(b.sells,'sell')}
+    <div class="rb-side buy">Buy</div>${rbSideTable(b.buys,'buy')}`;
   return `<div class="rb-block">
     <div class="rb-hd">
       <span class="rb-title">${esc(BNAMES[curBasket]||curBasket)} ${b.kind==='quality_exit'?'Quality exit':'Rebalance'}</span>
       <span class="rb-chip ${chip}">${esc(b.chip||b.state||'')}</span>
       <span class="rb-date">${fmtDMY(b.date)}</span>
     </div>
-    <div class="rb-side sell">Sell</div>${rbSideTable(b.sells,'sell')}
-    <div class="rb-side buy">Buy</div>${rbSideTable(b.buys,'buy')}
+    ${body}
     <div class="rb-foot">held after = ${f.held_after!=null?f.held_after:'—'}${f.bees_held?' (+NIFTYBEES)':''}
       · book value after = ${lakh(f.book_value_after)}${cash}${b.next_due?' · next due '+fmtDMY(b.next_due):''}</div>
   </div>`;

@@ -583,6 +583,15 @@ def _rebalance_blocks(log_rows, positions, held_asof, value_by_date, reasons):
                        # rows write cash_after; the seed row wrote cash; QB rows carry alloc_residual).
                        "cash_after": _first_num(a.get("cash_after"), a.get("cash"), a.get("alloc_residual"))},
             "next_due": a.get("advanced_to"), "n_candidates": len(cands),
+            # cc#2122: the AWAITING panel was rendering with the DONE block's markup (no branch
+            # existed for it at all), so the founder saw "0 candidates" on a row that already
+            # carried 15 -- the card face (gated_rebalances, untouched) had them, this block never
+            # did. Passed AS STORED: entry_candidates is already rank-ordered in the log row, never
+            # reshaped/re-sorted here. entry_priority/cap_max_stocks/entry_status ride along so the
+            # panel can explain WHY these candidates and how many will actually be bought, which the
+            # founder cannot judge from a bare symbol list alone.
+            "candidates": cands, "entry_priority": a.get("entry_priority"),
+            "cap_max_stocks": a.get("cap_max_stocks"), "entry_status": a.get("entry_status"),
         })
     return blocks
 
