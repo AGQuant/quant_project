@@ -47,7 +47,11 @@
    than the single Check link it replaces). .scorr-prow is this page's own block layout; the shared
    module's own injected CSS (also scoped .scorr-prow) supplies the .trk/.lbl/.fn-tc rail+capsule
    styling on top of it. */
-.scorr-prow{display:block;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative}
+/* cc#2113: row padding + .sub's margin-top both bumped up. These were tuned for the OLD layout
+   where the (now cc#2111-removed) .v box's own 15px/12px padding contributed extra visual height
+   on its own -- with that box gone, the row reads as cramped at the old values. Padding/margin
+   only, no chrome reintroduced (cc#2111's own do_not_touch). */
+.scorr-prow{display:block;padding:var(--space-14) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative}
 .scorr-prow:last-child{border-bottom:none}
 .scorr-prow::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
 .scorr-prow.up::before{background:var(--win)}.scorr-prow.dn::before{background:var(--loss)}.scorr-prow.mu::before{background:var(--edge)}
@@ -78,7 +82,7 @@
 .scorr-prow .v .c::before{display:none}
 /* cc#2105 item 2: TC capsule moves into the sub line, pushed to the far right via .tcw's
    margin-left:auto -- same flex-row-with-auto-margin idiom the mockup's own .subline/.tcscore use. */
-.scorr-prow .sub{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}
+.scorr-prow .sub{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--type-95);color:var(--muted);margin-top:var(--space-6);line-height:1.45}
 .scorr-prow .sub b{color:var(--ink);font-weight:700}
 .scorr-prow .sub .tcw{margin-left:auto}
 /* cc#2105 item 3a: two-tone reward/risk background tint on the trk bar, split at the entry
