@@ -60,19 +60,16 @@
   // fullscreen refit. Renaming the key would have touched six predicates for a cosmetic change,
   // and any one missed rename would fail silently in a different direction each time. Label-only
   // is zero logic churn. TF_LABEL is the ONE place a key becomes a word.
-  // cc#1566 (founder 02-Sep): 3Y is BACK, between 1Y and ALL, in stock AND index mode. 1095 days.
-  // It is the one bounded TF with a depth gate: /api/candles?tf=3Y refuses a symbol with under
-  // ~2.5 years of sessions (kind=unavailable) rather than serving a shorter series labelled 3Y,
-  // and the pill greys out with that reason — it is never hidden and never falls back to ALL.
-  // cc#2103: 3M and 3Y dropped from the row (founder screenshot: TF row overflowed/squeezed on
-  // phone). TF_3Y_REASON/_3yCache/_probe3Y/_apply3Y and the "3Y" TF map entry's depth-gate sibling
-  // in _load()'s EOD URL builder are left in place, deliberately unreachable now (no button can set
-  // _tf to "3Y" anymore) rather than torn out — cc#2103's own scope note allows this as optional
-  // cleanup, not required.
+  // cc#1566 (founder 02-Sep): 3Y was briefly back, between 1Y and ALL, with a depth gate on
+  // /api/candles?tf=3Y (refused under ~2.5 years of history). cc#2103 dropped 3Y (and 3M) from the
+  // row entirely (founder screenshot: TF row overflowed/squeezed on phone). cc#2112 removed the
+  // now-fully-unreachable 3Y depth-probe machinery (TF_3Y_REASON/_3yCache/_probe3Y/_apply3Y, the
+  // EOD URL builder's &tf=3Y branch, and the "unavailable" response handler) that cc#2103 had
+  // deliberately left in place as optional cleanup — no button has been able to set _tf to "3Y"
+  // since cc#2103, so none of it could ever run.
   var TF = { "5m": null, "1W": 7, "1M": 30, "1Y": 365, "ALL": 1825 };
   var TF_ORDER = ["5m", "1W", "1M", "1Y", "ALL"];
   var TF_LABEL = { "5m": "1D" };   // internal key -> shown label; everything else shows its key
-  var TF_3Y_REASON = "Under 3 years of listed history";   // fallback text; the server reason wins
   // cc#806 FOUNDER RULE: pivots render ONLY on 5m and 1M/3M/6M. Rolling levels lose meaning at 1Y+,
   // so those pills grey out exactly like VWAP does on EOD frames. This replaces the old ALL-only
   // suppression. One predicate, used by the toggle chip, the price lines and the chip strip — so the
@@ -1208,31 +1205,6 @@ var _full = false;                // cc#779: fullscreen state
     return fetchWithTimeout(url, { credentials: "same-origin" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
   }
 
-  /* cc#1566: 3Y depth probe — one tiny GET per symbol per page load (cached like _futCache), answered
-     WITHOUT bars, so the pill is already grey with its reason before the user reaches for it. A probe
-     failure is NOT cached as unavailable: the pill stays enabled and the load path re-asks. */
-  var _3yCache = {};
-  function _probe3Y(sym) {
-    if (_3yCache[sym]) return Promise.resolve(_3yCache[sym]);
-    return _getJSON("/api/candles/" + encodeURIComponent(sym) + "?tf=3Y&probe=1")
-      .then(function (d) {
-        if (!d || !d.kind) return null;
-        _3yCache[sym] = { ok: d.kind === "ok", reason: d.reason || null, sessions: d.sessions_available };
-        return _3yCache[sym];
-      })
-      .catch(function () { return null; });
-  }
-  /* Re-style just the 3Y pill after a probe lands; _paintChrome rebuilt the row already, so only
-     the one button changes hands. */
-  function _apply3Y(sym) {
-    var y3 = _3yCache[sym]; if (!y3 || _sym !== sym) return;
-    var host = document.getElementById("scorrChartTfs"); if (!host) return;
-    var b = host.querySelector('[data-tf="3Y"]'); if (!b) return;
-    if (y3.ok) return;
-    b.style.opacity = ".4"; b.style.cursor = "not-allowed"; b.onclick = null;
-    b.title = y3.reason || TF_3Y_REASON;
-  }
-
   function _probeFutures(sym) {
     if (_futCache[sym] != null) return Promise.resolve(_futCache[sym]);
     return _getJSON("/api/intraday/" + encodeURIComponent(sym) + "?sessions=1")
@@ -1301,19 +1273,10 @@ var _full = false;                // cc#779: fullscreen state
     var url = isIntraday
       ? (viaYahoo ? "/api/chart/oneday/" + encodeURIComponent(_sym)
                   : "/api/intraday/" + encodeURIComponent(_sym) + "?sessions=3")
-      : "/api/candles/" + encodeURIComponent(_sym) + "?days=" + TF[tf] + (tf === "3Y" ? "&tf=3Y" : "");   // cc#1566: 3Y carries the depth gate
+      : "/api/candles/" + encodeURIComponent(_sym) + "?days=" + TF[tf];
     _getJSON(url).then(function (rows) {
       if (stale()) return;                       // a response for a symbol/timeframe we left
       var data;
-      /* cc#1566: the server refused 3Y for this symbol (too little history). Grey the pill with the
-         reason, say so in the caption, and STOP — no shorter series under a 3Y label, no silent hop
-         to ALL. The user picks the next frame. */
-      if (rows && !Array.isArray(rows) && rows.kind === "unavailable") {
-        _3yCache[wantSym] = { ok: false, reason: rows.reason || TF_3Y_REASON, sessions: rows.sessions_available };
-        _apply3Y(wantSym);
-        msg.textContent = "3Y unavailable for " + wantSym + " — " + (rows.reason || TF_3Y_REASON) + ".";
-        _setHL([]); return;
-      }
       // cc#2043: chart_oneday_endpoints.py returns {symbol,source,session_date,bars,note}, not a
       // bare array — unwrap it here so the SAME row->candle mapping below (already correct for
       // /api/intraday/'s own bare-array shape) handles both sources without forking.
@@ -1845,7 +1808,6 @@ var _full = false;                // cc#779: fullscreen state
       if (!ok) { document.getElementById("scorrChartMsg").textContent = "Chart library failed to load."; _paintChrome(); return; }
       _probeFutures(_sym).then(function () { _load(_tf); });
       _paintChrome();
-      _probe3Y(_sym).then(function () { _apply3Y(_sym); });   // cc#1566: greys the 3Y pill if history is short
     });
   }
 
