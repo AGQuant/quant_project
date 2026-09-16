@@ -25,12 +25,18 @@ they render as visible, named, "coming" sections on the page (never hidden -- th
 founder must see the shape of the page he is maturing) and are explicit follow-up
 scope, not a silent gap.
 
-Pool 3 (Nifty 500) carries a real, measured data-quality caveat: nifty500_universe
-has exactly ONE built_at (2026-06-02) and has not moved since -- checked directly,
-this session, not assumed from the spec. Surfaced on the page as a stale badge, per
-the card's own instruction that a pool must never silently claim to be current.
+cc#2125 cutover: the four cap-band pools and the Nifty 500 pool now read mcap_rank_daily
+(the per-date market-cap rank computed from screener_raw on every screener CSV load --
+session_log 85's own named source), at its latest rank_date. Before this they read
+input_raw.cap_category (frozen since June 2026) and nifty500_universe (one build,
+2026-06-02) -- 111 companies sat in the wrong band on the 16-Sep-2026 batch. Every
+rank-derived pool now states its ranking date on the page, and shows a stale badge only
+when a newer screener batch exists that has not been ranked, or the rank is more than
+two weeks old. nifty500_universe is retired as this page's source (not dropped -- other
+readers are a separate card).
 """
 import os
+from datetime import date
 from typing import Optional, List
 
 import psycopg
@@ -48,8 +54,10 @@ def _conn():
 
 # ── pool definitions ──────────────────────────────────────────────────────────────────────────
 # Each pool resolves to a bare "SELECT symbol ..." used as a CTE. Symbol columns differ per
-# source table (input_raw.nse_code, futures_universe.symbol, nifty500_universe.symbol) -- the SQL
-# below aliases every one to `symbol` so the caller never needs to know which table it came from.
+# source table (mcap_rank_daily.symbol, futures_universe.symbol) -- the SQL below aliases every one
+# to `symbol` so the caller never needs to know which table it came from.
+# cc#2125: cap bands and Nifty 500 read the LATEST rank_date of mcap_rank_daily (per-date rank from
+# screener_raw, session_log 85 band edges applied at write time) -- never input_raw's frozen copy.
 _CAP_BANDS = {
     "cap_large": ("Large Cap", "large"),
     "cap_mid": ("Mid Cap", "mid"),
@@ -57,13 +65,15 @@ _CAP_BANDS = {
     "cap_micro": ("Micro Cap", "micro"),
 }
 
+_RANK_LATEST = "rank_date = (SELECT MAX(rank_date) FROM mcap_rank_daily)"
+
 _POOL_SQL = {
-    "cap_large": "SELECT nse_code AS symbol FROM input_raw WHERE cap_category = 'large'",
-    "cap_mid": "SELECT nse_code AS symbol FROM input_raw WHERE cap_category = 'mid'",
-    "cap_small": "SELECT nse_code AS symbol FROM input_raw WHERE cap_category = 'small'",
-    "cap_micro": "SELECT nse_code AS symbol FROM input_raw WHERE cap_category = 'micro'",
+    "cap_large": f"SELECT symbol FROM mcap_rank_daily WHERE {_RANK_LATEST} AND cap_category = 'large'",
+    "cap_mid": f"SELECT symbol FROM mcap_rank_daily WHERE {_RANK_LATEST} AND cap_category = 'mid'",
+    "cap_small": f"SELECT symbol FROM mcap_rank_daily WHERE {_RANK_LATEST} AND cap_category = 'small'",
+    "cap_micro": f"SELECT symbol FROM mcap_rank_daily WHERE {_RANK_LATEST} AND cap_category = 'micro'",
     "fo": "SELECT symbol FROM futures_universe WHERE is_active = true",
-    "nifty500": "SELECT symbol FROM nifty500_universe",
+    "nifty500": f"SELECT symbol FROM mcap_rank_daily WHERE {_RANK_LATEST} AND mcap_rank <= 500",
 }
 _POOL_LABEL = {
     "cap_large": "Large Cap", "cap_mid": "Mid Cap", "cap_small": "Small Cap", "cap_micro": "Micro Cap",
@@ -77,12 +87,15 @@ _POOL_GROUP = {"cap_large": "cap_band", "cap_mid": "cap_band", "cap_small": "cap
 
 @router.get("/api/qb/universe2/pools")
 def qb_universe2_pools():
-    """Every pool's live count. Cap bands read input_raw.cap_category (session_log 85's own locked
-    band edges: large=mcap_rank 1-100 etc, already computed there -- this endpoint reads the
-    classification, it does not re-derive it). F&O reads the registry (is_active), same convention
-    every other surface in this codebase uses for the active futures list. Nifty 500 is OUR OWN
-    top-500-by-market-cap build (founder ruling, this card: "That is our own calculation"), not
-    real NSE index membership -- labelled as such.
+    """Every pool's live count. Cap bands read mcap_rank_daily.cap_category at its latest rank_date
+    (cc#2125: session_log 85's own locked band edges, applied when the rank is written from
+    screener_raw on each CSV load -- this endpoint reads the classification, it does not re-derive
+    it). F&O reads the registry (is_active), same convention every other surface in this codebase
+    uses for the active futures list. Nifty 500 is OUR OWN top-500-by-market-cap (founder ruling,
+    cc#2123: "That is our own calculation") -- mcap_rank <= 500 on the same latest rank_date -- not
+    real NSE index membership, labelled as such. Every rank-derived pool carries `ranked_as_of` and
+    says it in `note`; `stale` is set only when a newer screener batch has not been ranked yet or
+    the rank is more than two weeks old (the failure class this card found), never by default.
 
     cc#2123: every pool's RAW size can differ from its SCORED size (how many of its members carry
     a current gvm_scores row) -- measured live this session, not assumed: F&O 208 raw / 205 scored
@@ -92,8 +105,10 @@ def qb_universe2_pools():
     it is what must agree with /preview's own pool_count with zero filters applied. The raw count
     and the reason for any gap ride along in `note` so nothing is silently dropped unexplained."""
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*), MAX(built_at) FROM nifty500_universe")
-        n500_count, n500_built = cur.fetchone()
+        cur.execute("SELECT MAX(rank_date) FROM mcap_rank_daily")
+        rank_date = cur.fetchone()[0]
+        cur.execute("SELECT MAX(loaded_at) FROM screener_raw")
+        scr_loaded = cur.fetchone()[0]
         raw = {}
         scored = {}
         for key, sql in _POOL_SQL.items():
@@ -105,6 +120,22 @@ def qb_universe2_pools():
                 "AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores))")
             scored[key] = cur.fetchone()[0]
 
+    # cc#2125: the rank is stale in exactly two honest cases -- a screener CSV landed and was not
+    # ranked (the hook failed), or no CSV has landed for over two weeks (weekly cadence missed).
+    # Neither is assumed; both are measured here on every call.
+    rank_stale, rank_stale_note = False, None
+    if rank_date is None:
+        rank_stale = True
+        rank_stale_note = "no market-cap rank has been written yet -- these pools are empty until the first screener load is ranked"
+    elif scr_loaded is not None and scr_loaded.date() > rank_date:
+        rank_stale = True
+        rank_stale_note = (f"a screener CSV loaded {scr_loaded.date()} has not been ranked yet -- "
+                           f"rank is still as of {rank_date}")
+    elif (date.today() - rank_date).days > 14:
+        rank_stale = True
+        rank_stale_note = (f"ranked as of {rank_date}, more than two weeks ago -- no weekly screener "
+                           "CSV has been loaded since")
+
     pools = []
     for key in _POOL_SQL:
         gap = raw[key] - scored[key]
@@ -115,15 +146,15 @@ def qb_universe2_pools():
                     f"count shown is the {scored[key]} CAT_1 filters can actually act on")
         entry = {"key": key, "label": _POOL_LABEL[key], "group": _POOL_GROUP[key],
                  "count": scored[key], "raw_count": raw[key], "note": note}
-        if key == "nifty500":
-            # cc#2123: measured this session, not assumed -- nifty500_universe has exactly one
-            # built_at and has not been rebuilt since. A rebuild-cadence fix is its own follow-up
-            # card (data pipeline, not this page); until it lands, the page must say so plainly.
-            entry["stale"] = True
-            entry["built_at"] = str(n500_built) if n500_built else None
-            built_date = str(n500_built)[:10] if n500_built else "ranking date unknown"
-            entry["stale_note"] = (f"ranked as of {built_date} -- this pool has not been rebuilt "
-                                    "since; market-cap moves daily but this ranking has not moved in months")
+        if _POOL_GROUP[key] in ("cap_band", "nifty500"):
+            entry["ranked_as_of"] = str(rank_date) if rank_date else None
+            asof = (f"ranked as of {rank_date} (screener CSV load)" if rank_date
+                    else "no market-cap rank written yet")
+            entry["note"] = asof + (f"; {note}" if note else "")
+            if rank_stale:
+                entry["stale"] = True
+                entry["built_at"] = str(rank_date) if rank_date else None
+                entry["stale_note"] = rank_stale_note
         pools.append(entry)
     return {"pools": pools}
 

@@ -509,6 +509,20 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
     except Exception as e:
         log.warning(f"cc#1865 screener_expectations snapshot failed (screener_raw load still succeeded): {e}")
 
+    # cc#2125: market-cap rank, PER DATE, from the batch just written. session_log 85 always named
+    # screener_raw as the rank source; input_raw's copy froze in June 2026 because nothing ever
+    # recomputed it. Hooked HERE -- the one writer both loader paths go through -- so the rank can
+    # never again lag a CSV upload. Same never-fail-the-load discipline as the cc#1865 snapshot
+    # above; the outcome rides back in the diagnostics dict so a failure is visible in the load
+    # response (cc#804's one-glance shape), never silent.
+    try:
+        import mcap_rank_daily
+        _rank_res = mcap_rank_daily.recompute_mcap_rank()
+        log.info(f"cc#2125 mcap_rank_daily: {_rank_res}")
+    except Exception as e:
+        _rank_res = {"status": "error", "error": str(e)[:300]}
+        log.error(f"cc#2125 mcap_rank_daily recompute FAILED (screener_raw load still succeeded): {e}")
+
     log.info("load_screener: %d/%d rows (dropped %d no-nse_code, %d duplicate), %d columns "
              "(%d added: %s), %d market_cap jump(s) rejected", len(batch), rows_in_file,
              dropped_no_nse, dropped_dupe, len(cols), len(added), ", ".join(added) or "none",
@@ -530,6 +544,9 @@ def _sql_clean_replace_screener_v2(rows: List[dict]) -> dict:
         "qoq_sales_computed": bool(qoq_sales_ok),
         "qoq_profit_computed": bool(qoq_profit_ok),
         "result_quarter": result_quarter,
+        # cc#2125: the per-date market-cap rank written from this load ({status, rank_date, rows,
+        # bands} or {status: error, ...}). Visible here so a rank that lags a CSV cannot go unnoticed.
+        "mcap_rank_daily": _rank_res,
     }
 
 

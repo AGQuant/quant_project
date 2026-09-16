@@ -41,6 +41,7 @@ from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
 from qb_discretionary_rebalance import router as qb_discretionary_router  # cc#1715: need-basis rebalance for discretionary baskets
 from qb_universe_builder import router as qb_universe_builder_router  # cc#2123: Quant Basket Universe builder V1
+from mcap_rank_daily import router as mcap_rank_daily_router  # cc#2125: per-date market-cap rank from screener_raw (status + admin recompute)
 from gvm_report_endpoints import router as gvm_report_router
 from gvm_market_endpoints import router as gvm_market_router
 from gvm_universe_pivots import router as gvm_universe_pivots_router
@@ -848,6 +849,7 @@ app.include_router(v8_futures_router)
 app.include_router(qb_router)
 app.include_router(qb_discretionary_router)
 app.include_router(qb_universe_builder_router)  # cc#2123: Quant Basket Universe builder V1
+app.include_router(mcap_rank_daily_router)  # cc#2125: per-date market-cap rank (status + admin recompute)
 app.include_router(gvm_nightly_router)
 app.include_router(gvm_report_router)
 app.include_router(gvm_market_router)
