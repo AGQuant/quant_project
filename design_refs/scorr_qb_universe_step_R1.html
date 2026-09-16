@@ -87,7 +87,10 @@ h1{font-size:19px;font-weight:700}
 .plusbtn{width:20px;height:20px;border-radius:6px;background:var(--panel2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--mut);flex:0 0 auto;transition:transform .15s}
 .frow.open .plusbtn{transform:rotate(45deg);color:var(--blu);border-color:var(--blu-chip-bd);background:var(--blu-chip)}
 .fname{font-size:12.5px;font-weight:600;flex:1}
-.fstatus{font-size:10.5px;color:var(--dim)}
+.rowcomb{display:flex;background:var(--well);border:1px solid var(--line2);border-radius:7px;overflow:hidden;flex:0 0 auto;margin:0 10px}
+.rowcomb span{padding:3px 9px;font-size:9.5px;font-weight:700;cursor:pointer;color:var(--dim)}
+.rowcomb span.sel{background:var(--blu);color:#fff}
+.fstatus{font-size:10.5px;color:var(--dim);width:64px;text-align:right;flex:0 0 auto}
 .fstatus.applied{color:var(--grn);font-weight:700}
 .fbody{display:none;padding:2px 12px 14px 42px}
 .frow.open .fbody{display:block}
@@ -102,12 +105,6 @@ h1{font-size:19px;font-weight:700}
 .passcount.show{display:block}
 .passcount .of{color:var(--mut);font-weight:400}
 
-.combrow{display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding:12px 14px;background:var(--well);border:1px solid var(--line);border-radius:10px}
-.comblabel{font-size:11.5px;color:var(--mut);font-weight:600}
-.combinator{display:flex;background:var(--panel);border:1px solid var(--line2);border-radius:8px;overflow:hidden}
-.combinator span{padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;color:var(--mut)}
-.combinator span.sel{background:var(--blu);color:#fff}
-
 .resultbar{margin-top:16px;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-radius:10px;background:var(--grn-d);border:1px solid var(--grn-d)}
 .resultbar .rl{font-size:11px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
 .resultbar .rv{font-size:20px;font-weight:800;color:var(--grn)}
@@ -121,7 +118,7 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
 </head>
 <body>
 
-<div class="notice">🎨 <b>DESIGN MOCKUP — Universe step only</b> — reflects cc#2132/cc#2133 refinements: compact pool, collapsible filters (+ to expand), tick-to-apply, live pass-count instead of notes, AND/OR combinator. Counts shown are illustrative, not live.</div>
+<div class="notice">🎨 <b>DESIGN MOCKUP — Universe step only</b> — reflects cc#2132/cc#2133 refinements: compact pool, collapsible filters (+ to expand), tick-to-apply, live pass-count instead of notes, per-row AND/OR toggle (middle of each filter row). Counts shown are illustrative, not live.</div>
 
 <div class="mast">
   <div class="logo">SC<span>O</span>RR</div>
@@ -158,7 +155,9 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
     <div class="filterlist" id="filterlist">
       <div class="frow" data-base="497" data-pass="312">
         <div class="fhead" onclick="toggleRow(this)">
-          <div class="plusbtn">+</div><div class="fname">GVM Score</div><div class="fstatus">not applied</div>
+          <div class="plusbtn">+</div><div class="fname">GVM Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
         </div>
         <div class="fbody">
           <div class="finputs">
@@ -170,7 +169,9 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
       </div>
       <div class="frow" data-base="497" data-pass="401">
         <div class="fhead" onclick="toggleRow(this)">
-          <div class="plusbtn">+</div><div class="fname">G Score</div><div class="fstatus">not applied</div>
+          <div class="plusbtn">+</div><div class="fname">G Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
         </div>
         <div class="fbody">
           <div class="finputs">
@@ -182,7 +183,9 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
       </div>
       <div class="frow" data-base="497" data-pass="288">
         <div class="fhead" onclick="toggleRow(this)">
-          <div class="plusbtn">+</div><div class="fname">V Score</div><div class="fstatus">not applied</div>
+          <div class="plusbtn">+</div><div class="fname">V Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
         </div>
         <div class="fbody">
           <div class="finputs">
@@ -194,7 +197,9 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
       </div>
       <div class="frow" data-base="497" data-pass="356">
         <div class="fhead" onclick="toggleRow(this)">
-          <div class="plusbtn">+</div><div class="fname">M Score</div><div class="fstatus">not applied</div>
+          <div class="plusbtn">+</div><div class="fname">M Score</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
         </div>
         <div class="fbody">
           <div class="finputs">
@@ -206,7 +211,9 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
       </div>
       <div class="frow" data-base="497" data-pass="190">
         <div class="fhead" onclick="toggleRow(this)">
-          <div class="plusbtn">+</div><div class="fname">Verdict</div><div class="fstatus">not applied</div>
+          <div class="plusbtn">+</div><div class="fname">Verdict</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
         </div>
         <div class="fbody">
           <div class="finputs">
@@ -218,7 +225,9 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
       </div>
       <div class="frow" data-base="497" data-pass="120">
         <div class="fhead" onclick="toggleRow(this)">
-          <div class="plusbtn">+</div><div class="fname">Rank within Segment</div><div class="fstatus">not applied</div>
+          <div class="plusbtn">+</div><div class="fname">Rank within Segment</div>
+          <div class="rowcomb" onclick="event.stopPropagation()"><span class="sel" onclick="setRowComb(this)">AND</span><span onclick="setRowComb(this)">OR</span></div>
+          <div class="fstatus">not applied</div>
         </div>
         <div class="fbody">
           <div class="finputs">
@@ -227,14 +236,6 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
           </div>
           <div class="passcount">120 <span class="of">of 497 pass</span></div>
         </div>
-      </div>
-    </div>
-
-    <div class="combrow">
-      <div class="comblabel">Combine applied filters with</div>
-      <div class="combinator" id="combinator">
-        <span class="sel" onclick="setComb(this,'AND')">AND — all must pass</span>
-        <span onclick="setComb(this,'OR')">OR — any passes</span>
       </div>
     </div>
 
@@ -249,7 +250,6 @@ footer{text-align:center;padding:30px 0 10px;color:var(--dim);font-size:11px}
 </div>
 
 <script>
-let comb='AND';
 document.querySelectorAll('.poolrow').forEach(r=>r.addEventListener('click',()=>{
   document.querySelectorAll('.poolrow').forEach(x=>x.classList.remove('sel'));
   r.classList.add('sel');
@@ -269,10 +269,12 @@ function toggleApply(wrap){
   pc.classList.toggle('show', on);
   recalc();
 }
-function setComb(el,val){
-  document.querySelectorAll('#combinator span').forEach(s=>s.classList.remove('sel'));
+function setRowComb(el){
+  const wrap=el.parentElement;
+  wrap.querySelectorAll('span').forEach(s=>s.classList.remove('sel'));
   el.classList.add('sel');
-  comb=val;
+  const row=wrap.closest('.frow');
+  row.dataset.comb = el.textContent.trim();
   recalc();
 }
 function recalc(){
@@ -280,14 +282,20 @@ function recalc(){
   const base = pool ? parseInt(pool.dataset.n) : 497;
   const applied = [...document.querySelectorAll('.frow')].filter(r=>r.querySelector('.tick').classList.contains('on'));
   document.getElementById('activecount').textContent = applied.length + ' active of 6';
-  let result;
-  if(applied.length===0){ result = base; }
-  else if(comb==='AND'){
-    result = Math.round(applied.reduce((acc,r)=>acc*(parseInt(r.dataset.pass)/parseInt(r.dataset.base)), base));
-  } else {
-    const maxPass = Math.max(...applied.map(r=>Math.round(parseInt(r.dataset.pass)/parseInt(r.dataset.base)*base)));
-    result = Math.min(base, Math.round(maxPass*1.15));
-  }
+  // illustrative combine only: each row now carries its OWN AND/OR flag (dataset.comb, default AND)
+  // instead of one global switch. AND-flagged rows narrow the running result; OR-flagged rows widen
+  // it. Not a real query -- just enough to make the per-row toggle visibly do something.
+  let result = base;
+  applied.forEach(r=>{
+    const flag = r.dataset.comb || 'AND';
+    const passFrac = parseInt(r.dataset.pass) / parseInt(r.dataset.base);
+    if(flag==='AND'){
+      result = Math.round(result * passFrac);
+    } else {
+      const rowPassAbs = Math.round(base * passFrac);
+      result = Math.min(base, Math.round(result + rowPassAbs * (1 - result / base)));
+    }
+  });
   document.getElementById('resultval').innerHTML = result + ' <span class="of">stocks</span>';
 }
 function toggleTheme(){
