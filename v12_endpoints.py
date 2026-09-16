@@ -527,6 +527,8 @@ def _validate_basket_def(d: dict) -> list:
     else:
         if "trailing_peak_pct" in x and not _isnum(x["trailing_peak_pct"]):
             errs.append("exit.trailing_peak_pct must be a number")
+        if "hard_stop_pct" in x and not (_isnum(x["hard_stop_pct"]) and x["hard_stop_pct"] > 0):
+            errs.append("exit.hard_stop_pct must be a positive number")   # cc#2129/cc#2127
         if "rank_fall_y" in x and not (isinstance(x["rank_fall_y"], int) and x["rank_fall_y"] >= 1):
             errs.append("exit.rank_fall_y must be a positive int")
         if isinstance(x.get("rank_fall_y"), int) and isinstance(e.get("top_x"), int) and x["rank_fall_y"] < e["top_x"]:
@@ -562,6 +564,14 @@ def _validate_basket_def(d: dict) -> list:
         errs.append("universe_ref is required (a v12_universes id or an inline {filters} object)")
     elif not (isinstance(u, int) or isinstance(u, dict)):
         errs.append("universe_ref must be a universe id (int) or an object with filters")
+    # cc#2129/cc#2128: PORTFOLIO CONSTRUCTION, a new top-level key (not entry/exit -- risk
+    # management governs how a qualifying position is sized/capped, not whether it qualifies).
+    rk = d.get("risk")
+    if rk is not None:
+        if not isinstance(rk, dict):
+            errs.append("risk must be an object")
+        elif "sector_cap_pct" in rk and not (_isnum(rk["sector_cap_pct"]) and 0 < rk["sector_cap_pct"] <= 100):
+            errs.append("risk.sector_cap_pct must be a number between 0 and 100")
     return errs
 
 

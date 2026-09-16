@@ -383,6 +383,10 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
     trail = exit_def.get("trailing_peak_pct")
     rank_fall_y = exit_def.get("rank_fall_y")
     atr_stop = exit_def.get("atr_stop")   # cc#2088: {mult, target_mult?, trailing?}
+    hard_stop_pct = exit_def.get("hard_stop_pct")   # cc#2129/cc#2127: flat %-from-entry stop
+    risk_def = basket_def.get("risk", {}) or {}
+    sector_cap_pct = risk_def.get("sector_cap_pct")   # cc#2129/cc#2128: PORTFOLIO CONSTRUCTION,
+    # applied when filling target from the ranked list below -- not a per-symbol entry/exit gate.
 
     bench_sym = _BENCH.get(str(benchmark).upper(), "NIFTY50")
 
@@ -417,6 +421,14 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         series = _load_series(cur, universe, load_start, end)
         atr_series = _load_weekly_atr(cur, universe, load_start, end, period=14) if atr_stop else None
         gvm_pit_series = _load_gvm_pit_series(cur, universe, load_start, end) if gvm_filters else None
+        sym_segment = {}
+        if sector_cap_pct:
+            # cc#2129/cc#2128: segment is NOT point-in-time anywhere in this codebase (same
+            # limitation _uni_where's existing `segments` filter already carries) -- today's
+            # gvm_scores mapping, loaded once, reused for every rebalance's sector-cap check.
+            cur.execute("SELECT symbol, segment FROM gvm_scores WHERE symbol = ANY(%s) "
+                        "AND score_date = (SELECT MAX(score_date) FROM gvm_scores)", (universe,))
+            sym_segment = {r[0]: r[1] for r in cur.fetchall()}
 
     rebals = _rebalance_dates(cal, start, end, freq)
     if len(rebals) < 2:
@@ -481,6 +493,13 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
                 if px <= pk * (1 - float(trail) / 100.0):
                     drop = True
                     reason = reason or "trailing_peak_pct"
+            if hard_stop_pct and px is not None:
+                # cc#2129/cc#2127: flat percent-from-entry, EOD close only -- genuinely new,
+                # additive to trailing_peak_pct (checked independently, same as atr_stop below).
+                ep = open_pos.get(sym, {}).get("entry_px")
+                if ep and px <= ep * (1 - float(hard_stop_pct) / 100.0):
+                    drop = True
+                    reason = reason or "hard_stop_pct"
             if not drop:
                 keep[sym] = w
             else:
@@ -490,6 +509,31 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         if len(target) < min_stocks:
             target = [s for s, _ in scored[:min_stocks]]
         target = target[:max_stocks]
+        sector_skips = []
+        if sector_cap_pct and target:
+            # cc#2129/cc#2128: PORTFOLIO CONSTRUCTION rule -- re-walks the SAME ranked `scored`
+            # list up to the SAME count top_x/min/max above already settled on (cap_n), skipping
+            # (never trimming) a candidate whose segment would breach the cap and moving to the
+            # next-ranked candidate for that same still-open slot. Weight-based (this is a
+            # weight-walk backtest, not a rupee sizer) -- slot = 1/cap_n, matching the equal-weight
+            # convention immediately below (tw = 1/len(target)).
+            cap_n = len(target)
+            slot = 1.0 / cap_n
+            seg_w = {}
+            new_target = []
+            for sym, _ in scored:
+                if len(new_target) >= cap_n:
+                    break
+                seg = sym_segment.get(sym) or "Unknown"
+                would_be = seg_w.get(seg, 0.0) + slot
+                if would_be > (float(sector_cap_pct) / 100.0) + 1e-9:
+                    sector_skips.append({"symbol": sym, "segment": seg,
+                                          "would_reach_pct": round(would_be * 100, 2),
+                                          "cap_pct": sector_cap_pct})
+                    continue
+                seg_w[seg] = would_be
+                new_target.append(sym)
+            target = new_target
         tw = (1.0 / len(target)) if target else 0.0
         new_holdings = {s: tw for s in target}
         exit_reason = {}
@@ -561,6 +605,10 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
             # date -- the founder-visible number that shows the point-in-time universe moving
             # over the walk, not a single static count.
             log_row["gvm_pit_pass_count"] = gvm_pass
+        if sector_cap_pct:
+            # cc#2129/cc#2128: every skip names the symbol, segment and the % it would have
+            # reached -- never a bare count, matching the card's own verify requirement.
+            log_row["sector_cap_skips"] = sector_skips
         rebalance_log.append(log_row)
 
     _do_rebalance(rebals[0])
@@ -753,7 +801,21 @@ def _stats_pack(equity_series, bench_series, trades, years, end_capital):
 
 
 def _passes_gates(series, sym, d, entry):
-    """Optional RSI / EMA gates from raw_prices (point-in-time). Absent gate -> pass."""
+    """Optional RSI / EMA gates from raw_prices (point-in-time). Absent gate -> pass.
+
+    cc#2129: rsi_gate/ema_gate already carry a validated `tf` field (D/W/M -- _validate_basket_def
+    has required it since before this card) but this function used to ignore it completely and
+    always compute on DAILY closes regardless of what tf said -- a real, pre-existing bug: the
+    schema promised a timeframe the engine never honoured. Checked before fixing: v12_baskets has
+    ZERO saved rows today, so honouring tf now changes no live basket's behaviour -- there is
+    nothing already built to protect. Fixed to actually resample to week-end/month-end closes for
+    tf='W'/'M' (a no-op passthrough for 'D' or an absent tf, so the DEFAULT stays exactly what it
+    was). 'M' resampling matches v8_metrics.rsi_month's own convention: RSI computed on the last
+    close of each calendar month, not daily closes -- needed for cc#2126's monthly-RSI entry
+    condition and cc#2127's exit mirror, which this same gate now serves for both (a position that
+    fails this gate on the NEXT rebalance's re-evaluation drops out of target/new_holdings
+    automatically -- the engine's existing exit-via-re-ranking mechanism, not a second exit-time
+    check)."""
     rsi_g = entry.get("rsi_gate")
     ema_g = entry.get("ema_gate")
     if not rsi_g and not ema_g:
@@ -765,10 +827,11 @@ def _passes_gates(series, sym, d, entry):
     i = bisect.bisect_right(ds, d) - 1
     if i < 20:
         return False
-    closes = cs[:i + 1]
+    dates, closes = ds[:i + 1], cs[:i + 1]
     if rsi_g:
         p = int(rsi_g.get("period", 14))
-        v = _rsi(closes, p)
+        _, rsi_closes = _resample_tf(dates, closes, rsi_g.get("tf", "D"))
+        v = _rsi(rsi_closes, p)
         if v is None:
             return False
         thr = float(rsi_g.get("threshold", 50))
@@ -777,15 +840,51 @@ def _passes_gates(series, sym, d, entry):
         if rsi_g.get("dir") == "below" and not v <= thr:
             return False
     if ema_g:
-        e1 = _ema(closes, int(ema_g.get("ema1", 20)))
-        e2 = _ema(closes, int(ema_g.get("ema2", 50)))
+        _, ema_closes = _resample_tf(dates, closes, ema_g.get("tf", "D"))
+        e1 = _ema(ema_closes, int(ema_g.get("ema1", 20)))
+        e2 = _ema(ema_closes, int(ema_g.get("ema2", 50)))
         if e1 is None or e2 is None or not e1 > e2:
             return False
         if ema_g.get("ema3"):
-            e3 = _ema(closes, int(ema_g["ema3"]))
+            e3 = _ema(ema_closes, int(ema_g["ema3"]))
             if e3 is None or not e2 > e3:
                 return False
     return True
+
+
+def _resample_tf(dates, closes, tf):
+    """cc#2129: daily (dates, closes) resampled to week-end or month-end closes for a W/M-
+    timeframe gate. 'D' (or any other value) is a no-op passthrough -- the existing daily
+    behaviour, unchanged. Week-end = the last trading day before the ISO week changes; month-end
+    = the last trading day before the calendar month changes -- the actual last traded close IN
+    each period, never a fabricated boundary or an interpolated value.
+
+    BUG FOUND AND FIXED DURING cc#2129's OWN VERIFICATION (the monthly-RSI spot-check against
+    v8_metrics.rsi_month this card's own verify checklist requires): the first version of this
+    function unconditionally treated the LAST date in `dates` as a period-end, even when that date
+    fell mid-month/mid-week -- since callers always pass dates[:i+1] (history truncated AT the
+    query date, for point-in-time correctness), a query on e.g. 15-Sep was fabricating "15-Sep" as
+    if it were September's completed month-end close, corrupting the RSI computed from it (BHEL
+    read 71.3 on 15-Sep this way vs v8_metrics.rsi_month's real 63.1 for the same date -- a
+    material, wrong-side-of-the-70-threshold divergence, caught by the spot-check, not asserted).
+    Fixed: a period only closes on an OBSERVED rollover (the next date's month/week differs) --
+    the trailing partial period is dropped entirely rather than force-included, so "as of date X"
+    always means the last COMPLETE month/week strictly before X, never a fabricated one from X
+    itself. Re-verified after the fix: BHEL/IDEA/TORNTPHARM now match v8_metrics.rsi_month within
+    the small, expected gap from two independently-computed RSI series (see cc#2129's report)."""
+    if tf not in ("W", "M"):
+        return dates, closes
+    out_d, out_c = [], []
+    for idx in range(len(dates) - 1):
+        d, nd = dates[idx], dates[idx + 1]
+        if tf == "M":
+            rolled = (nd.month != d.month or nd.year != d.year)
+        else:
+            rolled = (nd.isocalendar()[1] != d.isocalendar()[1] or nd.year != d.year)
+        if rolled:
+            out_d.append(d)
+            out_c.append(closes[idx])
+    return out_d, out_c
 
 
 def _rsi(closes, period=14):
