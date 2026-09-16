@@ -194,6 +194,13 @@ _CHAINED_JOBS = [
     {"job_name": "gvm_coverage_guard",
      "cadence_human": "nightly, chained immediately after gvm_recompute (and after screeners_eod)",
      "module": "gvm_coverage_guard.py", "function": "alert", "service": "app", "category": "chained"},
+    # cc#2126: TC Scanner EOD score snapshot -- chained after gvm_coverage_guard, same block, same
+    # cc#1095 P2 lesson above (a chained job is invisible to enumerate_scheduler_jobs() and MUST be
+    # listed here or the drift audit auto-retires it as "vanished from code" while it keeps running).
+    {"job_name": "tc_scanner_score_daily",
+     "cadence_human": "nightly, chained immediately after gvm_recompute (and after gvm_coverage_guard)",
+     "module": "qb_entry_rules.py", "function": "compute_tc_scanner_score_daily", "service": "app",
+     "category": "chained"},
 ]
 
 

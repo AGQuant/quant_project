@@ -2623,6 +2623,28 @@ def _bg_gvm():
                                         duration_ms=int((time.time() - _cg_t0) * 1000))
         except Exception as _re:
             log.warning(f"record_run(gvm_coverage_guard) failed: {_re}")
+
+        # cc#2126 — TC Scanner EOD score snapshot, CHAINED FOR THE SAME REASON screeners_eod and
+        # gvm_coverage_guard are: a fixed wall-clock slot risks nothing here specifically (the
+        # market closes 15:30 IST, well before this nightly run), but the established convention
+        # in this block is chain-after-gvm rather than a new independent slot, and there is no
+        # reason to be the exception. A snapshot failure must never mark the GVM run bad.
+        _tc_t0 = time.time()
+        _tc_status, _tc_err = "ok", None
+        try:
+            import qb_entry_rules
+            with _conn() as tcconn:
+                _tc_res = qb_entry_rules.compute_tc_scanner_score_daily(tcconn)
+            log.info("cc#2126 tc_scanner_score_daily: %s", _tc_res)
+        except Exception as e:
+            _tc_status, _tc_err = "error", str(e)[:400]
+            log.error(f"cc#2126 tc_scanner_score_daily: {e}")
+        try:
+            import scheduler_master
+            scheduler_master.record_run("tc_scanner_score_daily", _tc_status, error=_tc_err,
+                                        duration_ms=int((time.time() - _tc_t0) * 1000))
+        except Exception as _re:
+            log.warning(f"record_run(tc_scanner_score_daily) failed: {_re}")
     except Exception as e: log.error(f"gvm: {e}")
 
 def _bg_gvm_backfill():
