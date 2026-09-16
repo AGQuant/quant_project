@@ -107,7 +107,8 @@
       <div class="fld"><label>ROC lookback</label><select id="e_roc"><option>1M</option><option selected>3M</option><option>6M</option><option>12M</option></select></div>
       <div class="fld"><label>Hold top X</label><input id="e_topx" type="number" value="10"></div>
       <div class="fld"><label>Min stocks</label><input id="e_min" type="number" value="5"></div>
-      <div class="fld"><label>Max stocks</label><input id="e_max" type="number" value="20"></div>
+      <!-- cc#2132: "Max stocks" (the basket cap) moved to step 4 Risk management -- same
+           definition field (entry.max_stocks), one input, now where the founder named it. -->
     </div>
     <label class="chk"><input type="checkbox" id="e_rsi_on"> RSI gate</label>
     <div class="grid" id="e_rsi_box" style="display:none">
@@ -131,6 +132,9 @@
     <h2>3 · Exit rules <span class="pill b">all optional</span></h2>
     <div class="sub">Evaluated at each rebalance (EOD). Any combination.</div>
     <div class="grid">
+      <!-- cc#2132: hard stop is a real engine field (exit.hard_stop_pct, cc#2127 -> cc#2129 wired
+           into v12_backtest.py and validated by v12_endpoints) that this page never exposed. -->
+      <div class="fld"><label>Hard stop % below entry</label><input id="x_hard" type="number" placeholder="e.g. 10"></div>
       <div class="fld"><label>Trailing peak fall % (SL)</label><input id="x_trail" type="number" placeholder="e.g. 15"></div>
       <div class="fld"><label>Rank-fall exit (drops below Y)</label><input id="x_rank" type="number" placeholder=">= top X"></div>
     </div>
@@ -141,12 +145,26 @@
       <div class="fld"><label>Target — ATR multiple (optional)</label><input id="x_atr_target" type="number" placeholder="e.g. 4"></div>
     </div>
     <label class="chk" id="x_atr_trail_wrap" style="display:none"><input type="checkbox" id="x_atr_trailing"> Trailing — stop follows the peak price, not just entry</label>
-    <div class="row"><button class="btn ghost" onclick="go(1)">&larr; Back</button><button class="btn" onclick="go(3)">Next: Backtest &rarr;</button></div>
+    <div class="row"><button class="btn ghost" onclick="go(1)">&larr; Back</button><button class="btn" onclick="go(3)">Next: Risk &rarr;</button></div>
   </div>
 
-  <!-- STEP 4 BACKTEST -->
+  <!-- STEP 4 RISK MANAGEMENT (cc#2132: the founder's own step list -- Universe, Entry, Exit,
+       Risk Management, Backtest, Deploy). Binds to the real definition fields cc#2128 built and
+       cc#2129 wired into v12_backtest.py: entry.max_stocks (basket cap) and risk.sector_cap_pct. -->
   <div class="panel" id="p3">
-    <h2>4 · Backtest</h2>
+    <h2>4 · Risk management</h2>
+    <div class="sub">Portfolio construction &mdash; how a qualifying position is sized and capped. A sector cap SKIPS a candidate whose segment would breach it (next-ranked fills), it never trims.</div>
+    <div class="grid">
+      <div class="fld"><label>Basket cap (max stocks)</label><input id="e_max" type="number" value="20"></div>
+      <div class="fld"><label>Sector cap (max weight %)</label><input id="r_seccap" type="number" placeholder="e.g. 25"></div>
+    </div>
+    <div class="sub" style="margin-top:10px">Residual allocation split (cash / GOLDBEES / SILVERBEES) exists in qb_risk_rules.py, but the V12 backtest definition has no field for it yet &mdash; not shown as a control that would do nothing.</div>
+    <div class="row"><button class="btn ghost" onclick="go(2)">&larr; Back</button><button class="btn" onclick="go(4)">Next: Backtest &rarr;</button></div>
+  </div>
+
+  <!-- STEP 5 BACKTEST -->
+  <div class="panel" id="p4">
+    <h2>5 · Backtest</h2>
     <div class="sub">Portfolio walk on 5-year EOD prices. Rebalance on schedule, equal-weight, with your costs. Honest: daily-mark drawdown, yearly split, min-n badge.</div>
     <div class="grid">
       <div class="fld"><label>Rebalance</label><select id="b_freq"><option>weekly</option><option selected>monthly</option><option>quarterly</option></select></div>
@@ -161,31 +179,54 @@
       <div class="fld"><label>End (YYYY-MM-DD)</label><input id="b_end" type="text" placeholder="today"></div>
     </div>
     <div class="row">
-      <button class="btn ghost" onclick="go(2)">&larr; Back</button>
+      <button class="btn ghost" onclick="go(3)">&larr; Back</button>
       <button class="btn" id="runBtn" onclick="runBacktest()">Run backtest</button>
       <span id="b_status" style="font-size:12px;color:var(--mut)"></span>
     </div>
     <div id="results"></div>
+    <div class="row"><button class="btn ghost" onclick="go(5)">Next: Deploy &rarr;</button></div>
   </div>
 
-  <!-- STEP 5 DEPLOY (P2) -->
-  <div class="panel" id="p4">
-    <h2>5 · Deploy <span class="pill a">P2</span></h2>
-    <div class="sub">One-click paper deploy (own book, journal-separated from V8/QB) ships in Phase 2. Build &amp; backtest freely now.</div>
-    <div class="empty">Paper deploy is disabled in P1.</div>
+  <!-- STEP 6 DEPLOY -- cc#2132: STOPPED, stated rather than invented. The card says: wire to
+       whatever qb_endpoints.py already uses to create a scheduler_master row for a new basket, and
+       if no such endpoint exists, STOP and report. Checked directly: qb_endpoints.py has no route
+       that creates a basket or a scheduler_master row (its routes are eod_check, rebalance_*,
+       nav/rebuild, seed/run, fix_allocations). So this step tells the truth instead of pretending. -->
+  <div class="panel" id="p5">
+    <h2>6 · Deploy <span class="pill a">not wired yet</span></h2>
+    <div class="sub">Deploying a basket to live needs an endpoint that creates its <code>scheduler_master</code> row and registers it for EOD runs. That endpoint does not exist yet &mdash; <code>qb_endpoints.py</code> carries none &mdash; so this step stops here rather than inventing one (cc#2132). Your backtest result above is the deliverable until it lands.</div>
+    <div class="empty">No deploy endpoint yet &mdash; stopped, reported on cc#2132.</div>
+    <div class="row"><button class="btn ghost" onclick="go(4)">&larr; Back to Backtest</button></div>
   </div>
 </div>
 
 <script src="/scorr_card_common.js"></script>
 <script>
 const API=location.origin;
-const STEP_NAMES=['Universe','Entry','Exit','Backtest','Deploy'];
+// cc#2132: the founder's own six steps, in his order. Risk management is a real step now (p3).
+const STEP_NAMES=['Universe','Entry','Exit','Risk Management','Backtest','Deploy'];
 let STEP=0, LAST=null;
+// cc#2132: embedded inside the QB page's "+ Build a Basket" flow (?embed=1) the QB page owns the
+// stepper; this page hides its own header/steps, follows step messages from the parent, and
+// reports its height + current step back so the parent frame fits and its stepper stays in sync.
+const QS=new URLSearchParams(location.search);
+const EMBED=QS.get('embed')==='1';
 function renderSteps(){
   document.getElementById('steps').innerHTML=STEP_NAMES.map((s,i)=>
-    `<div class="step ${i===STEP?'on':''} ${i===4?'disabled':''}" onclick="${i===4?'':'go('+i+')'}"><span class="n">${i+1}</span>${s}</div>`).join('');
+    `<div class="step ${i===STEP?'on':''}" onclick="go(${i})"><span class="n">${i+1}</span>${s}</div>`).join('');
 }
-function go(i){STEP=i;renderSteps();for(let k=0;k<5;k++){const el=document.getElementById('p'+k);if(el)el.classList.toggle('on',k===i);}window.scrollTo({top:0,behavior:'smooth'});}
+function go(i){STEP=i;renderSteps();for(let k=0;k<6;k++){const el=document.getElementById('p'+k);if(el)el.classList.toggle('on',k===i);}
+  if(EMBED){_postEmbed();}else{window.scrollTo({top:0,behavior:'smooth'});}}
+function _postEmbed(){
+  if(!EMBED||window.parent===window)return;
+  window.parent.postMessage({scorrEmbed:'v12',step:STEP,height:document.documentElement.scrollHeight},'*');
+}
+if(EMBED){
+  const hd=document.querySelector('header');if(hd)hd.style.display='none';
+  document.getElementById('steps').style.display='none';
+  window.addEventListener('message',ev=>{const d=ev.data||{};if(typeof d.v12step==='number')go(d.v12step);});
+  if(window.ResizeObserver)new ResizeObserver(_postEmbed).observe(document.body);
+}
 document.getElementById('e_rsi_on').addEventListener('change',e=>document.getElementById('e_rsi_box').style.display=e.target.checked?'grid':'none');
 document.getElementById('e_ema_on').addEventListener('change',e=>document.getElementById('e_ema_box').style.display=e.target.checked?'grid':'none');
 document.getElementById('x_atr_on').addEventListener('change',e=>{const on=e.target.checked;document.getElementById('x_atr_box').style.display=on?'grid':'none';document.getElementById('x_atr_trail_wrap').style.display=on?'flex':'none';});
@@ -232,10 +273,13 @@ function buildDefinition(){
   if(document.getElementById('e_rsi_on').checked)entry.rsi_gate={tf:document.getElementById('e_rsi_tf').value,period:parseInt(document.getElementById('e_rsi_p').value||'14'),threshold:parseFloat(document.getElementById('e_rsi_t').value||'50'),dir:document.getElementById('e_rsi_dir').value};
   if(document.getElementById('e_ema_on').checked){entry.ema_gate={tf:document.getElementById('e_ema_tf').value,ema1:parseInt(document.getElementById('e_ema1').value||'20'),ema2:parseInt(document.getElementById('e_ema2').value||'50')};const e3=num('e_ema3');if(e3!=null)entry.ema_gate.ema3=parseInt(e3);}
   const exit={};const tr=num('x_trail');if(tr!=null)exit.trailing_peak_pct=tr;const rf=num('x_rank');if(rf!=null)exit.rank_fall_y=parseInt(rf);if(document.getElementById('x_gate').checked)exit.gate_mirror=true;
+  const hs=num('x_hard');if(hs!=null)exit.hard_stop_pct=hs;   // cc#2132: exit.hard_stop_pct (cc#2127/2129)
   if(document.getElementById('x_atr_on').checked){const am=num('x_atr_mult');if(am!=null){const a={mult:am};const at=num('x_atr_target');if(at!=null)a.target_mult=at;if(document.getElementById('x_atr_trailing').checked)a.trailing=true;exit.atr_stop=a;}}
-  return {meta:{builder:'v12'},universe_ref:{filters},entry,exit,
+  const def={meta:{builder:'v12'},universe_ref:{filters},entry,exit,
     rebalance:{freq:document.getElementById('b_freq').value},
     costs:{txn_pct:parseFloat(document.getElementById('b_txn').value||'0'),slippage_pct:parseFloat(document.getElementById('b_slip').value||'0')}};
+  const scap=num('r_seccap');if(scap!=null)def.risk={sector_cap_pct:scap};   // cc#2132: risk.sector_cap_pct (cc#2128/2129)
+  return def;
 }
 
 let pollTimer=null;
@@ -371,12 +415,13 @@ function applyPreset(id){
   if(f.gvm)_setVal('u_gvm_min',f.gvm.min);
   if(f.mcap_rank){_setVal('u_mcaprank_min',f.mcap_rank.min);_setVal('u_mcaprank_max',f.mcap_rank.max);}
   const e=d.entry||{};_setVal('e_roc',e.roc_lookback);_setVal('e_topx',e.top_x);_setVal('e_min',e.min_stocks);_setVal('e_max',e.max_stocks);
-  const x=d.exit||{};_setVal('x_trail',x.trailing_peak_pct);_setVal('x_rank',x.rank_fall_y);
+  const x=d.exit||{};_setVal('x_trail',x.trailing_peak_pct);_setVal('x_rank',x.rank_fall_y);_setVal('x_hard',x.hard_stop_pct);
+  if(d.risk)_setVal('r_seccap',d.risk.sector_cap_pct);
   if(x.atr_stop){const on=document.getElementById('x_atr_on');on.checked=true;document.getElementById('x_atr_box').style.display='grid';document.getElementById('x_atr_trail_wrap').style.display='flex';_setVal('x_atr_mult',x.atr_stop.mult);_setVal('x_atr_target',x.atr_stop.target_mult);if(x.atr_stop.trailing)document.getElementById('x_atr_trailing').checked=true;}
   if(d.rebalance)_setVal('b_freq',d.rebalance.freq);
   const c=d.costs||{};_setVal('b_txn',c.txn_pct);_setVal('b_slip',c.slippage_pct);
   go(0);
 }
-renderSteps();go(0);loadPresets();
+renderSteps();go(EMBED?Math.max(0,Math.min(5,parseInt(QS.get('step')||'0',10)||0)):0);loadPresets();
 </script>
 </body>

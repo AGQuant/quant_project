@@ -395,13 +395,11 @@ PWA_JS = """
     ['/result-corner', '\\u2263', 'Results'],
     ['/sector', '\\u2297', 'Sector'],
     ['/quant-basket', '\\u25eb', 'QB'],
-    // cc#2123 (founder 16-Sep "Universe filter should be full page category wise... You are
-    // building a Quant Basket Engine not screener"): a NEW, separate Universe builder -- pool
-    // selector + GVM/component-score filters live, six more categories visible as "coming".
-    // Placed directly after QB (adjacent-tool convention, same as Alerts/Trades and Options next
-    // to Screeners/Invest Scan above). v12_endpoints.py / scorr_v12.html and their own nav
-    // entries are untouched -- this is a new page, not a replacement.
-    ['/qb/universe2', '\\u2b1a', 'QB Universe'],
+    // cc#2123 added a 'QB Universe' stop here; cc#2132 (founder 16-Sep: "Hide QB builder from
+    // nav and merge inside QB Basket builder button") REMOVED it -- the Universe builder is now
+    // step 1 of the QB page's own "+ Build a Basket" flow (/quant-basket), embedded. The
+    // /qb/universe2 route stays alive server-side (still PROTECTED, still injected) exactly as
+    // /v12 did under cc#557; it just is not its own nav stop any more.
     ['/adaptive', '\\u25f0', 'Adaptive Dashboard'],
     // cc#824 (founder 02-Aug): Screeners — the 8 predefined screens as a standing destination.
     // ONE entry, added ONCE. This array renders in two form factors (desktop top bar and the mobile

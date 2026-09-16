@@ -1643,7 +1643,7 @@ NAV_REGISTRY = {
     "/structure":    ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/performance":  ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/quant-basket": ("QB (curated Quant Basket)", "nav"),
-    "/qb/universe2": ("QB Universe builder (cc#2123 V1)", "nav"),
+    "/qb/universe2": ("QB Universe builder — step 1 of the QB-page Build-a-Basket flow (removed from top nav)", "tab"),  # cc#2132: folded into /quant-basket, same treatment as /v12 (cc#557)
     # cc#1523: Intel de-listed from the site nav — now a V8 tab-row embed pane (the cc#853 Digest
     # placement). Route unchanged, still PROTECTED + injected; /m/intel app entry untouched.
     # cc#1747: Intel is back on the site nav (slot 3, after V8) as '/dashboard#intel' — the same V8

@@ -65,6 +65,22 @@
      Web only — the /m/ QB surface has no table (SURFACE_SPLIT 16915). */
   .ph-left{flex:1 1 auto;min-width:0}
   .ph-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  /* cc#2132: Build-a-Basket entry + the in-place six-step builder */
+  .qbb-btn{display:inline-flex;align-items:center;gap:8px;margin-top:12px;border:1px solid var(--blu);border-radius:10px;padding:9px 16px;
+    font:inherit;font-size:13px;font-weight:800;color:#fff;background:var(--blu);cursor:pointer}
+  .qbb-btn[aria-expanded="true"]{background:var(--card);color:var(--blu)}
+  .qbb{border:1px solid var(--line);border-radius:14px;background:var(--panel);margin:0 0 18px;overflow:hidden}
+  .qbb-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 0}
+  .qbb-title{font-size:16px;font-weight:800}
+  .qbb-sub{font-size:12px;color:var(--mut);margin-top:4px}
+  .qbb-close{background:transparent;border:1px solid var(--line);color:var(--mut);border-radius:8px;min-width:32px;min-height:32px;cursor:pointer;font-size:14px}
+  .qbb-steps{display:flex;gap:6px;margin:14px 18px 0;overflow-x:auto;padding-bottom:2px}
+  .qbb-steps .step{flex:1;min-width:112px;text-align:center;padding:10px 6px;border-radius:10px 10px 0 0;font-size:12px;font-weight:700;color:var(--mut);cursor:pointer;border-bottom:2px solid var(--line);background:transparent;font-family:inherit;white-space:nowrap}
+  .qbb-steps .step .n{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--card);color:var(--mut);font-size:10px;margin-right:5px}
+  .qbb-steps .step.active{color:var(--txt);border-bottom-color:var(--blu)}
+  .qbb-steps .step.active .n{background:var(--blu);color:#fff}
+  .qbb-steps .step.done .n{background:var(--grn);color:#fff}
+  .qbb-frame{display:block;width:100%;border:0;min-height:640px;background:transparent}
   .ph-tools .seg{margin-left:auto}
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card)}
   .seg button{background:transparent;border:0;color:var(--mut);font:inherit;font-size:12px;font-weight:700;
@@ -254,7 +270,9 @@
       <!-- cc#557: V12 Basket Builder folded into the QB page (removed from top nav) -->
       <!-- cc#1712: Cards | Table toggle on the same row, right-aligned. Default Cards. -->
       <div class="ph-tools">
-      <a href="/v12" title="Build & backtest your own rotation basket (V12)" style="display:inline-flex;align-items:center;gap:7px;margin-top:12px;border:1px solid var(--blu);border-radius:9px;padding:7px 14px;font-size:12.5px;font-weight:700;color:var(--blu);background:rgba(77,124,254,.10);text-decoration:none">&#8863; Basket Builder &rarr;</a>
+      <!-- cc#2132: ONE door in. Opens the six-step Build-a-Basket flow in place (below the header),
+           replacing the link out to the standalone /v12 page. The route stays alive server-side. -->
+      <button type="button" class="qbb-btn" id="qbb-btn" onclick="toggleBuilder()" aria-expanded="false" aria-controls="qbb">&#65291; Build a Basket</button>
       <div class="seg" id="qb-view-seg" role="group" aria-label="Basket view">
         <button type="button" class="on" data-view="cards" onclick="setBasketView('cards')">Cards</button>
         <button type="button" data-view="table" onclick="setBasketView('table')">Table</button>
@@ -267,6 +285,21 @@
       <div class="ph-stat"><div class="sk">Portfolio Alpha</div><div class="sv" id="s-alpha">—</div></div>
       <div class="ph-stat"><div class="sk">Positions</div><div class="sv" id="s-pos">—</div></div>
     </div>
+  </div>
+
+  <!-- cc#2132: the consolidated Build-a-Basket flow. Six steps in the founder's order. Step 1
+       embeds the REAL Universe builder (/qb/universe2, cc#2123 + cc#2135 -- ported by embedding
+       the working page, not by copying its logic); steps 2-6 embed the REAL V12 builder (/v12,
+       presets intact) at the matching panel, driven from this stepper by postMessage. Both pages
+       strip their own chrome under ?embed=1 (main.py _is_embedded, the cc#1282 mechanism). -->
+  <div class="qbb" id="qbb" hidden>
+    <div class="qbb-head">
+      <div><div class="qbb-title">Build a Basket</div>
+      <div class="qbb-sub">One flow: pick a universe, set entry &amp; exit rules, cap the risk, backtest it honestly, deploy.</div></div>
+      <button type="button" class="qbb-close" onclick="toggleBuilder()" aria-label="Close builder">&#10005;</button>
+    </div>
+    <div class="qbb-steps" id="qbb-steps"></div>
+    <iframe id="qbb-frame" class="qbb-frame" title="Basket builder step" loading="lazy"></iframe>
   </div>
 
   <!-- cc#561 R1: cycle strip — the page tells the market-cycle story the baskets implement -->
@@ -1032,6 +1065,44 @@ init();
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
   var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
 }
+</script>
+<script>
+/* cc#2132: Build-a-Basket flow -- this page owns the stepper; the steps are the two real pages,
+   embedded. Step index maps 1:1 onto /v12's own panels (p0 Universe .. p5 Deploy); step 0 shows
+   the Universe builder page instead of V12's filter grid. */
+var QBB_STEPS = ['Universe', 'Entry', 'Exit', 'Risk Management', 'Backtest', 'Deploy'];
+var QBB = { open: false, step: 0, kind: null };
+function toggleBuilder(){
+  QBB.open = !QBB.open;
+  var box = document.getElementById('qbb'), btn = document.getElementById('qbb-btn');
+  box.hidden = !QBB.open;
+  btn.setAttribute('aria-expanded', QBB.open ? 'true' : 'false');
+  if (QBB.open){ qbbShowStep(QBB.step); setTimeout(function(){ box.scrollIntoView({behavior:'smooth', block:'start'}); }, 60); }
+}
+function qbbRenderSteps(){
+  document.getElementById('qbb-steps').innerHTML = QBB_STEPS.map(function(s, i){
+    var cls = 'step' + (i === QBB.step ? ' active' : '') + (i < QBB.step ? ' done' : '');
+    return '<button type="button" class="'+cls+'" onclick="qbbShowStep('+i+')"><span class="n">'+(i+1)+'</span>'+s+'</button>';
+  }).join('');
+}
+function qbbShowStep(i){
+  QBB.step = i; qbbRenderSteps();
+  var fr = document.getElementById('qbb-frame');
+  if (i === 0){
+    if (QBB.kind !== 'universe'){ QBB.kind = 'universe'; fr.src = '/qb/universe2?embed=1'; }
+  } else {
+    if (QBB.kind !== 'v12'){ QBB.kind = 'v12'; fr.src = '/v12?embed=1&step=' + i; }
+    else if (fr.contentWindow){ fr.contentWindow.postMessage({v12step: i}, '*'); }
+  }
+}
+window.addEventListener('message', function(ev){
+  var d = ev.data || {};
+  if (!d.scorrEmbed) return;
+  var fr = document.getElementById('qbb-frame');
+  if (d.height) fr.style.height = Math.max(640, d.height + 24) + 'px';
+  if (d.scorrEmbed === 'v12' && typeof d.step === 'number' && d.step !== QBB.step && QBB.kind === 'v12'){ QBB.step = d.step; qbbRenderSteps(); }
+});
+qbbRenderSteps();
 </script>
 <script src="/nav_toggle.js" defer></script>
 </body>

@@ -310,6 +310,16 @@ function renderResults(d){
 }
 document.getElementById('resultVal').addEventListener('click', toggleResults);
 
+/* cc#2132: embedded as step 1 of the QB page's Build-a-Basket flow (?embed=1) -- report our
+   height so the parent frame fits the content instead of scrolling inside a box. */
+(function(){
+  var embed = new URLSearchParams(location.search).get('embed') === '1';
+  if (!embed || window.parent === window) return;
+  var post = function(){ window.parent.postMessage({scorrEmbed:'universe', height: document.documentElement.scrollHeight}, '*'); };
+  if (window.ResizeObserver) new ResizeObserver(post).observe(document.body);
+  window.addEventListener('load', post);
+})();
+
 loadPools();
 renderFilters();
 </script>
