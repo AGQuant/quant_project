@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCORR — V8 Open (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#171A1F; --ink-soft:#565C66; --ink-faint:#8A8F99;
+    --bg:#F1F0EC; --surface:#FFFFFF; --line:#E3E1D9;
+    --gold:#AD832A; --gold-soft:#F3E8CE;
+    --long:#166B45; --long-bg:#E3F1E9;
+    --short:#A6382E; --short-bg:#F7E7E4;
+    --blue:#2C5FA8; --blue-bg:#E7EDF6;
+    --track:#EDEBE3;
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#EDEEF0; --ink-soft:#A6ABB4; --ink-faint:#6E7480;
+      --bg:#121316; --surface:#1B1D21; --line:#2B2E33;
+      --gold:#D9AE55; --gold-soft:#3A311E;
+      --long:#4FCB8C; --long-bg:#173226;
+      --short:#F0847A; --short-bg:#3A1E1C;
+      --blue:#7CA6E0; --blue-bg:#1B2740;
+      --track:#26282D;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#EDEEF0; --ink-soft:#A6ABB4; --ink-faint:#7A7F87;
+    --bg:#121316; --surface:#1B1D21; --line:#2B2E33;
+    --gold:#D9AE55; --gold-soft:#3A311E;
+    --long:#4FCB8C; --long-bg:#173226;
+    --short:#F0847A; --short-bg:#3A1E1C;
+    --blue:#7CA6E0; --blue-bg:#1B2740;
+    --track:#26282D;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:'Archivo',system-ui,sans-serif; -webkit-font-smoothing:antialiased;}
+  body{max-width:480px;margin:0 auto;padding-bottom:64px;}
+
+  header{display:flex;align-items:center;gap:12px;padding:16px 18px 14px;
+    background:var(--surface);border-bottom:1px solid var(--line);
+    position:sticky;top:0;z-index:5;}
+  header .back{font-size:20px;color:var(--ink-faint);line-height:1;}
+  header .brand{font-weight:800;font-size:16px;letter-spacing:.2px;}
+  header .brand em{font-style:normal;color:var(--gold);}
+  header .sep{width:1px;height:16px;background:var(--line);}
+  header .page{font-weight:700;font-size:16px;color:var(--ink-soft);}
+  header .live{margin-left:auto;display:flex;align-items:center;gap:6px;
+    font-size:11px;color:var(--ink-faint);}
+  header .dot{width:6px;height:6px;border-radius:50%;background:var(--long);
+    box-shadow:0 0 0 3px var(--long-bg);}
+
+  .section{padding:16px 18px 0;}
+
+  .stats{display:flex;background:var(--surface);border:1px solid var(--line);
+    border-radius:var(--radius);overflow:hidden;}
+  .stat{flex:1;padding:14px 12px 15px;position:relative;}
+  .stat + .stat{border-left:1px solid var(--line);}
+  .stat .lbl{font-size:10.5px;color:var(--ink-faint);letter-spacing:.2px;margin-bottom:6px;}
+  .stat .val{font-family:'IBM Plex Mono';font-weight:600;font-size:18px;}
+  .stat .sub{font-family:'IBM Plex Mono';font-size:10.5px;color:var(--ink-soft);margin-top:2px;}
+  .stat.pos .val{color:var(--long);} .stat.neg .val{color:var(--short);}
+
+  .filters{display:flex;align-items:center;gap:8px;margin-top:14px;}
+  .fscroll{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;flex:1;
+    mask-image:linear-gradient(90deg,#000 92%,transparent);}
+  .fscroll::-webkit-scrollbar{display:none;}
+  .fchip{flex:none;font-family:'IBM Plex Mono';font-size:12px;font-weight:600;
+    color:var(--ink-soft);background:var(--surface);border:1px solid var(--line);
+    border-radius:9px;padding:7px 12px;white-space:nowrap;}
+  .fchip .n{color:var(--ink-faint);margin-left:4px;}
+  .fchip.on{background:var(--gold-soft);border-color:var(--gold);color:var(--ink);}
+  .fchip.on .n{color:var(--gold);}
+  .sortbtn{flex:none;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);background:var(--surface);border-radius:9px;color:var(--ink-soft);
+    font-size:14px;}
+
+  .tagrow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-top:8px;
+    mask-image:linear-gradient(90deg,#000 92%,transparent);}
+  .tagrow::-webkit-scrollbar{display:none;}
+  .tagchip{flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Mono';
+    font-size:11.5px;font-weight:600;border-radius:20px;padding:5px 11px;white-space:nowrap;
+    border:1px solid var(--line);color:var(--ink-soft);background:var(--surface);}
+  .tagchip .star{font-size:10px;}
+  .tagchip.gold .star{color:var(--gold);} .tagchip.blue .star{color:var(--blue);} .tagchip.short .star{color:var(--short);}
+
+  .cards{display:flex;flex-direction:column;gap:10px;padding:14px 18px 0;}
+  .card{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--gold);
+    border-radius:var(--radius);padding:14px 16px 16px;}
+
+  .card .top{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .card .symwrap{display:flex;align-items:center;gap:7px;}
+  .card .sym{font-weight:800;font-size:16px;letter-spacing:.2px;}
+  .card .flag{color:var(--short);font-size:13px;}
+  .card .amt{font-family:'IBM Plex Mono';font-weight:600;font-size:17px;}
+  .card .amt.up{color:var(--long);} .card .amt.down{color:var(--short);}
+
+  .meta{font-family:'IBM Plex Mono';font-size:11.5px;color:var(--ink-faint);margin-top:5px;}
+  .meta b{color:var(--ink-soft);font-weight:500;}
+  .meta .dir{font-weight:600;}
+  .meta .dir.short{color:var(--short);} .meta .dir.long{color:var(--long);}
+
+  .scorerow{display:flex;align-items:center;gap:7px;margin-top:11px;flex-wrap:wrap;}
+  .scorepill{font-family:'IBM Plex Mono';font-weight:700;font-size:13px;border:1.5px solid var(--long);
+    color:var(--long);border-radius:7px;padding:2px 9px;}
+  .scorepill.mid{border-color:var(--gold);color:var(--gold);}
+  .minitag{display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Mono';
+    font-size:11px;color:var(--ink-soft);}
+  .minitag .ic{font-size:9px;}
+  .minitag .ic.star{color:var(--short);} .minitag .ic.sq{color:var(--short);}
+
+  .bracket{margin-top:26px;}
+  .bracket .labels{display:flex;justify-content:space-between;font-family:'IBM Plex Mono';
+    font-size:11px;color:var(--ink-faint);margin-bottom:6px;}
+  .bracket .labels b{color:var(--ink-soft);font-weight:600;}
+  .track{position:relative;height:6px;border-radius:3px;background:var(--track);}
+  .track .entrylabel{position:absolute;top:-20px;transform:translateX(-50%);
+    font-family:'IBM Plex Mono';font-size:11px;font-weight:600;color:var(--ink);white-space:nowrap;}
+  .track .entrylabel:after{content:'';position:absolute;left:50%;top:19px;width:1px;height:5px;background:var(--ink-faint);}
+  .track .zone{position:absolute;top:0;bottom:0;border-radius:3px;}
+  .track .zone.reward{background:var(--long-bg);}
+  .track .zone.risk{background:var(--short-bg);}
+  .track .tick{position:absolute;top:-4px;width:2px;height:14px;background:var(--ink-faint);}
+  .track .tick.entry{background:var(--ink);width:2px;}
+  .track .cmp{position:absolute;top:-5px;width:12px;height:12px;margin-left:-6px;
+    border-radius:50%;border:2.5px solid var(--surface);box-shadow:0 0 0 1.5px currentColor;}
+  .track .cmp.up{color:var(--long);background:var(--long);}
+  .track .cmp.down{color:var(--short);background:var(--short);}
+
+  nav.tabbar{position:fixed;left:0;right:0;bottom:0;max-width:480px;margin:0 auto;
+    background:var(--surface);border-top:1px solid var(--line);display:flex;padding:9px 0 12px;}
+  nav.tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
+    color:var(--ink-faint);text-decoration:none;font-size:10.5px;font-weight:600;}
+  nav.tabbar a.active{color:var(--gold);}
+  nav.tabbar svg{width:18px;height:18px;}
+
+  .hint{padding:14px 18px 4px;font-size:12px;color:var(--ink-faint);text-align:center;}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="back">‹</span>
+  <span class="brand">SC<em>O</em>RR</span>
+  <span class="sep"></span>
+  <span class="page">V8</span>
+  <span class="live"><span class="dot"></span>live</span>
+</header>
+
+<div class="section">
+  <div class="stats">
+    <div class="stat pos">
+      <div class="lbl">Unrealised</div>
+      <div class="val">₹38,904</div>
+      <div class="sub">+0.3%</div>
+    </div>
+    <div class="stat neg">
+      <div class="lbl">Long</div>
+      <div class="val">−₹94,343</div>
+      <div class="sub">4 positions</div>
+    </div>
+    <div class="stat pos">
+      <div class="lbl">Short</div>
+      <div class="val">₹1,33,247</div>
+      <div class="sub">14 positions</div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="fscroll">
+      <span class="fchip on">All<span class="n">18</span></span>
+      <span class="fchip">Long<span class="n">4</span></span>
+      <span class="fchip">Short<span class="n">14</span></span>
+      <span class="fchip">Buy Reversal<span class="n">2</span></span>
+      <span class="fchip">Sell Momentum<span class="n">9</span></span>
+    </div>
+    <div class="sortbtn">⇅</div>
+  </div>
+
+  <div class="tagrow">
+    <span class="tagchip gold"><span class="star">★</span>TC strong<span class="n" style="color:var(--ink-faint)">1</span></span>
+    <span class="tagchip blue"><span class="star">★</span>S1 rev<span class="n" style="color:var(--ink-faint)">1</span></span>
+    <span class="tagchip short"><span class="star">★</span>R1 mirror<span class="n" style="color:var(--ink-faint)">1</span></span>
+  </div>
+</div>
+
+<div class="cards">
+
+  <div class="card" data-dir="short">
+    <div class="top">
+      <div class="symwrap"><span class="sym">CANBK</span><span class="flag">⚑</span></div>
+      <div class="amt up">₹20,858</div>
+    </div>
+    <div class="meta"><span class="dir short">Short</span> · Sell Momentum · 2 Sep · 14d</div>
+    <div class="scorerow">
+      <span class="scorepill">71.2</span>
+      <span class="minitag"><span class="ic star">★</span>R1 mirror</span>
+      <span class="minitag"><span class="ic sq">■</span>5&lt;20</span>
+    </div>
+    <div class="bracket">
+      <div class="labels"><span>tgt <b>121.2</b></span><span>sl <b>128.7</b></span></div>
+      <div class="track" data-entry="125.46" data-cmp="122.37" data-tgt="121.2" data-sl="128.7" data-dir="short"></div>
+    </div>
+  </div>
+
+  <div class="card" data-dir="short">
+    <div class="top">
+      <div class="symwrap"><span class="sym">PAGEIND</span><span class="flag">⚑</span></div>
+      <div class="amt up">₹20,400</div>
+    </div>
+    <div class="meta"><span class="dir short">Short</span> · Sell Momentum · 10 Sep · 6d</div>
+    <div class="scorerow">
+      <span class="scorepill">77.0</span>
+      <span class="minitag"><span class="ic sq">■</span>5&lt;20</span>
+    </div>
+    <div class="bracket">
+      <div class="labels"><span>tgt <b>34,493.2</b></span><span>sl <b>36,626.8</b></span></div>
+      <div class="track" data-entry="35600" data-cmp="34580" data-tgt="34493.2" data-sl="36626.8" data-dir="short"></div>
+    </div>
+  </div>
+
+</div>
+
+<p class="hint">Mockup — layout &amp; type only, not wired to live data. NOTE: this mockup shows only the OPEN-book pane; it does not depict or replace the Closed/Net Total panes of the real swipe deck (cc#2005) -- see cc#2107 evidence.</p>
+
+<nav class="tabbar">
+  <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-7 9 7"/><path d="M5 10v9a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1v-9"/></svg>Home</a>
+  <a href="#" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-8 4 5 8-10"/></svg>V8</a>
+  <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h2v8H8zM14 11h2v5h-2z"/></svg>GVM</a>
+  <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg>Check</a>
+  <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/></svg>Alerts</a>
+</nav>
+
+<script>
+  document.querySelectorAll('.track').forEach(function(t){
+    var entry = parseFloat(t.dataset.entry), cmp = parseFloat(t.dataset.cmp),
+        tgt = parseFloat(t.dataset.tgt), sl = parseFloat(t.dataset.sl),
+        dir = t.dataset.dir;
+    var lo = Math.min(entry,cmp,tgt,sl), hi = Math.max(entry,cmp,tgt,sl);
+    var span = (hi - lo) || 1;
+    var pad = span * 0.12; lo -= pad; hi += pad; span = hi - lo;
+    function pos(v){ return ((v - lo) / span) * 100; }
+    var rewardLeft, rewardWidth, riskLeft, riskWidth;
+    if(dir === 'short'){
+      rewardLeft = pos(tgt); rewardWidth = pos(entry) - pos(tgt);
+      riskLeft = pos(entry); riskWidth = pos(sl) - pos(entry);
+    } else {
+      rewardLeft = pos(entry); rewardWidth = pos(tgt) - pos(entry);
+      riskLeft = pos(sl); riskWidth = pos(entry) - pos(sl);
+    }
+    var html = '';
+    html += '<div class="zone reward" style="left:'+rewardLeft+'%;width:'+rewardWidth+'%"></div>';
+    html += '<div class="zone risk" style="left:'+riskLeft+'%;width:'+riskWidth+'%"></div>';
+    html += '<div class="tick" style="left:'+pos(tgt)+'%"></div>';
+    html += '<div class="tick" style="left:'+pos(sl)+'%"></div>';
+    html += '<div class="tick entry" style="left:'+pos(entry)+'%"></div>';
+    html += '<div class="entrylabel" style="left:'+pos(entry)+'%">entry '+entry+'</div>';
+    var favourableMove = dir === 'short' ? (cmp < entry) : (cmp > entry);
+    html += '<div class="cmp '+(favourableMove?'up':'down')+'" style="left:'+pos(cmp)+'%"></div>';
+    t.innerHTML = html;
+  });
+</script>
+</body>
+</html>
