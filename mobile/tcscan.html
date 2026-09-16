@@ -57,9 +57,25 @@
 .scorr-prow .nm .tag.b{color:var(--win)}.scorr-prow .nm .tag.s{color:var(--loss)}
 /* cc#2105 item 1: pct + rupee/lot on ONE line -- .v becomes a flex row instead of stacking
    two block divs; .n/.c markup is unchanged, only their container's layout. */
-.scorr-prow .v{text-align:right;flex:none;display:flex;align-items:baseline;gap:var(--space-6)}
+/* cc#2111: mobile_app.css defines BARE, unscoped .v{...} and .c{...} rules for two unrelated
+   shared components (the Market Mood verdict card's .v1/.v2/.word/.score family; a generic
+   list-card .c used elsewhere) -- both give their bare selector a rounded/bordered/padded "card"
+   look plus a 3px ::before accent bar. .scorr-prow .v / .scorr-prow .v .c below only ever
+   override LAYOUT properties, so that card chrome (background/border/radius/padding/margin/
+   cursor + the accent bar) bled straight through the cascade onto this page's own pct+amount
+   pair, rendering as an oversized purple box with a nested white ribbon tag around the rupee
+   amount. Explicit reset turns both back into plain inline text, no container -- the bare rules
+   themselves in mobile_app.css are untouched, they are correct for their own real components.
+   Dropping the box's own padding/margin is also what reclaims the vertical space cc#2111 item 3
+   asks for -- the content below simply flows up into the space the box's box-model no longer
+   claims, no separate repositioning needed. */
+.scorr-prow .v{text-align:right;flex:none;display:flex;align-items:baseline;gap:var(--space-6);
+  position:static;background:none;border:none;border-radius:0;padding:0;margin-bottom:0;overflow:visible;cursor:default}
+.scorr-prow .v::before{display:none}
 .scorr-prow .v .n{font-size:var(--type-15);font-weight:800;line-height:1}
-.scorr-prow .v .c{font-size:var(--type-9);color:var(--muted);font-weight:700}
+.scorr-prow .v .c{font-size:var(--type-9);color:var(--muted);font-weight:700;
+  position:static;background:none;border:none;border-radius:0;padding:0;margin-bottom:0;overflow:visible}
+.scorr-prow .v .c::before{display:none}
 /* cc#2105 item 2: TC capsule moves into the sub line, pushed to the far right via .tcw's
    margin-left:auto -- same flex-row-with-auto-margin idiom the mockup's own .subline/.tcscore use. */
 .scorr-prow .sub{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}
