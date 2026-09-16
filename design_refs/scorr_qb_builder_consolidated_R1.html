@@ -1,1 +1,410 @@
-$(cat /home/claude/qb_builder_mockup.html)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCORR — Quant Basket Builder (V12 consolidated) — design mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============ SCORR WEB TOKEN CONTRACT — copied verbatim from scorr_web_tokens.css ============ */
+:root {
+  --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241; --well:#0D1428;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.26);
+  --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+  --grn:#2FD48B; --grn-d:rgba(47,212,139,.13);
+  --red:#FF5C6C; --red-d:rgba(255,92,108,.12);
+  --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
+  --amber-bg:rgba(245,185,74,.08); --amber-bd:rgba(245,185,74,.4); --amber-row:rgba(245,185,74,.1);
+  --blu-row:rgba(77,124,254,.1); --blu-chip:rgba(77,124,254,.14); --blu-chip-bd:rgba(77,124,254,.3);
+  --flat:#2a3350; --shadow:0 18px 44px rgba(3,7,20,.5);
+  --font:'Sora',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace; --r:16px;
+  --card:#121A33; --card2:#0D1428; --mast:#060B16; --hover:rgba(148,166,210,.05);
+  --on-accent:#0A0F1E; --bull:#2FD48B; --bear:#FF5C6C;
+}
+html[data-theme="light"] {
+  --bg:#F5F7FB; --bg2:#EEF1F8; --panel:#FFFFFF; --panel2:#F7F9FD; --well:#EEF1F8;
+  --line:rgba(23,40,80,.10); --line2:rgba(23,40,80,.18);
+  --txt:#17203A; --mut:#5B6785; --dim:#93A0BE;
+  --grn:#0E9F62; --grn-d:rgba(14,159,98,.10);
+  --red:#DE3A52; --red-d:rgba(222,58,82,.09);
+  --blu:#3563E9; --cyan:#0E93B0; --amber:#B47B10; --violet:#6E4FE0;
+  --amber-bg:rgba(180,123,16,.07); --amber-bd:rgba(180,123,16,.35); --amber-row:rgba(180,123,16,.08);
+  --blu-row:rgba(53,99,233,.08); --blu-chip:rgba(53,99,233,.10); --blu-chip-bd:rgba(53,99,233,.3);
+  --flat:#D5DAE8; --shadow:0 10px 28px rgba(23,40,80,.08);
+  --card:#FFFFFF; --card2:#EEF1F8; --mast:#07111F; --hover:rgba(7,17,31,.03);
+  --on-accent:#FFFFFF; --bull:#0E9F62; --bear:#DE3A52;
+}
+:root, html[data-theme="light"] {
+  --grn-bg:color-mix(in srgb, var(--grn) 8%, transparent);
+  --red-bg:color-mix(in srgb, var(--red) 8%, transparent);
+  --amber-d:color-mix(in srgb, var(--amber) 78%, var(--txt));
+}
+/* ============ mockup chrome ============ */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--txt)}
+body{font-family:var(--font);min-height:100vh;transition:background .25s,color .25s}
+.mono{font-family:var(--mono)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+
+.notice{background:var(--amber-bg);border-bottom:1px solid var(--amber-bd);padding:9px 20px;font-size:12.5px;color:var(--amber-d);text-align:center}
+.notice b{color:var(--txt)}
+
+.mast{background:var(--mast);border-bottom:1px solid var(--line)}
+.mastrow{display:flex;align-items:center;gap:22px;padding:13px 20px;max-width:1180px;margin:0 auto;flex-wrap:wrap}
+.logo{font-family:var(--font);font-weight:800;font-size:18px;letter-spacing:.5px;color:#fff}
+.logo span{color:var(--amber)}
+.navlinks{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:#9aa6c4;flex:1}
+.navlinks a{color:#9aa6c4;text-decoration:none;white-space:nowrap}
+.navlinks a.active{color:#fff;font-weight:600}
+.navlinks .strike{position:relative;color:#57608a}
+.navlinks .strike::after{content:"";position:absolute;left:-3px;right:-3px;top:50%;height:1px;background:#57608a}
+.themebtn{background:var(--panel2);border:1px solid var(--line2);color:var(--txt);font-family:var(--font);font-size:12px;font-weight:600;padding:6px 12px;border-radius:20px;cursor:pointer}
+
+.hero{padding:26px 0 8px}
+h1{font-size:22px;font-weight:700}
+.sub{color:var(--mut);font-size:13px;margin-top:6px;max-width:760px;line-height:1.5}
+.tag-removed{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--mut);background:var(--panel2);border:1px dashed var(--line2);border-radius:20px;padding:4px 10px;margin-top:10px}
+.tag-removed b{color:var(--red);text-decoration:line-through}
+.tag-removed i{color:var(--grn);font-style:normal}
+
+.basketrow{display:flex;gap:12px;margin-top:18px;overflow-x:auto;padding-bottom:4px}
+.minicard{flex:0 0 auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:150px}
+.minicard .nm{font-size:12.5px;font-weight:700}
+.minicard .st{font-size:10.5px;color:var(--mut);margin-top:2px}
+.minicard .pl{font-size:13px;font-weight:700;color:var(--grn);margin-top:6px}
+
+.cta-row{display:flex;align-items:center;gap:14px;margin:22px 0 6px;flex-wrap:wrap}
+.buildbtn{background:linear-gradient(135deg,var(--blu),var(--violet));color:#fff;border:none;font-family:var(--font);font-weight:700;font-size:14.5px;padding:13px 22px;border-radius:12px;cursor:pointer;box-shadow:var(--shadow);display:flex;align-items:center;gap:8px}
+.buildbtn:hover{filter:brightness(1.08)}
+.cta-note{font-size:12px;color:var(--mut)}
+
+/* ---- builder panel ---- */
+.builder{margin-top:22px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);box-shadow:var(--shadow);overflow:hidden;max-height:0;opacity:0;transition:max-height .45s ease,opacity .35s ease;}
+.builder.open{max-height:4200px;opacity:1}
+.builder-head{padding:20px 22px 0}
+.builder-title{font-size:16px;font-weight:700}
+.builder-sub{font-size:12px;color:var(--mut);margin-top:4px}
+
+.stepper{display:flex;gap:6px;margin:18px 0 0;padding:0 22px;overflow-x:auto}
+.step{flex:1;min-width:110px;text-align:center;padding:10px 6px;border-radius:10px 10px 0 0;font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;border-bottom:2px solid var(--line)}
+.step .n{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--panel2);color:var(--mut);font-size:10px;margin-right:5px}
+.step.active{color:var(--txt);border-bottom:2px solid var(--blu)}
+.step.active .n{background:var(--blu);color:#fff}
+.step.done .n{background:var(--grn);color:var(--on-accent)}
+
+.panel{display:none;padding:20px 22px 24px}
+.panel.active{display:block}
+
+.presetcard{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel2)}
+.presetcard .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.presetname{font-weight:700;font-size:14px}
+.chip{font-size:10.5px;background:var(--blu-chip);border:1px solid var(--blu-chip-bd);color:var(--txt);padding:3px 9px;border-radius:20px}
+.chip.bt{background:var(--amber-bg);border-color:var(--amber-bd);color:var(--amber-d);font-weight:700}
+.presetdesc{font-size:11.5px;color:var(--mut);margin-top:10px;line-height:1.6}
+.presetdesc b{color:var(--txt)}
+.statgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
+.stat .l{font-size:9.5px;color:var(--mut);letter-spacing:.4px;text-transform:uppercase}
+.stat .v{font-size:16px;font-weight:700;margin-top:3px}
+.stat .v.g{color:var(--grn)} .stat .v.r{color:var(--red)}
+.caveat{font-size:10px;color:var(--dim);margin-top:10px;line-height:1.5}
+.usebtn{margin-top:14px;background:var(--blu);color:#fff;border:none;font-family:var(--font);font-weight:700;font-size:12.5px;padding:9px 16px;border-radius:8px;cursor:pointer}
+
+.sectionlbl{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:22px 0 10px}
+.pool{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.poolrow{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.poolrow:last-child{border-bottom:none}
+.poolrow:hover{background:var(--hover)}
+.radio{width:16px;height:16px;border-radius:50%;border:2px solid var(--line2);margin-top:2px;flex:0 0 auto}
+.poolrow.sel .radio{border-color:var(--blu);background:radial-gradient(circle,var(--blu) 0 5px,transparent 6px)}
+.poolmain{flex:1}
+.poolname{font-size:13px;font-weight:600}
+.poolcaption{font-size:10.5px;color:var(--amber-d);margin-top:3px;line-height:1.5}
+.poolcount{font-size:14px;font-weight:700}
+.stalebadge{font-size:9px;background:var(--amber-bg);color:var(--amber-d);border:1px solid var(--amber-bd);padding:2px 7px;border-radius:10px;margin-left:8px;font-weight:700}
+
+.filterchips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.fchip{font-size:11.5px;background:var(--panel2);border:1px solid var(--line2);color:var(--txt);padding:6px 12px;border-radius:20px;cursor:pointer}
+.fchip.on{background:var(--blu-chip);border-color:var(--blu-chip-bd);color:var(--blu)}
+
+.grid12{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.field{border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.field label{font-size:9.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:6px}
+.field .two{display:flex;gap:6px}
+.field input{width:100%;background:var(--well);border:1px solid var(--line2);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:12px;padding:6px 8px}
+.field input::placeholder{color:var(--dim)}
+
+.rule{border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.rule .rn{font-size:13px;font-weight:600}
+.rule .rd{font-size:11px;color:var(--mut);margin-top:3px}
+.togglewrap{display:flex;align-items:center;gap:8px}
+.toggle{width:34px;height:20px;border-radius:20px;background:var(--flat);position:relative;cursor:pointer}
+.toggle.on{background:var(--grn)}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.toggle.on::after{left:16px}
+.combinator{display:flex;background:var(--well);border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.combinator span{padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;color:var(--mut)}
+.combinator span.sel{background:var(--blu);color:#fff}
+.eodbadge{font-size:9.5px;background:var(--violet-bg,rgba(155,124,255,.1));border:1px solid var(--violet-bd,rgba(155,124,255,.3));color:var(--violet);padding:3px 8px;border-radius:10px;font-weight:700}
+
+.risksplit{display:flex;align-items:center;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line2)}
+.risksplit div{height:100%;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:#fff}
+.risklegend{display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--mut)}
+.risklegend .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+
+.runbt{background:var(--grn);color:var(--on-accent);border:none;font-family:var(--font);font-weight:700;font-size:13px;padding:11px 20px;border-radius:10px;cursor:pointer;margin-top:6px}
+.deploybox{border:1px solid var(--grn-d);background:var(--grn-bg);border-radius:12px;padding:16px}
+.deploybox .dtitle{font-weight:700;font-size:13.5px}
+.deploybox .dnote{font-size:11.5px;color:var(--mut);margin-top:8px;line-height:1.6}
+.deploybtn{background:var(--grn);color:var(--on-accent);border:none;font-family:var(--font);font-weight:700;font-size:13px;padding:11px 22px;border-radius:10px;cursor:pointer;margin-top:14px}
+
+.navfoot{display:flex;justify-content:space-between;margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+.navfoot button{font-family:var(--font);font-weight:700;font-size:12.5px;padding:9px 16px;border-radius:8px;cursor:pointer;border:1px solid var(--line2);background:var(--panel2);color:var(--txt)}
+.navfoot button.next{background:var(--blu);border:none;color:#fff}
+
+footer{text-align:center;padding:34px 0 50px;color:var(--dim);font-size:11px}
+
+@media(max-width:760px){
+  .grid12{grid-template-columns:repeat(2,1fr)}
+  .statgrid{grid-template-columns:repeat(2,1fr)}
+  .navlinks{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="notice">🎨 <b>DESIGN MOCKUP</b> — not live data. Shows the consolidated builder flow requested for cc#2132: QB Builder nav entry hidden, Universe → Entry → Exit → Risk → Backtest → Deploy folded into one "Build a Basket" button on the QB page.</div>
+
+<div class="mast">
+  <div class="mastrow">
+    <div class="logo">SC<span>O</span>RR</div>
+    <div class="navlinks">
+      <a>Home</a><a>V8</a><a>Intel</a><a>Invest Scan</a><a>GVM</a><a>Results</a><a>Sector</a>
+      <a class="active">QB</a>
+      <span class="strike" title="folded into the Build a Basket flow below — no longer its own nav stop">QB Universe</span>
+      <a>Adaptive Dashboard</a><a>Screeners</a><a>Option Strategy</a><a>V13</a><a>Max</a><a>FPC</a><a>V9·Pairs</a><a>V15·MF</a><a>Scheduler</a><a>Fable Room</a>
+    </div>
+    <button class="themebtn" onclick="toggleTheme()">☀ / 🌙 Theme</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>Quant Baskets</h1>
+    <div class="sub">Your live baskets, and one door in to build a new one — Universe, Entry, Exit, Risk, Backtest and Deploy all live inside the same button now instead of scattered across QB Universe and a separate V12 page.</div>
+    <div class="tag-removed"><b>QB Builder</b> tab removed from nav <i>→ merged below</i></div>
+  </div>
+
+  <div class="basketrow">
+    <div class="minicard"><div class="nm">Alpha Multicap</div><div class="st">Nifty 500 · monthly</div><div class="pl">+34.1% CAGR</div></div>
+    <div class="minicard"><div class="nm">Stable</div><div class="st">Large cap · quarterly</div><div class="pl">+18.2% CAGR</div></div>
+    <div class="minicard"><div class="nm">Sell Momentum</div><div class="st">F&O · weekly</div><div class="pl">+27.9% net pts</div></div>
+    <div class="minicard"><div class="nm">Wealth Compounder</div><div class="st">Nifty 500 · monthly</div><div class="pl">+21.4% CAGR</div></div>
+  </div>
+
+  <div class="cta-row">
+    <button class="buildbtn" onclick="openBuilder()">＋ Build a Basket</button>
+    <div class="cta-note">one flow: pick a universe, set entry &amp; exit rules, cap the risk, backtest it honestly, deploy.</div>
+  </div>
+
+  <div class="builder" id="builder">
+    <div class="builder-head">
+      <div class="builder-title">V12 Quant Basket Builder</div>
+      <div class="builder-sub">Rotation baskets · momentum + gates + honest backtest — start from a preset or build from scratch, tweak any step before backtesting.</div>
+    </div>
+
+    <div class="stepper" id="stepper">
+      <div class="step active" data-p="0"><span class="n">1</span>Universe</div>
+      <div class="step" data-p="1"><span class="n">2</span>Entry</div>
+      <div class="step" data-p="2"><span class="n">3</span>Exit</div>
+      <div class="step" data-p="3"><span class="n">4</span>Risk</div>
+      <div class="step" data-p="4"><span class="n">5</span>Backtest</div>
+      <div class="step" data-p="5"><span class="n">6</span>Deploy</div>
+    </div>
+
+    <!-- STEP 1 — UNIVERSE -->
+    <div class="panel active" id="p0">
+      <div class="presetcard">
+        <div class="row1">
+          <span class="presetname">Alpha Multicap</span>
+          <span class="chip">GVM + Momentum composite</span>
+          <span class="chip">Nifty 500 · monthly rotation</span>
+          <span class="chip bt">BACKTESTED · Nov-21 … Jul-26 · full-capital</span>
+        </div>
+        <div class="presetdesc">
+          <b>universe:</b> Nifty 500 (top-500 mcap) &nbsp;·&nbsp;
+          <b>score:</b> 0.5·GVM + 0.5·M &nbsp;·&nbsp;
+          <b>hard gates:</b> GVM ≥ 7.5, V ≥ 7.5, M > 7, ΔGVM(180d) > +0.5 &nbsp;·&nbsp;
+          <b>selection:</b> top-12 by composite, equal weight; fewer qualify → cash slots &nbsp;·&nbsp;
+          <b>exit:</b> monthly (6th): max 3 outside composite top-25, worst first · HS1 −20% only
+        </div>
+        <div class="statgrid">
+          <div class="stat"><div class="l">CAGR</div><div class="v g">+34.1%</div></div>
+          <div class="stat"><div class="l">Worst Mo</div><div class="v r">−14.7%</div></div>
+          <div class="stat"><div class="l">Positive Mo</div><div class="v">59%</div></div>
+          <div class="stat"><div class="l">Swaps/mo</div><div class="v">~3</div></div>
+          <div class="stat"><div class="l">vs Nifty</div><div class="v g">+9.1%</div></div>
+        </div>
+        <div class="caveat">⚠ ΔGVM-180d, the 0.5·GVM+0.5·M composite ranking, and the max-3-exit cap are Alpha-book rules the V12 ROC backtest does not natively run — stats shown are the locked Alpha backtest, not a V12 re-sim. <span style="color:var(--amber-d)">survivorship caveat</span> · session_log id=6086 (locked 19-Jul-2026)</div>
+        <button class="usebtn">Use this preset →</button>
+      </div>
+
+      <div class="sectionlbl">Or build your own — Pool</div>
+      <div class="pool">
+        <div class="poolrow"><div class="radio"></div><div class="poolmain"><div class="poolname">Large Cap</div></div><div class="poolcount">100</div></div>
+        <div class="poolrow"><div class="radio"></div><div class="poolmain"><div class="poolname">Mid Cap</div></div><div class="poolcount">149</div></div>
+        <div class="poolrow"><div class="radio"></div><div class="poolmain"><div class="poolname">Small Cap</div>
+          <div class="poolcaption">748 in raw pool; 4 have no current GVM score — count shown is the 744 filters can actually act on</div></div><div class="poolcount">744</div></div>
+        <div class="poolrow sel"><div class="radio"></div><div class="poolmain"><div class="poolname">Nifty 500 (top-500 mcap) <span class="stalebadge">STALE SINCE 2026-06-02</span></div>
+          <div class="poolcaption">500 in raw pool; 3 have no current GVM score — ranked as of 2026-06-02, pool has not been rebuilt since</div></div><div class="poolcount">497</div></div>
+      </div>
+
+      <div class="sectionlbl">GVM &amp; component filters — 2 active of 6</div>
+      <div class="filterchips">
+        <span class="fchip on">+ GVM Score</span><span class="fchip">+ G Score</span><span class="fchip">+ V Score</span>
+        <span class="fchip on">+ M Score</span><span class="fchip">+ Verdict</span><span class="fchip">+ Rank within Segment</span>
+      </div>
+
+      <div class="grid12">
+        <div class="field"><label>GVM Score (min/max)</label><div class="two"><input placeholder="7.5"><input placeholder="max"></div></div>
+        <div class="field"><label>Mcap Rank (min/max)</label><div class="two"><input placeholder="1"><input placeholder="500"></div></div>
+        <div class="field"><label>ROE % (min)</label><input placeholder="min"></div>
+        <div class="field"><label>ROCE % (min)</label><input placeholder="min"></div>
+        <div class="field"><label>D/E (max) · BFSI-excluded</label><input placeholder="max"></div>
+        <div class="field"><label>Profit growth 3Y % (min)</label><input placeholder="min"></div>
+        <div class="field"><label>Promoter holding % (min)</label><input placeholder="min"></div>
+        <div class="field"><label>Segment (contains)</label><input placeholder="e.g. IT · Large"></div>
+        <div class="field"><label>P/E multiplier, cur/5y avg (min/max)</label><div class="two"><input placeholder="min"><input placeholder="max"></div></div>
+        <div class="field"><label>Mcap / Sales (min/max)</label><div class="two"><input placeholder="min"><input placeholder="max"></div></div>
+        <div class="field"><label>Promoter pledge % (min/max)</label><div class="two"><input placeholder="min"><input placeholder="max"></div></div>
+        <div class="field"><label>Beta vs Nifty, 1Y (min/max)</label><div class="two"><input placeholder="min"><input placeholder="max"></div></div>
+      </div>
+      <div class="navfoot"><span></span><button class="next" onclick="goStep(1)">Next: Entry →</button></div>
+    </div>
+
+    <!-- STEP 2 — ENTRY -->
+    <div class="panel" id="p1">
+      <div class="sectionlbl">Entry rules <span class="eodbadge">EOD-ONLY</span></div>
+      <div class="rule"><div><div class="rn">TC-score rise</div><div class="rd">Trigger when a stock's TC score crosses upward through a threshold</div></div>
+        <div class="togglewrap"><input class="field" style="width:70px" placeholder="≥ 55"><div class="toggle on"></div></div></div>
+      <div class="rule"><div><div class="rn">Monthly RSI</div><div class="rd">Trigger when monthly RSI crosses above a threshold</div></div>
+        <div class="togglewrap"><input class="field" style="width:70px" placeholder="≥ 45"><div class="toggle on"></div></div></div>
+      <div class="rule"><div><div class="rn">EMA crossover</div><div class="rd">Short EMA crosses above long EMA</div></div>
+        <div class="togglewrap"><div class="toggle"></div></div></div>
+      <div class="sectionlbl">Combine rules with</div>
+      <div class="combinator"><span class="sel">AND — all must fire</span><span>OR — any fires</span></div>
+      <div class="navfoot"><button onclick="goStep(0)">← Universe</button><button class="next" onclick="goStep(2)">Next: Exit →</button></div>
+    </div>
+
+    <!-- STEP 3 — EXIT -->
+    <div class="panel" id="p2">
+      <div class="sectionlbl">Exit rules <span class="eodbadge">EOD-ONLY</span></div>
+      <div class="rule"><div><div class="rn">Hard stop</div><div class="rd">Fixed % below entry</div></div>
+        <div class="togglewrap"><input class="field" style="width:70px" placeholder="−12%"><div class="toggle on"></div></div></div>
+      <div class="rule"><div><div class="rn">Trailing stop</div><div class="rd">% below the position's peak since entry</div></div>
+        <div class="togglewrap"><input class="field" style="width:70px" placeholder="−20%"><div class="toggle on"></div></div></div>
+      <div class="rule"><div><div class="rn">GVM rating exit</div><div class="rd">Exit when GVM verdict drops below</div></div>
+        <div class="togglewrap"><input class="field" style="width:70px" placeholder="< 6.5"><div class="toggle"></div></div></div>
+      <div class="rule"><div><div class="rn">Momentum rating exit</div><div class="rd">Exit when M-score drops below</div></div>
+        <div class="togglewrap"><input class="field" style="width:70px" placeholder="< 5"><div class="toggle"></div></div></div>
+      <div class="rule"><div><div class="rn">Monthly RSI exit</div><div class="rd">Exit when monthly RSI crosses below</div></div>
+        <div class="togglewrap"><input class="field" style="width:70px" placeholder="< 40"><div class="toggle on"></div></div></div>
+      <div class="rule"><div><div class="rn">EMA crossover exit</div><div class="rd">Short EMA crosses below long EMA</div></div>
+        <div class="togglewrap"><div class="toggle on"></div></div></div>
+      <div class="sectionlbl">Combine rules with</div>
+      <div class="combinator"><span>AND — all must fire</span><span class="sel">OR — any fires</span></div>
+      <div class="navfoot"><button onclick="goStep(1)">← Entry</button><button class="next" onclick="goStep(3)">Next: Risk →</button></div>
+    </div>
+
+    <!-- STEP 4 — RISK -->
+    <div class="panel" id="p3">
+      <div class="sectionlbl">Risk management</div>
+      <div class="grid12" style="grid-template-columns:repeat(2,1fr)">
+        <div class="field"><label>Basket cap (max stocks)</label><input placeholder="12"></div>
+        <div class="field"><label>Sector cap (max weight %)</label><input placeholder="25%"></div>
+      </div>
+      <div class="sectionlbl">Residual allocation split</div>
+      <div class="risksplit">
+        <div style="width:70%;background:var(--blu)">Equities 70%</div>
+        <div style="width:20%;background:var(--amber)">GOLDBEES 20%</div>
+        <div style="width:10%;background:var(--mut)">Cash 10%</div>
+      </div>
+      <div class="risklegend">
+        <span><i class="dot" style="background:var(--blu)"></i>Equities</span>
+        <span><i class="dot" style="background:var(--amber)"></i>GOLDBEES</span>
+        <span><i class="dot" style="background:var(--mut)"></i>Cash</span>
+        <span style="margin-left:auto">SILVERBEES swap available</span>
+      </div>
+      <div class="navfoot"><button onclick="goStep(2)">← Exit</button><button class="next" onclick="goStep(4)">Next: Backtest →</button></div>
+    </div>
+
+    <!-- STEP 5 — BACKTEST -->
+    <div class="panel" id="p4">
+      <div class="sectionlbl">Backtest — honest, point-in-time</div>
+      <div class="statgrid">
+        <div class="stat"><div class="l">CAGR</div><div class="v g">+29.6%</div></div>
+        <div class="stat"><div class="l">Worst Mo</div><div class="v r">−11.2%</div></div>
+        <div class="stat"><div class="l">Positive Mo</div><div class="v">61%</div></div>
+        <div class="stat"><div class="l">Swaps/mo</div><div class="v">~4</div></div>
+        <div class="stat"><div class="l">vs Nifty</div><div class="v g">+6.8%</div></div>
+      </div>
+      <div class="caveat">No look-ahead: ratings and rankings are applied as-of each rebalance date, not today's snapshot (cc#2085 discipline).</div>
+      <button class="runbt" onclick="alert('mockup only — would call v12_backtest.py')">▶ Run Backtest</button>
+      <div class="navfoot"><button onclick="goStep(3)">← Risk</button><button class="next" onclick="goStep(5)">Next: Deploy →</button></div>
+    </div>
+
+    <!-- STEP 6 — DEPLOY -->
+    <div class="panel" id="p5">
+      <div class="sectionlbl">Deploy</div>
+      <div class="deploybox">
+        <div class="dtitle">Ready to go live</div>
+        <div class="dnote">Deploying creates a <span class="mono">scheduler_master</span> row and begins EOD signal generation at the next close. This basket will appear on the QB page immediately in "pending first run" state until the first real rebalance completes.</div>
+        <button class="deploybtn" onclick="alert('mockup only — would POST to qb_endpoints.py')">Deploy Basket</button>
+      </div>
+      <div class="navfoot"><button onclick="goStep(4)">← Backtest</button><span></span></div>
+    </div>
+  </div>
+
+  <footer>SCORR — Quant Basket Builder consolidated mockup · design reference for cc#2132 · not connected to live data</footer>
+</div>
+
+<script>
+function openBuilder(){
+  const b=document.getElementById('builder');
+  b.classList.add('open');
+  setTimeout(()=>b.scrollIntoView({behavior:'smooth',block:'start'}),80);
+}
+function goStep(i){
+  document.querySelectorAll('.panel').forEach((p,idx)=>p.classList.toggle('active',idx===i));
+  document.querySelectorAll('.step').forEach((s,idx)=>{
+    s.classList.toggle('active',idx===i);
+    s.classList.toggle('done',idx<i);
+  });
+}
+document.querySelectorAll('.step').forEach(s=>s.addEventListener('click',()=>goStep(parseInt(s.dataset.p))));
+document.querySelectorAll('.poolrow').forEach(r=>r.addEventListener('click',()=>{
+  document.querySelectorAll('.poolrow').forEach(x=>x.classList.remove('sel'));
+  r.classList.add('sel');
+}));
+document.querySelectorAll('.fchip').forEach(c=>c.addEventListener('click',()=>c.classList.toggle('on')));
+document.querySelectorAll('.toggle').forEach(t=>t.addEventListener('click',()=>t.classList.toggle('on')));
+document.querySelectorAll('.combinator').forEach(cb=>{
+  cb.querySelectorAll('span').forEach(s=>s.addEventListener('click',()=>{
+    cb.querySelectorAll('span').forEach(x=>x.classList.remove('sel'));
+    s.classList.add('sel');
+  }));
+});
+function toggleTheme(){
+  const html=document.documentElement;
+  const cur=html.getAttribute('data-theme');
+  html.setAttribute('data-theme', cur==='light' ? 'dark' : 'light');
+}
+// default to system preference
+if(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches){
+  document.documentElement.setAttribute('data-theme','light');
+}
+</script>
+</body>
+</html>
