@@ -10073,6 +10073,14 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   }
 
   window.tc13Boot=function(){ if(_booted)return; _booted=true; load(null,null); };
+  // cc#2118 P1 FIX: both side-filter setters MUST be global. _tc13SideTag() (above) emits them as
+  // inline onclick/onkeydown attribute STRINGS ('setTc13ClosedSide(...)'), which the browser
+  // resolves against the GLOBAL scope at click time -- being declared inside this IIFE is not
+  // enough, exactly like tc13Boot/tc13InfoOpen/tc13InfoClose below already needed this same
+  // export. Without it every Long/Short tap on both books threw an uncaught ReferenceError and
+  // did nothing (confirmed in a real browser before this fix). Do not remove these exports.
+  window.setTc13OpenSide=setTc13OpenSide;
+  window.setTc13ClosedSide=setTc13ClosedSide;
 
   // cc#1685: the info sheet. Facts come from /api/scanners/tc/spec (tc_scanner_endpoints.py's own
   // registry — cc#465's named constants, never a hand-typed number here) plus the CURRENTLY
