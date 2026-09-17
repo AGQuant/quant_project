@@ -203,10 +203,17 @@ def mobile_results_season(request: Request):
     quarter = season.get("quarter")
     with _conn() as conn, conn.cursor() as cur:
         written = _written_set(cur, quarter) if quarter else set()
-        cur.execute("""SELECT ticker, company_name, ex_date, status FROM earnings_calendar
-                       WHERE ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 10 AND verified <> 'false'
-                       ORDER BY ex_date, ticker LIMIT 40""")
-        upcoming = [{"symbol": r[0], "company": r[1], "date": str(r[2]), "status": r[3]} for r in cur.fetchall()]
+        # cc#2168: 30-day window; size from the ranked universe, GVM from the latest scores; a bare BSE scrip code
+        # (a purely numeric ticker) is never shown as if it were an NSE symbol -- display = the company name.
+        cur.execute("""SELECT e.ticker, e.company_name, e.ex_date, e.status, mr.cap_category, g.gvm_score
+                       FROM earnings_calendar e
+                       LEFT JOIN mcap_rank_daily mr ON mr.symbol = UPPER(e.ticker)
+                            AND mr.rank_date = (SELECT MAX(rank_date) FROM mcap_rank_daily)
+                       LEFT JOIN gvm_scores g ON g.symbol = UPPER(e.ticker)
+                            AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+                       WHERE e.ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + %s AND e.verified <> 'false'
+                       ORDER BY e.ex_date, e.ticker LIMIT 200""", (UPCOMING_DAYS,))
+        upcoming = [upcoming_row(r) for r in cur.fetchall()]
         cur.execute("SELECT MAX(polished_at) FROM result_analysis_v2")
         last_written = cur.fetchone()[0]
     companies = [_co_row(c, written) for c in (rc.get("companies") or [])]
@@ -236,8 +243,24 @@ def mobile_results_season(request: Request):
             "sectors_unsized": sum(1 for x in sectors if x.get("size") is None),   # cc#2162: rows with no avg_mcap
             "written": {"rows": written_rows, "total": (wl.get("total_polished") if isinstance(wl, dict) else None),
                         "last": last_written.isoformat() if last_written else None},
-            "upcoming": upcoming,
+            "upcoming": upcoming, "upcoming_days": UPCOMING_DAYS,   # cc#2168
             "note": "Season numbers cover only companies that have filed this quarter. A dash means not filed yet, never zero."}
+
+
+UPCOMING_DAYS = 30   # cc#2168: the calendar window the season payload carries (was 10)
+
+
+def upcoming_row(r):
+    """cc#2168: one calendar row -> {symbol, company, date, status, size, gvm, display, bse_code}.
+    size = mcap_rank_daily.cap_category ('large' | 'mid' | 'small' | 'micro'), None when the ticker is not in the
+    ranked universe; gvm = the latest gvm_scores score, None if absent. A purely numeric ticker is a BSE scrip
+    code: display = the company name and bse_code carries the code, so it is never rendered as an NSE symbol."""
+    ticker, company, ex_date, status, cap, gvm = r
+    t = (ticker or "").strip()
+    numeric = t.isdigit()
+    return {"symbol": t, "company": company, "date": str(ex_date), "status": status,
+            "size": (cap.lower() if isinstance(cap, str) and cap else None), "gvm": _fl(gvm),
+            "display": (company or t) if numeric else t, "bse_code": t if numeric else None}
 
 
 def _sector_row(rc, segment):

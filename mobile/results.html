@@ -2,14 +2,16 @@
 <!-- ══ mobile/results.html — Results app section. Fable single-mode build 10-Sep-2026 (founder: read the web
      APIs, build intuitively). Supersedes the cc#1901 build and the older calendar-first page. ONE page, three views:
        /m/results                → THE SEASON: who has filed, PAT growing/flat/declining bar, medians, biggest movers,
-                                   sector table, written-up analyses, next 10 days
+                                   sector table, written-up analyses, upcoming results
        /m/results?view=companies → every reporter this season, sortable
        /m/results?sym=<symbol>   → one company's numbers + the written analysis
      cc#2161 (17-Sep): hero = two tappable median cells + Leading sectors strip. cc#2162: 'Sectors this season' (Top / Under toggle,
      size chips with counts, five rows, View more sheet, ?perf=&size= URL state) replaces the old sector ladder. cc#2163: every
      sector row opens the same sheet with that sector's companies table (/companies?segment=, sideways scroll, sortable). cc#2164:
      ?view=companies&segment= is honoured (title = the sector, Clear filter), movers show Read > only when written, section order =
-     hero -> Sectors this season -> Biggest profit jumps -> Biggest profit falls -> Written up -> Next 10 days -> note.
+     hero -> Sectors this season -> Biggest profit jumps -> Biggest profit falls -> Written up -> Upcoming results -> note.
+     cc#2168: 'Upcoming results' (30-day window, All / Large / Mid / Small / Micro chips, rows by date, View more sheet, ?up=)
+     replaces the Next 10 days grid; a bare BSE code shows its company name.
      Data: /api/mobile/results_app/season · /companies · /analysis?symbol= (results_app_mobile.py V2), which read
      the web Result Corner's own result_corner_v2 and the Results page's own analysis feed. Contract tokens only. -->
 <html lang="en">
@@ -68,9 +70,9 @@ body{margin:0;min-height:100vh;min-height:100dvh;background:var(--field)}   /* c
 .st-tog button{flex:1;min-height:40px;border:none;border-radius:var(--radius-16);background:none;color:var(--muted);font-family:inherit;font-size:var(--type-115);font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .st-tog button[aria-pressed="true"]{background:var(--brand);color:var(--field)}
 .st-chips{display:flex;gap:var(--space-6);margin:var(--space-8) var(--space-16) 0;overflow-x:auto;scrollbar-width:none}.st-chips::-webkit-scrollbar{display:none}
-.st-chip{flex:1 1 0;min-width:0;min-height:40px;display:flex;align-items:center;justify-content:center;gap:var(--space-4);padding:0 var(--space-6);border-radius:var(--radius-12);background:var(--panel);border:var(--bw-1) solid var(--edge);color:var(--ink);font-family:inherit;font-size:var(--type-11);font-weight:800;cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent}
-.st-chip small{font-size:var(--type-9);font-weight:700;color:var(--muted)}
-.st-chip[aria-pressed="true"]{background:color-mix(in srgb, var(--brand) 16%, var(--panel));border-color:var(--brand);color:var(--brand)}.st-chip[aria-pressed="true"] small{color:var(--brand)}
+.st-chip,.up-chip{flex:1 1 0;min-width:0;min-height:40px;display:flex;align-items:center;justify-content:center;gap:var(--space-4);padding:0 var(--space-6);border-radius:var(--radius-12);background:var(--panel);border:var(--bw-1) solid var(--edge);color:var(--ink);font-family:inherit;font-size:var(--type-11);font-weight:800;cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.st-chip small,.up-chip small{font-size:var(--type-9);font-weight:700;color:var(--muted)}
+.st-chip[aria-pressed="true"],.up-chip[aria-pressed="true"]{background:color-mix(in srgb, var(--brand) 16%, var(--panel));border-color:var(--brand);color:var(--brand)}.st-chip[aria-pressed="true"] small,.up-chip[aria-pressed="true"] small{color:var(--brand)}
 .st-tbl{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
 .st-h{display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:var(--space-8);padding:var(--space-7) var(--space-12);background:var(--hi);font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}
 .st-h span:not(:first-child){text-align:right}
@@ -103,10 +105,16 @@ body.st-lock{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 .wr:last-child{border-bottom:none}
 .wr .t{display:flex;justify-content:space-between;align-items:baseline}.wr .s{font-size:var(--type-125);font-weight:800}.wr .d{font-size:var(--type-9);color:var(--muted)}
 .wr .co{font-size:var(--type-95);color:var(--muted)}.wr .tz{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-4);line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-/* calendar */
-.cal{margin:0 var(--space-16);display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-8)}
-.cd{background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-9) var(--space-10)}
-.cd .d{font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em8)}.cd .s{font-size:var(--type-115);font-weight:800;margin-top:var(--space-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* cc#2168: Upcoming results -- size chips, rows grouped by date, View more sheet */
+.up-list{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.up-d{padding:var(--space-7) var(--space-12);background:var(--hi);font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.up-r{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-8);align-items:center;min-height:48px;padding:var(--space-7) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit}.up-r:last-child{border-bottom:none}.up-r>div{min-width:0}
+.up-s{font-size:var(--type-12);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.up-c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.up-c i{font-style:normal;margin-left:var(--space-4);padding:var(--space-1) var(--space-4);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-6);font-weight:800;text-transform:uppercase;letter-spacing:var(--track-em8);font-size:var(--type-8)}
+.up-g{text-align:right;font-size:var(--type-125);font-weight:800;font-variant-numeric:tabular-nums}.up-g small{display:block;font-size:var(--type-8);color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:var(--track-em8)}
+.up-emp{padding:var(--space-10) var(--space-12);font-size:var(--type-105);color:var(--muted);line-height:1.5}
+.st-sheet-b .up-d,.st-sheet-b .up-r{padding-left:var(--space-16);padding-right:var(--space-16)}
 /* analysis */
 .card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
 .ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
@@ -182,13 +190,13 @@ function renderSeason(d){
   var w=d.written||{}, wr=w.rows||[];
   h+='<div class="sec"><h2>Written up</h2><span class="hint">'+(w.total||0)+' analyses · last '+esc(dm(w.last))+'</span></div>';
   h+= wr.length ? '<div class="wl">'+wr.slice(0,8).map(function(r){ return '<a class="wr" href="/m/results?sym='+encodeURIComponent(r.symbol)+'"><div class="t"><span class="s">'+esc(r.symbol)+'</span><span class="d">'+esc(dm(r.result_date||r.polished_at))+'</span></div><div class="co">'+esc(r.company||'')+'</div><div class="tz">'+esc(r.teaser||'')+'</div></a>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing written yet</b>No result analysis on record for this quarter.</div></div>';
-  var up=d.upcoming||[];
-  h+='<div class="sec"><h2>Next 10 days</h2><span class="hint">'+up.length+' on the calendar</span></div>';
-  h+= up.length ? '<div class="cal">'+up.slice(0,12).map(function(u){ return '<div class="cd"><div class="d">'+esc(dm(u.date))+'</div><div class="s">'+esc(u.symbol)+'</div></div>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Quiet calendar</b>No result dates in the next ten days.</div></div>';
+  var up=d.upcoming||[], upDays=Number(d.upcoming_days||30);
+  h+='<div class="sec"><h2>Upcoming results</h2><span class="hint">next '+upDays+' days · '+up.length+' on the calendar</span></div><div id="up"></div>';   // cc#2168: replaces the old ten-day grid
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Write-ups are Scorr editorial from filings and calls, never a recommendation.</div>';
   document.getElementById('body').innerHTML=h;
   LEAD.sectors=d.sectors||[]; LEAD.metric='sales'; drawLead(); stTapWire(document.getElementById('lead'));
   stInit(d.sectors||[]);   // cc#2162: the sector table   // cc#2161: sales strip open on load (the founder's own example)
+  upInit(d.upcoming||[], upDays);   // cc#2168: the upcoming-results list
   ['sales','pat'].forEach(function(m){ var b=document.getElementById('kc-'+m); if(b) b.addEventListener('click', function(){ LEAD.metric=(LEAD.metric===m)?null:m; drawLead(); }); });
 }
 /* cc#2161: the hero's two cells + the leading-sectors strip. Source = d.sectors (result_corner_v2's own rows, no
@@ -220,7 +228,7 @@ function stView(){ return stSorted(stInSize(stElig(),ST.size),ST.perf); }
 function stSizeWord(){ var s=ST_SIZES.filter(function(x){ return x[0]===ST.size; })[0]; return ST.size==='all'?'':s[1]; }
 function stRow(x){ var n=Number(x.pat_n!=null?x.pat_n:x.n_used); return '<a class="st-r" data-sector="'+esc(x.sector||'')+'" href="/m/results?view=companies&segment='+encodeURIComponent(x.sector||'')+'"><div><div class="st-nm">'+esc(x.sector)+'</div><div class="st-sub">'+n+' filings · GVM '+esc(x.verdict||'—')+(n<5?'<i>thin</i>':'')+'</div></div><span class="st-p '+cls(x.pat_yoy)+'">'+pct(x.pat_yoy)+'</span><span class="st-s">'+pct(x.sales_yoy)+'</span></a>'; }
 function stEmpty(n){ var w=stSizeWord(); return n===0?('No '+(w?w+' ':'')+'sector has 3+ filings this season.'):('Only '+n+' '+(w?w+' ':'')+'sector'+(n===1?' has':'s have')+' 3+ filings this season.'); }
-function stSyncUrl(){ try{ var q=[]; if(ST.perf!=='top') q.push('perf='+ST.perf); if(ST.size!=='all') q.push('size='+ST.size); history.replaceState(history.state,'','/m/results'+(q.length?'?'+q.join('&'):'')); }catch(e){} }
+function stSyncUrl(){ try{ var q=[]; if(ST.perf!=='top') q.push('perf='+ST.perf); if(ST.size!=='all') q.push('size='+ST.size); if(typeof UP!=='undefined'&&UP.size!=='all') q.push('up='+UP.size); history.replaceState(history.state,'','/m/results'+(q.length?'?'+q.join('&'):'')); }catch(e){} }   // cc#2168: carries ?up= too
 function stDraw(){
   var el=document.getElementById('st'); if(!el) return;
   var elig=stElig(), view=stView(), five=view.slice(0,5), k=view.length-five.length;
@@ -277,6 +285,43 @@ function stHideSheet(){
   try{ history.scrollRestoration=ST_RESTORE; }catch(e){}
 }
 function stCloseSheet(){ var s=stSheet(); if(s.sh.hidden) return; if(history.state&&history.state.stSheet){ history.back(); } else stHideSheet(); }
+/* cc#2168: Upcoming results. Rows = the season payload's 30-day calendar (size from the ranked universe, GVM, display name for a
+   bare BSE code). Chips All / Large / Mid / Small / Micro with counts; unranked rows (size null) only under All, tagged; the next
+   10 matching rows grouped by date; View more -> the shared sheet with every row in the window; ?up= in the URL. */
+var UP={size:'all', rows:[], days:30}, UP_SIZES=[['all','All'],['large','Large'],['mid','Mid'],['small','Small'],['micro','Micro']];
+function upIn(list,size){ return size==='all'?list:list.filter(function(x){ return String(x.size||'').toLowerCase()===size; }); }
+function upWord(){ var s=UP_SIZES.filter(function(x){ return x[0]===UP.size; })[0]; return UP.size==='all'?'':s[1]; }
+function upName(x){ return x.display||x.symbol||'—'; }
+function upRows(list){
+  var out='', last=null;
+  list.forEach(function(x){ var dte=String(x.date||'').slice(0,10); if(dte!==last){ out+='<div class="up-d">'+esc(dm(dte))+'</div>'; last=dte; }
+    var href=x.bse_code?null:('/m/results?sym='+encodeURIComponent(x.symbol||'')); var sub=x.bse_code?('BSE code '+esc(x.bse_code)):esc(x.company||'');
+    out+='<'+(href?'a href="'+href+'"':'div')+' class="up-r"><div><div class="up-s">'+esc(upName(x))+'</div><div class="up-c">'+sub+(x.size?'':'<i>unranked</i>')+'</div></div><span class="up-g">'+f2(x.gvm)+'<small>GVM</small></span></'+(href?'a':'div')+'>'; });
+  return out;
+}
+function upEmpty(){ var w=upWord(); return 'No '+(w?w+' ':'')+'results on the calendar in the next '+UP.days+' days.'; }
+function upDraw(){
+  var el=document.getElementById('up'); if(!el) return;
+  var view=upIn(UP.rows,UP.size), ten=view.slice(0,10), k=view.length-ten.length;
+  var h='<div class="st-chips">'+UP_SIZES.map(function(s){ return '<button type="button" class="up-chip" data-up="'+s[0]+'" aria-pressed="'+(UP.size===s[0])+'">'+s[1]+'<small>'+upIn(UP.rows,s[0]).length+'</small></button>'; }).join('')+'</div>';
+  h+='<div class="up-list">'+(ten.length?upRows(ten):'<div class="up-emp">'+upEmpty()+'</div>')+'</div>';
+  h+='<a class="st-more" href="#" id="up-more"'+(k>0?'':' hidden')+'>'+k+' more'+(UP.size==='all'?'':' in '+upWord())+' · <b>View all ›</b></a>';
+  el.innerHTML=h;
+  el.querySelectorAll('.up-chip').forEach(function(b){ b.addEventListener('click', function(){ UP.size=b.getAttribute('data-up'); stSyncUrl(); upDraw(); }); });
+  var more=document.getElementById('up-more'); if(more) more.addEventListener('click', function(e){ e.preventDefault(); upOpenSheet(); });
+}
+function upInit(rows,days){
+  UP.rows=rows||[]; UP.days=days||30;
+  try{ var u=new URLSearchParams(location.search); var s=String(u.get('up')||'').toLowerCase(); UP.size=(['large','mid','small','micro'].indexOf(s)>=0)?s:'all'; }catch(e){}
+  upDraw();
+}
+function upOpenSheet(){
+  var view=upIn(UP.rows,UP.size); stSheet();
+  document.getElementById('st-sheet-t').textContent='Upcoming results · '+(UP.size==='all'?'All sizes':upWord())+' · '+view.length;
+  document.getElementById('st-sheet-m').textContent='next '+UP.days+' days · ex-dates from the earnings calendar · GVM = latest score';
+  document.getElementById('st-sheet-b').innerHTML=view.length?upRows(view):'<div class="up-emp">'+upEmpty()+'</div>';
+  stShow();
+}
 /* cc#2163: a sector's companies in the same sheet -- /companies?segment=<name> (the season's own rows, filtered server-side),
    a sideways-scrolling table, default Profit YoY desc with NULLs last, tap a header to sort. */
 var CO={sector:null, rows:[], meta:null, key:'pat_yoy', asc:false, seq:0};
