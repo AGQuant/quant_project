@@ -2699,6 +2699,8 @@ SCORR_ALERT_CREATE_JS = _read_root_js("scorr_alert_create.js")
 # cc#2095: the Custom Alerts V1 categorized picker + condition builder (window.ScorrCustomAlertCreate),
 # same repo-root-file serve pattern, mounted alongside scorr_alert_create.js everywhere the bell is.
 SCORR_CUSTOM_ALERT_CREATE_JS = _read_root_js("scorr_custom_alert_create.js")
+# cc#2196: the watchlist "+" (window.ScorrWatchlistAdd), same repo-root-file serve pattern, mounted site-wide by _MOBILE_HEAD.
+SCORR_WATCHLIST_ADD_JS = _read_root_js("scorr_watchlist_add.js")
 
 
 @router.get("/index_tape_card.js")
@@ -2959,6 +2961,11 @@ def pwa_scorr_alert_create_js():
 @router.get("/scorr_custom_alert_create.js")
 def pwa_scorr_custom_alert_create_js():
     return Response(SCORR_CUSTOM_ALERT_CREATE_JS, media_type="application/javascript", headers=_CACHE_1D)
+
+
+@router.get("/scorr_watchlist_add.js")
+def pwa_scorr_watchlist_add_js():
+    return Response(SCORR_WATCHLIST_ADD_JS, media_type="application/javascript", headers=_CACHE_1D)
 
 
 @router.get("/scorr_cockpit_card.js")

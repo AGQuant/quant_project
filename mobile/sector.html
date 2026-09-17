@@ -165,7 +165,7 @@ var ROWS=[], KEY='gvm', ASC=false, COLS=[];
 function tbl(){
   var rows=ROWS.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
   var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
-  var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; }).join('');
+  var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); if(i===0&&r.symbol&&window.ScorrWatchlistAdd) cell=window.ScorrWatchlistAdd.button(r.symbol,'sector',true)+' '+cell; return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; }).join('');   /* cc#2196: the watchlist + on company rows (a segment row has no symbol, so no button) */
   document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' rows · tap a header to sort</div>';
   document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='segment'||k==='symbol'); } tbl(); });
 }

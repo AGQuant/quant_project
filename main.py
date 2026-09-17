@@ -119,7 +119,7 @@ from fyers_range_backfill_endpoints import router as fyers_range_backfill_router
 from smartgain_daily_m2m import router as smartgain_daily_m2m_router
 from smartgain_app_portfolio import router as smartgain_app_portfolio_router   # cc#1895: My Portfolio section page
 from trade_alerts_app import router as trade_alerts_app_router   # cc#1896: My Alerts section page
-from mobile_watchlist_stub import router as mobile_watchlist_stub_router   # cc#1897: My Watchlist section page (static, no store)
+from watchlist_app_mobile import router as watchlist_app_mobile_router   # cc#2196: Watchlist V1 -- /m/mywatchlist + /m/watchlist + /api/mobile/watchlists (replaces the cc#1897 stub)
 from mobile_dash_hub import router as mobile_dash_hub_router   # cc#1916: /m/dash app Dashboard hub (Fable page b4ade10 + router ae0b0c3)
 from mobile_qb_holdings import router as mobile_qb_holdings_router   # cc#1922: /m/qb/holdings View-holdings table (Fable page be3142c + router bd68379, QB_APP_R5_LOCK 42805)
 from mobile_scanners import router as mobile_scanners_router   # cc#1923: /m/tcscan + /m/invscan pages (Fable 84b7578 / 85471cf, router 0e18327)
@@ -338,6 +338,7 @@ PROTECTED.add("/m/options")   # cc#2039: Option Strategy Builder, app screen —
 PROTECTED.add("/m/myportfolio")   # cc#1895: Dashboard-section My Portfolio page — same PROTECTED-only convention as /m/holdings
 PROTECTED.add("/m/myalerts")   # cc#1896: Dashboard-section My Alerts page — same PROTECTED-only convention
 PROTECTED.add("/m/mywatchlist")   # cc#1897: Dashboard-section My Watchlist page — same PROTECTED-only convention
+PROTECTED.add("/m/watchlist")     # cc#2196: the card's own name for the same page (watchlist_app_mobile.py serves both)
 PROTECTED.add("/m/dash")   # cc#1916: app Dashboard hub (My Portfolio / My Alerts / My Watchlist / My Trades)
 PROTECTED.add("/m/qb/holdings")   # cc#1922: Quant Basket holdings table, reached from /m/qb?basket= only
 PROTECTED.add("/m/tcscan")   # cc#1923: TC Scanner trades (app page)
@@ -472,6 +473,7 @@ _MOBILE_HEAD = (
     + b'<script src="/scorr_alert_create.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2030: the bell's own Set Alert button opens this (cc#1831, relocated off Wall of Trades by cc#2029) -- every app page now needs it loaded, not just the two pages that used to carry it inline
     + b'<script src="/scorr_custom_alert_create.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2095: the bell's new "+ CUSTOM ALERT" button opens this -- same every-app-page reasoning as scorr_alert_create.js just above
     + b'<script src="/scorr_mobile_cards.js?v=' + _BUILD_B + b'" defer></script>'  # cc#859 Part A: shared mobile section card (cc#862/#863 import it, never redefine it)
+    + b'<script src="/scorr_watchlist_add.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2196: the watchlist + (the strip below renders it, so it loads first)
     + b'<script src="/scorr_card_strip.js?v=' + _BUILD_B + b'" defer></script>'   # cc#789: shared C·A·R·D strip, load before its consumers
     + b'<script src="/scorr_position_row.js?v=' + _BUILD_B + b'" defer></script>'   # cc#2101: shared price-rail geometry + TC capsule + card-strip toggle (mobile/v8.html, mobile/tcscan.html)
     + b'<script src="/scorr_segment_results.js?v=' + _BUILD_B + b'" defer></script>'  # cc#1191: SEGMENT RESULTS popout — AFTER the strip, which it calls per row
@@ -722,7 +724,9 @@ async def auth_gate(request: Request, call_next):
                     b"scorr_alert_create.js",
                     # cc#2095: added WITH its script tag in _MOBILE_HEAD above, in this same commit
                     # (cc#1060 rule) — the Custom Alerts V1 categorized picker + condition builder.
-                    b"scorr_custom_alert_create.js"):
+                    b"scorr_custom_alert_create.js",
+                    # cc#2196: added WITH its script tag in _MOBILE_HEAD above, in this same commit (cc#1060 rule) -- the watchlist +.
+                    b"scorr_watchlist_add.js"):
             body = body.replace(b'src="/' + _js + b'"',
                                 b'src="/' + _js + b'?v=' + _BUILD_B + b'"')
         # APP_QA_R4 P2: mobile/home.html hardcodes the theme token layer as a <link href>,
@@ -997,7 +1001,7 @@ app.include_router(v8_daylog_extras_router)   # cc#1561: Day Log P&L series + re
 app.include_router(mobile_ext_router)
 app.include_router(smartgain_app_portfolio_router)   # cc#1895: /m/myportfolio + /api/mobile/myportfolio
 app.include_router(trade_alerts_app_router)   # cc#1896: /m/myalerts + /api/mobile/myalerts
-app.include_router(mobile_watchlist_stub_router)   # cc#1897: /m/mywatchlist (static, no backing store)
+app.include_router(watchlist_app_mobile_router)   # cc#2196: /m/mywatchlist + /m/watchlist + /api/mobile/watchlists (user_watchlists / user_watchlist_items, CREATE-only at first use)
 app.include_router(mobile_dash_hub_router)   # cc#1916: /m/dash — Home grid Dashboard tile now opens the app hub, not the web /dashboard
 app.include_router(mobile_qb_holdings_router)   # cc#1922: /m/qb/holdings?basket= — reached from the /m/qb basket detail page
 app.include_router(mobile_scanners_router)   # cc#1923: /m/tcscan, /m/invscan — the two Analytics scanner tiles (HOME_GRID_R1_LOCK 42796 rule 2)
@@ -1588,7 +1592,8 @@ NAV_REGISTRY = {
     # the registry says which bar an entry appears on, and it now actually appears on this one.
     "/m/myportfolio": ("My Portfolio (mobile, SmartGain data) — HIDDEN 17-Sep-2026 (cc#2197): duplicate of /m/holdings; route alive for old links, off the Home grid, never in the NAV array", "typed-url"),   # cc#1895, tier fixed cc#1907, hidden cc#2197
     "/m/myalerts":    ("My Alerts (mobile) — the ONE alerts page since cc#2195: Triggered · Pending · Create; the Home bell (scorr_bell.js on /m/*) and the My Scorr tile both open it", "nav-mobile"),   # cc#1896, tier fixed cc#1907, rebuilt cc#2195
-    "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "nav-mobile"),   # cc#1897, tier fixed cc#1907
+    "/m/mywatchlist": ("My Watchlist (mobile) — user watchlists (max 5), swipeable list cards, names sheet with rating + CMP; the + on every stock card writes here (cc#2196)", "nav-mobile"),   # cc#1897, tier fixed cc#1907, live store cc#2196
+    "/m/watchlist":   ("My Watchlist (mobile) — alias of /m/mywatchlist, the cc#2196 card's own name for the page", "typed-url"),   # cc#2196
     "/m/dash":        ("Dashboard hub (mobile) — My Portfolio / My Alerts / My Watchlist / My Trades; Home grid Dashboard tile", "nav-mobile"),   # cc#1916 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)
     "/m/qb/holdings": ("Quant Basket holdings table (mobile) — reached from /m/qb?basket= detail page", "grid-tile"),   # cc#1922: not in the NAV array by design (detail-page link only), so grid-tile is the right tier here
     "/m/tcscan":      ("TC Scanner trades (mobile) — open/closed book, record; Home grid tile", "nav-mobile"),   # cc#1923 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)

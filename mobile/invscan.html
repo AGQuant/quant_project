@@ -121,7 +121,8 @@ function gatesHtml(r){ var g=r.gates||{}; return '<span class="iv-gates">'+Objec
 function brow(r){
   var st=r.state||'', tag = st==='ENTERED'?'<span class="iv-pill mom">held</span>':(st==='ENTERS'?'<span class="iv-pill win">enters</span>':(st==='GATED'?'<span class="iv-pill">gated</span>':''));
   return '<a class="iv-brow '+(st==='ENTERS'||st==='ENTERED'?'up':(st==='GATED'?'':'mu'))+'" href="/m/check?sym='+encodeURIComponent(r.symbol)+'#ic"><div><div class="iv-bnm">'+esc(r.symbol)+tag+'</div><div class="iv-bsub">'+esc(band(r.band))+' · GVM <b>'+f2(r.gvm)+'</b> · gates '+(r.gates_n!=null?r.gates_n+'/4':'—')+gatesHtml(r)+(r.month_return!=null?' · month '+pct(r.month_return,1):'')+'</div></div>'
-    +'<div class="iv-bval"><div class="iv-bn">'+(r.score!=null?Math.round(r.score):'—')+'</div><div class="iv-bc">'+(TRACK==='momentum'?'rev '+(r.rev!=null?Math.round(r.rev):'—'):'mom '+(r.mom!=null?Math.round(r.mom):'—'))+'</div></div></a>';
+    +'<div class="iv-bval"><div class="iv-bn">'+(r.score!=null?Math.round(r.score):'—')+'</div><div class="iv-bc">'+(TRACK==='momentum'?'rev '+(r.rev!=null?Math.round(r.rev):'—'):'mom '+(r.mom!=null?Math.round(r.mom):'—'))+'</div>'
+    +(window.ScorrWatchlistAdd?'<div style="margin-top:6px">'+window.ScorrWatchlistAdd.button(r.symbol,'invscan',true)+'</div>':'')+'</div></a>';   /* cc#2196: the watchlist + under the score (shared component; its capture-phase tap never follows this link) */
 }
 /* exit-reason pill: TARGET / SL / TIME in win / loss / muted; the engine's own exits ("momentum 70.7 < 75.0",
    "alpha -5.4 pct vs NIFTY500") get a short word (SCORE / ALPHA, muted) and the full reason on the sub line. */

@@ -485,7 +485,7 @@ function tbl(){
   var cols=[['symbol','Name'],['gvm','GVM'],['g','G'],['v','V'],['m','M'],['mcap','Mcap Cr']];
   var th=cols.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
   var f=function(v){ return v==null?'—':Number(v).toFixed(2); };
-  var tr=rows.map(function(r){ return '<tr><td>'+esc(r.symbol)+'<small>'+esc(r.sector||'')+'</small></td><td class="'+((r.gvm||0)>=8?'gd':'')+'">'+f(r.gvm)+'</td><td>'+f(r.g)+'</td><td>'+f(r.v)+'</td><td>'+f(r.m)+'</td><td>'+(r.mcap==null?'—':Math.round(Number(r.mcap)).toLocaleString('en-IN'))+'</td></tr>'; }).join('');
+  var tr=rows.map(function(r){ return '<tr><td>'+(window.ScorrWatchlistAdd?window.ScorrWatchlistAdd.button(r.symbol,'screeners',true)+' ':'')+esc(r.symbol)+'<small>'+esc(r.sector||'')+'</small></td><td class="'+((r.gvm||0)>=8?'gd':'')+'">'+f(r.gvm)+'</td><td>'+f(r.g)+'</td><td>'+f(r.v)+'</td><td>'+f(r.m)+'</td><td>'+(r.mcap==null?'—':Math.round(Number(r.mcap)).toLocaleString('en-IN'))+'</td></tr>'; }).join('');
   document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' names · tap a header to sort · scores from the latest GVM run</div>';
   document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='symbol'); } tbl(); });
 }

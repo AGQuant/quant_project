@@ -178,7 +178,7 @@ function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim
 function mover(c,dn){
   return '<a class="mc '+(dn?'dn':'')+'" href="/m/results?sym='+encodeURIComponent(c.symbol)+'"><div class="s">'+esc(c.symbol)+'</div><div class="seg">'+esc(c.segment||'')+(c.tier?' · '+c.tier.toLowerCase():'')+'</div>'
     +'<div class="p '+cls(c.pat_yoy)+'">'+pct(c.pat_yoy)+'</div><div class="pl">profit vs last year · sales '+pct(c.sales_yoy)+'</div>'
-    +'<div class="g"><span>GVM <b>'+f2(c.gvm)+'</b></span>'+(c.written?'<span class="rd">Read ›</span>':'')+'</div></a>';   // cc#2164: an unwritten name shows nothing here, only a written one gets the Read link
+    +'<div class="g"><span>GVM <b>'+f2(c.gvm)+'</b></span>'+(c.written?'<span class="rd">Read ›</span>':'')+(window.ScorrWatchlistAdd?window.ScorrWatchlistAdd.button(c.symbol,'results-movers',true):'')+'</div></a>';   // cc#2164: an unwritten name shows nothing here, only a written one gets the Read link; cc#2196: the watchlist +
 }
 function renderSeason(d){
   var s=d.summary||{}, q=(d.season||{}).quarter||'—';

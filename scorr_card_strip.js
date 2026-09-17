@@ -229,9 +229,14 @@
     }).join('');
     var app = false;
     try { app = (typeof location !== 'undefined') && String(location.pathname || '').indexOf('/m/') === 0; } catch (e) {}   // cc#1948: app scope decided HERE
+    /* cc#2196: on the APP the strip carries a fifth control -- the watchlist "+" (scorr_watchlist_add.js), so every
+       stock card that shows this strip (V8 rows, TC Scanner rows, the GVM company view, the symbol card sheet)
+       gets it with no page code. Not a letter: it opens no card, it dispatches through its own data-wl-add tap
+       handler (capture phase) and never reaches ScorrCardNav. The web strip is unchanged. */
+    var wl = (app && window.ScorrWatchlistAdd && window.ScorrWatchlistAdd.button) ? window.ScorrWatchlistAdd.button(s, compact ? 'strip-row' : 'strip', compact) : '';
     return '<span class="scorr-card-strip' + (compact ? ' scorr-cs-sm' : '') + (app ? ' scorr-cs-app' : '') + '" data-sym="' + s
       + '" data-active="' + esc(active || '') + '"' + (compact ? ' data-compact="1"' : '') + '>'
-      + btns + '</span>';
+      + btns + wl + '</span>';
   }
 
   /* cc#798 convenience for table cells — one short call per row, so a row author never hand-writes
