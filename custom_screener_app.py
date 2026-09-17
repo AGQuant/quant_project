@@ -206,7 +206,7 @@ def applied(selection):
 
 def run_sql(selection, limit: int = ROW_CAP) -> str:
     """ONE statement: universe, full match count, names dropped for a missing technicals row, the five dates,
-    and the first `limit` rows as JSON. Nothing selected -> LIMIT 0 (the count still comes back)."""
+    and the first `limit` rows as JSON objects. Nothing selected -> LIMIT 0 (the count still comes back)."""
     non_tech, tech, _ = where_parts(selection)
     rows_limit = int(limit) if selection else 0
     return (_SCORED_CTE
@@ -214,12 +214,15 @@ def run_sql(selection, limit: int = ROW_CAP) -> str:
             + ", matched AS (SELECT * FROM base WHERE " + tech + ")\n"
             "SELECT (SELECT COUNT(*) FROM scored) AS universe, (SELECT COUNT(*) FROM matched) AS total,\n"
             "       (SELECT COUNT(*) FROM base WHERE NOT has_tech) AS excluded_no_technicals, " + _DATES_SQL + ",\n"
-            "       (SELECT COALESCE(json_agg(m), '[]'::json) FROM (\n"
+            "       (SELECT COALESCE(json_agg(rowx), '[]'::json) FROM (\n"
             "            SELECT symbol, company_name, segment, cap, ROUND(gvm_score::numeric, 2) AS gvm, verdict,\n"
             "                   ROUND(g_score::numeric, 2) AS g, ROUND(v_score::numeric, 2) AS v, ROUND(m_score::numeric, 2) AS m,\n"
             "                   ROUND(invest_score::numeric, 2) AS invest_score, invest_band, price,\n"
             "                   ROUND(year_return::numeric, 2) AS year_return, ROUND(week_index_52::numeric, 1) AS w52\n"
-            "              FROM matched ORDER BY invest_score DESC NULLS LAST, gvm_score DESC, symbol LIMIT %d) m) AS rows" % rows_limit)
+            "              FROM matched ORDER BY invest_score DESC NULLS LAST, gvm_score DESC, symbol LIMIT %d) rowx) AS rows" % rows_limit)
+    # cc#2174 (P0): the row subquery's alias must not be a column name inside it. It was `m`, and the subquery
+    # also selects ROUND(m_score) AS m -- Postgres resolves the bare `m` in json_agg(m) as that COLUMN, so every
+    # row came back as a bare M-score and the app rendered dashes. `rowx` collides with nothing.
 
 
 def _as_of(row):
