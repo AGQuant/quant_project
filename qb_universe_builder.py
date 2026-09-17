@@ -320,7 +320,15 @@ scored AS (
            sr.roce, sr."Debt to equity" AS de,
            sr."Promoter holding" AS promoter_holding,
            ROUND(GREATEST(sr."Promoter holding" - sr."Unpledged promoter holding", 0)::numeric, 2) AS promoter_pledge,
-           sr.dividend_yield, sr.loaded_at AS screener_loaded_at
+           sr.dividend_yield, sr.loaded_at AS screener_loaded_at,
+           -- cc#2148 CAT_5 / CAT_6 / CAT_3 remainder: the night-window precompute (qb_universe_derived at
+           -- its latest score_date), read with a plain join -- nothing on this path is computed on request.
+           qd.score_date AS derived_date,
+           qd.yoy_sales_growth, qd.yoy_profit_growth, qd.opm_latest_quarter, qd.opm_change_yoy,
+           qd.consecutive_quarters_profit_growth, qd.quarters_since_last_result, qd.latest_quarter_end,
+           qd.alpha_vs_nifty500_1y, qd.alpha_vs_nifty500_3y, qd.alpha_vs_sector_1y,
+           qd.beta_1y, qd.beta_sessions, qd.beta_asof, qd.max_drawdown_1y, qd.rs_percentile_1y,
+           qd.ret_3m, qd.ret_6m, qd.consecutive_up_months
       FROM gvm_scores g
       JOIN pool p ON p.symbol = g.symbol
       LEFT JOIN sect_ranked s ON s.segment = g.segment
@@ -331,6 +339,8 @@ scored AS (
            AND sr.loaded_at = (SELECT MAX(loaded_at) FROM screener_raw)
       LEFT JOIN mcap_rank_daily mr ON mr.symbol = g.symbol
            AND mr.rank_date = (SELECT MAX(rank_date) FROM mcap_rank_daily)
+      LEFT JOIN qb_universe_derived qd ON qd.symbol = g.symbol
+           AND qd.score_date = (SELECT MAX(score_date) FROM qb_universe_derived)
 """ + _asof_lateral("h30", 30) + _asof_lateral("h90", 90) + _asof_lateral("h180", 180) + """      LEFT JOIN LATERAL (SELECT h.verdict FROM gvm_history h
                           WHERE h.symbol = g.symbol AND h.score_date < (SELECT d FROM latest)
                           ORDER BY h.score_date DESC OFFSET %(migr_n)s - 1 LIMIT 1) hm ON true
@@ -380,6 +390,18 @@ def qb_universe2_preview(
     promoter_min: Optional[float] = None, promoter_max: Optional[float] = None,
     pledge_max: Optional[float] = None,
     div_yield_min: Optional[float] = None, div_yield_max: Optional[float] = None,
+    # cc#2148: the night-precompute rows (qb_universe_derived)
+    cons_up_min: Optional[int] = None,
+    yoy_sales_min: Optional[float] = None, yoy_sales_max: Optional[float] = None,
+    yoy_profit_min: Optional[float] = None, yoy_profit_max: Optional[float] = None,
+    opm_q_min: Optional[float] = None, opm_q_max: Optional[float] = None,
+    opm_chg_min: Optional[float] = None, opm_chg_max: Optional[float] = None,
+    cons_pg_min: Optional[int] = None, qslr_max: Optional[int] = None,
+    alpha_n500_min: Optional[float] = None, alpha_n500_max: Optional[float] = None, alpha_n500_window: str = "1Y",
+    alpha_sector_min: Optional[float] = None, alpha_sector_max: Optional[float] = None,
+    beta_min: Optional[float] = None, beta_max: Optional[float] = None,
+    mdd_min: Optional[float] = None, mdd_max: Optional[float] = None,
+    rs_pct_min: Optional[float] = None, rs_pct_max: Optional[float] = None,
     ops: Optional[str] = None,
     limit: int = 500,
 ):
@@ -458,7 +480,8 @@ def qb_universe2_preview(
         applied.append("gvm_consistency")
     # cc#2147: CAT_3 Price & Momentum (universe_technicals) -- the window picks the column; 3M / 6M
     # are not offered (V2, raw_prices derivation) and fall back to 1M if forced.
-    _PRICE_COLS = {"1W": "ret_1w", "1M": "ret_1m", "1Y": "ret_1y", "3Y": "ret_3y"}
+    # cc#2148: 3M / 6M come from the night precompute (qb_universe_derived.ret_3m / ret_6m)
+    _PRICE_COLS = {"1W": "ret_1w", "1M": "ret_1m", "3M": "ret_3m", "6M": "ret_6m", "1Y": "ret_1y", "3Y": "ret_3y"}
     price_change_window = price_change_window if price_change_window in _PRICE_COLS else "1M"
     rng(_PRICE_COLS[price_change_window], price_change_min, price_change_max, "price_change")
     rng("w52_position", w52_pos_min, w52_pos_max, "w52_pos")
@@ -494,6 +517,25 @@ def qb_universe2_preview(
     if _pr:
         fconds["promoter"] = "(" + " AND ".join(_pr) + ")"; applied.append("promoter")
     rng("dividend_yield", div_yield_min, div_yield_max, "div_yield")
+    # cc#2148: CAT_3 remainder + CAT_5 + CAT_6 -- every column read from qb_universe_derived, the
+    # night-window precompute; a row is NULL (and fails the filter) until the first night run.
+    if cons_up_min is not None:
+        fconds["cons_up"] = "(consecutive_up_months >= %(cons_up_lo)s)"; params["cons_up_lo"] = int(cons_up_min); applied.append("cons_up")
+    rng("yoy_sales_growth", yoy_sales_min, yoy_sales_max, "yoy_sales")
+    rng("yoy_profit_growth", yoy_profit_min, yoy_profit_max, "yoy_profit")
+    rng("opm_latest_quarter", opm_q_min, opm_q_max, "opm_q")
+    rng("opm_change_yoy", opm_chg_min, opm_chg_max, "opm_chg")
+    if cons_pg_min is not None:
+        fconds["cons_pg"] = "(consecutive_quarters_profit_growth >= %(cons_pg_lo)s)"; params["cons_pg_lo"] = int(cons_pg_min); applied.append("cons_pg")
+    if qslr_max is not None:
+        fconds["qslr"] = "(quarters_since_last_result <= %(qslr_hi)s)"; params["qslr_hi"] = int(qslr_max); applied.append("qslr")
+    _ALPHA_COLS = {"1Y": "alpha_vs_nifty500_1y", "3Y": "alpha_vs_nifty500_3y"}
+    alpha_n500_window = alpha_n500_window if alpha_n500_window in _ALPHA_COLS else "1Y"
+    rng(_ALPHA_COLS[alpha_n500_window], alpha_n500_min, alpha_n500_max, "alpha_n500")
+    rng("alpha_vs_sector_1y", alpha_sector_min, alpha_sector_max, "alpha_sector")
+    rng("beta_1y", beta_min, beta_max, "beta")
+    rng("max_drawdown_1y", mdd_min, mdd_max, "mdd")
+    rng("rs_percentile_1y", rs_pct_min, rs_pct_max, "rs_pct")
     params["migr_n"] = max(1, min(int(verdict_migration_n), 400))
     params["cons_n"] = max(1, min(int(gvm_consistency_n), 400))
     params["asof_grace"] = ASOF_GRACE_DAYS
@@ -551,13 +593,17 @@ def qb_universe2_preview(
                               (SELECT MIN(score_date) FROM universe_technicals),
                               (SELECT MAX(score_date) FROM universe_technicals),
                               (SELECT MAX(loaded_at) FROM screener_raw),
-                              (SELECT MAX(rank_date) FROM mcap_rank_daily)""")
+                              (SELECT MAX(rank_date) FROM mcap_rank_daily),
+                              (SELECT MIN(score_date) FROM qb_universe_derived),
+                              (SELECT MAX(score_date) FROM qb_universe_derived)""")
         _fl = cur.fetchone()
         sources = {"gvm_history_daily_floor": str(_fl[0]) if _fl[0] else None,
                    "technicals_floor": str(_fl[1]) if _fl[1] else None,
                    "technicals_date": str(_fl[2]) if _fl[2] else None,
                    "screener_loaded_at": str(_fl[3]) if _fl[3] else None,
-                   "rank_date": str(_fl[4]) if _fl[4] else None}
+                   "rank_date": str(_fl[4]) if _fl[4] else None,
+                   "derived_floor": str(_fl[5]) if len(_fl) > 5 and _fl[5] else None,   # cc#2148
+                   "derived_date": str(_fl[6]) if len(_fl) > 6 and _fl[6] else None}
         # cc#2145 item 5 (FOUNDER_AMENDMENT_16SEP_RANK_IS_SEGMENT_ONLY): segment-size context for the
         # Rank-within-Segment row -- the POOL's segments and their member counts, min / median / max.
         # Shown beside the rank filter, never auto-applied as a filter.
@@ -590,9 +636,10 @@ def qb_universe2_preview(
                           "verdict_migration_n": params["migr_n"], "gvm_consistency_n": params["cons_n"],
                           "asof_grace_days": ASOF_GRACE_DAYS},   # cc#2146
         "price_change_window": price_change_window, "bfsi_excluded": bfsi_excluded,   # cc#2147
+        "alpha_n500_window": alpha_n500_window, "derived_date": sources.get("derived_date"),   # cc#2148
         "sources": sources,
         "reconstruct_from": _reconstruct_from(ordered, sources, gvm_change_days, m_change_days,
-                                              params["migr_n"], params["cons_n"]),
+                                              params["migr_n"], params["cons_n"], price_change_window),
     }
 
 
@@ -602,8 +649,10 @@ _FILTER_ORDER = ("gvm", "g", "v", "m", "verdict", "seg_rank",
                  "sector_gvm", "sector_rank", "sector_gap", "sector_members", "segments",   # cc#2145: CAT_2 after CAT_1
                  "gvm_change", "m_change", "g_change", "v_change", "sector_change",
                  "verdict_migration", "gvm_consistency",   # cc#2146: CAT_4 after CAT_2
-                 "price_change", "w52_pos", "ret_vs_index",   # cc#2147: CAT_3
-                 "mcap_rank", "pe_mult", "roce", "de", "promoter", "div_yield")   # cc#2147: CAT_7 (promoter = holding min + pledge max, one row)
+                 "price_change", "w52_pos", "ret_vs_index", "cons_up",   # cc#2147: CAT_3 (+ cc#2148 consecutive up months)
+                 "mcap_rank", "pe_mult", "roce", "de", "promoter", "div_yield",   # cc#2147: CAT_7 (promoter = holding min + pledge max, one row)
+                 "yoy_sales", "yoy_profit", "opm_q", "opm_chg", "cons_pg", "qslr",   # cc#2148: CAT_5 (night precompute)
+                 "alpha_n500", "alpha_sector", "beta", "mdd", "rs_pct")   # cc#2148: CAT_6 (night precompute)
 
 
 # cc#2147 item 3: which date this universe can be honestly rebuilt for, given the rows applied.
@@ -616,18 +665,32 @@ _CAT_OF = {"gvm": 1, "g": 1, "v": 1, "m": 1, "verdict": 1, "seg_rank": 1,
            "sector_gvm": 2, "sector_rank": 2, "sector_gap": 2, "sector_members": 2, "segments": 2,
            "gvm_change": 4, "m_change": 4, "g_change": 4, "v_change": 4, "sector_change": 4,
            "verdict_migration": 4, "gvm_consistency": 4,
-           "price_change": 3, "w52_pos": 3, "ret_vs_index": 3,
-           "mcap_rank": 7, "pe_mult": 7, "roce": 7, "de": 7, "promoter": 7, "div_yield": 7}
+           "price_change": 3, "w52_pos": 3, "ret_vs_index": 3, "cons_up": 3,
+           "mcap_rank": 7, "pe_mult": 7, "roce": 7, "de": 7, "promoter": 7, "div_yield": 7,
+           "yoy_sales": 5, "yoy_profit": 5, "opm_q": 5, "opm_chg": 5, "cons_pg": 5, "qslr": 5,
+           "alpha_n500": 6, "alpha_sector": 6, "beta": 6, "mdd": 6, "rs_pct": 6}
+_DERIVED_KEYS = {"cons_up", "yoy_sales", "yoy_profit", "opm_q", "opm_chg", "cons_pg", "qslr",
+                 "alpha_n500", "alpha_sector", "beta", "mdd", "rs_pct"}   # cc#2148: rows that live in qb_universe_derived
 
 
-def _reconstruct_from(ordered, sources, gvm_days, m_days, migr_n, cons_n):
+def _reconstruct_from(ordered, sources, gvm_days, m_days, migr_n, cons_n, price_window="1M"):
     import datetime as _dt
     def _d(v):
         return _dt.date.fromisoformat(v) if v else None
     gvm_floor, tech_floor = _d(sources.get("gvm_history_daily_floor")), _d(sources.get("technicals_floor"))
+    derived_floor = _d(sources.get("derived_floor"))   # cc#2148: the first night the precompute ran
     floors, today_only = [], []
     for k in ordered:
         c = _CAT_OF.get(k)
+        # cc#2148: a night-precompute row (or the 3M / 6M price window) can only be rebuilt from the
+        # first night the table has; before that night there is nothing to rebuild from.
+        if k in _DERIVED_KEYS or (k == "price_change" and price_window in ("3M", "6M")):
+            if derived_floor:
+                floors.append((derived_floor, k))
+            else:
+                return {"date": None, "today_only": False, "limited_by": k, "not_yet": True,
+                        "note": "the night precompute (qb_universe_derived) has not run yet -- this row has no rows to evaluate until its first 02:30 IST run"}
+            continue
         if c in (1, 2) and gvm_floor:
             floors.append((gvm_floor, k))
         elif c == 4 and gvm_floor:
@@ -703,7 +766,28 @@ def qb_universe2_coverage():
         _t = cur.fetchone()
         cur.execute("SELECT MAX(loaded_at) FROM screener_raw")
         _sl = cur.fetchone()[0]
+        # cc#2148: the night precompute's state -- the page keeps CAT_5 / CAT_6 / the 3M-6M options as
+        # COMING (with the next run's date) until this says rows exist.
+        cur.execute("SELECT to_regclass('qb_universe_derived')")
+        _dd = _df = None; _dn = _dq = _db = 0
+        if cur.fetchone()[0] is not None:
+            cur.execute("SELECT MAX(score_date), MIN(score_date) FROM qb_universe_derived")
+            _dd, _df = cur.fetchone()
+            if _dd:
+                cur.execute("SELECT COUNT(*), COUNT(latest_quarter_end), COUNT(beta_1y) FROM qb_universe_derived WHERE score_date = %s", (_dd,))
+                _dn, _dq, _db = cur.fetchone()
+        cur.execute("SELECT COUNT(DISTINCT d) FROM beta_daily")
+        _bd = cur.fetchone()[0] or 0
     latest_d = r[10]
+    import datetime as _dt2
+    _now_ist = _dt2.datetime.utcnow() + _dt2.timedelta(hours=5, minutes=30)
+    _next = _now_ist.replace(hour=2, minute=30, second=0, microsecond=0)
+    if _next <= _now_ist:
+        _next += _dt2.timedelta(days=1)
+    derived = {"ready": bool(_dd), "date": str(_dd) if _dd else None, "floor": str(_df) if _df else None,
+               "rows": int(_dn or 0), "quarterly_symbols": int(_dq or 0), "beta_rows": int(_db or 0),
+               "beta_days": int(_bd), "universe": int(r[0] or 0),
+               "next_run_ist": _next.strftime("%Y-%m-%d %H:%M IST")}
     era_days = (latest_d - floor).days if (latest_d and floor) else 0
     def win(n, c, lo, hi):
         # ENABLED only when the daily era is at least n days deep (item 3: "disabled until history
@@ -716,6 +800,7 @@ def qb_universe2_coverage():
                 "asof_to": str(hi) if hi else None, "enabled": enabled, "reason": reason}
     return {"technicals_floor": str(_t[0]) if _t and _t[0] else None, "technicals_date": str(_t[1]) if _t and _t[1] else None,
             "screener_loaded_at": str(_sl) if _sl else None,   # cc#2147
+            "derived": derived,   # cc#2148
             "as_of_date": str(r[10]) if r[10] else None, "symbols": int(r[0] or 0),
             "windows": {"30": win(30, r[1], r[4], r[5]), "90": win(90, r[2], r[6], r[7]), "180": win(180, r[3], r[8], r[9])},
             "daily_history_floor": str(floor) if floor else None, "daily_era_days": era_days, "snapshots_last_90d": int(snaps or 0),

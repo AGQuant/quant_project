@@ -149,9 +149,8 @@
   <div class="sub">
     Pick one or more pools (they combine, deduplicated), then narrow with filters. Every value here is the current EOD snapshot
     (gvm_scores as of its latest score_date) — this is a Quant Basket engine, not a screener.
-    <b>V1</b>: pool selection and five filter categories are live (GVM/component scores, Sector &amp; Segment, Change &amp; Delta, Price &amp; Momentum, Quality/Valuation/Size/Ownership). Quarterly Results and Alpha &amp; Risk are
-    shown below so you can see the full shape of the page — they are not wired to real filtering
-    yet. <b>Save</b> the universe under a basket name (pools, every applied row with its AND/OR, duration and
+    <b>V1</b>: pool selection and five filter categories are live (GVM/component scores, Sector &amp; Segment, Change &amp; Delta, Price &amp; Momentum, Quality/Valuation/Size/Ownership). Quarterly Results and Alpha &amp; Risk (and the 3M / 6M price windows) are computed
+    once a night at 02:30 IST and switch on after the first run — until then they read Coming. <b>Save</b> the universe under a basket name (pools, every applied row with its AND/OR, duration and
     note, and the date it was previewed on) and <b>Load</b> it back on any day — the notes are the strategy record.
   </div>
 
@@ -241,9 +240,10 @@ var CAT4_FILTERS = [
    evening before). 4 of 5 rows live; consecutive_up_months stays Coming (V2, raw_prices). The
    price-change window offers 3M / 6M DISABLED with the reason (V2 -- needs raw_prices derivation). */
 var CAT3_FILTERS = [
-  {key:'price_change', label:'Price change', kind:'range', cat:3, colBase:'ret_', windows:[{v:'1W',t:'1 week'},{v:'1M',t:'1 month'},{v:'3M',t:'3 months',dis:'V2 -- needs raw_prices derivation'},{v:'6M',t:'6 months',dis:'V2 -- needs raw_prices derivation'},{v:'1Y',t:'1 year'},{v:'3Y',t:'3 years'}]},
+  {key:'price_change', label:'Price change', kind:'range', cat:3, colBase:'ret_', windows:[{v:'1W',t:'1 week'},{v:'1M',t:'1 month'},{v:'3M',t:'3 months',derived:true},{v:'6M',t:'6 months',derived:true},{v:'1Y',t:'1 year'},{v:'3Y',t:'3 years'}]},   /* cc#2148: 3M / 6M from the night precompute */
   {key:'w52_pos', label:'52-week range position (0 = at 52W low, 100 = at 52W high)', kind:'range', cat:3, col:'w52_position'},
   {key:'ret_vs_index', label:'Return vs index (52W)', kind:'range', cat:3, col:'ret_vs_index_52w'},
+  {key:'cons_up', label:'Consecutive up months (min)', kind:'range', cat:3, col:'consecutive_up_months', minOnly:true, step:1, derived:true},   /* cc#2148 */
 ];
 /* cc#2147: CAT_7 Quality / Valuation / Size / Ownership -- CURRENT VALUES ONLY (screener_raw at its
    one loaded_at; mcap_rank from mcap_rank_daily's latest rank_date, never input_raw). Any row here
@@ -256,12 +256,27 @@ var CAT7_FILTERS = [
   {key:'promoter', label:'Promoter holding % (min) and pledge % of total shares (max)', kind:'promoter', cat:7, col:'promoter_holding'},
   {key:'div_yield', label:'Dividend yield % (min)', kind:'range', cat:7, col:'dividend_yield', minOnly:true},
 ];
-var ALL_FILTERS = CAT1_FILTERS.concat(CAT2_FILTERS, CAT4_FILTERS, CAT3_FILTERS, CAT7_FILTERS);
-var LOCKED_SET_TOTAL = 40;   /* the locked V1 set (cc#2123 spec); 27 wired today (CAT_1 6, CAT_2 5, CAT_4 7, CAT_3 3, CAT_7 6) */
-var CATEGORIES_COMING = [
-  {name:'Quarterly Results (YoY)', n:6},
-  {name:'Alpha & Risk', n:5},
+/* cc#2148: CAT_5 Quarterly Results (YoY) and CAT_6 Alpha & Risk -- every row reads qb_universe_derived,
+   the night-window precompute (02:30 IST). They render as real rows only once that table has rows;
+   before the first run the two categories stay COMING with the next run's date. */
+var CAT5_FILTERS = [
+  {key:'yoy_sales', label:'Sales growth YoY %', kind:'range', cat:5, col:'yoy_sales_growth', derived:true},
+  {key:'yoy_profit', label:'Net profit growth YoY %', kind:'range', cat:5, col:'yoy_profit_growth', derived:true},
+  {key:'opm_q', label:'OPM % latest quarter', kind:'range', cat:5, col:'opm_latest_quarter', derived:true},
+  {key:'opm_chg', label:'OPM change YoY (pp)', kind:'range', cat:5, col:'opm_change_yoy', derived:true},
+  {key:'cons_pg', label:'Consecutive quarters of profit growth (min)', kind:'range', cat:5, col:'consecutive_quarters_profit_growth', minOnly:true, step:1, derived:true},
+  {key:'qslr', label:'Quarters since last result (max)', kind:'range', cat:5, col:'quarters_since_last_result', maxOnly:true, step:1, derived:true},
 ];
+var CAT6_FILTERS = [
+  {key:'alpha_n500', label:'Alpha vs NIFTY500 (pp)', kind:'range', cat:6, colBase:'alpha_vs_nifty500_', windows:[{v:'1Y',t:'1 year'},{v:'3Y',t:'3 years'}], derived:true},
+  {key:'alpha_sector', label:'Alpha vs own sector, 1Y (pp)', kind:'range', cat:6, col:'alpha_vs_sector_1y', derived:true},
+  {key:'beta', label:'Beta vs NIFTY50 (1Y, accruing)', kind:'range', cat:6, col:'beta_1y', derived:true},
+  {key:'mdd', label:'Max drawdown 1Y (%, negative)', kind:'range', cat:6, col:'max_drawdown_1y', derived:true},
+  {key:'rs_pct', label:'RS percentile in universe (1Y, 0-100)', kind:'range', cat:6, col:'rs_percentile_1y', derived:true},
+];
+var ALL_FILTERS = CAT1_FILTERS.concat(CAT2_FILTERS, CAT4_FILTERS, CAT3_FILTERS, CAT7_FILTERS, CAT5_FILTERS, CAT6_FILTERS);
+var LOCKED_SET_TOTAL = 40;   /* the locked V1 set (cc#2123 spec); 39 wired (CAT_1 6, CAT_2 5, CAT_4 7, CAT_3 5, CAT_7 6, CAT_5 6, CAT_6 5) -- the 12 night-precompute rows count as live only once qb_universe_derived has rows (cc#2148) */
+var CATEGORIES_COMING = [];   /* cc#2148: every locked category now has real rows; CAT_5 / CAT_6 read as COMING only until the precompute's first run */
 
 var STATE = { pools:[], sel:[], rows:{}, last:null, seq:0 };   /* cc#2143: sel = selected pool keys, any number */
 function freshRow(f){ return {open:false, applied:false, op:'AND', min:'', max:'', list:[], days:(f.days ? f.days[0] : null), win:(f.windows ? (f.windows.filter(function(w){ return w.v === '1M' && !w.dis; })[0] || f.windows.filter(function(w){ return !w.dis; })[0]).v : null), n:5, k:3, note:''}; }   /* cc#2149: the note rides on the row */
@@ -356,7 +371,7 @@ function togglePool(key){
 function renderFilters(){
   document.getElementById('filterlist').innerHTML = CAT1_FILTERS.map(filterRowHtml).join('');
   var n = appliedKeys().length;
-  document.getElementById('activeCount').textContent = n + ' active of ' + ALL_FILTERS.length + ' live \u00b7 ' + LOCKED_SET_TOTAL + ' in the locked set';
+  document.getElementById('activeCount').textContent = n + ' active of ' + liveFilters().length + ' live \u00b7 ' + LOCKED_SET_TOTAL + ' in the locked set';   /* cc#2148: derived rows count once the precompute has rows */
   /* cc#2145: Sector & Segment is LIVE -- its rows render with the same row pattern as CAT_1,
      each carrying the POINT-IN-TIME data-backing badge; the other five categories stay "Coming". */
   document.getElementById('categories').innerHTML =
@@ -367,10 +382,13 @@ function renderFilters(){
     + '<div class="filterlist" id="filterlist4">' + CAT4_FILTERS.map(filterRowHtml).join('') + '</div>'
     /* cc#2147: Price & Momentum (universe_technicals, from 2026-07-03) and Quality/Valuation/Size/
        Ownership (screener_raw current values -- amber, never point-in-time). */
-    + '<div class="cat-hd live"><div><span class="cat-title">Price &amp; Momentum</span><span class="cat-count">' + CAT3_FILTERS.length + ' of 5 filters</span></div><span>' + techBadgeHtml() + '<span class="dbadge pit" title="universe_technicals at its latest score_date, an EOD table written the evening before">POINT-IN-TIME</span></span></div>'
-    + '<div class="filterlist" id="filterlist3">' + CAT3_FILTERS.map(filterRowHtml).join('') + '<div class="frow coming-row"><div class="fhead"><div class="plusbtn" style="opacity:.4">+</div><div class="fname">Consecutive up months</div><div class="fstatus">Coming (V2)</div></div></div></div>'
+    + '<div class="cat-hd live"><div><span class="cat-title">Price &amp; Momentum</span><span class="cat-count" title="the locked list counts the 3M / 6M price windows as the fifth filter; they switch on with the night precompute">' + (CAT3_FILTERS.filter(function(f){ return !f.derived || derivedReady(); }).length + (derivedReady() ? 1 : 0)) + ' of 5 filters</span></div><span>' + techBadgeHtml() + '<span class="dbadge pit" title="universe_technicals at its latest score_date, an EOD table written the evening before">POINT-IN-TIME</span></span></div>'
+    + '<div class="filterlist" id="filterlist3">' + CAT3_FILTERS.filter(function(f){ return !f.derived || derivedReady(); }).map(filterRowHtml).join('') + (derivedReady() ? '' : '<div class="frow coming-row"><div class="fhead"><div class="plusbtn" style="opacity:.4">+</div><div class="fname">Consecutive up months</div><div class="fstatus">Coming \u00b7 first run ' + esc(derivedNextRun()) + '</div></div></div>') + '</div>'   /* cc#2148 */
     + '<div class="cat-hd live"><div><span class="cat-title">Quality, Valuation, Size &amp; Ownership</span><span class="cat-count">' + CAT7_FILTERS.length + ' filters</span></div>' + curBadgeHtml() + '</div>'
     + '<div class="filterlist" id="filterlist7">' + CAT7_FILTERS.map(filterRowHtml).join('') + '</div>'
+    /* cc#2148: Quarterly Results and Alpha & Risk -- real rows once the night precompute has rows, COMING with the next run's date until then */
+    + catBlockHtml('Quarterly Results (YoY)', CAT5_FILTERS, 'filterlist5', quarterlyHeadHtml())
+    + catBlockHtml('Alpha &amp; Risk', CAT6_FILTERS, 'filterlist6', '<span>' + derivedBadgeHtml() + '<span class="dbadge pit" title="raw_prices EOD closes and beta_daily, computed once a night; every alpha is a difference in percentage points">POINT-IN-TIME</span></span>')
     + CATEGORIES_COMING.map(function(c){
         return '<div class="cat-hd"><div><span class="cat-title">'+esc(c.name)+'</span><span class="cat-count">'+c.n+' filters</span></div><span class="cat-coming">Coming</span></div>';
       }).join('');
@@ -410,14 +428,35 @@ function colOf(f, st){ if (f.windows) return f.colBase + String(st.win || '').to
    screener load time), the price-change window selector, the reconstruct-from line. */
 function techBadgeHtml(){ var c = STATE.coverage; return (c && c.technicals_floor) ? '<span class="dbadge lim" title="universe_technicals has rows only from ' + esc(c.technicals_floor) + '">LIMITED HISTORY FROM ' + esc(c.technicals_floor) + '</span>' : ''; }
 function curBadgeHtml(){ var c = STATE.coverage; var when = c && c.screener_loaded_at ? String(c.screener_loaded_at).slice(0, 16) : '\u2014'; return '<span class="dbadge cur" title="screener_raw holds ONE load, replaced on every CSV upload; mcap_rank from mcap_rank_daily at its latest rank_date. Nothing here can be evaluated at an earlier date.">CURRENT VALUE ONLY \u2014 NOT POINT-IN-TIME \u00b7 loaded ' + esc(when) + '</span>'; }
+/* cc#2148: the night precompute's state drives what is offered -- rows and windows marked `derived`
+   exist only once qb_universe_derived has rows; before that they read COMING with the next run's date. */
+function derivedReady(){ var c = STATE.coverage; return !!(c && c.derived && c.derived.ready); }
+function derivedNextRun(){ var c = STATE.coverage; return (c && c.derived && c.derived.next_run_ist) ? c.derived.next_run_ist : 'the next 02:30 IST run'; }
+function derivedBadgeHtml(){ var c = STATE.coverage; var d = c && c.derived; if (!d || !d.ready) return ''; return '<span class="dbadge lim" title="qb_universe_derived: computed once a night at 02:30 IST, one row per symbol; the first night it ran is the floor">NIGHT PRECOMPUTE \u00b7 FROM ' + esc(d.floor || d.date) + '</span>'; }
+function betaBadgeHtml(){ var c = STATE.coverage; var d = c && c.derived; var n = d ? (d.beta_days || 0) : 0; return '<span class="dbadge lim" title="beta_daily is a few days old; the 1-year window fills forward one session a day">FORWARD-ACCRUING \u00b7 ' + fmtN(n) + ' day' + (n === 1 ? '' : 's') + ' of history</span>'; }
+function liveFilters(){ var ok = derivedReady(); return ALL_FILTERS.filter(function(f){ return ok || !f.derived; }); }
+function catBlockHtml(name, list, id, rightHtml){
+  if (!derivedReady()){
+    return '<div class="cat-hd"><div><span class="cat-title">' + name + '</span><span class="cat-count">' + list.length + ' filters</span></div><span class="cat-coming">Coming \u00b7 first run ' + esc(derivedNextRun()) + '</span></div>';
+  }
+  return '<div class="cat-hd live"><div><span class="cat-title">' + name + '</span><span class="cat-count">' + list.length + ' filters</span></div>' + rightHtml + '</div>'
+    + '<div class="filterlist" id="' + id + '">' + list.map(filterRowHtml).join('') + '</div>';
+}
+function quarterlyHeadHtml(){
+  var d = STATE.coverage && STATE.coverage.derived;
+  var ceiling = d ? fmtN(d.quarterly_symbols) + ' of ' + fmtN(d.universe) + ' symbols have quarterly history' : '';
+  return '<span><span class="cat-count">' + esc(ceiling) + '</span>' + derivedBadgeHtml() + '<span class="dbadge pit" title="fundamentals_history quarters, consolidated preferred, the same YoY arithmetic the Result Corner peers use">POINT-IN-TIME (quarterly)</span></span>';
+}
 function winSelectHtml(f, st){
   return '<select class="winsel" onchange="setWin(\'' + f.key + '\', this.value)">' + f.windows.map(function(w){
-    return '<option value="' + w.v + '"' + (st.win === w.v ? ' selected' : '') + (w.dis ? ' disabled title="' + esc(w.dis) + '"' : '') + '>' + esc(w.t) + (w.dis ? ' \u2014 ' + esc(w.dis) : '') + '</option>';
+    var dis = w.dis || ((w.derived && !derivedReady()) ? ('first run ' + derivedNextRun()) : null);   /* cc#2148 */
+    return '<option value="' + w.v + '"' + (st.win === w.v ? ' selected' : '') + (dis ? ' disabled title="' + esc(dis) + '"' : '') + '>' + esc(w.t) + (dis ? ' \u2014 ' + esc(dis) : '') + '</option>';
   }).join('') + '</select>';
 }
 function setWin(key, v){ STATE.rows[key].win = v; renderFilters(); if (STATE.rows[key].applied) refresh(); }
 function reconLineHtml(d){
   var r = d && d.reconstruct_from; if (!r) return '';
+  if (r.not_yet) return '<span class="recon warn">Earliest date this universe can be honestly reconstructed: <b>not yet</b> \u2014 ' + esc(r.note) + '</span>';   /* cc#2148 */
   if (r.today_only) return '<span class="recon warn">Earliest date this universe can be honestly reconstructed: <b>today only</b> \u2014 ' + esc(r.note) + '</span>';
   if (!r.date) return '<span class="recon">' + esc(r.note || '') + '</span>';
   return '<span class="recon">Earliest date this universe can be honestly reconstructed: <b>' + esc(r.date) + '</b> (limited by ' + esc(labelOf(r.limited_by)) + ')</span>';
@@ -471,6 +510,9 @@ function filterRowHtml(f){
   if (cat4 && winDays != null) badges += covBadgeHtml(winDays);
   if (f.cat === 3) badges += techBadgeHtml();   /* cc#2147 */
   if (f.cat === 7) badges += '<span class="dbadge cur" title="Current value from the latest screener CSV load -- not point-in-time">CURRENT VALUE ONLY</span>';
+  if (f.cat === 5) badges += '<span class="dbadge pit" title="fundamentals_history quarters, consolidated preferred; YoY = the same quarter one year earlier">POINT-IN-TIME (quarterly)</span>' + derivedBadgeHtml();   /* cc#2148 */
+  if (f.cat === 6) badges += '<span class="dbadge pit" title="raw_prices EOD closes; alphas are differences in percentage points, never ratios">POINT-IN-TIME</span>' + (f.key === 'beta' ? betaBadgeHtml() : derivedBadgeHtml());
+  if (f.cat === 3 && f.derived) badges += derivedBadgeHtml();
   var covline = (cat4 && winDays != null) ? covLineHtml(winDays) : (cat4 ? '<div class="covline">counts snapshots (distinct score_dates), never days \u2014 ' + (STATE.coverage ? fmtN(STATE.coverage.snapshots_last_90d) + ' snapshots in the last 90 days' : 'measuring\u2026') + '</div>' : '');
   var pc = passCountHtml(f.key);
   return '<div class="frow'+(st.open?' open':'')+'" id="frow-'+f.key+'">'
@@ -609,7 +651,7 @@ function renderResults(d){
           var v = r[c.k];
           if (c.k === 'symbol') return '<td><strong>'+esc(v)+'</strong></td>';
           if (c.k === 'company_name' || c.k === 'segment' || c.k === 'verdict') return '<td>'+esc(v||'—')+'</td>';
-          if (c.k === 'seg_rank' || c.k === 'sector_rank' || c.k === 'sector_member_count' || c.k === 'gvm_pos_snapshots' || c.k === 'verdict_migration') return '<td>'+(v!=null?esc(v):'—')+'</td>';
+          if (c.k === 'seg_rank' || c.k === 'sector_rank' || c.k === 'sector_member_count' || c.k === 'gvm_pos_snapshots' || c.k === 'verdict_migration' || c.k === 'consecutive_quarters_profit_growth' || c.k === 'quarters_since_last_result' || c.k === 'consecutive_up_months' || c.k === 'beta_sessions') return '<td>'+(v!=null?esc(v):'—')+'</td>';
           return '<td>'+num2(v)+'</td>';
         }).join('') + '</tr>';
       }).join('')

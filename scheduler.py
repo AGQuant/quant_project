@@ -548,6 +548,7 @@ _pivots_ran_today: Optional[date] = None
 _upivots_ran_today: Optional[date] = None   # cc#342: full-universe v8_paper_pivots rebuild
 _qb_eod_ran_today: Optional[date] = None
 _ut_ran_today: Optional[date] = None   # cc#154: universe_technicals nightly guard
+_qbd_ran_today: Optional[date] = None  # cc#2148: qb_universe_derived nightly guard
 _qb_eod_running = False
 _beta_engine_ran_today: Optional[date] = None   # cc#2032: nightly per-stock + basket beta
 _beta_engine_running = False
@@ -3052,6 +3053,30 @@ def _bg_universe_technicals():
         _log_alert("universe_technicals_error", f"nightly run failed for {today}: {e}")
 
 
+def _bg_qb_universe_derived():
+    """cc#2148: the QB Universe builder's night-window precompute -- CAT_5 quarterly YoY, CAT_6 alpha
+    & risk, and the CAT_3 remainder (3M/6M price change, consecutive up months) -- ONE EOD-stamped
+    row per scored symbol in qb_universe_derived, read by /api/qb/universe2/preview with a plain
+    join. 02:30 IST: after GVM (01:30, the universe and score_date it stamps with) and
+    universe_technicals (02:05). Never on request, never in market hours (cc#2123 ruling_2 clause
+    d). score_date = gvm_scores' latest, so a weekend re-run is an idempotent skip, not a new row."""
+    global _qbd_ran_today
+    today = _ist_now().date()
+    if _qbd_ran_today == today: return _Skip.already_ran()
+    try:
+        import qb_universe_derived
+        res = qb_universe_derived.run()
+        with _conn() as conn:
+            _log_health(conn, "qb_universe_derived",
+                        {k: v for k, v in (res or {}).items() if k in ("status", "score_date", "rows", "quarterly_symbols", "duration_s", "note")})
+        _qbd_ran_today = today
+        log.info(f"qb_universe_derived: {res}")
+        return res
+    except Exception as e:
+        log.error(f"qb_universe_derived: {e}")
+        _log_alert("qb_universe_derived_error", f"nightly precompute failed for {today}: {e}")
+
+
 _rvol_ran_today: Optional[date] = None   # cc#674: RVOL profiles nightly guard
 
 
@@ -5510,6 +5535,7 @@ async def _scheduler_loop():
         if h == 5 and m == 5:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit. cc#622 C: 08:45 -> 05:05 (clear 06:00-09:10)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
+        if h == 2 and m == 30:  _spawn(_bg_qb_universe_derived)  # cc#2148: QB Universe derived precompute, after universe_technicals (02:05)
         # cc#795 RETIRED: ops_peer_benchmark is derived FROM sector_ops_metrics, which is now a frozen
         # archive — rebuilding it nightly from frozen input would only rewrite the same rows forever.
         # The table is left in place (read paths unaffected), just no longer regenerated.
