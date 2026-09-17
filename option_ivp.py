@@ -1,7 +1,8 @@
 """
 option_ivp.py — cc#1859 OPTION VALUE: skew-aware IV percentile fair value from the bhavcopy year.
 
-Reads option_iv_daily (cc#1858, populated nightly by option_iv_history.py off the NSE F&O
+Reads the nightly bhavcopy slice (cc#1858 option_iv_daily then; option_eod_slice solved on read since
+cc#2205 -- see AMENDED cc#2205 at the end of this docstring), populated by option_iv_history.py off the NSE F&O
 bhavcopy) ONLY. Never writes it (do_not_touch on the card). No new tables, no ALTER TABLE.
 
 THE METHOD, exactly as ruled across cc_task_logs on cc#1859/1199 (session_log trail: 6264, 6296,
@@ -103,9 +104,21 @@ reports/CC2031_option_black76_wingtag_buckets.md.
   (do_not_touch: no ALTER TABLE), and conflating "which bucket" with "how it's priced" would let
   the same word quietly answer two different, drifting questions. BUCKET_MIN_SESSIONS stays 60 —
   never lowered (G1/G2).
+
+AMENDED cc#2205 (founder ruling 17-Sep-2026 ~18:30 IST: IV is an answer, not data). WHERE iv COMES
+  FROM changed; THE METHOD did not. atm_iv_history and bucket_skew_history no longer SELECT a stored
+  iv: solved_rows() below fetches the RAW day-end rows (close, spot, strike, expiry, option_type) from
+  option_eod_slice ONCE per symbol, runs option_iv_history.solve_iv() (the one Black-76 solver, the
+  same parity-forward rule the nightly load used to run) and keeps the result in a per-process cache
+  keyed (symbol, MAX(trade_date) of that symbol) -- the data changes once a night, so a chain request
+  after the first one per day is a cache hit. The G3 band (IV_FLOOR / IV_CEILING) and the spot > 0
+  rule are applied in Python AFTER the solve (_banded), exactly where the SQL WHERE applied them.
+  chain_tags does ONE fetch + ONE solve per request and hands the solved rows to both helpers (it
+  fetched twice before). Every LEVEL / SHAPE / WINDOW / BANDS ruling above stands unchanged.
 """
 import logging
 import math
+import threading
 from typing import Dict, List, Optional, Tuple
 
 log = logging.getLogger("scorr.option_ivp")
@@ -166,19 +179,99 @@ def _sigma_moneyness_bucket(K: float, F: float, sigma_atm: float, T: float) -> O
     return round(z * 2) / 2.0
 
 
-def atm_iv_history(cur, symbol: str) -> List[Tuple]:
+# ── cc#2205: solve on read ──────────────────────────────────────────────────────────────────────
+_SOLVED_CACHE: Dict[str, Tuple] = {}     # symbol -> (max_trade_date, [(trade_date, ot, strike, iv, spot, expiry)]), LRU by insertion
+_CACHE_MAX_SYMBOLS = 64                   # ~1 MB per symbol of solved tuples; the chain page opens a handful of names a day
+_CACHE_LOCK = threading.Lock()            # FastAPI sync endpoints run on a threadpool; the LRU touch/evict is a two-step edit
+_SLICE_SQL = ("SELECT trade_date, expiry, strike, option_type, close, spot FROM option_eod_slice "
+              "WHERE symbol = %s ORDER BY trade_date, expiry, strike, option_type")
+# TRANSITIONAL (cc#2205 push 1 only, removed in the dead-code push): while option_eod_slice has no rows
+# for a symbol -- the minutes between this deploy and the fill job's commit -- read the SAME raw columns
+# from the old table and solve them on read. Its stored iv is never read.
+_LEGACY_SQL = ("SELECT trade_date, expiry, strike, option_type, close, spot FROM option_iv_daily "
+               "WHERE symbol = %s ORDER BY trade_date, expiry, strike, option_type")
+
+
+def solved_from(rows, iv) -> List[Tuple]:
+    """(raw rows in the solve_iv shape, their solved iv array) -> the reader shape
+    [(trade_date, option_type, strike, iv, spot, expiry)], rows without a finite iv dropped. Pure."""
+    out = []
+    for r, v in zip(rows, iv):
+        if v is None:
+            continue
+        fv = float(v)
+        if not math.isfinite(fv):
+            continue
+        out.append((r[0], (r[3] or "").upper(), float(r[2]), fv, float(r[5]) if r[5] is not None else None, r[1]))
+    return out
+
+
+def solved_rows(cur, symbol: str) -> List[Tuple]:
+    """Every session's rows for `symbol`, solved on read -- ONE fetch + ONE solve per (symbol, day).
+    Cache key is (symbol, MAX(trade_date) in option_eod_slice for that symbol): one cheap index
+    lookup per request decides hit or miss, and the nightly tick's new date is picked up on the
+    first request after it lands. Unbanded: callers apply _banded (G3) themselves, so the latest-
+    session gap map (latest_session_iv) keeps its own, looser floor."""
+    cur.execute("SELECT MAX(trade_date) FROM option_eod_slice WHERE symbol = %s", (symbol,))
+    r = cur.fetchone()
+    max_d = r[0] if r else None
+    with _CACHE_LOCK:
+        hit = _SOLVED_CACHE.get(symbol)
+        if hit is not None and max_d is not None and hit[0] == max_d:
+            _SOLVED_CACHE.pop(symbol, None)
+            _SOLVED_CACHE[symbol] = hit      # LRU touch
+            return hit[1]
+    cur.execute(_SLICE_SQL if max_d is not None else _LEGACY_SQL, (symbol,))
+    rows = cur.fetchall()
+    if rows:
+        from option_iv_history import solve_iv
+        out = solved_from(rows, solve_iv(rows))
+    else:
+        out = []
+    if max_d is not None:
+        with _CACHE_LOCK:
+            _SOLVED_CACHE.pop(symbol, None)
+            _SOLVED_CACHE[symbol] = (max_d, out)
+            while len(_SOLVED_CACHE) > _CACHE_MAX_SYMBOLS:
+                _SOLVED_CACHE.pop(next(iter(_SOLVED_CACHE)))
+    return out
+
+
+def invalidate(symbol: Optional[str] = None) -> None:
+    """Drop one symbol's (or every) cached solve -- tests and the fill job's cold-latency measure."""
+    with _CACHE_LOCK:
+        if symbol is None:
+            _SOLVED_CACHE.clear()
+        else:
+            _SOLVED_CACHE.pop(symbol, None)
+
+
+def _banded(rows: List[Tuple]) -> List[Tuple]:
+    """The G3 sanity band + spot > 0, applied after the solve (was the SQL WHERE)."""
+    return [t for t in rows if t[3] >= IV_FLOOR and t[3] <= IV_CEILING and t[4] is not None and t[4] > 0]
+
+
+def latest_session_iv(cur, symbol: str) -> Tuple[Optional[object], Dict[Tuple[float, str], float]]:
+    """(latest trade_date, {(strike, 'CE'|'PE'): iv}) for that session, solved on read from the
+    same cache -- what deriv_metrics._stored_iv_gap_map (cc#1994) reads for the ATM put/call gap.
+    Unbanded on purpose: that reader applies its own 0.001 floor (a bisection-floor leg is left
+    out there, not here)."""
+    rows = solved_rows(cur, symbol)
+    if not rows:
+        return None, {}
+    last = max(t[0] for t in rows)
+    return last, {(t[2], t[1]): t[3] for t in rows if t[0] == last}
+
+
+def atm_iv_history(cur, symbol: str, solved: Optional[List[Tuple]] = None) -> List[Tuple]:
     """[(trade_date, blended_atm_iv, spot, expiry, dte)] ordered oldest->newest, one row per
     session where BOTH legs' ATM IV clear the G3 floor/ceiling. 'ATM' = the strike nearest that
-    session's own spot; every (symbol, trade_date) in option_iv_daily carries exactly one expiry
-    (verified empirically — cc#1859 build note), so there is no expiry tie-break to make."""
-    cur.execute("""
-        SELECT trade_date, option_type, strike, iv, spot, expiry
-        FROM option_iv_daily
-        WHERE symbol = %s AND iv IS NOT NULL AND iv >= %s AND iv <= %s AND spot IS NOT NULL AND spot > 0
-        ORDER BY trade_date
-    """, (symbol, IV_FLOOR, IV_CEILING))
+    session's own spot; every (symbol, trade_date) in the slice carries exactly one expiry
+    (verified empirically — cc#1859 build note), so there is no expiry tie-break to make.
+    cc#2205: rows come from solved_rows() (one fetch + one solve, cached) with the G3 band applied
+    in Python; `solved` lets a caller that already holds the rows (chain_tags) pass them in."""
     by_day: Dict = {}
-    for trade_date, ot, strike, iv, spot, expiry in cur.fetchall():
+    for trade_date, ot, strike, iv, spot, expiry in _banded(solved if solved is not None else solved_rows(cur, symbol)):
         d = by_day.setdefault(trade_date, {"spot": float(spot), "expiry": expiry, "legs": {}})
         cur_best = d["legs"].get(ot)
         dist = abs(float(strike) - float(spot))
@@ -222,7 +315,7 @@ def ivp_and_fair_value(cur, symbol: str, spot_today: float, strike: float, T_yea
             "fair_value": round(fair_value, 2) if fair_value else None}
 
 
-def bucket_skew_history(cur, symbol: str) -> Dict[Tuple[str, float], List[Tuple]]:
+def bucket_skew_history(cur, symbol: str, solved: Optional[List[Tuple]] = None) -> Dict[Tuple[str, float], List[Tuple]]:
     """{(option_type, sigma_bucket): [(trade_date, skew, raw_iv), ...]} — skew measured WITHIN
     ITS OWN LEG against that leg's own ATM IV, same session, same leg (R3, log 6312). Only rows
     clearing the G3 floor/ceiling enter the series. Each entry also carries `raw_iv` (that leg's
@@ -232,18 +325,13 @@ def bucket_skew_history(cur, symbol: str) -> Dict[Tuple[str, float], List[Tuple]
     cc#2031 C1/C2 (supersedes the original wk/mo + whole-percent-of-spot bucket scheme — see
     AMENDED cc#2031 in the module docstring for the full evidence). Key is now
     (option_type, half_sigma_bucket) — NO expiry_class split; IF WEEKLY EXPIRIES ARE EVER LOADED
-    into option_iv_daily alongside monthlies, THIS SPLIT MUST RETURN. Moneyness bucketing goes
+    into the slice alongside monthlies, THIS SPLIT MUST RETURN. Moneyness bucketing goes
     through _sigma_moneyness_bucket, shared verbatim with chain_tags/strike_fair_tag's own
     bucketing of today's chain."""
     from deriv_metrics import R_FREE
-    cur.execute("""
-        SELECT trade_date, option_type, strike, iv, spot, expiry
-        FROM option_iv_daily
-        WHERE symbol = %s AND iv IS NOT NULL AND iv >= %s AND iv <= %s AND spot IS NOT NULL AND spot > 0
-        ORDER BY trade_date
-    """, (symbol, IV_FLOOR, IV_CEILING))
+    # cc#2205: solved on read (solved_rows), G3 band applied in Python -- see atm_iv_history.
     by_day: Dict = {}
-    for trade_date, ot, strike, iv, spot, expiry in cur.fetchall():
+    for trade_date, ot, strike, iv, spot, expiry in _banded(solved if solved is not None else solved_rows(cur, symbol)):
         d = by_day.setdefault(trade_date, {"spot": float(spot), "expiry": expiry, "rows": {}})
         d["rows"].setdefault(ot, []).append((float(strike), float(iv)))
     out: Dict[Tuple[str, float], List[Tuple]] = {}
@@ -268,12 +356,15 @@ def bucket_skew_history(cur, symbol: str) -> Dict[Tuple[str, float], List[Tuple]
 
 
 def chain_tags(cur, symbol: str, spot: float, strikes: List[float], dte_today: int,
-               px: Optional[Dict[Tuple[float, str], float]] = None
+               px: Optional[Dict[Tuple[float, str], float]] = None,
+               solved: Optional[List[Tuple]] = None
                ) -> Tuple[Dict[Tuple[float, str], Dict], Optional[str]]:
-    """cc#2004 wiring: ONE history fetch + ONE bucket fetch per chain REQUEST, not per strike —
-    a naive per-strike call to ivp_and_fair_value/strike_fair_tag would re-fetch the whole
-    symbol's option_iv_daily history once per (strike, leg), ~40+ redundant fetches for a
-    20-strike chain. This computes every cell from the SAME two in-memory fetches.
+    """cc#2004 wiring: ONE fetch per chain REQUEST, not per strike — a naive per-strike call to
+    ivp_and_fair_value/strike_fair_tag would re-fetch the whole symbol's history once per
+    (strike, leg), ~40+ redundant fetches for a 20-strike chain. cc#2205: ONE fetch + ONE solve
+    (solved_rows, cached), handed to BOTH helpers — it fetched twice before. `solved` lets a
+    caller that already holds the rows pass them in (the fill job's width measurement); then
+    `cur` is never touched.
 
     Returns ({(strike, 'CE'|'PE'): {'tag', 'fair_value', 'ivp'}}, forward_source) — 'tag' is None
     (never fabricated) wherever the ATM history or that bucket's own history is short of its floor
@@ -292,7 +383,8 @@ def chain_tags(cur, symbol: str, spot: float, strikes: List[float], dte_today: i
     _bs_price(spot,...) call this replaces, so a caller with no live quotes sees the same numbers
     as before."""
     from deriv_metrics import _b76_price, R_FREE
-    hist = atm_iv_history(cur, symbol)
+    rows = solved if solved is not None else solved_rows(cur, symbol)
+    hist = atm_iv_history(cur, symbol, solved=rows)
     out: Dict[Tuple[float, str], Dict] = {}
     if len(hist) < MIN_SESSIONS:
         reason = f"only {len(hist)} session(s) of ATM history, need {MIN_SESSIONS}+"
@@ -305,7 +397,7 @@ def chain_tags(cur, symbol: str, spot: float, strikes: List[float], dte_today: i
     median_atm_iv = _median(window)
     atm_ivp = _percentile_rank(today_atm_iv, window)
     atm_strike = min(strikes, key=lambda s: abs(s - spot)) if strikes else None
-    buckets = bucket_skew_history(cur, symbol)
+    buckets = bucket_skew_history(cur, symbol, solved=rows)
     T = dte_today / 365.0
 
     # cc#2031 A3: the PRICING forward — parity when both legs near the money are live-quoted,

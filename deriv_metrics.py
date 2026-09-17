@@ -1738,36 +1738,34 @@ def _price_rows(strikes, spot, T, rv20, px_of):
 def _stored_iv_gap_map(cur, sym: str) -> Tuple[Optional[str], Dict[float, Dict]]:
     """cc#1994 (FOUNDER_RULING_11SEP on cc_tasks.spec, relayed cc_task_logs 6358): the ATM put/call
     IV asymmetry is accepted as REAL MARKET STRUCTURE, not a solver bug. Do not fix the pricer, do
-    not re-solve anything -- surface it as a plain fact from the STORED nightly capture
-    (option_iv_daily, populated by option_iv_history.py off the prior day's NSE bhavcopy settle).
+    not re-solve anything -- surface it as a plain fact from the nightly bhavcopy capture.
+
+    cc#2205: the capture no longer stores an iv. The latest session's per-leg vols come from
+    option_ivp.latest_session_iv -- the raw day-end slice (option_eod_slice) solved on read by the
+    ONE solver (option_iv_history.solve_iv, Black-76 off the parity forward), from the same
+    per-process cache the chain tags use, so the gap and the tags on a chain always come from one
+    solve of one day's rows. Same as-of (the bhavcopy trade_date), same floor rule as before.
 
     Deliberately NOT derived from this endpoint's own live ce/pe iv above -- those are intraday,
-    Black-Scholes-inverted from a live Fyers ltp, a different day's data with a different solve
-    context than the bhavcopy settle. Mixing the two into one "gap" would misstate which day's data
-    produced it, so this is its own field with its own as-of (the bhavcopy trade_date), not derived
-    from or blended with the chain's own iv.
+    inverted from a live Fyers ltp, a different day's data with a different solve context than the
+    bhavcopy settle. Mixing the two into one "gap" would misstate which day's data produced it, so
+    this is its own field with its own as-of, not derived from or blended with the chain's own iv.
 
-    A strike only gets a gap when BOTH legs' stored iv clear 0.001 -- comfortably above the
-    solver's own bisection floor of 1e-4 (option_iv_history._bs_iv_vec, lo=1e-4). An iv landing
-    on that floor means the stored close price was below what any positive vol could produce (a
-    deep-ITM leg priced under intrinsic in that day's bhavcopy is the usual cause) -- not a real
-    solved value, so a "gap" built from it would be a numeric artifact wearing the shape of a
-    market fact. That strike is simply left out of the map (no manufactured number), same
-    have-a-number-or-say-so discipline as gvm_nightly.py's excluded_no_market_cap. Confirmed on
-    real data before shipping: NIFTY 10-Sep strikes 23000-23300 CE all floor at 1e-4 (deep ITM,
-    close below intrinsic) and RELIANCE 10-Sep strike 1370 PE floors the same way at the other
-    end -- both correctly excluded, ATM-area strikes on both names show a clean, present gap.
+    A strike only gets a gap when BOTH legs' solved iv clear 0.001 -- comfortably above the
+    solver's own bisection floor of 1e-4 (option_iv_history._b76_iv_vec, lo=1e-4). An iv landing
+    on that floor means the close was below what any positive vol could produce (a deep-ITM leg
+    priced under intrinsic in that day's bhavcopy is the usual cause) -- not a real solved value,
+    so a "gap" built from it would be a numeric artifact wearing the shape of a market fact. That
+    strike is simply left out of the map (no manufactured number), same have-a-number-or-say-so
+    discipline as gvm_nightly.py's excluded_no_market_cap.
 
-    Read-only against option_iv_daily -- never writes it (do_not_touch, cc#1994's own card)."""
-    cur.execute("SELECT MAX(trade_date) FROM option_iv_daily WHERE symbol=%s", (sym,))
-    r = cur.fetchone()
-    trade_date = r[0] if r else None
+    Read-only -- never writes the slice (do_not_touch, cc#1994's own card)."""
+    import option_ivp
+    trade_date, legs = option_ivp.latest_session_iv(cur, sym)
     if not trade_date:
         return None, {}
-    cur.execute("""SELECT strike, option_type, iv FROM option_iv_daily
-                   WHERE symbol=%s AND trade_date=%s""", (sym, trade_date))
     ce_iv, pe_iv = {}, {}
-    for st, ot, iv in cur.fetchall():
+    for (st, ot), iv in legs.items():
         if iv is None:
             continue
         (ce_iv if (ot or "").upper() == "CE" else pe_iv)[float(st)] = float(iv)
@@ -1776,8 +1774,8 @@ def _stored_iv_gap_map(cur, sym: str) -> Tuple[Optional[str], Dict[float, Dict]]
         piv = pe_iv.get(s)
         if piv is not None and civ > 0.001 and piv > 0.001:
             # gap_vol_pts is derived from the two ALREADY-ROUNDED display fields below, not
-            # independently rounded from the raw fraction -- so "gap shown equals stored put_iv
-            # minus call_iv" (the card's own verify wording) holds EXACTLY on the numbers a reader
+            # independently rounded from the raw fraction -- so "gap shown equals put_iv minus
+            # call_iv" (the card's own verify wording) holds EXACTLY on the numbers a reader
             # actually sees, never off by 0.1 from independent rounding on each side.
             call_pct = round(civ * 100, 1)
             put_pct = round(piv * 100, 1)
@@ -1859,7 +1857,7 @@ def strike_chain(symbol: str):
                 days = max((exp - today).days, 0) if exp else 0
                 # cc#1859/2004: same cursor, before the connection closes -- chain_tags needs
                 # `strikes` (moved earlier in this branch for exactly this) and is read-only
-                # against option_iv_daily, same discipline as _stored_iv_gap_map just above.
+                # against option_eod_slice (solved on read), same discipline as _stored_iv_gap_map just above.
                 # cc#2031 A3: this branch's `px` ({(strike,'CE'/'PE'): ltp}, built just above from
                 # the same option_chain tick) is passed straight through -- chain_tags uses it to
                 # price off the live parity-implied forward instead of assuming spot*e^(R_FREE*T).
