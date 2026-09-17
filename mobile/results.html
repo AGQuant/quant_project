@@ -4,6 +4,7 @@
        /m/results                → THE SEASON: who has filed, PAT growing/flat/declining bar, medians, biggest movers,
                                    sector table, written-up analyses, upcoming results
        /m/results?view=companies → every reporter this season, sortable
+       /m/results?view=past      → Past results: every filer this season, size chips, sortable (cc#2169)
        /m/results?sym=<symbol>   → one company's numbers + the written analysis
      cc#2161 (17-Sep): hero = two tappable median cells + Leading sectors strip. cc#2162: 'Sectors this season' (Top / Under toggle,
      size chips with counts, five rows, View more sheet, ?perf=&size= URL state) replaces the old sector ladder. cc#2163: every
@@ -115,6 +116,13 @@ body.st-lock{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 .up-g{text-align:right;font-size:var(--type-125);font-weight:800;font-variant-numeric:tabular-nums}.up-g small{display:block;font-size:var(--type-8);color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:var(--track-em8)}
 .up-emp{padding:var(--space-10) var(--space-12);font-size:var(--type-105);color:var(--muted);line-height:1.5}
 .st-sheet-b .up-d,.st-sheet-b .up-r{padding-left:var(--space-16);padding-right:var(--space-16)}
+/* cc#2169: the Past results button card + the past view */
+.past-btn{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:var(--space-10);align-items:center;margin:var(--space-10) var(--space-16) 0;min-height:56px;padding:var(--space-10) var(--space-14);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);text-decoration:none;color:inherit}
+.past-ic{width:36px;height:36px;border-radius:var(--radius-10);background:var(--hi);border:var(--bw-1) solid var(--edge);display:flex;align-items:center;justify-content:center;color:var(--brand);font-weight:800;font-size:var(--type-16)}
+.past-t{font-size:var(--type-13);font-weight:800}.past-s{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.past-go{color:var(--brand);font-weight:800;font-size:var(--type-18)}
+.past-chips{margin-top:var(--space-10)}
+.past-foot{padding:var(--space-9) var(--space-12);font-size:var(--type-10);color:var(--muted);border-top:var(--bw-1) solid var(--edge);line-height:1.5}
 /* analysis */
 .card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
 .ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
@@ -192,6 +200,7 @@ function renderSeason(d){
   h+= wr.length ? '<div class="wl">'+wr.slice(0,8).map(function(r){ return '<a class="wr" href="/m/results?sym='+encodeURIComponent(r.symbol)+'"><div class="t"><span class="s">'+esc(r.symbol)+'</span><span class="d">'+esc(dm(r.result_date||r.polished_at))+'</span></div><div class="co">'+esc(r.company||'')+'</div><div class="tz">'+esc(r.teaser||'')+'</div></a>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing written yet</b>No result analysis on record for this quarter.</div></div>';
   var up=d.upcoming||[], upDays=Number(d.upcoming_days||30);
   h+='<div class="sec"><h2>Upcoming results</h2><span class="hint">next '+upDays+' days · '+up.length+' on the calendar</span></div><div id="up"></div>';   // cc#2168: replaces the old ten-day grid
+  h+='<a class="past-btn" id="past-btn" href="/m/results?view=past"><span class="past-ic">≡</span><span><span class="past-t" style="display:block">Past results</span><span class="past-s" style="display:block">'+nz(s.reported)+' companies filed this season</span></span><span class="past-go">›</span></a>';   // cc#2169
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Write-ups are Scorr editorial from filings and calls, never a recommendation.</div>';
   document.getElementById('body').innerHTML=h;
   LEAD.sectors=d.sectors||[]; LEAD.metric='sales'; drawLead(); stTapWire(document.getElementById('lead'));
@@ -370,6 +379,34 @@ function renderCompanies(d){
   COLS=[['symbol','Name',function(v,r){return '<a href="/m/results?sym='+encodeURIComponent(v)+'">'+esc(v)+(r.written?' <span class="gd">•</span>':'')+'<small>'+esc(r.segment||'')+'</small></a>';}],['pat_yoy','Profit YoY',pc],['sales_yoy','Sales YoY',pc],['pat_qoq','Profit QoQ',pc],['gvm','GVM',f2],['pe','P/E',f1],['reported','Filed',function(v){return esc(dm(v));}]];
   tbl();
 }
+/* cc#2169: Past results -- /companies rows with a filed date, size chips on top, the page's sortable table (Name · Filed · Sales YoY ·
+   Profit YoY · GVM), default Filed desc with NULLs last; chip + sort state in the URL (?view=past&size=&sort=&dir=). */
+var PT={rows:[], size:'all', key:'reported', asc:false, total:0}, PT_SIZES=[['all','All'],['large','Large'],['mid','Mid'],['small','Small'],['micro','Micro']];
+function ptIn(list,size){ return size==='all'?list:list.filter(function(x){ return String(x.size||'').toLowerCase()===size; }); }
+function ptWord(){ var s=PT_SIZES.filter(function(x){ return x[0]===PT.size; })[0]; return PT.size==='all'?'':s[1]; }
+function ptSyncUrl(){ try{ var q=['view=past']; if(PT.size!=='all') q.push('size='+PT.size); if(PT.key!=='reported'||PT.asc) q.push('sort='+PT.key+'&dir='+(PT.asc?'asc':'desc')); history.replaceState(history.state,'','/m/results?'+q.join('&')); }catch(e){} }
+function renderPast(d){
+  document.getElementById('pg-title').textContent='Past results'; var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/results');
+  PT.rows=(d.rows||[]).filter(function(r){ return !!r.reported; }); PT.total=(d.rows||[]).length;
+  try{ var u=new URLSearchParams(location.search); var sz=String(u.get('size')||'').toLowerCase(); PT.size=(['large','mid','small','micro'].indexOf(sz)>=0)?sz:'all';
+       var sk=u.get('sort'); if(sk&&['symbol','reported','sales_yoy','pat_yoy','gvm'].indexOf(sk)>=0){ PT.key=sk; PT.asc=(u.get('dir')==='asc'); } }catch(e){}
+  document.getElementById('asof').innerHTML='Season <b>'+esc(d.quarter||'—')+'</b> · '+PT.rows.length+' filed of '+PT.total;
+  document.getElementById('body').innerHTML='<div class="st-chips past-chips" id="pt-chips"></div><div class="wrap" id="pt-tb"></div>';
+  ptDraw();
+}
+function ptDraw(){
+  var chips=document.getElementById('pt-chips'), tb=document.getElementById('pt-tb'); if(!chips||!tb) return;
+  chips.innerHTML=PT_SIZES.map(function(s){ return '<button type="button" class="up-chip" data-pt="'+s[0]+'" aria-pressed="'+(PT.size===s[0])+'">'+s[1]+'<small>'+ptIn(PT.rows,s[0]).length+'</small></button>'; }).join('');
+  chips.querySelectorAll('.up-chip').forEach(function(b){ b.addEventListener('click', function(){ PT.size=b.getAttribute('data-pt'); ptSyncUrl(); ptDraw(); }); });
+  var view=ptIn(PT.rows,PT.size).slice().sort(cmpBy(PT.key,PT.asc));
+  var cols=[['symbol','Name'],['reported','Filed'],['sales_yoy','Sales YoY'],['pat_yoy','Profit YoY'],['gvm','GVM']];
+  var th=cols.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(PT.key===c[0]?'on'+(PT.asc?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
+  var tr=view.map(function(r){ var basic=r.basis==='basic'; return '<tr><td><a href="/m/results?sym='+encodeURIComponent(r.symbol)+'">'+esc(r.symbol)+'<span class="st-dot'+(basic?' b':'')+'" title="'+(basic?'CSV-basic':'detailed filing')+'"></span><small>'+esc(r.company||'')+'</small></a></td><td>'+esc(dm(r.reported))+'</td><td class="'+cls(r.sales_yoy)+'">'+pct(r.sales_yoy)+'</td><td class="'+cls(r.pat_yoy)+'">'+pct(r.pat_yoy)+'</td><td class="st-gv'+((r.gvm||0)>=8?' gd':'')+'">'+f2(r.gvm)+'<small>'+esc(r.verdict||'')+'</small></td></tr>'; }).join('');
+  var basicN=view.filter(function(r){ return r.basis==='basic'; }).length;
+  if(!view.length){ tb.innerHTML='<div class="up-emp">No '+(ptWord()?ptWord()+' ':'')+'company has filed this season.</div>'; return; }
+  tb.innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="past-foot">'+view.length+' of '+PT.total+' shown · tap a header to sort · dash = not filed or CSV-basic'+(basicN?'<br>CSV-basic rows carry no profit YoY (cc#1192 rule) — sales still shown.':'')+'</div>';
+  tb.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===PT.key) PT.asc=!PT.asc; else { PT.key=k; PT.asc=(k==='symbol'); } ptSyncUrl(); ptDraw(); });
+}
 function renderAnalysis(d){
   var n=d.numbers||{};
   document.getElementById('pg-title').textContent=d.symbol; document.getElementById('back').style.display='';
@@ -386,10 +423,10 @@ function renderAnalysis(d){
   document.getElementById('body').innerHTML=h;
 }
 var Q={}; try{ var u=new URLSearchParams(location.search); Q.sym=u.get('sym'); Q.view=u.get('view'); Q.segment=(u.get('segment')||'').trim(); }catch(e){}   // cc#2164: ?segment= narrows the companies view
-var url = Q.sym ? '/api/mobile/results_app/analysis?symbol='+encodeURIComponent(Q.sym) : (Q.view==='companies' ? '/api/mobile/results_app/companies'+(Q.segment?'?segment='+encodeURIComponent(Q.segment):'') : '/api/mobile/results_app/season');
+var url = Q.sym ? '/api/mobile/results_app/analysis?symbol='+encodeURIComponent(Q.sym) : (Q.view==='companies' ? '/api/mobile/results_app/companies'+(Q.segment?'?segment='+encodeURIComponent(Q.segment):'') : (Q.view==='past' ? '/api/mobile/results_app/companies' : '/api/mobile/results_app/season'));   // cc#2169: ?view=past
 fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
   if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
-  Q.sym ? renderAnalysis(d) : (Q.view==='companies' ? renderCompanies(d) : renderSeason(d));
+  Q.sym ? renderAnalysis(d) : (Q.view==='companies' ? renderCompanies(d) : (Q.view==='past' ? renderPast(d) : renderSeason(d)));
 }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load results.</div>'; });
 </script>
 </body></html>

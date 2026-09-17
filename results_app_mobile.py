@@ -263,6 +263,13 @@ def upcoming_row(r):
             "display": (company or t) if numeric else t, "bse_code": t if numeric else None}
 
 
+def _size_map(cur):
+    """cc#2169: symbol -> 'large' | 'mid' | 'small' | 'micro' from mcap_rank_daily at its latest rank date (the same
+    source push 6 uses for the calendar). A symbol outside the ranked universe is simply absent (size None)."""
+    cur.execute("SELECT symbol, cap_category FROM mcap_rank_daily WHERE rank_date = (SELECT MAX(rank_date) FROM mcap_rank_daily)")
+    return {r[0]: (r[1].lower() if isinstance(r[1], str) and r[1] else None) for r in cur.fetchall()}
+
+
 def _sector_row(rc, segment):
     for s in rc.get("sectors") or []:
         if s.get("sector") == segment:
@@ -284,7 +291,8 @@ def mobile_results_companies(request: Request, segment: str = ""):
     quarter = (rc.get("season") or {}).get("quarter")
     with _conn() as conn, conn.cursor() as cur:
         written = _written_set(cur, quarter) if quarter else set()
-    rows = [_co_row(c, written) for c in (rc.get("companies") or [])]
+        sizes = _size_map(cur)                       # cc#2169: size on every companies row; `tier` stays for other readers
+    rows = [dict(_co_row(c, written), size=sizes.get((c.get("symbol") or "").upper())) for c in (rc.get("companies") or [])]
     if not segment:
         return {"quarter": quarter, "rows": rows, "count": len(rows)}
     rows = [r for r in rows if (r.get("segment") or "") == segment]

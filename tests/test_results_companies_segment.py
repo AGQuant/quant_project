@@ -33,10 +33,12 @@ class _Cur:
     def __exit__(self, *a):
         return False
 
-    def execute(self, *a):
-        pass
+    def execute(self, sql, *a):
+        self.sql = sql
 
     def fetchall(self):
+        if "mcap_rank_daily" in getattr(self, "sql", ""):      # cc#2169: the size map
+            return [("KMEW", "micro"), ("EMIL", "small")]
         return [("KMEW",)]
 
 
@@ -58,6 +60,7 @@ def test_segment_filters_and_carries_the_sector_medians(stubbed):
     assert out["segment"] == "Shipping & Maritime" and out["size"] == "Mid" and out["total"] == 7 and out["reported"] == 6
     assert out["season_medians"] == {"sales_yoy": 40.6, "pat_yoy": 117.3, "pat_n": 4}
     assert out["rows"][0]["written"] is True and out["rows"][1]["written"] is False
+    assert out["rows"][0]["size"] == "micro" and out["rows"][1]["size"] is None   # cc#2169: size from the ranked universe, None when absent
 
 
 def test_segment_match_is_case_exact_and_unknown_is_empty(stubbed):
@@ -69,3 +72,4 @@ def test_segment_match_is_case_exact_and_unknown_is_empty(stubbed):
 def test_no_param_is_the_old_payload(stubbed):
     out = ram.mobile_results_companies(None)
     assert set(out.keys()) == {"quarter", "rows", "count"} and out["count"] == 3
+    assert [r["size"] for r in out["rows"]] == ["micro", None, "small"]   # cc#2169
