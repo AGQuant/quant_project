@@ -14,19 +14,29 @@
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
   .card h2{font-size:13px;font-weight:800;margin:0 0 10px;text-transform:uppercase;letter-spacing:.05em;color:var(--txt)}
   .card h2 .hcount{font-weight:600;text-transform:none;letter-spacing:0;color:var(--dim);font-size:11px;margin-left:8px}
-  /* cc#2135: compact pool rows -- one line each (name + caption + count), tight caption, no
-     separate note line. The caption keeps the full text (cc#2123 gap notes, cc#2125 ranking
-     date) -- it is smaller and single-line, not removed; the full text is also the title tooltip. */
-  .pool-grp{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:8px 0 4px}
-  .pool-grp:first-child{margin-top:0}
-  .pool-row{display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;min-width:0}
-  .pool-row:hover{background:var(--card2)}
-  .pool-row.on{background:var(--card2);border-color:var(--blu)}
-  .pool-row input{margin:0;flex:0 0 auto}
-  .pool-main{flex:1;display:flex;align-items:baseline;gap:8px;min-width:0}
-  .pool-name{font-size:12.5px;font-weight:700;white-space:nowrap}
-  .pool-caption{font-size:9.5px;color:var(--dim);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .pool-count{font-size:12.5px;font-weight:800;color:var(--txt);font-variant-numeric:tabular-nums;flex:0 0 auto}
+  /* cc#2143 (founder 17-Sep): the Pool section is a flat, wrapping grid of MULTI-SELECT toggle
+     chips -- checkbox + name + the pool's own scored count as a badge, ~5 per row on desktop,
+     2 per row on a phone. The per-chip commentary is gone from the chip; what it carried moves,
+     not deleted: the ranking date + stale state sit in ONE caption above the grid (.pool-asof),
+     the raw-vs-scored gap sits behind the (i) on the chip (title tooltip on desktop, tap on a
+     phone writes it into .pool-note under the grid). Tokens only, no literal fallbacks. */
+  .pool-asof{font-size:11px;color:var(--mut);margin:0 0 9px;line-height:1.5}
+  .pool-asof b{color:var(--txt)}
+  .pool-asof .warn{color:var(--amber);font-weight:700}
+  .pool-stalenote{color:var(--amber)}
+  .pool-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+  .pool-chip{display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel);cursor:pointer;min-width:0;user-select:none}
+  .pool-chip:hover{background:var(--card2)}
+  .pool-chip.on{background:var(--card2);border-color:var(--blu)}
+  .pool-chip input{margin:0;flex:0 0 auto;accent-color:var(--blu)}
+  .pool-chip .pool-name{flex:1;min-width:0;font-size:12px;font-weight:700;line-height:1.25}
+  .pool-qual{display:inline-block;font-size:9.5px;font-weight:600;color:var(--mut);margin-left:4px;line-height:1.2}
+  .pool-badge{font-size:11px;font-weight:800;color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:1px 7px;font-variant-numeric:tabular-nums;flex:0 0 auto}
+  .pool-info{flex:0 0 auto;width:18px;height:18px;border-radius:50%;border:1px solid var(--line2);background:transparent;color:var(--mut);font-family:inherit;font-size:10px;font-weight:800;line-height:1;cursor:help;padding:0}
+  .pool-info:hover{color:var(--blu);border-color:var(--blu)}
+  .pool-note{font-size:11px;color:var(--mut);margin-top:8px;line-height:1.5}
+  .pool-note:empty{display:none}
+  @media(max-width:560px){.pool-grid{grid-template-columns:repeat(2,1fr)}}
   .badge-stale{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
     padding:1px 6px;border-radius:9px;background:var(--card2);color:var(--amber);border:1px solid var(--amber);flex:0 0 auto}
   /* cc#2135: filter rows -- collapsed by default, + expands in place, per-row AND/OR in the middle,
@@ -82,7 +92,7 @@
 <div class="wrap">
   <h1>Quant Basket Universe</h1>
   <div class="sub">
-    Pick a pool, then narrow it with filters. Every value here is the current EOD snapshot
+    Pick one or more pools (they combine, deduplicated), then narrow with filters. Every value here is the current EOD snapshot
     (gvm_scores as of its latest score_date) — this is a Quant Basket engine, not a screener.
     <b>V1</b>: pool selection + GVM/component-score filters are live. The other six categories
     (Sector, Price/Momentum, Change/Delta, Quarterly Results, Alpha/Risk, Quality/Valuation) are
@@ -104,7 +114,7 @@
   <div class="card">
     <div class="resultbar" id="resultBar">
       <span class="rl">Universe after filters</span>
-      <span class="rv" id="resultVal">— <span class="of">pick a pool</span></span>
+      <span class="rv" id="resultVal">— <span class="of">select at least one pool</span></span>
     </div>
     <div class="expr" id="exprLine"></div>
     <div class="binding" id="bindingLine"></div>
@@ -142,7 +152,7 @@ var CATEGORIES_COMING = [
   {name:'Quality, Valuation, Size & Ownership', n:6},
 ];
 
-var STATE = { pools:[], pool:null, rows:{}, last:null, seq:0 };
+var STATE = { pools:[], sel:[], rows:{}, last:null, seq:0 };   /* cc#2143: sel = selected pool keys, any number */
 CAT1_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[]}; });
 
 function loadPools(){
@@ -151,29 +161,62 @@ function loadPools(){
     renderPools();
   }).catch(function(e){ document.getElementById('pools').innerHTML = '<div class="empty">Could not load pools — '+esc(e.message)+'</div>'; });
 }
+/* cc#2143: the pools render as ONE flat grid of toggle chips (no group sub-headers -- the founder
+   asked for all names together; grouping-within-chips is the flagged easy follow-up). Selection is
+   a set: any number of chips, combined by the server as a DISTINCT union (never a sum). */
 function renderPools(){
-  var groups = {cap_band:[], fo:[], nifty500:[]};
-  STATE.pools.forEach(function(p){ (groups[p.group]||(groups[p.group]=[])).push(p); });
-  var h = '';
-  h += '<div class="pool-grp">Cap Band</div>';
-  (groups.cap_band||[]).forEach(function(p){ h += poolRow(p); });
-  h += '<div class="pool-grp">All F&amp;O Stocks</div>';
-  (groups.fo||[]).forEach(function(p){ h += poolRow(p); });
-  h += '<div class="pool-grp">Nifty 500</div>';
-  (groups.nifty500||[]).forEach(function(p){ h += poolRow(p); });
-  document.getElementById('pools').innerHTML = h;
+  var ranked = STATE.pools.filter(function(p){ return p.ranked_as_of; });
+  var dates = ranked.map(function(p){ return p.ranked_as_of; }).filter(function(v, i, a){ return a.indexOf(v) === i; });
+  var stale = ranked.filter(function(p){ return p.stale; })[0];
+  var cap = '';
+  if (ranked.length){
+    /* data-honesty: the ranking date the removed captions used to carry, stated ONCE. Every
+       rank-derived pool reads the same MAX(rank_date), so one date is expected -- if the pools
+       ever disagree, all dates are shown and flagged rather than one picked. */
+    cap = '<div class="pool-asof">Cap bands and Nifty 500 ranked as of <b>' + esc(dates.join(' / ')) + '</b> (screener CSV load)'
+      + (dates.length > 1 ? ' — <span class="warn">ranking dates differ between pools</span>' : '')
+      + (stale ? ' <span class="badge-stale" title="' + esc(stale.stale_note || '') + '">stale since ' + esc((stale.built_at || '').slice(0, 10)) + '</span> <span class="pool-stalenote">' + esc(stale.stale_note || '') + '</span>' : '')
+      + '</div>';
+  }
+  document.getElementById('pools').innerHTML = cap
+    + '<div class="pool-grid">' + STATE.pools.map(poolChip).join('') + '</div>'
+    + '<div class="pool-note" id="poolNote"></div>';
 }
-function poolRow(p){
-  var on = STATE.pool === p.key;
-  var stale = p.stale ? '<span class="badge-stale" title="'+esc(p.stale_note||'')+'">stale since '+esc((p.built_at||'').slice(0,10))+'</span>' : '';
-  var noteTxt = [p.note, p.stale_note].filter(Boolean).join(' ');
-  var caption = noteTxt ? '<span class="pool-caption" title="'+esc(noteTxt)+'">'+esc(noteTxt)+'</span>' : '';
-  return '<label class="pool-row'+(on?' on':'')+'" onclick="pickPool(\''+p.key+'\')">'
-    + '<input type="radio" name="pool" '+(on?'checked':'')+'>'
-    + '<span class="pool-main"><span class="pool-name">'+esc(p.label)+'</span>'+stale+caption+'</span>'
-    + '<span class="pool-count">'+fmtN(p.count)+'</span></label>';
+/* the raw-vs-scored gap sentence only -- the "ranked as of" lead-in moved to the caption */
+function gapNote(p){
+  var n = p.note || '';
+  if (p.ranked_as_of){ var i = n.indexOf(';'); n = i >= 0 ? n.slice(i + 1).trim() : ''; }
+  return n;
 }
-function pickPool(key){ STATE.pool = key; renderPools(); refresh(); }
+/* a served label like "Nifty 500 (top-500 mcap)" keeps its qualifier VISIBLE on the chip, as a small
+   muted suffix, so the honesty label cc#2123 chose (our own top-500 by mcap, not NSE index
+   membership) is not hidden -- it just stops forcing a 4-line chip on a phone. */
+function nameOf(label){ var i = String(label || '').indexOf(' ('); return i > 0 ? label.slice(0, i) : label; }
+function qualOf(label){ var m = /\(([^)]*)\)\s*$/.exec(String(label || '')); return m ? m[1] : ''; }
+function poolChip(p){
+  var on = STATE.sel.indexOf(p.key) >= 0;
+  var gap = gapNote(p);
+  return '<label class="pool-chip' + (on ? ' on' : '') + '" data-pool="' + esc(p.key) + '">'
+    + '<input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="togglePool(\'' + p.key + '\')">'
+    + '<span class="pool-name">' + esc(nameOf(p.label)) + (qualOf(p.label) ? '<small class="pool-qual">' + esc(qualOf(p.label)) + '</small>' : '') + '</span>'
+    + '<span class="pool-badge">' + fmtN(p.count) + '</span>'
+    + (gap ? '<button type="button" class="pool-info" title="' + esc(gap) + '" aria-label="About this count" onclick="event.preventDefault();event.stopPropagation();showPoolNote(\'' + p.key + '\')">i</button>' : '')
+    + '</label>';
+}
+function showPoolNote(key){
+  var p = STATE.pools.filter(function(x){ return x.key === key; })[0];
+  var el = document.getElementById('poolNote');
+  if (!p || !el) return;
+  var same = el.getAttribute('data-key') === key;
+  el.textContent = same ? '' : (p.label + ': ' + gapNote(p));
+  el.setAttribute('data-key', same ? '' : key);
+}
+function togglePool(key){
+  var i = STATE.sel.indexOf(key);
+  if (i >= 0) STATE.sel.splice(i, 1); else STATE.sel.push(key);
+  renderPools();
+  refresh();
+}
 
 /* ── filters (cc#2135) ───────────────────────────────────────────────────────────────────── */
 function renderFilters(){
@@ -239,7 +282,7 @@ function toggleListVal(key, val, on){
    them left-to-right in its own fixed row order (the same order as this page) with explicit
    parentheses -- the count shown is always the server's, never computed here. */
 function buildQuery(){
-  var q = ['pool=' + encodeURIComponent(STATE.pool)];
+  var q = STATE.sel.map(function(k){ return 'pools=' + encodeURIComponent(k); });   /* cc#2143: repeated pools= */
   var ops = [];
   appliedKeys().forEach(function(key){
     var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0];
@@ -257,8 +300,14 @@ function buildQuery(){
 }
 
 function refresh(){
-  if (!STATE.pool){
-    document.getElementById('resultVal').innerHTML = '— <span class="of">pick a pool</span>';
+  if (!STATE.sel.length){
+    /* cc#2143: zero pools is an explicit state, never an empty query */
+    STATE.seq++;
+    document.getElementById('resultVal').innerHTML = '— <span class="of">select at least one pool</span>';
+    document.getElementById('exprLine').textContent = '';
+    document.getElementById('bindingLine').textContent = '';
+    document.getElementById('asOf').textContent = '';
+    document.getElementById('resultsWrap').style.display = 'none';
     return;
   }
   var seq = ++STATE.seq;

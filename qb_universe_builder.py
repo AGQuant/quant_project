@@ -85,6 +85,34 @@ _POOL_GROUP = {"cap_large": "cap_band", "cap_mid": "cap_band", "cap_small": "cap
                "cap_micro": "cap_band", "fo": "fo", "nifty500": "nifty500"}
 
 
+# cc#2143: MULTI-SELECT pools. The page sends the selection as repeated `pools=` query params
+# (`pools=cap_large&pools=nifty500`); a comma-separated value inside one param is tolerated, and the
+# legacy single `pool=` is folded in so nothing that ever held a link to this endpoint breaks (its
+# only caller is scorr_qb_universe.html -- re-grepped for this card, still true). Order is kept,
+# duplicates dropped.
+def _pool_keys(pools, pool):
+    keys = []
+    for v in list(pools or []) + ([pool] if pool else []):
+        for k in str(v).split(","):
+            k = k.strip()
+            if k and k not in keys:
+                keys.append(k)
+    return keys
+
+
+# cc#2143: the CAT_1 population of several pools is the DISTINCT union of each pool's own
+# _POOL_SQL -- never a sum of counts and never a plain concatenation, because the pools overlap
+# (Nifty 500 = mcap_rank <= 500 contains all of Large Cap and part of Mid/Small; F&O can hold any
+# cap size). Measured live before this shipped: Large Cap + Nifty 500 scored = 490 (the solo
+# Nifty 500 count), not 100 + 490 = 590; F&O + Mid Cap = 264, not 352. One key = that pool's own
+# SQL unchanged, so a single selection behaves byte-for-byte as before.
+def _pool_union_sql(keys):
+    if len(keys) == 1:
+        return _POOL_SQL[keys[0]]
+    return ("SELECT DISTINCT symbol FROM ("
+            + " UNION ALL ".join("(" + _POOL_SQL[k] + ")" for k in keys) + ") u")
+
+
 @router.get("/api/qb/universe2/pools")
 def qb_universe2_pools():
     """Every pool's live count. Cap bands read mcap_rank_daily.cap_category at its latest rank_date
@@ -186,7 +214,8 @@ SELECT * FROM scored WHERE 1=1{where}
 
 @router.get("/api/qb/universe2/preview")
 def qb_universe2_preview(
-    pool: str,
+    pools: Optional[List[str]] = Query(None),
+    pool: Optional[str] = None,
     gvm_min: Optional[float] = None, gvm_max: Optional[float] = None,
     g_min: Optional[float] = None, g_max: Optional[float] = None,
     v_min: Optional[float] = None, v_max: Optional[float] = None,
@@ -196,7 +225,9 @@ def qb_universe2_preview(
     ops: Optional[str] = None,
     limit: int = 500,
 ):
-    """cc#2123: pool -> optional CAT_1 filters -> count + ranked rows. Every value read straight
+    """cc#2123: pool(s) -> optional CAT_1 filters -> count + ranked rows. cc#2143: several pools
+    may be selected (repeated `pools=`); their population is the DISTINCT union (see
+    _pool_union_sql), pool_count is the SCORED size of that union. Every value read straight
     off gvm_scores' own current snapshot (score_date = MAX) -- no intraday feed anywhere on this
     path, per the founder's separate EOD-basis ruling on this same card (there is no live-price
     join here at all to violate it). filters_applied + binding_filter let the caller show WHY a
@@ -210,8 +241,13 @@ def qb_universe2_preview(
     at every step -- ((f1 OP f2) OP f3) -- the spec's stated default, flagged there for correction.
     The first applied row's flag has nothing to its left and is ignored. Omitting `ops` means AND
     everywhere, which is exactly what this endpoint did before this card."""
-    if pool not in _POOL_SQL:
-        return {"error": "unknown pool", "known": sorted(_POOL_SQL)}
+    keys = _pool_keys(pools, pool)
+    if not keys:
+        return {"error": "select at least one pool", "known": sorted(_POOL_SQL)}
+    unknown = [k for k in keys if k not in _POOL_SQL]
+    if unknown:
+        return {"error": "unknown pool: " + ", ".join(unknown), "known": sorted(_POOL_SQL)}
+    pool_sql = _pool_union_sql(keys)
     limit = max(1, min(int(limit), 2000))
 
     fconds, params, applied = {}, {}, []
@@ -239,7 +275,7 @@ def qb_universe2_preview(
     ordered = [k for k in _FILTER_ORDER if k in fconds]
     expr, expr_text = _combine(ordered, fconds, op_map)
     where = (" AND " + expr) if expr else ""
-    sql = _CAT1_SQL.format(pool_sql=_POOL_SQL[pool], where=where)
+    sql = _CAT1_SQL.format(pool_sql=pool_sql, where=where)
     params["limit"] = limit
 
     # cc#2123: two separate, honest counts -- pool size (no filters) and pass count (filters
@@ -249,7 +285,7 @@ def qb_universe2_preview(
     # using the raw count here would make a zero-filter preview look like it silently dropped
     # members that were never scoreable to begin with.
     scored_count_sql = (
-        "WITH pool AS (" + _POOL_SQL[pool] + "), scored AS ("
+        "WITH pool AS (" + pool_sql + "), scored AS ("
         "SELECT g.symbol, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, "
         "RANK() OVER (PARTITION BY g.segment ORDER BY g.gvm_score DESC) AS seg_rank "
         "FROM gvm_scores g JOIN pool p ON p.symbol = g.symbol "
@@ -257,7 +293,7 @@ def qb_universe2_preview(
         "SELECT COUNT(*) FROM scored WHERE 1=1")
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT COUNT(*) FROM (" + _POOL_SQL[pool] + ") p WHERE EXISTS "
+            "SELECT COUNT(*) FROM (" + pool_sql + ") p WHERE EXISTS "
             "(SELECT 1 FROM gvm_scores g WHERE g.symbol = p.symbol "
             "AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores))")
         pool_count = cur.fetchone()[0]
@@ -284,7 +320,12 @@ def qb_universe2_preview(
         binding = {"filter": k, "cut_to": n, "cut_count": pool_count - n}
 
     return {
-        "pool": pool, "pool_label": _POOL_LABEL[pool], "pool_count": pool_count,
+        # cc#2143: `pools` is the selection as sent; `pool`/`pool_label` keep their old names for
+        # any reader that still expects one value (joined, so a two-pool selection reads
+        # "Large Cap + Nifty 500 (top-500 mcap)"), never silently the first pool alone.
+        "pools": keys, "pool_labels": [_POOL_LABEL[k] for k in keys],
+        "pool": ",".join(keys), "pool_label": " + ".join(_POOL_LABEL[k] for k in keys),
+        "pool_count": pool_count,
         "count": pass_count, "filters_applied": applied, "filter_order": ordered,
         "ops": {k: op_map.get(k, "AND") for k in ordered}, "expression": expr_text,
         "per_filter_counts": per_filter, "binding_filter": binding,
