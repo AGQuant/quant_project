@@ -69,6 +69,22 @@ body{min-height:100vh;min-height:100dvh;background:var(--field)}
 .lr .nm{font-size:var(--type-115);font-weight:800}.lr .nm small{color:var(--muted);font-weight:600;font-size:var(--type-9)}.lr .v{text-align:right;font-size:var(--type-115);font-weight:800}
 .lr.h{background:var(--hi)}.lr.h .nm,.lr.h .v{font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);font-weight:800}
 .back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800}
+/* cc#2184: the fund LIST is its own mf- prefixed set (the old .row/.v/.n/.c names are also mobile_app.css bare
+   selectors, which boxed the value cell and stretched every row). Plain --panel fill, hairline separators, no side bar. */
+.mf-lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.mf-card{display:block;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--edge);text-decoration:none;color:var(--ink)}
+.mf-card:last-child{border-bottom:none}
+.mf-top{display:grid;grid-template-columns:minmax(0,1fr) 56px;gap:var(--space-10);align-items:start}
+.mf-nm{font-size:var(--type-125);font-weight:800;line-height:1.3;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mf-cat{display:inline-block;margin-top:var(--space-4);font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-6);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted)}
+.mf-score{width:56px;min-height:44px;border-radius:var(--radius-10);background:var(--hi);border:var(--bw-1) solid var(--edge);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--ink)}
+.mf-score b{font-size:var(--type-18);font-weight:800;line-height:1}.mf-score.gd{color:var(--brand);border-color:color-mix(in srgb, var(--brand) 55%, transparent)}
+.mf-score i{font-style:normal;font-size:var(--type-8);font-weight:700;color:var(--muted);margin-top:var(--space-2);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.mf-met{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-6);margin-top:var(--space-8)}
+.mf-met>div{min-width:0}.mf-met .k{font-size:var(--type-8);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);white-space:nowrap}
+.mf-met .w{font-size:var(--type-125);font-weight:800;margin-top:var(--space-2);white-space:nowrap;color:var(--ink)}.mf-met .w.pos{color:var(--win)}.mf-met .w.neg{color:var(--loss)}
+.mf-foot{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mf-foot b{color:var(--ink);font-weight:700}
+.mf-more{display:block;width:100%;min-height:44px;background:var(--hi);border:none;border-top:var(--bw-1) solid var(--edge);color:var(--brand);font:inherit;font-size:var(--type-115);font-weight:800;cursor:pointer}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -103,22 +119,44 @@ function cr(v){ if(v==null) return '—'; v=Number(v); return v>=1000?'₹'+(v/1
 function short(c){ return String(c||'').replace(' Fund','').replace('Sectoral/Thematic','Sectoral').replace('Value/Contra','Value'); }
 var Q={}; try{ var u=new URLSearchParams(location.search); Q.code=u.get('code'); }catch(e){}
 var CAT='', SORT='mqs', QS='';
-function frow(r){
-  var sub=esc(r.amc||'')+' · '+esc(short(r.category))+' · 1y <b class="'+cls(r.ret_1y)+'">'+pct(r.ret_1y,1)+'</b>'+(r.ret_3y!=null?' · 3y <b>'+pct(r.ret_3y,1)+'</b>':'')+(r.aum!=null?' · '+cr(r.aum):'')+(r.er!=null?' · ER '+f2(r.er)+'%':'');
-  return '<a class="row '+((r.mqs||0)>=65?'up':'mu')+'" href="/m/mf?code='+encodeURIComponent(r.code)+'"><div><div class="nm">'+esc(r.name)+'</div><div class="sub">'+sub+'</div></div><div class="v"><div class="n '+((r.mqs||0)>=65?'gd':'')+'">'+(r.mqs!=null?Math.round(r.mqs):'—')+'</div><div class="c">score</div></div></a>';
+/* cc#2184: LIST RULE -- whichever category (or All) is chosen, the top 10 by the current sort show first;
+   "View more" reveals the next 10 each tap (expand, not paging) until the payload is exhausted. The
+   endpoint returns up to 80 rows; the hint says how many are shown of how many came. */
+var PAGE=10, SHOWN=PAGE, ROWS=[];
+function mcard(r){
+  var gd=(r.mqs||0)>=65, young=(r.ret_3y_state&&r.ret_3y_state!=='value');
+  var foot=(r.aum!=null?'<b>'+cr(r.aum)+'</b> AUM':'')+(r.amc?' · '+esc(r.amc):'')+(r.cat_n_1y!=null?' · cat avg on '+r.cat_n_1y+' funds':'');
+  return '<a class="mf-card" href="/m/mf?code='+encodeURIComponent(r.code)+'">'
+    +'<div class="mf-top"><div><div class="mf-nm">'+esc(r.name)+'</div><span class="mf-cat">'+esc(short(r.category))+'</span></div>'
+    +'<div class="mf-score'+(gd?' gd':'')+'"><b>'+(r.mqs!=null?Math.round(r.mqs):'—')+'</b><i>score</i></div></div>'
+    +'<div class="mf-met">'
+    +'<div><div class="k">1y</div><div class="w '+cls(r.ret_1y)+'">'+pct(r.ret_1y,1)+'</div></div>'
+    +'<div><div class="k">Cat avg 1y</div><div class="w '+cls(r.cat_avg_1y)+'">'+pct(r.cat_avg_1y,1)+'</div></div>'
+    +'<div><div class="k">ER</div><div class="w'+(r.er!=null&&r.cat_avg_er!=null&&r.er>r.cat_avg_er?' neg':'')+'">'+(r.er!=null?f2(r.er)+'%':'—')+'</div></div>'
+    +'<div><div class="k">3y</div><div class="w '+cls(young?null:r.ret_3y)+'">'+(young?'young':pct(r.ret_3y,1))+'</div></div>'
+    +'</div>'+(foot?'<div class="mf-foot">'+foot+'</div>':'')+'</a>';
+}
+function listHtml(){
+  var vis=ROWS.slice(0,SHOWN), left=ROWS.length-vis.length;
+  return '<div class="mf-lst" id="mfList">'+vis.map(mcard).join('')+(left>0?'<button type="button" class="mf-more" id="mfMore">View more · '+left+' more</button>':'')+'</div>';
 }
 function renderList(d){
+  ROWS=d.rows||[]; SHOWN=PAGE;
   document.getElementById('asof').innerHTML='<b>'+(d.scored||0)+'</b> scored of '+(d.universe||0)+' equity funds · direct growth only';
   var h='<div class="card" style="padding:10px 12px"><input id="q" class="qin" placeholder="Search a fund or AMC" value="'+esc(QS)+'"></div>';
   h+='<div class="chips" id="cats"><span class="chip'+(CAT===''?' on':'')+'" data-c="">All</span>'+(d.categories||[]).map(function(c){return '<span class="chip'+(c===CAT?' on':'')+'" data-c="'+esc(c)+'">'+esc(short(c))+'</span>';}).join('')+'</div>';
   h+='<div class="sec"><h2>'+(QS?'Matches':(CAT?esc(short(CAT)):'All categories'))+'</h2><span class="seg2" id="sort"><span data-s="mqs"'+(SORT==='mqs'?' class="on"':'')+'>Score</span><span data-s="1y"'+(SORT==='1y'?' class="on"':'')+'>1y</span><span data-s="aum"'+(SORT==='aum'?' class="on"':'')+'>Size</span></span></div>';
-  h+= (d.rows||[]).length ? '<div class="lst">'+d.rows.map(frow).join('')+'</div>' : '<div class="emp"><b>No fund here</b>'+(QS?'Nothing matches that name.':'No scored fund in this category yet.')+'</div>';
-  h+='<div class="note"><b>The score, plainly.</b> Out of 100. Half is the quality of what the fund holds (its stocks\' GVM), a quarter is returns, the rest is cost and steadiness. A fund with no score has no score — never a zero.</div>';
+  h+='<div class="more" id="mfHint"></div>';
+  h+= ROWS.length ? listHtml() : '<div class="emp"><b>No fund here</b>'+(QS?'Nothing matches that name.':'No scored fund in this category yet.')+'</div>';
+  h+='<div class="note"><b>The score, plainly.</b> Out of 100. Half is the quality of what the fund holds (its stocks\' GVM), a quarter is returns, the rest is cost and steadiness. A fund with no score has no score — never a zero. Cat avg = the mean of the scored funds in that category.</div>';
   document.getElementById('body').innerHTML=h;
+  hintSync();
   document.getElementById('cats').addEventListener('click', function(e){ var s=e.target.closest('[data-c]'); if(!s) return; CAT=s.getAttribute('data-c'); QS=''; load(); });
   document.getElementById('sort').addEventListener('click', function(e){ var s=e.target.closest('[data-s]'); if(!s) return; SORT=s.getAttribute('data-s'); load(); });
   var qi=document.getElementById('q'); qi.addEventListener('keydown', function(e){ if(e.key==='Enter'){ QS=qi.value.trim(); load(); } });
+  document.getElementById('body').addEventListener('click', function(e){ var b=e.target.closest('#mfMore'); if(!b) return; e.preventDefault(); SHOWN=Math.min(ROWS.length, SHOWN+PAGE); var host=document.getElementById('mfList'); if(host) host.outerHTML=listHtml(); hintSync(); });
 }
+function hintSync(){ var el=document.getElementById('mfHint'); if(!el) return; el.textContent= ROWS.length ? ('Top '+Math.min(SHOWN,ROWS.length)+' of '+ROWS.length+' by '+(SORT==='1y'?'1y return':(SORT==='aum'?'size':'score'))+(ROWS.length>=80?' · first 80 shown':'')) : ''; }
 function load(){
   fetch('/api/mobile/mf_app/list?category='+encodeURIComponent(CAT)+'&sort='+SORT+'&q='+encodeURIComponent(QS),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
     if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }

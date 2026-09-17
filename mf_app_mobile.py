@@ -38,6 +38,7 @@ do_not_touch honoured: the MQS engine and mf_scores — read-only, zero writes. 
 """
 import os
 
+import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 import psycopg
@@ -45,6 +46,7 @@ import psycopg
 from mobile_endpoints import _guard, _json_safe, _page
 
 router = APIRouter()
+log = logging.getLogger("scorr.mobile.mf")
 
 RAIL_ROW_CAP = 6
 
@@ -173,7 +175,7 @@ def mobile_mf_app(request: Request):
 #   GET /api/mobile/mf_app/fund?code=                → v15_fund (scores, returns vs category, rank, peers,
 #                                                      flags) + mf_fund (look-through holdings with GVM,
 #                                                      sector exposure, NAV series)
-from mf_pipeline import v15_screener, v15_stats, v15_fund, mf_fund, EQUITY_CATEGORY_WHITELIST
+from mf_pipeline import v15_screener, v15_stats, v15_fund, mf_fund, EQUITY_CATEGORY_WHITELIST, _derive_cat
 
 
 def _fl(v):
@@ -192,6 +194,37 @@ def _short(name):
     return n.strip(" -")
 
 
+def _cat_avgs():
+    """cc#2184 item 4: category averages computed SERVER-SIDE over the scored, direct-growth funds
+    (the same population v15_screener lists), keyed by the category the row itself displays
+    (_derive_cat(name, category), the screener's own mapping). Plain means; a fund with no 1y
+    figure is counted in n but not in the mean (n_1y says how many the mean stands on)."""
+    out = {}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT m.name, m.category, m.ret_1y, m.ret_3y, m.expense_ratio
+                           FROM mf_master m JOIN mf_scores s ON s.scheme_code = m.scheme_code
+                           WHERE m.name ILIKE '%%direct%%' AND m.name ILIKE '%%growth%%'""")
+            acc = {}
+            for name, cat, r1, r3, er in cur.fetchall():
+                c = _derive_cat(name, cat)
+                if not c:
+                    continue
+                a = acc.setdefault(c, {"n": 0, "r1": [], "r3": [], "er": []})
+                a["n"] += 1
+                if r1 is not None: a["r1"].append(float(r1))
+                if r3 is not None: a["r3"].append(float(r3))
+                if er is not None: a["er"].append(float(er))
+        for c, a in acc.items():
+            out[c] = {"n": a["n"], "n_1y": len(a["r1"]),
+                      "avg_1y": round(sum(a["r1"]) / len(a["r1"]), 2) if a["r1"] else None,
+                      "avg_3y": round(sum(a["r3"]) / len(a["r3"]), 2) if a["r3"] else None,
+                      "avg_er": round(sum(a["er"]) / len(a["er"]), 2) if a["er"] else None}
+    except Exception as e:
+        log.warning("mf_app list: category averages unavailable: %s", e)
+    return out
+
+
 @router.get("/api/mobile/mf_app/list")
 @_json_safe
 def mobile_mf_list(request: Request, category: str = "", sort: str = "mqs", q: str = ""):
@@ -201,13 +234,23 @@ def mobile_mf_list(request: Request, category: str = "", sort: str = "mqs", q: s
     st = v15_stats()
     cat = q.strip() if q.strip() else category
     sc = v15_screener(category=cat, sort=sort if sort in ("mqs", "1y", "aum") else "mqs", limit=80)
+    avgs = _cat_avgs()   # cc#2184: category average 1y / 3y / ER beside every row, server-side
     rows = []
     for r in (sc.get("results") or []) if isinstance(sc, dict) else []:
+        ca = avgs.get(r.get("category")) or {}
         rows.append({"code": str(r.get("scheme_code")), "name": _short(r.get("name")), "amc": r.get("amc"), "category": r.get("category"),
                      "mqs": _fl(r.get("mqs")), "ret_1y": _fl(r.get("ret_1y")), "ret_3y": _fl(r.get("ret_3y")), "ret_3y_state": r.get("ret_3y_state"),
-                     "aum": _fl(r.get("aum_cr")), "er": _fl(r.get("expense_ratio")), "crisil": r.get("crisil_rank")})
+                     "aum": _fl(r.get("aum_cr")), "er": _fl(r.get("expense_ratio")), "crisil": r.get("crisil_rank"),
+                     "cat_avg_1y": ca.get("avg_1y"), "cat_avg_3y": ca.get("avg_3y"), "cat_avg_er": ca.get("avg_er"), "cat_n_1y": ca.get("n_1y")})
     return {"scored": st.get("scored"), "universe": st.get("universe"), "categories": list(EQUITY_CATEGORY_WHITELIST),
-            "category": category, "q": q, "sort": sort, "rows": rows, "count": len(rows)}
+            "category": category, "q": q, "sort": sort, "rows": rows, "count": len(rows),
+            "cat_avgs": avgs,
+            "cat_avg_basis": "mean over the scored, direct-growth funds of that category (mf_master joined to mf_scores); n_1y = funds with a 1y figure",
+            # cc#2184 item 2 asked for a rating beside the score. No rating field is populated for any
+            # scored fund (crisil_rank and finkhoz_rating are NULL on all of them, checked 17-Sep-2026),
+            # and the scoring engine defines the score only -- so the card shows the score, never an
+            # invented band. Said here so the reader knows it was checked, not forgotten.
+            "rating_basis": "none available: crisil_rank / finkhoz_rating are NULL for every scored fund; the score out of 100 is the rating"}
 
 
 @router.get("/api/mobile/mf_app/fund")
