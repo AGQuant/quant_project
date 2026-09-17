@@ -43,6 +43,7 @@ from qb_discretionary_rebalance import router as qb_discretionary_router  # cc#1
 from qb_universe_builder import router as qb_universe_builder_router  # cc#2123: Quant Basket Universe builder V1
 from mcap_rank_daily import router as mcap_rank_daily_router  # cc#2125: per-date market-cap rank from screener_raw (status + admin recompute)
 from investment_score_eod import router as investment_score_eod_router  # cc#2134: IC V2 score EOD for the whole universe (status + admin run)
+from image_assets_endpoints import router as image_assets_router  # cc#2140: image hosting -- /api/images/{id} (bytes), /meta, /status
 from gvm_report_endpoints import router as gvm_report_router
 from gvm_market_endpoints import router as gvm_market_router
 from gvm_universe_pivots import router as gvm_universe_pivots_router
@@ -852,6 +853,7 @@ app.include_router(qb_discretionary_router)
 app.include_router(qb_universe_builder_router)  # cc#2123: Quant Basket Universe builder V1
 app.include_router(mcap_rank_daily_router)  # cc#2125: per-date market-cap rank (status + admin recompute)
 app.include_router(investment_score_eod_router)  # cc#2134: IC V2 score EOD (status + admin run)
+app.include_router(image_assets_router)  # cc#2140: image hosting (Postgres bytea; Claude/Fable attach chart images to polished_news via polished_news_images)
 app.include_router(gvm_nightly_router)
 app.include_router(gvm_report_router)
 app.include_router(gvm_market_router)
