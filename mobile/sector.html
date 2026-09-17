@@ -92,7 +92,10 @@ td a{color:inherit;text-decoration:none}
 tr:last-child td{border-bottom:none}.gd{color:var(--brand)}
 .foot{padding:var(--space-9) var(--space-12);font-size:var(--type-10);color:var(--muted);border-top:var(--bw-1) solid var(--edge)}
 .note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
-.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center;line-height:1.5}
+.se-retry{margin-top:var(--space-10);padding:var(--space-8) var(--space-14);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);background:var(--panel);color:var(--ink);font:inherit;font-size:var(--type-12);font-weight:700}
+.se-search{padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--edge)}
+.se-search input{width:100%;box-sizing:border-box;padding:var(--space-9) var(--space-12);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);background:var(--hi);color:var(--ink);font:inherit;font-size:var(--type-12)}
 .back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800}
 </style>
 </head>
@@ -161,23 +164,25 @@ function drawLadder(){
   var all=(D.rows||[]).length, band=SIZE==='ALL'?'':' '+SIZE.toLowerCase();
   document.getElementById('lmore').innerHTML='<a class="si-more" href="/m/sector?view=all"><div><b>View all '+all+' segments</b><span>'+(rows.length>5?'Showing the top 5 of '+rows.length+band:'All '+rows.length+band+' shown')+' · sortable table</span></div><i>›</i></a>';
 }
-var ROWS=[], KEY='gvm', ASC=false, COLS=[];
+var ROWS=[], KEY='gvm', ASC=false, COLS=[], FILTER='';   /* cc#2206: FILTER = the All Segments search, case-insensitive substring on the segment name */
 function tbl(){
-  var rows=ROWS.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
+  var src=FILTER?ROWS.filter(function(r){ return String(r.segment||'').toLowerCase().indexOf(FILTER)>-1; }):ROWS;
+  var rows=src.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
   var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
   var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); if(i===0&&r.symbol&&window.ScorrWatchlistAdd) cell=window.ScorrWatchlistAdd.button(r.symbol,'sector',true)+' '+cell; return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; }).join('');   /* cc#2196: the watchlist + on company rows (a segment row has no symbol, so no button) */
-  document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' rows · tap a header to sort</div>';
+  document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+(FILTER?' of '+ROWS.length:'')+' rows · tap a header to sort</div>';
   document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='segment'||k==='symbol'); } tbl(); });
 }
 function renderAll(d){
   document.getElementById('pg-title').textContent='All segments'; document.getElementById('back').style.display='';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(d.rows||[]).length+' segments';
-  document.getElementById('body').innerHTML='<div class="wrap" id="tb"></div>';
-  ROWS=d.rows||[]; KEY='gvm'; ASC=false;
+  document.getElementById('body').innerHTML='<div class="wrap"><div class="se-search"><input id="se-q" type="search" inputmode="search" placeholder="Search segments" aria-label="Search segments" autocomplete="off"></div><div id="tb"></div></div>';   /* cc#2206: search box above the table, filters live */
+  ROWS=d.rows||[]; KEY='gvm'; ASC=false; FILTER='';
   COLS=[['segment','Segment',function(v,r){return '<a href="/m/sector?seg='+encodeURIComponent(v)+'">'+esc(v)+'<small>'+esc(r.verdict||'')+(r.size?' · '+r.size.toLowerCase():'')+'</small></a>';}],
         ['gvm','GVM',function(v){return '<span class="'+((v||0)>=7?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],
         ['change','Δ',function(v){return '<span class="'+cls(v)+'">'+sg(v)+'</span>';}],['names','Names'],['mcap','Mcap',cr]];
   tbl();
+  document.getElementById('se-q').addEventListener('input', function(){ FILTER=this.value.trim().toLowerCase(); tbl(); });
 }
 function renderSeg(d){
   var s=d.scorecard||{}, e=d.evidence||{}, b=d.brief||{};
@@ -202,9 +207,24 @@ function renderSeg(d){
 }
 var Q={}; try{ var u=new URLSearchParams(location.search); Q.seg=u.get('seg'); Q.view=u.get('view'); }catch(e){}
 var url = Q.seg ? '/api/mobile/sector_app/segment?name='+encodeURIComponent(Q.seg) : '/api/mobile/sector_app/list';
-fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-  if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
-  Q.seg ? renderSeg(d) : (Q.view==='all' ? renderAll(d) : renderList(d));
-}).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load sectors.</div>'; });
+/* cc#2206: a failure is diagnosable from the screen -- HTTP status + content-type + the first 120 chars of the body (never the bare
+   'Could not load sectors.' that hid a 502-during-deploy, an auth HTML page and a real bug behind one string). One automatic retry
+   after 800 ms; then a Retry button that re-runs the SAME fetch (ladder -> /list, segment -> /segment?name=, all -> /list), no reload. */
+function showErr(m, retry){ var az=document.getElementById('asof'); if(az) az.textContent='Not loaded'; document.getElementById('body').innerHTML='<div class="err">'+esc(m)+(retry?'<br><button type="button" class="se-retry" id="se-retry">Retry</button>':'')+'</div>'; var b=document.getElementById('se-retry'); if(b) b.addEventListener('click', function(){ load(0); }); }
+function load(attempt){
+  fetch(url,{credentials:'same-origin'}).then(function(r){
+    var ct=(r.headers.get('content-type')||'').split(';')[0].trim();
+    if(!r.ok||ct!=='application/json'){ return r.text().then(function(t){ throw new Error('HTTP '+r.status+(ct?' '+ct:'')+' — '+String(t||'').replace(/\s+/g,' ').trim().slice(0,120)); }); }
+    return r.json();
+  }).then(function(d){
+    if(d.error){ showErr('Could not load: '+d.error, true); return; }
+    Q.seg ? renderSeg(d) : (Q.view==='all' ? renderAll(d) : renderList(d));
+  }).catch(function(e){
+    var m='Could not load sectors — '+((e&&e.message)?e.message:'network error');
+    if(!attempt){ showErr(m+' · retrying…', false); setTimeout(function(){ load(1); }, 800); return; }
+    showErr(m, true);
+  });
+}
+load(0);
 </script>
 </body></html>
