@@ -140,6 +140,45 @@ def screener_detail(screen_id: int):
                 except Exception as e:
                     log.warning(f"screener_detail cmp overlay: {e}")
 
+            # cc#2133: WEEK% / MONTH% for the screen's own rows -- a per-request calc over this small
+            # row set (a screen is a few dozen symbols), NOT a precompute. Same price source the
+            # page's other numbers rest on (raw_prices closes), anchored on each symbol's OWN last
+            # traded date exactly the way invest_check_v2._ret_over anchors: base = the last close on
+            # or before (last_date - 7 / 30 calendar days). A symbol without a close that far back
+            # gets null, which the page renders as '--' -- never a number made up for missing
+            # history. v8_metrics' week_return/month_return is NOT used: it covers the ~209 F&O names
+            # only, and this population is the full Screeners universe.
+            if rows:
+                try:
+                    cur.execute("""
+                        WITH syms AS (SELECT unnest(%s::text[]) AS symbol),
+                        last AS (SELECT r.symbol, MAX(r.price_date) AS d0 FROM raw_prices r
+                                 JOIN syms s ON s.symbol = r.symbol WHERE r.close > 0 GROUP BY r.symbol),
+                        c0 AS (SELECT r.symbol, l.d0, r.close AS c0 FROM raw_prices r
+                               JOIN last l ON l.symbol = r.symbol AND r.price_date = l.d0),
+                        w AS (SELECT DISTINCT ON (r.symbol) r.symbol, r.close AS cw FROM raw_prices r
+                              JOIN last l ON l.symbol = r.symbol
+                              WHERE r.close > 0 AND r.price_date <= l.d0 - INTERVAL '7 days'
+                              ORDER BY r.symbol, r.price_date DESC),
+                        m AS (SELECT DISTINCT ON (r.symbol) r.symbol, r.close AS cm FROM raw_prices r
+                              JOIN last l ON l.symbol = r.symbol
+                              WHERE r.close > 0 AND r.price_date <= l.d0 - INTERVAL '30 days'
+                              ORDER BY r.symbol, r.price_date DESC)
+                        SELECT c0.symbol, c0.d0,
+                               ROUND(((c0.c0 / NULLIF(w.cw, 0)) - 1) * 100, 2) AS week_pct,
+                               ROUND(((c0.c0 / NULLIF(m.cm, 0)) - 1) * 100, 2) AS month_pct
+                        FROM c0 LEFT JOIN w ON w.symbol = c0.symbol LEFT JOIN m ON m.symbol = c0.symbol
+                    """, ([r["symbol"].upper() for r in rows],))
+                    ret = {sym: (d0, wk, mo) for sym, d0, wk, mo in cur.fetchall()}
+                    for r in rows:
+                        d0, wk, mo = ret.get(r["symbol"].upper(), (None, None, None))
+                        r["week_pct"] = float(wk) if wk is not None else None
+                        r["month_pct"] = float(mo) if mo is not None else None
+                        r["ret_as_of"] = str(d0) if d0 else None
+                except Exception as e:
+                    conn.rollback()
+                    log.warning(f"screener_detail week/month overlay: {e}")
+
             # cc#2134: Investment Score overlay -- score10 + band from investment_check_v2_scores at
             # its LATEST score_date, joined by symbol. A symbol with no row (first day, or outside
             # the GVM universe) gets null, which the page renders as '--'. Never a computed value.

@@ -199,6 +199,10 @@ function renderScreen(d){
     SYMBOL: function(r){ return (r.symbol||'').toUpperCase(); },
     CMP:    function(r){ return (r.cmp==null||isNaN(Number(r.cmp)))?null:Number(r.cmp); },
     DAY:    function(r){ return (r.day_pct==null||isNaN(Number(r.day_pct)))?null:Number(r.day_pct); },
+    // cc#2133: WEEK% / MONTH% come from the endpoint (raw_prices closes, anchored on the symbol's own
+    // last traded date); null when the history is too short, which sorts last and renders '--'.
+    WEEK:   function(r){ return (r.week_pct==null||isNaN(Number(r.week_pct)))?null:Number(r.week_pct); },
+    MONTH:  function(r){ return (r.month_pct==null||isNaN(Number(r.month_pct)))?null:Number(r.month_pct); },
     GVM:    function(r){ var v=(r.metrics||{}).gvm_score;
                          return (v==null||isNaN(Number(v)))?null:Number(v); },
     INV:    function(r){ return (r.inv_score==null||isNaN(Number(r.inv_score)))?null:Number(r.inv_score); },
@@ -206,8 +210,8 @@ function renderScreen(d){
                          var t=new Date(r.first_seen+'T00:00:00').getTime();
                          return isNaN(t)?null:t; }
   };
-  var defDir = { SYMBOL:1, CMP:-1, DAY:-1, GVM:-1, INV:-1, ADDED:-1 };
-  var labels = { SYMBOL:'Symbol', CMP:'CMP', DAY:'Day%', GVM:'GVM', INV:'Inv Score', ADDED:'Added On' };
+  var defDir = { SYMBOL:1, CMP:-1, DAY:-1, WEEK:-1, MONTH:-1, GVM:-1, INV:-1, ADDED:-1 };
+  var labels = { SYMBOL:'Symbol', CMP:'CMP', DAY:'Day%', WEEK:'Week%', MONTH:'Month%', GVM:'GVM', INV:'Inv Score', ADDED:'Added On' };
   shown.forEach(function(c){
     var k = 'm_'+c.key;   // prefixed so a screen field can never collide with a fixed key
     getters[k] = (function(key){ return function(r){
@@ -222,11 +226,12 @@ function renderScreen(d){
 
 function paintScreen(){
   var d = VIEW.d, shown = VIEW.shown;
-  // Sr · Symbol (+ C·A·R·D strip) · CMP · Day% · GVM · Inv Score · <screen's own fields> · Added On
+  // Sr · Symbol (+ C·A·R·D strip) · CMP · Day% · Week% · Month% · GVM · Inv Score · <screen's own fields> · Added On
   // cc#2134: Inv Score = invest_check_v2 score10 + band, persisted EOD (investment_check_v2_scores
   // at its latest score_date, joined server-side). '--' when the symbol has no row -- never derived.
   var head = ['<th>Sr</th>', scrTh('Symbol','SYMBOL',''), scrTh('CMP','CMP','num'),
-              scrTh('Day%','DAY','num'), scrTh('GVM','GVM','num'),
+              scrTh('Day%','DAY','num'), scrTh('Week%','WEEK','num'), scrTh('Month%','MONTH','num'),   // cc#2133
+              scrTh('GVM','GVM','num'),
               scrTh('Inv Score'+(d.inv_score_date?' · '+fmtDate(d.inv_score_date):''),'INV','num')];
   shown.forEach(function(c){ head.push(scrTh(c.label,'m_'+c.key,'num')); });
   head.push(scrTh('Added On','ADDED',''));
@@ -253,6 +258,8 @@ function paintScreen(){
     tds.push('<td class="num">'+(r.cmp==null?'--':fmtLevel(r.cmp))
              + (r.live?'<span class="live-dot" title="live tick"></span>':'')+'</td>');
     tds.push('<td class="num '+cls(r.day_pct)+'">'+fmtGrowth(r.day_pct)+'</td>');
+    tds.push('<td class="num '+cls(r.week_pct)+'">'+fmtGrowth(r.week_pct)+'</td>');     // cc#2133
+    tds.push('<td class="num '+cls(r.month_pct)+'">'+fmtGrowth(r.month_pct)+'</td>');   // cc#2133
     tds.push('<td class="num">'+(m.gvm_score==null?'--':Number(m.gvm_score).toFixed(2))+'</td>');
     tds.push('<td class="num">'+(r.inv_score==null ? '--'
              : '<span class="inv"><b>'+Number(r.inv_score).toFixed(2)+'</b>'
