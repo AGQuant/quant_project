@@ -74,6 +74,12 @@
   .dbadge{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:2px 6px;border-radius:5px;margin-left:8px;vertical-align:middle;white-space:nowrap}
   .dbadge.pit{color:var(--grn);border:1px solid var(--grn);background:var(--grn-d)}
   .cat-hd.live{border-bottom:none;padding-top:16px}
+  /* cc#2146: LIMITED HISTORY badge (amber), the window selector, the coverage line */
+  .dbadge.lim{color:var(--amber);border:1px solid var(--amber);background:transparent}
+  .winsel{padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
+  .covline{margin-top:6px;font-size:10.5px;color:var(--dim);line-height:1.5}
+  .covline b{color:var(--txt)}
+  .covline.warn{color:var(--amber)}
   .segpicked{display:flex;flex-wrap:wrap;gap:5px;width:100%;margin-bottom:6px}
   .segchip{font-size:10.5px;font-weight:700;color:var(--blu);border:1px solid var(--blu);border-radius:999px;padding:2px 8px}
   .segsearch{width:100%;max-width:340px;padding:6px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
@@ -115,8 +121,8 @@
   <div class="sub">
     Pick one or more pools (they combine, deduplicated), then narrow with filters. Every value here is the current EOD snapshot
     (gvm_scores as of its latest score_date) — this is a Quant Basket engine, not a screener.
-    <b>V1</b>: pool selection, GVM/component-score filters and Sector &amp; Segment filters are live. The other five categories
-    (Price/Momentum, Change/Delta, Quarterly Results, Alpha/Risk, Quality/Valuation) are
+    <b>V1</b>: pool selection, GVM/component-score, Sector &amp; Segment and Change &amp; Delta filters are live. The other four categories
+    (Price/Momentum, Quarterly Results, Alpha/Risk, Quality/Valuation) are
     shown below so you can see the full shape of the page — they are not wired to real filtering
     yet.
   </div>
@@ -127,7 +133,7 @@
   </div>
 
   <div class="card">
-    <h2>2 — Filters <span class="hcount" id="activeCount">0 active of 11 live · 40 in the locked set</span></h2>
+    <h2>2 — Filters <span class="hcount" id="activeCount">0 active of 18 live · 40 in the locked set</span></h2>
     <div class="filterlist" id="filterlist"></div>
     <div id="categories"></div>
   </div>
@@ -175,18 +181,31 @@ var CAT2_FILTERS = [
   {key:'sector_members', label:'Sector Member Count', kind:'range', col:'sector_member_count', cat:2, step:1, minOnly:true},
   {key:'segments', label:'Segments', kind:'multi', col:'segment', cat:2},
 ];
-var ALL_FILTERS = CAT1_FILTERS.concat(CAT2_FILTERS);
-var LOCKED_SET_TOTAL = 40;   /* the locked V1 set (cc#2123 spec); 11 of them are wired here today */
+/* cc#2146: CAT_4 Change & Delta -- seven locked rows from gvm_history at date offsets (as-of, never
+   an exact date; NULL = absent). Duration rows carry a window selector; the snapshot rows carry N
+   (snapshots, never days). `days` options are enabled/disabled from /api/qb/universe2/coverage, so
+   a window nobody resolves at is offered as disabled WITH the reason, never as an empty set. */
+var CAT4_FILTERS = [
+  {key:'gvm_change', label:'GVM change', kind:'range', cat:4, days:[30,90,180], colBase:'gvm_change_'},
+  {key:'m_change', label:'M Score change', kind:'range', cat:4, days:[30,90], colBase:'m_change_'},
+  {key:'g_change', label:'G Score change (90d)', kind:'range', cat:4, col:'g_change_90d', fixedDays:90},
+  {key:'v_change', label:'V Score change (90d)', kind:'range', cat:4, col:'v_change_90d', fixedDays:90},
+  {key:'sector_change', label:'Sector GVM change (90d)', kind:'range', cat:4, col:'sector_gvm_change_90d', fixedDays:90},
+  {key:'verdict_migration', label:'Verdict migration', kind:'list', cat:4, col:'verdict_migration', options:['upgraded','unchanged','downgraded'], nInput:true},
+  {key:'gvm_consistency', label:'GVM change consistency', kind:'kofn', cat:4, col:'gvm_pos_snapshots'},
+];
+var ALL_FILTERS = CAT1_FILTERS.concat(CAT2_FILTERS, CAT4_FILTERS);
+var LOCKED_SET_TOTAL = 40;   /* the locked V1 set (cc#2123 spec); 18 of them are wired here today (CAT_1 6, CAT_2 5, CAT_4 7) */
 var CATEGORIES_COMING = [
   {name:'Price & Momentum', n:5},
-  {name:'Change & Delta', n:7},
   {name:'Quarterly Results (YoY)', n:6},
   {name:'Alpha & Risk', n:5},
   {name:'Quality, Valuation, Size & Ownership', n:6},
 ];
 
 var STATE = { pools:[], sel:[], rows:{}, last:null, seq:0 };   /* cc#2143: sel = selected pool keys, any number */
-ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[]}; });
+ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[], days:(f.days ? f.days[0] : null), n:5, k:3}; });
+STATE.coverage = null;   /* cc#2146: /api/qb/universe2/coverage, loaded once */
 STATE.segments = [];   /* cc#2145: the universe's segments for the multi-select, loaded once */
 STATE.segq = '';
 
@@ -197,6 +216,16 @@ function loadSegments(){
     STATE.segments = d.segments || [];
     renderFilters();
   }).catch(function(){ STATE.segments = []; });
+}
+/* cc#2146: the delta coverage caveat, measured server-side -- resolves-for counts per window, the
+   daily-history floor, which windows are enabled. Rendered on every CAT_4 row. */
+function loadCoverage(){
+  fetchWithTimeout('/api/qb/universe2/coverage').then(function(r){return r.json();}).then(function(d){
+    STATE.coverage = d && d.windows ? d : null;
+    /* a row whose default window is disabled moves to the first enabled one */
+    CAT4_FILTERS.forEach(function(f){ if (!f.days) return; var st = STATE.rows[f.key]; var w = STATE.coverage && STATE.coverage.windows[String(st.days)]; if (w && !w.enabled){ var ok = f.days.filter(function(dd){ var x = STATE.coverage.windows[String(dd)]; return x && x.enabled; })[0]; if (ok) st.days = ok; } });
+    renderFilters();
+  }).catch(function(){ STATE.coverage = null; });
 }
 function loadPools(){
   fetchWithTimeout('/api/qb/universe2/pools').then(function(r){return r.json();}).then(function(d){
@@ -271,6 +300,9 @@ function renderFilters(){
   document.getElementById('categories').innerHTML =
     '<div class="cat-hd live"><div><span class="cat-title">Sector &amp; Segment</span><span class="cat-count">' + CAT2_FILTERS.length + ' filters</span></div><span class="dbadge pit" title="Read from the latest EOD gvm_scores snapshot: one score_date, computed in the query, no stored roll-up">POINT-IN-TIME</span></div>'
     + '<div class="filterlist" id="filterlist2">' + CAT2_FILTERS.map(filterRowHtml).join('') + '</div>'
+    /* cc#2146: Change & Delta is LIVE -- gvm_history at date offsets, in the same query. */
+    + '<div class="cat-hd live"><div><span class="cat-title">Change &amp; Delta</span><span class="cat-count">' + CAT4_FILTERS.length + ' filters</span></div><span>' + covBadgeHtml(null) + '<span class="dbadge pit" title="Read from gvm_history, the point-in-time table: each symbol compared with its own row at the offset date (as-of lookup), computed in the query">POINT-IN-TIME</span></span></div>'
+    + '<div class="filterlist" id="filterlist4">' + CAT4_FILTERS.map(filterRowHtml).join('') + '</div>'
     + CATEGORIES_COMING.map(function(c){
         return '<div class="cat-hd"><div><span class="cat-title">'+esc(c.name)+'</span><span class="cat-count">'+c.n+' filters</span></div><span class="cat-coming">Coming</span></div>';
       }).join('');
@@ -283,6 +315,29 @@ function segCtxHtml(){
   if (!st) return '<div class="segctx">Segment sizes in this pool: pick a pool to see them</div>';
   return '<div class="segctx">Segments in this pool: <b>' + fmtN(st.segments) + '</b> \u00b7 members min <b>' + fmtN(st.min) + '</b> \u00b7 median <b>' + fmtN(st.median) + '</b> \u00b7 max <b>' + fmtN(st.max) + '</b> \u2014 a rank of 1 in a 5-member segment is not a rank of 1 in a 40-member one</div>';
 }
+/* cc#2146 helpers -- the coverage caveat on screen (item 3), the LIMITED HISTORY badge (item 6),
+   the window selector and the snapshot inputs (item 4: snapshots, never days). */
+function covWin(days){ return STATE.coverage && STATE.coverage.windows ? STATE.coverage.windows[String(days)] : null; }
+function covBadgeHtml(days){
+  var c = STATE.coverage; if (!c || !c.daily_history_floor) return '';
+  if (days != null && days < 90) return '';
+  return '<span class="dbadge lim" title="gvm_history has daily snapshots only from ' + esc(c.daily_history_floor) + ' (' + fmtN(c.daily_era_days) + ' days back); older rows are yearly">LIMITED HISTORY FROM ' + esc(c.daily_history_floor) + '</span>';
+}
+function covLineHtml(days){
+  var w = covWin(days);
+  if (!w) return '<div class="covline">coverage: measuring\u2026</div>';
+  if (!w.enabled) return '<div class="covline warn">' + esc(w.reason || 'not available yet') + '</div>';
+  return '<div class="covline">resolves for <b>' + fmtN(w.resolves) + '</b> of ' + fmtN(w.of) + ' symbols (as-of row on ' + esc(w.asof_to || '\u2014') + '; a symbol with no row within ' + fmtN(STATE.coverage.asof_grace_days) + ' days of the offset is left out, not failed)</div>';
+}
+function daysSelectHtml(f, st){
+  return '<select class="winsel" onchange="setDays(\'' + f.key + '\', this.value)">' + f.days.map(function(dd){
+    var w = covWin(dd); var dis = w ? !w.enabled : (dd >= 180);
+    return '<option value="' + dd + '"' + (String(st.days) === String(dd) ? ' selected' : '') + (dis ? ' disabled' : '') + (w && !w.enabled ? ' title="' + esc(w.reason) + '"' : '') + '>' + dd + 'd' + (dis ? ' \u2014 not yet' : '') + '</option>';
+  }).join('') + '</select>';
+}
+function setDays(key, v){ STATE.rows[key].days = parseInt(v, 10); renderFilters(); if (STATE.rows[key].applied) refresh(); }
+function setN(key, field, v){ var x = parseInt(v, 10); if (!isNaN(x) && x >= 1) STATE.rows[key][field] = x; renderFilters(); if (STATE.rows[key].applied) refresh(); }
+function colOf(f, st){ return f.colBase ? (f.colBase + st.days + 'd') : f.col; }
 function segOptionsHtml(st){
   var q = (STATE.segq || '').toLowerCase();
   var list = STATE.segments.filter(function(g){ return !q || g.segment.toLowerCase().indexOf(q) >= 0; });
@@ -301,22 +356,33 @@ function filterRowHtml(f){
   var inputs;
   if (f.kind === 'range'){
     var stp = f.step ? String(f.step) : '0.01';   /* cc#2145: whole numbers for ranks and counts */
-    inputs = '<input type="number" step="'+stp+'" placeholder="min" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">'
+    inputs = (f.days ? '<span class="to">over</span>' + daysSelectHtml(f, st) : '')
+      + '<input type="number" step="'+stp+'" placeholder="min" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">'
       + (f.minOnly ? '<span class="to">and above</span>'
          : '<span class="to">to</span>'
            + '<input type="number" step="'+stp+'" placeholder="max" value="'+esc(st.max)+'" onchange="setVal(\''+f.key+'\',\'max\',this.value)">');
+  } else if (f.kind === 'kofn'){
+    /* cc#2146: positive in K of the last N snapshots (consecutive score_dates, never days) */
+    inputs = '<span class="to">GVM rose in at least</span><input type="number" step="1" min="0" value="'+esc(st.k)+'" onchange="setN(\''+f.key+'\',\'k\',this.value)">'
+      + '<span class="to">of the last</span><input type="number" step="1" min="1" value="'+esc(st.n)+'" onchange="setN(\''+f.key+'\',\'n\',this.value)"><span class="to">snapshots</span>';
   } else if (f.kind === 'multi'){
     inputs = segOptionsHtml(st);   /* cc#2145: the Segments multi-select */
   } else {
     inputs = (f.options||[]).map(function(o){
       var checked = st.list.indexOf(o) >= 0;
       return '<label class="opt"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleListVal(\''+f.key+'\',\''+o+'\',this.checked)">'+esc(o)+'</label>';
-    }).join('');
+    }).join('')
+      + (f.nInput ? '<span class="to">vs the snapshot</span><input type="number" step="1" min="1" value="'+esc(st.n)+'" onchange="setN(\''+f.key+'\',\'n\',this.value)"><span class="to">snapshots back</span>' : '');   /* cc#2146 */
   }
+  var cat4 = f.cat === 4;
+  var winDays = f.days ? st.days : (f.fixedDays || null);
+  var badges = (f.cat === 2 || cat4) ? '<span class="dbadge pit" title="POINT-IN-TIME: the latest EOD snapshot, computed in the query">POINT-IN-TIME</span>' : '';
+  if (cat4 && winDays != null) badges += covBadgeHtml(winDays);
+  var covline = (cat4 && winDays != null) ? covLineHtml(winDays) : (cat4 ? '<div class="covline">counts snapshots (distinct score_dates), never days \u2014 ' + (STATE.coverage ? fmtN(STATE.coverage.snapshots_last_90d) + ' snapshots in the last 90 days' : 'measuring\u2026') + '</div>' : '');
   var pc = passCountHtml(f.key);
   return '<div class="frow'+(st.open?' open':'')+'" id="frow-'+f.key+'">'
     + '<div class="fhead" onclick="toggleRow(\''+f.key+'\')">'
-    +   '<div class="plusbtn">+</div><div class="fname">'+esc(f.label)+(f.cat === 2 ? '<span class="dbadge pit" title="POINT-IN-TIME: the latest EOD gvm_scores snapshot, computed in the query">POINT-IN-TIME</span>' : '')+'</div>'
+    +   '<div class="plusbtn">+</div><div class="fname">'+esc(f.label)+badges+'</div>'
     +   '<div class="rowcomb" onclick="event.stopPropagation()" title="How this row combines with the rows above it (left-to-right, top-to-bottom)">'
     +     '<button type="button" class="'+(st.op==='AND'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'AND\')">AND</button>'
     +     '<button type="button" class="'+(st.op==='OR'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'OR\')">OR</button></div>'
@@ -324,7 +390,7 @@ function filterRowHtml(f){
     + '</div>'
     + '<div class="fbody"><div class="finputs">' + inputs
     +   '<button type="button" class="applywrap" onclick="toggleApply(\''+f.key+'\')"><span class="tick'+(st.applied?' on':'')+'">✓</span><span class="applylabel">Apply</span></button>'
-    + '</div><div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div>'+(f.key === 'seg_rank' ? segCtxHtml() : '')+'</div>'
+    + '</div>' + covline + '<div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div>'+(f.key === 'seg_rank' ? segCtxHtml() : '')+'</div>'
     + '</div>';
 }
 /* cc#2144: every applied row shows BOTH numbers -- ALONE (this filter by itself against the pool,
@@ -373,10 +439,14 @@ function buildQuery(){
     if (f.kind === 'range'){
       if (st.min !== '') q.push(key + '_min=' + encodeURIComponent(st.min));
       if (st.max !== '' && !f.minOnly) q.push(key + '_max=' + encodeURIComponent(st.max));
+      if (f.days) q.push(key + '_days=' + st.days);   /* cc#2146 */
+    } else if (f.kind === 'kofn'){
+      q.push(key + '_k=' + st.k); q.push(key + '_n=' + st.n);   /* cc#2146 */
     } else if (f.kind === 'multi'){
       st.list.forEach(function(v){ q.push('segments=' + encodeURIComponent(v)); });   /* cc#2145 */
     } else {
-      st.list.forEach(function(v){ q.push('verdict=' + encodeURIComponent(v)); });
+      st.list.forEach(function(v){ q.push(key + '=' + encodeURIComponent(v)); });   /* verdict= / verdict_migration= */
+      if (f.nInput) q.push(key + '_n=' + st.n);   /* cc#2146 */
     }
     ops.push(key + ':' + st.op);
   });
@@ -424,8 +494,9 @@ function renderResults(d){
   var cols = [{h:'Symbol', k:'symbol'}, {h:'Company', k:'company_name'}, {h:'Segment', k:'segment'}];
   keys.forEach(function(key){
     var f = ALL_FILTERS.filter(function(x){return x.key===key;})[0];
-    if (cols.some(function(c){return c.k===f.col;})) return;   /* cc#2145: segment / verdict already a column */
-    cols.push({h:f.label, k:f.col});
+    var col = colOf(f, STATE.rows[key]);   /* cc#2146: window rows resolve to gvm_change_30d etc. */
+    if (cols.some(function(c){return c.k===col;})) return;   /* cc#2145: segment / verdict already a column */
+    cols.push({h:f.label + (f.days ? ' (' + STATE.rows[key].days + 'd)' : ''), k:col});
   });
   if (!keys.length) cols.push({h:'GVM', k:'gvm_score'}, {h:'Segment Rank', k:'seg_rank'});
   document.getElementById('resultsHead').innerHTML = '<tr>' + cols.map(function(c){return '<th>'+esc(c.h)+'</th>';}).join('') + '</tr>';
@@ -436,7 +507,7 @@ function renderResults(d){
           var v = r[c.k];
           if (c.k === 'symbol') return '<td><strong>'+esc(v)+'</strong></td>';
           if (c.k === 'company_name' || c.k === 'segment' || c.k === 'verdict') return '<td>'+esc(v||'—')+'</td>';
-          if (c.k === 'seg_rank' || c.k === 'sector_rank' || c.k === 'sector_member_count') return '<td>'+(v!=null?v:'—')+'</td>';
+          if (c.k === 'seg_rank' || c.k === 'sector_rank' || c.k === 'sector_member_count' || c.k === 'gvm_pos_snapshots' || c.k === 'verdict_migration') return '<td>'+(v!=null?esc(v):'—')+'</td>';
           return '<td>'+num2(v)+'</td>';
         }).join('') + '</tr>';
       }).join('')
@@ -456,6 +527,7 @@ document.getElementById('resultVal').addEventListener('click', toggleResults);
 
 loadPools();
 loadSegments();   /* cc#2145 */
+loadCoverage();   /* cc#2146 */
 renderFilters();
 </script>
 </body>

@@ -221,10 +221,51 @@ sect AS (
       FROM uni
 ),
 sect_ranked AS (
-    SELECT segment, sector_member_count,
+    SELECT segment, sector_member_count, sector_gvm_raw,
            ROUND(sector_gvm_raw::numeric, 3) AS sector_gvm,
            DENSE_RANK() OVER (ORDER BY sector_gvm_raw DESC NULLS LAST) AS sector_rank
       FROM sect
+)"""
+
+# cc#2146: CAT_4 Change & Delta -- gvm_history ONLY (the point-in-time table), self-joined at date
+# offsets. OFFSET VALUE = the symbol's LATEST row at score_date <= D - N days (an as-of lookup, never
+# an exact-date match), and it must sit within ASOF_GRACE_DAYS of the offset: a row from a year ago
+# is not "180 days ago", so it resolves as ABSENT (NULL -> excluded, cc#1822), which is what makes
+# the 180d option honestly empty until daily history reaches it. Snapshot windows (verdict
+# migration, consistency) count DISTINCT score_dates, never days -- 90 snapshots in the last 90d
+# today vs ~4 a year before 2026. Verdict ordinal: Weak < Average < Good < Excellent
+# (gvm_nightly._verdict). Same single query as CAT_1/CAT_2; index-bound on
+# gvm_history (symbol, score_date DESC); no job, no cache.
+ASOF_GRACE_DAYS = 45
+
+_ORD = "CASE {v} WHEN 'Weak' THEN 1 WHEN 'Average' THEN 2 WHEN 'Good' THEN 3 WHEN 'Excellent' THEN 4 END"
+
+def _asof_lateral(alias, days, cols="h.score_date, h.gvm_score, h.m_score, h.g_score, h.v_score"):
+    return ("      LEFT JOIN LATERAL (SELECT " + cols + " FROM gvm_history h"
+            " WHERE h.symbol = g.symbol AND h.score_date <= (SELECT d FROM latest) - " + str(int(days)) +
+            " AND h.score_date >= (SELECT d FROM latest) - " + str(int(days)) + " - %(asof_grace)s"
+            " ORDER BY h.score_date DESC LIMIT 1) " + alias + " ON true\n")
+
+# universe-wide sector GVM at the 90d offset. gvm_history carries NO market cap and no table keeps
+# one at past dates (mcap_rank_daily holds a single rank_date), so the offset rows are weighted with
+# TODAY's market caps over the members that have a 90d row -- constant weights, so the change is a
+# pure score movement. Stated on the card as a deviation from "same expression as cc#2145".
+_UNI90_SQL = """
+uni90 AS (
+    SELECT g.segment,
+           SUM(CASE WHEN g.market_cap IS NOT NULL THEN h90.gvm_score * g.market_cap END) AS w_num,
+           SUM(CASE WHEN g.market_cap IS NOT NULL AND h90.gvm_score IS NOT NULL THEN g.market_cap END) AS w_den,
+           AVG(h90.gvm_score) AS simple_avg,
+           COUNT(h90.gvm_score) AS members_90d
+      FROM gvm_scores g
+""" + _asof_lateral("h90", 90, "h.gvm_score") + """     WHERE g.score_date = (SELECT d FROM latest) AND g.gvm_score IS NOT NULL
+       AND g.segment IS NOT NULL AND g.segment NOT IN ('', 'Unknown')
+     GROUP BY g.segment
+),
+sect90 AS (
+    SELECT segment, members_90d,
+           CASE WHEN w_den > 0 THEN w_num / w_den ELSE simple_avg END AS sector_gvm_90d_raw
+      FROM uni90
 )"""
 
 # The ONE scored CTE both the preview rows and every count (alone / step / total) read from: the
@@ -234,6 +275,7 @@ sect_ranked AS (
 _SCORED_CTE = """
 WITH pool AS ({pool_sql}),
 """ + _UNI_SECT_SQL + """,
+""" + _UNI90_SQL + """,
 scored AS (
     SELECT g.symbol, g.company_name, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score,
            g.verdict, g.market_cap, g.price,
@@ -241,10 +283,35 @@ scored AS (
            COUNT(*) OVER (PARTITION BY g.segment) AS seg_size,
            ROUND((g.gvm_score - AVG(g.gvm_score) OVER (PARTITION BY g.segment))::numeric, 2) AS gap_vs_sector,
            s.sector_gvm, s.sector_rank, s.sector_member_count,
-           ROUND((g.gvm_score - s.sector_gvm)::numeric, 2) AS gvm_minus_sector
+           ROUND((g.gvm_score - s.sector_gvm)::numeric, 2) AS gvm_minus_sector,
+           -- cc#2146 CAT_4: as-of deltas (NULL = no row within the grace window = ABSENT)
+           h30.score_date AS asof_30d, h90.score_date AS asof_90d, h180.score_date AS asof_180d,
+           ROUND((g.gvm_score - h30.gvm_score)::numeric, 2)  AS gvm_change_30d,
+           ROUND((g.gvm_score - h90.gvm_score)::numeric, 2)  AS gvm_change_90d,
+           ROUND((g.gvm_score - h180.gvm_score)::numeric, 2) AS gvm_change_180d,
+           ROUND((g.m_score - h30.m_score)::numeric, 2) AS m_change_30d,
+           ROUND((g.m_score - h90.m_score)::numeric, 2) AS m_change_90d,
+           ROUND((g.g_score - h90.g_score)::numeric, 2) AS g_change_90d,
+           ROUND((g.v_score - h90.v_score)::numeric, 2) AS v_change_90d,
+           ROUND((s.sector_gvm_raw - s9.sector_gvm_90d_raw)::numeric, 3) AS sector_gvm_change_90d,
+           hm.verdict AS verdict_then,
+           CASE WHEN hm.verdict IS NULL THEN NULL
+                WHEN (""" + _ORD.format(v="g.verdict") + """) > (""" + _ORD.format(v="hm.verdict") + """) THEN 'upgraded'
+                WHEN (""" + _ORD.format(v="g.verdict") + """) < (""" + _ORD.format(v="hm.verdict") + """) THEN 'downgraded'
+                ELSE 'unchanged' END AS verdict_migration,
+           CASE WHEN hc.n >= %(cons_n)s THEN hc.pos END AS gvm_pos_snapshots
       FROM gvm_scores g
       JOIN pool p ON p.symbol = g.symbol
       LEFT JOIN sect_ranked s ON s.segment = g.segment
+      LEFT JOIN sect90 s9 ON s9.segment = g.segment
+""" + _asof_lateral("h30", 30) + _asof_lateral("h90", 90) + _asof_lateral("h180", 180) + """      LEFT JOIN LATERAL (SELECT h.verdict FROM gvm_history h
+                          WHERE h.symbol = g.symbol AND h.score_date < (SELECT d FROM latest)
+                          ORDER BY h.score_date DESC OFFSET %(migr_n)s - 1 LIMIT 1) hm ON true
+      LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE z.dlt > 0) AS pos, COUNT(z.dlt) AS n
+                           FROM (SELECT w.gvm_score - LEAD(w.gvm_score) OVER (ORDER BY w.score_date DESC) AS dlt
+                                   FROM (SELECT h.score_date, h.gvm_score FROM gvm_history h
+                                          WHERE h.symbol = g.symbol AND h.score_date <= (SELECT d FROM latest)
+                                          ORDER BY h.score_date DESC LIMIT %(cons_n)s + 1) w) z) hc ON true
      WHERE g.score_date = (SELECT d FROM latest)
 )
 """
@@ -269,6 +336,13 @@ def qb_universe2_preview(
     sector_gap_min: Optional[float] = None, sector_gap_max: Optional[float] = None,
     sector_members_min: Optional[int] = None, sector_members_max: Optional[int] = None,
     segments: Optional[List[str]] = Query(None),
+    gvm_change_min: Optional[float] = None, gvm_change_max: Optional[float] = None, gvm_change_days: int = 30,
+    m_change_min: Optional[float] = None, m_change_max: Optional[float] = None, m_change_days: int = 30,
+    g_change_min: Optional[float] = None, g_change_max: Optional[float] = None,
+    v_change_min: Optional[float] = None, v_change_max: Optional[float] = None,
+    sector_change_min: Optional[float] = None, sector_change_max: Optional[float] = None,
+    verdict_migration: Optional[List[str]] = Query(None), verdict_migration_n: int = 5,
+    gvm_consistency_k: Optional[int] = None, gvm_consistency_n: int = 5,
     ops: Optional[str] = None,
     limit: int = 500,
 ):
@@ -327,6 +401,27 @@ def qb_universe2_preview(
         fconds["segments"] = "(segment = ANY(%(segments)s))"
         params["segments"] = seg_list
         applied.append("segments")
+    # cc#2146: CAT_4 Change & Delta. The duration rows pick their column by the selected window;
+    # snapshot windows are bound as parameters the CTE always needs (defaults 5 / 5).
+    gvm_change_days = gvm_change_days if gvm_change_days in (30, 90, 180) else 30
+    m_change_days = m_change_days if m_change_days in (30, 90) else 30
+    rng(f"gvm_change_{gvm_change_days}d", gvm_change_min, gvm_change_max, "gvm_change")
+    rng(f"m_change_{m_change_days}d", m_change_min, m_change_max, "m_change")
+    rng("g_change_90d", g_change_min, g_change_max, "g_change")
+    rng("v_change_90d", v_change_min, v_change_max, "v_change")
+    rng("sector_gvm_change_90d", sector_change_min, sector_change_max, "sector_change")
+    mig = [x.strip().lower() for x in (verdict_migration or []) if x and x.strip().lower() in ("upgraded", "unchanged", "downgraded")]
+    if mig:
+        fconds["verdict_migration"] = "(verdict_migration = ANY(%(verdict_migration)s))"
+        params["verdict_migration"] = mig
+        applied.append("verdict_migration")
+    if gvm_consistency_k is not None:
+        fconds["gvm_consistency"] = "(gvm_pos_snapshots >= %(cons_k)s)"
+        params["cons_k"] = max(0, int(gvm_consistency_k))
+        applied.append("gvm_consistency")
+    params["migr_n"] = max(1, min(int(verdict_migration_n), 400))
+    params["cons_n"] = max(1, min(int(gvm_consistency_n), 400))
+    params["asof_grace"] = ASOF_GRACE_DAYS
 
     op_map = _parse_ops(ops)
     ordered = [k for k in _FILTER_ORDER if k in fconds]
@@ -402,13 +497,18 @@ def qb_universe2_preview(
         "per_filter_counts": per_filter, "step_counts": step_counts, "binding_filter": binding,
         "as_of_date": str(as_of) if as_of else None, "rows": rows,
         "segment_stats": segment_stats,   # cc#2145 item 5
+        "delta_windows": {"gvm_change_days": gvm_change_days, "m_change_days": m_change_days,
+                          "verdict_migration_n": params["migr_n"], "gvm_consistency_n": params["cons_n"],
+                          "asof_grace_days": ASOF_GRACE_DAYS},   # cc#2146
     }
 
 
 # cc#2135: the page's fixed row order -- "left-to-right" in the combine below means top-to-bottom
 # on the page. Kept in ONE place so the page and the endpoint cannot disagree about it.
 _FILTER_ORDER = ("gvm", "g", "v", "m", "verdict", "seg_rank",
-                 "sector_gvm", "sector_rank", "sector_gap", "sector_members", "segments")   # cc#2145: CAT_2 after CAT_1
+                 "sector_gvm", "sector_rank", "sector_gap", "sector_members", "segments",   # cc#2145: CAT_2 after CAT_1
+                 "gvm_change", "m_change", "g_change", "v_change", "sector_change",
+                 "verdict_migration", "gvm_consistency")   # cc#2146: CAT_4 after CAT_2
 
 
 def _parse_ops(ops: Optional[str]) -> dict:
@@ -435,6 +535,44 @@ def _combine(ordered, fconds, op_map):
         expr = f"({expr} {op} {fconds[k]})"
         text = f"({text} {op} {k})"
     return expr, text
+
+
+@router.get("/api/qb/universe2/coverage")
+def qb_universe2_coverage():
+    """cc#2146 item 3: the delta coverage caveat, MEASURED on every call -- for each offset, how many
+    of today's scored symbols have an as-of row within the grace window, the as-of date span, the
+    daily-history floor and the snapshot count in the last 90 days. The page renders these on the
+    rows ("resolves for N of M symbols") and disables an offset that resolves for nobody, with the
+    reason, instead of ever returning an empty set silently."""
+    sql = ("WITH latest AS (SELECT MAX(score_date) AS d FROM gvm_scores), g AS (SELECT symbol FROM gvm_scores, latest WHERE score_date = latest.d) "
+           "SELECT COUNT(*), COUNT(h30.score_date), COUNT(h90.score_date), COUNT(h180.score_date), "
+           "MIN(h30.score_date), MAX(h30.score_date), MIN(h90.score_date), MAX(h90.score_date), MIN(h180.score_date), MAX(h180.score_date), "
+           "(SELECT d FROM latest) FROM g\n"
+           + _asof_lateral("h30", 30, "h.score_date") + _asof_lateral("h90", 90, "h.score_date") + _asof_lateral("h180", 180, "h.score_date"))
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, {"asof_grace": ASOF_GRACE_DAYS})
+        r = cur.fetchone()
+        cur.execute("SELECT MIN(score_date) FROM (SELECT score_date FROM gvm_history WHERE score_date >= DATE '2026-01-01' "
+                    "GROUP BY 1 HAVING COUNT(*) >= 500) f")
+        floor = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(DISTINCT score_date) FROM gvm_history, (SELECT MAX(score_date) AS d FROM gvm_scores) l "
+                    "WHERE score_date > l.d - 90 AND score_date <= l.d")
+        snaps = cur.fetchone()[0]
+    latest_d = r[10]
+    era_days = (latest_d - floor).days if (latest_d and floor) else 0
+    def win(n, c, lo, hi):
+        # ENABLED only when the daily era is at least n days deep (item 3: "disabled until history
+        # reaches it"). A handful of pre-era snapshots can still resolve inside the grace window
+        # (12 symbols at 180d today, from a 2026-03-01 snapshot) -- counted, but not an offer.
+        enabled = era_days >= n
+        reason = None if enabled else (f"daily history starts {floor} ({era_days} days back); {n}-day changes "
+                                       f"resolve from {(floor + __import__('datetime').timedelta(days=n)).isoformat()}")
+        return {"days": n, "resolves": int(c or 0), "of": int(r[0] or 0), "asof_from": str(lo) if lo else None,
+                "asof_to": str(hi) if hi else None, "enabled": enabled, "reason": reason}
+    return {"as_of_date": str(r[10]) if r[10] else None, "symbols": int(r[0] or 0),
+            "windows": {"30": win(30, r[1], r[4], r[5]), "90": win(90, r[2], r[6], r[7]), "180": win(180, r[3], r[8], r[9])},
+            "daily_history_floor": str(floor) if floor else None, "daily_era_days": era_days, "snapshots_last_90d": int(snaps or 0),
+            "asof_grace_days": ASOF_GRACE_DAYS}
 
 
 @router.get("/api/qb/universe2/segments")
