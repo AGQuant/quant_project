@@ -3,6 +3,7 @@ room_endpoints.py — cc#1086 THE FABLE ROOM VIEWER
 ==================================================
     GET /room             -> scorr_room.html
     GET /api/room/feed    -> the thread, newest task first, oldest message first within a task
+    GET /api/room/shipped -> cc#2152: tasks done today (IST), by finished_at
 
 WHAT THIS IS. CC_COMMS_LOOP_V1 (session_log 24138) says `cc_task_logs` IS the meeting room: Fable
 and CC talk through the table and the founder moderates. Until now watching that conversation meant
@@ -183,6 +184,39 @@ def room_feed(tasks: int = Query(10, ge=1, le=50)):
         log.exception("room feed failed")
         return JSONResponse(status_code=503,
                             content={"error": "The room is unreachable — %s" % str(e)[:200]})
+
+
+# cc#2152: the Shipped-today tab reads the column the close-out actually writes. The old Pushes tab
+# was fed by message prefixes (kind == push), and the card's own reading was that a status value
+# ('pushed') nobody has written since 06-Sep fed it; either way the founder wants the day's shipped
+# cards as a list, keyed on finished_at in IST, and this is that list. One SELECT, read-only.
+_SHIPPED_SQL = """
+    SELECT id, title, priority, commit_sha, finished_at
+      FROM cc_tasks
+     WHERE status = 'done'
+       AND (finished_at AT TIME ZONE 'Asia/Kolkata')::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+     ORDER BY finished_at DESC, id DESC
+"""
+
+
+@router.get("/api/room/shipped")
+def room_shipped():
+    """cc#2152: tasks with status = 'done' whose finished_at falls on today's IST date."""
+    try:
+        with _conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(_SHIPPED_SQL)
+                rows = [dict(r) for r in cur.fetchall()]
+                cur.execute("SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::date AS d")
+                today = cur.fetchone()
+        for r in rows:
+            r["finished_at"] = r["finished_at"].isoformat() if r.get("finished_at") else None
+        return {"date_ist": str(today["d"]) if today else None, "count": len(rows), "tasks": rows,
+                "repo_url": _REPO_URL}
+    except Exception as e:
+        log.exception("room shipped failed")
+        return JSONResponse(status_code=503,
+                            content={"error": "Shipped list unreachable -- %s" % str(e)[:200]})
 
 
 @router.get("/room", response_class=HTMLResponse)

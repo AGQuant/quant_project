@@ -29,6 +29,7 @@ READ-ONLY ON EVERYTHING EXCEPT THE TWO COLUMNS IT OWNS. It writes `status` and `
 rows it releases, and appends one cc_task_logs line per release. No DDL, no deletes, nothing else.
 """
 
+import json
 import logging
 import os
 
@@ -131,6 +132,57 @@ _RELEASE_SQL = """
 """
 
 
+# ── cc#2152: the nightly task-bookkeeping alert, riding THIS job ──────────────────────────────────
+# The gap it names (DAY LOGs 15/16/17-Sep): a task pushed, its result written, and nobody closed it --
+# status stays in_progress with a commit_sha, so it is neither queue work nor shipped work and the
+# day-end verification pass walks past it (six such rows overnight on 16-Sep). This job already wakes
+# every 15 minutes under an active scheduler_master row (bg_stale_claim_release), so the alert rides
+# here instead of adding a registry row: ONE ops_log row per IST day, written by the first tick of
+# the IST day that finds offenders, listing them by id and title. ALERT ONLY -- nothing here touches
+# a task row; closing is Fable's diff + DB verification, never automatic.
+ALERT_TITLE = "CC_TASKS_UNFINISHED_WITH_COMMIT"
+UNFINISHED_HOURS = 12
+
+_UNFINISHED_SQL = """
+    SELECT id, title, commit_sha, claimed_at
+      FROM cc_tasks
+     WHERE status = 'in_progress' AND commit_sha IS NOT NULL AND result IS NOT NULL
+       AND finished_at IS NULL AND claimed_at < NOW() - (%s * INTERVAL '1 hour')
+     ORDER BY claimed_at
+"""
+# One row per IST day. ops_log.session_ts is written with NOW() and stored naive in UTC (checked
+# 17-Sep against the ist field other alerts carry), so the day test converts before comparing.
+_ALREADY_TODAY_SQL = """
+    SELECT 1 FROM ops_log
+     WHERE title = %s
+       AND (session_ts AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date
+           = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+     LIMIT 1
+"""
+
+
+def alert_unfinished_with_commit(cur, hours=UNFINISHED_HOURS):
+    """Write today's CC_TASKS_UNFINISHED_WITH_COMMIT row when it is not there yet and offenders
+    exist. Returns {"written", "count", "ids", "why"}. Read + one INSERT on ops_log, nothing else."""
+    cur.execute(_ALREADY_TODAY_SQL, (ALERT_TITLE,))
+    if cur.fetchone():
+        return {"written": False, "count": None, "ids": [], "why": "already logged today"}
+    cur.execute(_UNFINISHED_SQL, (hours,))
+    rows = cur.fetchall()
+    if not rows:
+        return {"written": False, "count": 0, "ids": [], "why": "no offenders"}
+    tasks = [{"id": r[0], "title": (r[1] or "")[:160], "commit_sha": r[2], "claimed_at": str(r[3])}
+             for r in rows]
+    cur.execute(
+        "INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+        "VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s::jsonb)",
+        (ALERT_TITLE, json.dumps({
+            "cc": 2152, "count": len(tasks), "hours": hours, "tasks": tasks,
+            "note": "in_progress with a commit_sha and a result but no finished_at for over %d hours "
+                    "-- alert only; closing is Fable's diff + DB verification" % hours})))
+    return {"written": True, "count": len(tasks), "ids": [t["id"] for t in tasks], "why": "written"}
+
+
 def release_stale_claims(skip_ids=None, minutes=None, conn=None):
     """Release abandoned claims. Returns a list of {id, title, claimed_min} for what was released.
 
@@ -179,6 +231,23 @@ def release_stale_claims(skip_ids=None, minutes=None, conn=None):
                      "session to claim" % age))
         if own:
             c.commit()
+        # cc#2152: the daily bookkeeping alert rides this tick -- in its OWN transaction, after the
+        # releases are committed, so a failure here can never roll a release back.
+        try:
+            with c.cursor() as cur2:
+                _al = alert_unfinished_with_commit(cur2)
+            if own:
+                c.commit()
+            if _al.get("written"):
+                log.error("cc#2152 %s: %d task(s) pushed with a result but never closed: %s",
+                          ALERT_TITLE, _al["count"], ", ".join("cc#%s" % i for i in _al["ids"]))
+        except Exception as _ae:
+            log.warning("cc#2152 %s skipped this tick: %s", ALERT_TITLE, _ae)
+            try:
+                if own:
+                    c.rollback()
+            except Exception:
+                pass
         # EVERY run says what it saw, including the quiet ones. A job that only logs when it acts
         # is indistinguishable from a job that is not running at all — which is exactly the state
         # this one was in while it recorded 'skipped' every quarter hour.

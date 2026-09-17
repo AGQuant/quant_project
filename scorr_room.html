@@ -50,6 +50,15 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,Bl
 .k-question,.k-stopped{color:var(--gold);background:rgba(245,185,74,.16)}
 .k-reco{color:var(--acc);background:rgba(77,124,254,.16)}
 .k-push{color:var(--grn);background:rgba(47,212,139,.16)}
+/* cc#2152: the Shipped-today list */
+.ship-head{font-size:11.5px;color:var(--mut);padding:10px 2px 6px}
+.ship{display:flex;gap:10px;align-items:center;padding:9px 12px;border:1px solid var(--line);border-top:none;background:var(--card);font-size:13px;min-width:0}
+.ship:first-of-type{border-top:1px solid var(--line);border-radius:10px 10px 0 0}
+.ship:last-child{border-radius:0 0 10px 10px}
+.ship .id{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;font-weight:800;color:var(--acc);flex:0 0 auto}
+.ship .ttl{flex:1;min-width:0;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ship .sha.none{color:var(--mut);border-bottom:none}
+.ship .t{color:var(--mut);font-size:11.5px;flex:0 0 auto;font-variant-numeric:tabular-nums}
 .k-claim,.k-note{color:var(--mut);background:rgba(148,166,210,.12)}
 .sha{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--grn);text-decoration:none;border-bottom:1px dotted rgba(47,212,139,.5)}
 .sha:hover{color:#5BE3A6}
@@ -77,13 +86,13 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,Bl
 </div>
 <script>
 /* One GET, no POST anywhere in this file. See the header comment. */
-var STATE = { threads: [], filter: 'all', seen: {}, first: true, repo: '' };
+var STATE = { threads: [], filter: 'all', seen: {}, first: true, repo: '', shipped: null };
 
 var FILTERS = [
   ['all',    'All',                function(){ return true; }],
   ['qs',     'Questions & stops',  function(m){ return m.kind === 'question' || m.kind === 'stopped'; }],
   ['reco',   'Rulings',            function(m){ return m.kind === 'reco'; }],
-  ['push',   'Pushes',             function(m){ return m.kind === 'push'; }],
+  ['shipped','Shipped today',      null],     /* cc#2152: task-level, from /api/room/shipped */
   ['open',   'Open cards',         null]     /* task-level, handled in render */
 ];
 
@@ -159,6 +168,7 @@ function msgHtml(m){
 
 function render(){
   var host = document.getElementById('body');
+  if (STATE.filter === 'shipped'){ renderShipped(host); return; }   /* cc#2152 */
   var f = FILTERS.filter(function(x){ return x[0] === STATE.filter; })[0];
   var openOnly = STATE.filter === 'open';
   var test = (f && f[2]) || function(){ return true; };
@@ -191,14 +201,13 @@ function render(){
 }
 
 function renderFilters(){
-  var counts = { all: 0, qs: 0, reco: 0, push: 0, open: 0 };
+  var counts = { all: 0, qs: 0, reco: 0, shipped: (STATE.shipped ? (STATE.shipped.count || 0) : 0), open: 0 };
   STATE.threads.forEach(function(t){
     if (String(t.status || '').toLowerCase() !== 'done') counts.open++;
     t.messages.forEach(function(m){
       counts.all++;
       if (m.kind === 'question' || m.kind === 'stopped') counts.qs++;
       if (m.kind === 'reco') counts.reco++;
-      if (m.kind === 'push') counts.push++;
     });
   });
   document.getElementById('filters').innerHTML = FILTERS.map(function(x){
@@ -213,7 +222,30 @@ function renderFilters(){
   });
 }
 
+/* cc#2152: the Shipped-today list. status = done AND finished_at on today's IST date, the column the
+   close-out writes -- served by /api/room/shipped, never derived from message prefixes. Its own
+   fetch, so a failure here leaves the conversation itself untouched. */
+function renderShipped(host){
+  var d = STATE.shipped;
+  if (!d){ host.innerHTML = '<div class="empty">Loading the shipped list\u2026</div>'; return; }
+  if (d.error){ host.innerHTML = '<div class="err"><b>Shipped list unreachable.</b><br>' + esc(d.error) + '</div>'; return; }
+  var rows = d.tasks || [];
+  if (!rows.length){ host.innerHTML = '<div class="empty">Nothing shipped yet today (' + esc(d.date_ist || 'IST') + '). A card lands here when its status is done and finished_at is today, IST.</div>'; return; }
+  host.innerHTML = '<div class="ship-head">' + rows.length + ' card' + (rows.length === 1 ? '' : 's') + ' done on ' + esc(d.date_ist || '') + ' (IST) \u00b7 by finished_at, newest first</div>'
+    + rows.map(function(t){
+        var sha = t.commit_sha ? '<a class="sha" target="_blank" rel="noopener" href="' + esc(STATE.repo) + '/commit/' + esc(t.commit_sha) + '">' + esc(String(t.commit_sha).slice(0, 7)) + '</a>' : '<span class="sha none">no sha</span>';
+        return '<div class="ship"><span class="id">cc#' + esc(t.id) + '</span><span class="ttl" title="' + esc(t.title || '') + '">' + esc(t.title || '') + '</span>' + sha + '<span class="t">' + esc(hhmm(t.finished_at)) + '</span></div>';
+      }).join('');
+}
+function loadShipped(){
+  fetch('/api/room/shipped', { headers: { 'Accept': 'application/json' } })
+    .then(function(r){ return r.text().then(function(t){ var d = null; try { d = JSON.parse(t); } catch(e){} if (!r.ok || !d || d.error) throw new Error((d && d.error) || ('server returned ' + r.status)); return d; }); })
+    .then(function(d){ STATE.shipped = d; if (!STATE.repo && d.repo_url) STATE.repo = d.repo_url; renderFilters(); if (STATE.filter === 'shipped') render(); })
+    .catch(function(e){ STATE.shipped = { error: e.message, count: 0, tasks: [] }; renderFilters(); if (STATE.filter === 'shipped') render(); });
+}
+
 function load(){
+  loadShipped();   /* cc#2152 */
   fetch('/api/room/feed?tasks=10', { headers: { 'Accept': 'application/json' } })
     .then(function(r){
       return r.text().then(function(t){
