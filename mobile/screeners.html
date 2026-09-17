@@ -18,6 +18,8 @@
      live count from /run in a sticky footer, results in the same names sheet. The Build-your-own card points here.
      cc#2160 (Screeners PUSH 5/5): the chip selection is mirrored into the URL (replaceState) so a link reopens to the
      same screen; Share copies that link; count-0 / alone-0 / meta-failure states are explicit, never blank.
+     cc#2173 (founder review 17-Sep 12:19): chips are label-only (no per-chip count), the ONE live count sits under the
+     subtitle, the footer keeps the buttons only, rows are ~30% shorter.
      TOKEN_MAP  #D4AF37 -> --brand · #3DD68C -> --win · #FF5C6C -> --loss · #131316 -> --panel · #1B1B20 -> --hi ·
      #2A2A32 -> --edge · #F5F2EA -> --ink · #8E8A7E -> --muted -->
 <html lang="en">
@@ -84,20 +86,21 @@ body.sk-lock{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 /* cc#2159: the custom screener view -- ten rows, three chips each, sticky count footer */
 .sk-cs-head{padding:var(--space-14) var(--space-16) var(--space-4)}
 .sk-cs-t{font-size:var(--type-18);font-weight:800}.sk-cs-s{font-size:var(--type-115);color:var(--muted);margin-top:var(--space-3)}
+.sk-cs-count{margin-top:var(--space-8);font-size:var(--type-16);font-weight:800;color:var(--ink)}.sk-cs-count b{font-size:var(--type-18);font-weight:800;transition:opacity .15s}.sk-cs-count b.dim{opacity:.45}.sk-cs-count span{font-size:var(--type-115);font-weight:600;color:var(--muted);margin-left:var(--space-5)}
 .sk-cs{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:0 var(--space-12)}
-.sk-cs-row{padding:var(--space-12) 0;border-bottom:var(--bw-1) solid var(--hi)}.sk-cs-row:last-child{border-bottom:none}
-.sk-cs-l{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}
-.sk-cs-r{font-size:var(--type-10);color:var(--muted);margin-top:var(--space-2);line-height:1.45}
-.sk-cs-chips{display:flex;flex-wrap:nowrap;gap:var(--space-6);margin-top:var(--space-8)}
-.sk-chip{flex:1 1 0;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-2);padding:var(--space-5) var(--space-6);border-radius:var(--radius-12);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--ink);font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sk-cs-row{padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--hi)}.sk-cs-row:last-child{border-bottom:none}   /* cc#2173: tighter rows */
+.sk-cs-h{display:flex;align-items:baseline;gap:var(--space-8);min-width:0;cursor:pointer}   /* cc#2173: label + rule on ONE line; tap the line to read the whole rule */
+.sk-cs-l{flex:none;font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}
+.sk-cs-r{flex:1;min-width:0;font-size:var(--type-10);color:var(--muted);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sk-cs-row.open .sk-cs-r{white-space:normal}
+.sk-cs-chips{display:flex;flex-wrap:nowrap;gap:var(--space-6);margin-top:var(--space-6)}
+.sk-chip{flex:1 1 0;min-width:0;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0 var(--space-6);border-radius:var(--radius-12);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--ink);font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}   /* cc#2173: label only */
 .sk-chip-l{font-size:var(--type-11);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.sk-chip-n{font-size:var(--type-9);color:var(--muted);font-weight:700}
-.sk-chip.on{background:color-mix(in srgb, var(--brand) 16%, var(--panel));border-color:var(--brand);color:var(--brand)}.sk-chip.on .sk-chip-n{color:var(--brand)}
+.sk-chip.on{background:color-mix(in srgb, var(--brand) 16%, var(--panel));border-color:var(--brand);color:var(--brand)}
 .sk-cs-excl{margin:var(--space-10) var(--space-16) 0;font-size:var(--type-105);color:var(--muted);line-height:1.5;padding:var(--space-8) var(--space-12);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12)}
 .sk-cs-excl[hidden]{display:none}
 .sk-cs-pad{height:var(--space-80)}
-.sk-cs-foot{position:fixed;left:0;right:0;z-index:21;background:var(--panel);border-top:var(--bw-1) solid var(--edge);padding:var(--space-10) var(--space-16);display:flex;align-items:center;gap:var(--space-8);font-family:Sora,-apple-system,sans-serif;color:var(--ink)}
-.sk-cs-n{flex:1;min-width:0;font-size:var(--type-105);color:var(--muted);line-height:1.3}.sk-cs-n b{display:block;font-size:var(--type-18);color:var(--ink);font-weight:800;transition:opacity .15s}.sk-cs-n b.dim{opacity:.45}
+.sk-cs-foot{position:fixed;left:0;right:0;z-index:21;background:var(--panel);border-top:var(--bw-1) solid var(--edge);padding:var(--space-8) var(--space-16);display:flex;align-items:center;justify-content:flex-end;gap:var(--space-8);font-family:Sora,-apple-system,sans-serif;color:var(--ink)}   /* cc#2173: buttons only, right-aligned */
 .sk-cs-clear{min-height:44px;padding:0 var(--space-12);border-radius:var(--radius-12);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);font-weight:800;font-size:var(--type-11);font-family:inherit;cursor:pointer}
 .sk-cs-show{min-height:44px;padding:0 var(--space-14);border-radius:var(--radius-12);background:color-mix(in srgb, var(--brand) 20%, var(--panel));border:var(--bw-1) solid var(--brand);color:var(--brand);font-weight:800;font-size:var(--type-12);font-family:inherit;cursor:pointer}.sk-cs-show:disabled{opacity:.4;cursor:default}
 .sk-warn{color:var(--loss)}
@@ -288,10 +291,10 @@ function renderCustom(meta){
   document.getElementById('pg-title').textContent='Custom screener'; var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/screeners');
   var a=meta.as_of||{}; var behind=(a.invest&&a.gvm&&a.invest<a.gvm)?' · <span class="sk-warn">Investment score is one day behind</span>':'';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(a.gvm))+'</b> · EOD only · '+Number(meta.universe||0).toLocaleString('en-IN')+' names'+behind;
-  var h='<div class="sk-cs-head"><div class="sk-cs-t">Custom screener</div><div class="sk-cs-s">Tap what you want. No numbers to type.</div></div><div class="sk-cs" id="cs-panel">';
+  var h='<div class="sk-cs-head"><div class="sk-cs-t">Custom screener</div><div class="sk-cs-s">Tap what you want. No numbers to type.</div><div class="sk-cs-count"><b id="cs-count">—</b><span id="cs-count-l">names match</span></div></div><div class="sk-cs" id="cs-panel">';   // cc#2173: the one live count sits here
   (meta.filters||[]).forEach(function(f){
-    h+='<div class="sk-cs-row" data-key="'+esc(f.key)+'"><div class="sk-cs-l">'+esc(f.label)+'</div><div class="sk-cs-r">'+esc(f.rule_text||'')+'</div><div class="sk-cs-chips">'
-      + (f.buttons||[]).slice(0,3).map(function(b){ var on=(CS.sel[f.key]||[]).indexOf(b.key)>=0; return '<button type="button" class="sk-chip'+(on?' on':'')+'" data-key="'+esc(f.key)+'" data-b="'+esc(b.key)+'" aria-pressed="'+(on?'true':'false')+'"><span class="sk-chip-l">'+esc(b.label)+'</span><span class="sk-chip-n">'+Number(b.alone||0).toLocaleString('en-IN')+'</span></button>'; }).join('')
+    h+='<div class="sk-cs-row" data-key="'+esc(f.key)+'"><div class="sk-cs-h" title="'+esc(f.rule_text||'')+'"><span class="sk-cs-l">'+esc(f.label)+'</span><span class="sk-cs-r">'+esc(f.rule_text||'')+'</span></div><div class="sk-cs-chips">'
+      + (f.buttons||[]).slice(0,3).map(function(b){ var on=(CS.sel[f.key]||[]).indexOf(b.key)>=0; return '<button type="button" class="sk-chip'+(on?' on':'')+'" data-key="'+esc(f.key)+'" data-b="'+esc(b.key)+'" aria-pressed="'+(on?'true':'false')+'"><span class="sk-chip-l">'+esc(b.label)+'</span></button>'; }).join('')   // cc#2173: label only; /meta still carries `alone`
       + '</div></div>';
   });
   h+='</div><div class="sk-cs-excl" id="cs-excl" hidden></div>';
@@ -299,7 +302,7 @@ function renderCustom(meta){
   document.getElementById('body').innerHTML=h;
   if(!document.getElementById('cs-foot')){
     var foot=document.createElement('div'); foot.className='sk-cs-foot'; foot.id='cs-foot';
-    foot.innerHTML='<div class="sk-cs-n"><b id="cs-count">—</b><span id="cs-count-l">names match</span></div><button type="button" class="sk-cs-clear" id="cs-clear">Clear</button><button type="button" class="sk-cs-clear" id="cs-share" disabled>Share</button><button type="button" class="sk-cs-show" id="cs-show" disabled>Show names</button>';
+    foot.innerHTML='<button type="button" class="sk-cs-clear" id="cs-clear">Clear</button><button type="button" class="sk-cs-clear" id="cs-share" disabled>Share</button><button type="button" class="sk-cs-show" id="cs-show" disabled>Show names</button>';   // cc#2173: buttons only
     document.body.appendChild(foot);
     document.getElementById('cs-clear').addEventListener('click', function(){ CS.sel={}; csSaveSel(); csSyncUrl(); document.querySelectorAll('#cs-panel .sk-chip').forEach(function(c){ c.classList.remove('on'); c.setAttribute('aria-pressed','false'); }); csRefresh(0); });
     document.getElementById('cs-share').addEventListener('click', csShare);
@@ -308,6 +311,7 @@ function renderCustom(meta){
   }
   csPlaceFoot();
   document.getElementById('cs-panel').addEventListener('click', function(e){
+    var hd=e.target.closest('.sk-cs-h'); if(hd){ hd.parentNode.classList.toggle('open'); return; }   // cc#2173: the header line opens the full rule text
     var c=e.target.closest('.sk-chip'); if(!c) return; var k=c.getAttribute('data-key'), b=c.getAttribute('data-b'); var arr=CS.sel[k]||[]; var i=arr.indexOf(b);
     if(i>=0) arr.splice(i,1); else arr.push(b); if(arr.length) CS.sel[k]=arr; else delete CS.sel[k];
     c.classList.toggle('on', i<0); c.setAttribute('aria-pressed', i<0?'true':'false'); csSaveSel(); csSyncUrl(); csRefresh(250);
