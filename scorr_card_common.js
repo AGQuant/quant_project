@@ -444,10 +444,15 @@ window.scorrAsofStamp = function (asof) {
   /* cc#897 (founder 08-Aug): FIVE slots — Models drops out. Its children all have their own
      doorway on the Home Tools grid now, so the sixth slot was spending permanent nav real estate
      on a hub nobody needs to pass through. */
+  /* cc#2170 (founder 17-Sep-2026 12:04 + 14:36 IST, RECO 6981): the bar is FIXED -- Home · GVM · AICIO ·
+     Check · Alerts, left to right. V8 leaves the bar only: /m/v8 stays a route, a Home grid Analytics tile
+     (HOME_GRID_R1) and a More-sheet entry. AICIO is the premium product and takes the centre slot; its glyph
+     is the NAV array's own /m/aicio glyph (\u2299), distinct from GVM's \u25c8. Everything else (Dash,
+     Models, WoT, Invest Scan, Results, Sector, QB ...) lives on the Home grid / More sheet, never here. */
   var NAV = [
     { href: '/m/home',   icon: '\u25e7', label: 'Home' },
-    { href: '/m/v8',     icon: '\u25b3', label: 'V8' },
     { href: '/m/gvm',    icon: '\u25c8', label: 'GVM' },
+    { href: '/m/aicio',  icon: '\u2299', label: 'AICIO' },
     { href: '/m/check',  icon: '\u25ce', label: 'Check' },
     /* cc#1506 (MANUAL_TRADE_ALERTS_V1, 34521): slot 5 Intel -> Alerts. /m/intel (news) stays
        fully live via the More sheet and Home links; only its NAV SLOT moved. This block is the
@@ -460,7 +465,9 @@ window.scorrAsofStamp = function (asof) {
   /* deeper screens highlight their parent slot. cc#897: the three that pointed at /m/models were
      REPOINTED to /m/home — a parent that is no longer a slot highlights nothing, which reads as a
      broken nav rather than a deep screen. /m/models itself joins them for the same reason. */
-  var PARENT = { '/m/positions': '/m/v8', '/m/qb': '/m/v8', '/m/results': '/m/v8',
+  /* cc#2170: V8 is no longer a slot, so its family (and /m/v8 itself, opened from the Home grid tile)
+     lights Home -- the same rule cc#897 applied when Models left the bar. */
+  var PARENT = { '/m/positions': '/m/home', '/m/qb': '/m/home', '/m/results': '/m/home', '/m/v8': '/m/home',
                  '/m/holdings': '/m/home', '/m/screeners': '/m/home',
                  '/m/sector': '/m/home', '/m/fpc': '/m/home', '/m/digest': '/m/home',
                  '/m/intel': '/m/home',   /* cc#1638: opened from the Home grid, so Home stays lit (the Sector pattern) */

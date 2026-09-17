@@ -512,7 +512,7 @@ PWA_JS = """
     ['/m/mf', '\\u25c9', 'Mutual Funds (mobile)', 'm'],
     // cc#1904: AI CIO — same shape as cc#1903's Mutual Funds entry above. Glyph matches /cio's
     // own desktop entry ('\\u2299', line ~401 in this same array) — not invented here.
-    ['/m/aicio', '\\u2299', 'AI CIO (mobile)', 'm'],
+    ['/m/aicio', '\\u2299', 'AICIO (mobile)', 'm'],   // cc#2170: one-word label, it is a bottom-bar slot now
     // cc#1905: Planning (FPC) — same pre-existing gap as /m/screeners and /m/sector had before
     // cc#1907. Glyph matches this array's own desktop '/fpc' entry ('\\u25e7', line ~402).
     ['/m/fpc', '\\u25e7', 'Planning / FPC (mobile)', 'm'],
@@ -562,7 +562,13 @@ PWA_JS = """
   // cc#1609 + cc#1585 (founder 02-Sep): /alerts and /trades left the desktop top nav — both live as
   // V8 header tabs (Wall of Trades, Alerts) in v8_dashboard.html; the routes stay live for typed
   // URLs and for the app. The mobile PRIMARY list below is the app's own bnav and is unchanged.
-  var PRIMARY = ['/m/home', '/m/gvm', '/m/check', '/m/trades'];
+  // cc#2170 (founder 17-Sep): the FIXED five, the same five scorr_card_common.js renders on every /m/
+  // page's own bar -- Home · GVM · AICIO · Check · Alerts. More stays as the sixth control here because
+  // this bar renders on legacy web pages where the sheet is what keeps nothing stranded (rule 2987).
+  var PRIMARY = ['/m/home', '/m/gvm', '/m/aicio', '/m/check', '/m/alerts'];
+  // cc#2170 / cc#1662: bar labels are ONE WORD. The NAV entries keep their descriptive labels for the
+  // More sheet ("Trade Check (mobile)", "Trade Alerts (mobile)"); the bar prints the five words.
+  var BAR_LABEL = { '/m/home': 'Home', '/m/gvm': 'GVM', '/m/aicio': 'AICIO', '/m/check': 'Check', '/m/alerts': 'Alerts' };
   if (!document.getElementById('pwa-mobile-nav')) {
     var nav = document.createElement('div');
     nav.className = 'pwa-mnav'; nav.id = 'pwa-mobile-nav';
@@ -576,7 +582,7 @@ PWA_JS = """
       var it = navByPath(pp); if (!it) return;
       var active = isActive(it[0]) ? ' active' : '';
       mhtml += '<a class="pwa-mn' + active + '" href="' + it[0] + '">'
-        + '<span class="ic">' + it[1] + '</span><span>' + shortLabel(it[2]) + '</span></a>';
+        + '<span class="ic">' + it[1] + '</span><span>' + (BAR_LABEL[pp] || shortLabel(it[2])) + '</span></a>';
     });
     var inSheet = NAV.some(function (it) { return PRIMARY.indexOf(it[0]) === -1 && isActive(it[0]); });
     mhtml += '<button type="button" class="pwa-mn' + (inSheet ? ' active' : '') + '" id="pwa-more-btn">'

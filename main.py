@@ -1593,13 +1593,13 @@ NAV_REGISTRY = {
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
-    "/m/aicio":      ("AI CIO (mobile)",         "nav-mobile"),   # cc#1904: new page, wired via the NAV array's More sheet
+    "/m/aicio":      ("AICIO (mobile) — bottom-bar slot 3 since cc#2170 (founder 17-Sep); More sheet + Home grid too", "nav-mobile"),   # cc#1904 page; cc#2170 slot
     "/m/learn":      ("Learn (mobile) — Knowledge Hub articles (knowledge_endpoints); Home grid tile + More sheet", "nav-mobile"),   # cc#1961
     "/m/fpc":        ("Planning / FPC (mobile)", "nav-mobile"),   # cc#1905: pre-existing route, gap fixed per cc#1907 default
     "/m/positions":  ("Open Book (mobile)",   "nav-mobile"),
     "/m/qb":         ("Baskets (mobile)",     "nav-mobile"),
     "/m/gvm":        ("GVM (mobile)",         "nav-mobile"),
-    "/m/v8":         ("V8 (mobile)",          "nav-mobile"),
+    "/m/v8":         ("V8 (mobile) — off the bottom bar since cc#2170 (founder 17-Sep); Home grid Analytics tile + More sheet", "grid+more-sheet"),
     "/m/check":      ("Trade Check (mobile)", "nav-mobile"),
     "/m/home":       ("Home (mobile)",        "nav-mobile"),
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
@@ -1608,7 +1608,7 @@ NAV_REGISTRY = {
     # cc#1506 gave Alerts the app bar's 4th slot; cc#1535 (founder 31-Aug) moved it to the home
     # grid tile 1 (the approve surface leads the grid) and gave the slot to WoT. Still in the
     # More sheet for injected pages — nothing stranded (rule 2987).
-    "/m/alerts":     ("Alerts (mobile)",       "grid+more-sheet"),
+    "/m/alerts":     ("Alerts (mobile) — bottom-bar slot 5 (cc#1506/cc#1662 in the live nav owner scorr_card_common.js; registry corrected cc#2170)", "nav-mobile"),
     "/m/results":    ("Results (mobile)",      "nav-mobile"),
     "/m/models":     ("Models — de-listed, reachable by typed URL", "typed-url"),   # cc#995: removed from nav (route + ScorrModels stay)
     # cc#991: Wall of Trades, TWO routes, one endpoint. cc#1535/cc#1536 (founder 31-Aug) ended
