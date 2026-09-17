@@ -98,7 +98,8 @@ import math
 import threading
 import time
 import zipfile
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, time as dt_time
+import json
 from typing import Dict, Optional
 from zoneinfo import ZoneInfo
 
@@ -569,6 +570,274 @@ def _maybe_start() -> bool:
     return True
 
 
+# ── cc#2031 A4: the GATED re-solve of STORED option_iv_daily.iv rows on the Black-76 parity forward ──
+# Phases A-C (2d4711c, 15-Sep-2026) changed the method for NEW rows only. This is the destructive
+# part the card gated on a founder GO: Fable's RECO (cc_task_logs 6864, founder-delegated,
+# 17-Sep) set four conditions -- (1) a plain CREATE TABLE backup first, (2) outside 09:15-15:30
+# IST, (3) the UPDATE in ONE transaction reporting rows changed vs the dry run, (4) ROLLBACK if the
+# changed count is more than 5% away from the dry run. All four live in a4_run() below. The
+# re-solve rule is ingest_date()'s own (parity forward off the strike nearest spot with BOTH legs
+# priced, carry fallback, _b76_iv_vec) applied to the stored close/spot -- one method, not a
+# second copy. Trigger: the same app_config flag pattern _startup_trigger() already uses for the
+# backfill (the CC sandbox has no HTTP path to prod): set A4_FLAG_KEY to a JSON
+# {"status":"pending","symbols":[...],"expect_outside":109,"tolerance":0.05,"dry_run":false,
+# "task_id":2031}; the next boot claims it and runs it on a daemon thread; the result lands in the
+# flag value AND as a cc_task_logs line on the task. Or POST /api/admin/option_iv/a4 with the token.
+A4_FLAG_KEY = "option_iv_a4_resolve"
+A4_BACKUP_TABLE = "option_iv_daily_bak_cc2031"
+A4_BAND_LO, A4_BAND_HI = 0.03, 1.50      # option_ivp's read-time sanity band (IV_FLOOR / IV_CEILING)
+_a4_running = False
+
+
+def a4_resolve_rows(rows):
+    """PURE (no DB). rows = list of (trade_date, expiry, strike, option_type, close, spot, iv) for
+    ONE symbol, any order. Re-solves every row's iv exactly as ingest_date() does for a fresh
+    bhavcopy: per (trade_date, expiry) group the parity forward F = K_atm + (C_atm - P_atm) *
+    e^(R_FREE*T) off the strike nearest that day's spot with BOTH legs priced (> 0); otherwise the
+    carry forward spot*e^(R_FREE*T); then the Black-76 bisection (_b76_iv_vec). A row with no
+    price stays NULL. Returns (iv_new ndarray aligned to rows, stats dict). Stats compare the
+    stored iv with the re-solve: rows_changed, null_flips, inside_to_outside / outside_to_inside
+    (the [0.03, 1.50] band), band_hits before/after (<= lo or >= hi), and the ATM same-strike
+    |CE - PE| gap in vol points (median / p95 over the parity groups) before and after."""
+    n = len(rows)
+    groups = {}
+    for i, r in enumerate(rows):
+        groups.setdefault((r[0], r[1]), []).append(i)
+    price = np.full(n, np.nan)
+    K = np.zeros(n)
+    T = np.zeros(n)
+    F = np.full(n, np.nan)
+    is_call = np.zeros(n, dtype=bool)
+    fallback_groups = 0
+    atm_pairs = []
+    for (d, exp), idxs in groups.items():
+        Tg = (exp - d).days / 365.0
+        spot = None
+        for i in idxs:
+            sp = rows[i][5]
+            if sp is not None and float(sp) > 0:
+                spot = float(sp)
+                break
+        legs = {}
+        for i in idxs:
+            c = rows[i][4]
+            c = float(c) if c is not None else None
+            if c is not None and c > 0:
+                legs.setdefault(float(rows[i][2]), {})[rows[i][3]] = (c, i)
+        best = None
+        if spot and Tg > 0:
+            for k, lg in legs.items():
+                if "CE" in lg and "PE" in lg:
+                    dist = abs(k - spot)
+                    if best is None or dist < best[0]:
+                        best = (dist, k, lg["CE"], lg["PE"])
+        if best is not None:
+            Fg = best[1] + (best[2][0] - best[3][0]) * math.exp(R_FREE * Tg)
+            atm_pairs.append((best[2][1], best[3][1]))
+        elif spot and Tg > 0:
+            Fg = spot * math.exp(R_FREE * Tg)
+            fallback_groups += 1
+        else:
+            Fg = np.nan
+            fallback_groups += 1
+        for i in idxs:
+            c = rows[i][4]
+            price[i] = float(c) if c is not None else np.nan
+            K[i] = float(rows[i][2])
+            T[i] = Tg
+            F[i] = Fg
+            is_call[i] = (rows[i][3] == "CE")
+    with np.errstate(invalid="ignore"):
+        iv_new = _b76_iv_vec(np.nan_to_num(price, nan=-1.0), F, K, T, is_call)
+    iv_new = np.where(np.isnan(price) | (price <= 0), np.nan, iv_new)
+    old = np.array([float(r[6]) if r[6] is not None else np.nan for r in rows], dtype=float)
+    lo, hi = A4_BAND_LO, A4_BAND_HI
+    both = np.isfinite(old) & np.isfinite(iv_new)
+    changed = both & (np.abs(old - iv_new) > 1e-9)
+    null_flips = int(np.sum(np.isfinite(old) != np.isfinite(iv_new)))
+    in_old = both & (old >= lo) & (old <= hi)
+    out_old = both & ((old < lo) | (old > hi))
+    in_new = both & (iv_new >= lo) & (iv_new <= hi)
+    out_new = both & ((iv_new < lo) | (iv_new > hi))
+
+    def _pct(vals, q):
+        return round(float(np.percentile(vals, q)), 3) if len(vals) else None
+
+    gb = [abs(old[a] - old[b]) * 100.0 for a, b in atm_pairs if np.isfinite(old[a]) and np.isfinite(old[b])]
+    ga = [abs(iv_new[a] - iv_new[b]) * 100.0 for a, b in atm_pairs if np.isfinite(iv_new[a]) and np.isfinite(iv_new[b])]
+    stats = {
+        "rows": n, "groups": len(groups), "parity_groups": len(atm_pairs), "fallback_groups": fallback_groups,
+        "rows_with_iv_before": int(np.sum(np.isfinite(old))), "rows_with_iv_after": int(np.sum(np.isfinite(iv_new))),
+        "rows_changed": int(changed.sum()), "null_flips": null_flips,
+        "inside_to_outside": int(np.sum(in_old & out_new)), "outside_to_inside": int(np.sum(out_old & in_new)),
+        "band_hits_before": int(np.sum(np.isfinite(old) & ((old <= lo) | (old >= hi)))),
+        "band_hits_after": int(np.sum(np.isfinite(iv_new) & ((iv_new <= lo) | (iv_new >= hi)))),
+        "atm_gap_before_median": _pct(gb, 50), "atm_gap_before_p95": _pct(gb, 95),
+        "atm_gap_after_median": _pct(ga, 50), "atm_gap_after_p95": _pct(ga, 95),
+        "gap_unit": "vol points (iv x 100), ATM same-strike |CE - PE| per parity group",
+    }
+    return iv_new, stats
+
+
+def a4_run(symbols, expect_outside=None, tolerance=0.05, dry_run=True, backup_table=A4_BACKUP_TABLE) -> dict:
+    """The gated run. dry_run=True: read + re-solve + stats, nothing written (the connection is
+    rolled back). dry_run=False: refuses inside 09:15-15:30 IST on a weekday; then, in ONE
+    transaction: CREATE TABLE <backup_table> AS SELECT * FROM option_iv_daily (a plain CREATE --
+    a re-run against an existing backup fails and rolls back rather than overwriting it), COPY the
+    re-solved ivs into a temp table, UPDATE only the rows whose iv actually differs, and commit --
+    unless the gate fails (inside_to_outside more than `tolerance` away from `expect_outside`),
+    in which case everything including the backup is rolled back and the result says so."""
+    now = _ist_now()
+    if not dry_run and now.weekday() < 5 and dt_time(9, 15) <= now.time() <= dt_time(15, 30):
+        return {"ok": False, "error": "market hours -- A4 writes run outside 09:15-15:30 IST only", "now_ist": now.isoformat(timespec="seconds")}
+    symbols = [str(x).strip().upper() for x in (symbols or []) if str(x).strip()]
+    if not symbols:
+        return {"ok": False, "error": "no symbols"}
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        per = {}
+        staging = []
+        for sym in symbols:
+            cur.execute("""SELECT trade_date, expiry, strike, option_type, close, spot, iv
+                           FROM option_iv_daily WHERE symbol=%s
+                           ORDER BY trade_date, expiry, strike, option_type""", (sym,))
+            rows = cur.fetchall()
+            if not rows:
+                per[sym] = {"rows": 0, "note": "no stored rows"}
+                continue
+            iv_new, st = a4_resolve_rows(rows)
+            per[sym] = st
+            for i, r in enumerate(rows):
+                v = float(iv_new[i]) if np.isfinite(iv_new[i]) else None
+                staging.append((sym, r[0], r[1], r[2], r[3], v))
+        total_outside = sum(int(s.get("inside_to_outside", 0)) for s in per.values())
+        total_changed = sum(int(s.get("rows_changed", 0)) for s in per.values())
+        gate = None
+        if expect_outside is not None:
+            diff = abs(total_outside - int(expect_outside)) / max(1, int(expect_outside))
+            gate = {"expect_outside": int(expect_outside), "actual_outside": total_outside,
+                    "diff_pct": round(diff * 100.0, 2), "tolerance_pct": round(float(tolerance) * 100.0, 2),
+                    "pass": bool(diff <= float(tolerance))}
+        result = {"ok": True, "dry_run": bool(dry_run), "symbols": symbols, "ran_at_ist": now.isoformat(timespec="seconds"),
+                  "per_symbol": per, "rows_changed": total_changed, "inside_to_outside": total_outside, "gate": gate}
+        if dry_run:
+            conn.rollback()
+            result["action"] = "DRY RUN: nothing written"
+            return result
+        if gate is not None and not gate["pass"]:
+            conn.rollback()
+            result.update(ok=False, action="ROLLBACK: gate failed, nothing written (no backup left behind either)")
+            return result
+        cur.execute(f"CREATE TABLE {backup_table} AS SELECT * FROM option_iv_daily")
+        cur.execute("""CREATE TEMP TABLE option_iv_a4_staging (
+            symbol TEXT, trade_date DATE, expiry DATE, strike NUMERIC, option_type TEXT, iv NUMERIC
+        ) ON COMMIT DROP""")
+        with cur.copy("COPY option_iv_a4_staging (symbol, trade_date, expiry, strike, option_type, iv) FROM STDIN") as cp:
+            for row in staging:
+                cp.write_row(row)
+        cur.execute("""UPDATE option_iv_daily o SET iv = s.iv, loaded_at = NOW()
+                       FROM option_iv_a4_staging s
+                       WHERE o.symbol = s.symbol AND o.trade_date = s.trade_date AND o.expiry = s.expiry
+                         AND o.strike = s.strike AND o.option_type = s.option_type
+                         AND o.iv IS DISTINCT FROM s.iv""")
+        result["rows_updated"] = cur.rowcount
+        cur.execute(f"SELECT COUNT(*) FROM {backup_table}")
+        result["backup_table"] = backup_table
+        result["backup_rows"] = int(cur.fetchone()[0])
+        conn.commit()
+        result["action"] = "COMMITTED (one transaction: backup + update)"
+        return result
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}", "action": "ROLLBACK on error"}
+    finally:
+        conn.close()
+
+
+def _a4_claim():
+    """Atomically claim a pending A4 request from app_config; returns the config dict or None."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key=%s FOR UPDATE", (A4_FLAG_KEY,))
+            r = cur.fetchone()
+            if not r:
+                return None
+            try:
+                cfg = json.loads(r[0])
+            except Exception:
+                return None
+            if not isinstance(cfg, dict) or cfg.get("status") != "pending":
+                return None
+            cfg["status"] = "claimed"
+            cfg["claimed_at_ist"] = _ist_now().isoformat(timespec="seconds")
+            cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key=%s", (json.dumps(cfg), A4_FLAG_KEY))
+            conn.commit()
+            return cfg
+    except Exception as e:
+        log.error(f"option_iv A4 flag claim failed: {e}")
+        return None
+
+
+def _a4_finish(cfg, result):
+    """Write the outcome where CC can read it: the flag value and one cc_task_logs line."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cfg = dict(cfg or {})
+            cfg["status"] = "done" if result.get("ok") else "error"
+            cfg["result"] = result
+            cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key=%s", (json.dumps(cfg, default=str), A4_FLAG_KEY))
+            task_id = int(cfg.get("task_id") or 0)
+            if task_id:
+                cur.execute("INSERT INTO cc_task_logs (task_id, actor, message) VALUES (%s, 'claude_code', %s)",
+                            (task_id, ("A4 SERVER RUN (option_iv_history.a4_run, started by the app_config flag): "
+                                       + json.dumps(result, default=str))[:6000]))
+            conn.commit()
+    except Exception as e:
+        log.error(f"option_iv A4 finish-write failed: {e} -- result was {json.dumps(result, default=str)[:800]}")
+
+
+def _a4_thread(cfg):
+    global _a4_running
+    try:
+        res = a4_run(cfg.get("symbols") or [], expect_outside=cfg.get("expect_outside"),
+                     tolerance=float(cfg.get("tolerance", 0.05)), dry_run=bool(cfg.get("dry_run", True)))
+    except Exception as e:
+        res = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
+    finally:
+        _a4_running = False
+    log.info(f"option_iv A4 run: {json.dumps(res, default=str)[:500]}")
+    _a4_finish(cfg, res)
+
+
+def _a4_maybe_start() -> bool:
+    global _a4_running
+    if _a4_running:
+        return False
+    cfg = _a4_claim()
+    if not cfg:
+        return False
+    _a4_running = True
+    threading.Thread(target=_a4_thread, args=(cfg,), name="cc2031-a4-resolve", daemon=True).start()
+    return True
+
+
+@router.post("/api/admin/option_iv/a4")
+def option_iv_a4(symbols: str = "NIFTY,BANKNIFTY,RELIANCE", dry_run: bool = True,
+                 expect_outside: Optional[int] = None, tolerance: float = 0.05,
+                 x_admin_token: Optional[str] = Header(None)):
+    """On-demand A4 (token-gated). dry_run=true is read-only; dry_run=false writes under the same
+    four gates as the flag path. Runs inline (30k rows per symbol solve in well under a second;
+    the write path's full-table backup copy is the slow part -- prefer the flag path for that)."""
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(403, "invalid admin token")
+    return a4_run([x for x in symbols.split(",") if x.strip()], expect_outside=expect_outside,
+                  tolerance=tolerance, dry_run=dry_run)
+
+
 @router.on_event("startup")
 async def _startup_trigger():
     # CC sandbox has no HTTP path to prod (same problem bhavcopy_diagnostic.py / fy_end_backfill.py
@@ -576,6 +845,7 @@ async def _startup_trigger():
     # boot claims it atomically and starts the daemon thread.
     if _claim_flag():
         _maybe_start()
+    _a4_maybe_start()   # cc#2031 A4: same flag pattern, its own key (A4_FLAG_KEY)
 
 
 @router.post("/api/admin/option_iv/seed")
