@@ -13,6 +13,9 @@
      cc#2157 (Screeners PUSH 2/5): a card tap opens the NAMES SHEET on this page (renderNamesSheet -- the one shared
      sheet, push 4 reuses it with its own rows) instead of leaving for /m/screeners?screen=<id>; that page stays as
      the 'Full table' target. Body scroll locks while open; pushState so the back button closes the sheet.
+     cc#2159 (Screeners PUSH 4/5): /m/screeners?view=custom = the CUSTOM SCREENER view (same route, so no NAV change):
+     renderCustom(meta) from /api/mobile/custom_screener/meta -- ten filter rows, three chips each, multi-select,
+     live count from /run in a sticky footer, results in the same names sheet. The Build-your-own card points here.
      TOKEN_MAP  #D4AF37 -> --brand · #3DD68C -> --win · #FF5C6C -> --loss · #131316 -> --panel · #1B1B20 -> --hi ·
      #2A2A32 -> --edge · #F5F2EA -> --ink · #8E8A7E -> --muted -->
 <html lang="en">
@@ -35,18 +38,6 @@
 .km .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}.km .v{font-size:var(--type-16);font-weight:800;margin-top:var(--space-3)}
 .sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
 .sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-8);padding:0 var(--space-16)}
-.sc{background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-12) var(--space-8) var(--space-10);text-decoration:none;color:inherit;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;overflow:hidden;min-height:150px}
-.sc::before{content:"";position:absolute;inset:0;background:radial-gradient(90% 60% at 50% 0%,color-mix(in srgb, var(--brand) 9%, transparent),transparent 65%);pointer-events:none}
-.sc .ic{width:48px;height:48px;border-radius:var(--radius-15);background:var(--hi);border:var(--bw-1) solid var(--edge);display:flex;align-items:center;justify-content:center;margin-top:var(--space-2)}
-.sc .ic svg{width:26px;height:26px;stroke:var(--brand);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.sc svg .f{fill:var(--brand);stroke:none;opacity:.22}
-.sc .nm{font-size:var(--type-12);font-weight:800;line-height:1.2;margin-top:var(--space-9);min-height:29px}
-.sc .n{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-4)}.sc .n b{color:var(--ink);font-weight:800}
-.sc .rule{font-size:var(--type-9);color:var(--muted);line-height:1.4;margin-top:var(--space-6);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi);width:100%}
-.sc .dot{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:var(--radius-3);background:var(--win)}.sc .dot.st{background:var(--loss)}
-.wide{grid-column:span 3;flex-direction:row;text-align:left;align-items:center;gap:var(--space-12);min-height:0;padding:var(--space-12)}
-.wide .ic{flex:none;margin:0}.wide .nm{margin:0;min-height:0}.wide .n{margin-top:var(--space-2)}.wide .rule{border-top:none;padding-top:0;margin-top:var(--space-2);width:auto}
-.wide .go{margin-left:auto;color:var(--brand);font-weight:800;font-size:var(--type-16)}
 .emp{margin:0 var(--space-16);background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}
 /* cc#2156: per-group snap rail -- same geometry as mobile/sector.html .rl/.tc (copied, not imported) */
 .sk-rail{display:flex;align-items:stretch;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scroll-padding-left:var(--space-16);scrollbar-width:none;-webkit-overflow-scrolling:touch}.sk-rail::-webkit-scrollbar{display:none}
@@ -81,7 +72,33 @@
 .sk-gvm-sub{font-size:var(--type-95);color:var(--muted);text-align:right;margin-top:var(--space-3);white-space:nowrap;font-variant-numeric:tabular-nums}
 .sk-sheet-e{padding:var(--space-20) var(--space-16);font-size:var(--type-115);color:var(--muted);text-align:center;line-height:1.5}
 .sk-sheet-f{flex:none;display:flex;justify-content:space-between;align-items:center;padding:var(--space-12) var(--space-16);border-top:var(--bw-1) solid var(--edge);color:var(--brand);font-weight:800;font-size:var(--type-12);text-decoration:none}
+.sk-sheet-f[hidden],.sk-sheet-fx[hidden]{display:none}   /* cc#2159: author display rules would otherwise beat the hidden attribute (the custom sheet has no full-table link) */
 body.sk-lock{position:fixed;left:0;right:0;width:100%;overflow:hidden}
+.sk-sheet-fx{flex:none;padding:var(--space-10) var(--space-16);border-top:var(--bw-1) solid var(--edge);font-size:var(--type-10);color:var(--muted);line-height:1.5}
+/* cc#2159: the Build-your-own card, full width, same card idiom (the old .sc was restyled by mobile_app.css's bare .sc) */
+.sk-one{padding:var(--space-4) var(--space-16)}
+.sk-wide{flex:none;width:100%;max-width:none;min-height:0;align-items:center}
+.sk-go{margin-left:auto;color:var(--brand);font-weight:800;font-size:var(--type-18);align-self:center;position:relative}
+/* cc#2159: the custom screener view -- ten rows, three chips each, sticky count footer */
+.sk-cs-head{padding:var(--space-14) var(--space-16) var(--space-4)}
+.sk-cs-t{font-size:var(--type-18);font-weight:800}.sk-cs-s{font-size:var(--type-115);color:var(--muted);margin-top:var(--space-3)}
+.sk-cs{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:0 var(--space-12)}
+.sk-cs-row{padding:var(--space-12) 0;border-bottom:var(--bw-1) solid var(--hi)}.sk-cs-row:last-child{border-bottom:none}
+.sk-cs-l{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}
+.sk-cs-r{font-size:var(--type-10);color:var(--muted);margin-top:var(--space-2);line-height:1.45}
+.sk-cs-chips{display:flex;flex-wrap:nowrap;gap:var(--space-6);margin-top:var(--space-8)}
+.sk-chip{flex:1 1 0;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-2);padding:var(--space-5) var(--space-6);border-radius:var(--radius-12);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--ink);font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sk-chip-l{font-size:var(--type-11);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.sk-chip-n{font-size:var(--type-9);color:var(--muted);font-weight:700}
+.sk-chip.on{background:color-mix(in srgb, var(--brand) 16%, var(--panel));border-color:var(--brand);color:var(--brand)}.sk-chip.on .sk-chip-n{color:var(--brand)}
+.sk-cs-excl{margin:var(--space-10) var(--space-16) 0;font-size:var(--type-105);color:var(--muted);line-height:1.5;padding:var(--space-8) var(--space-12);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12)}
+.sk-cs-excl[hidden]{display:none}
+.sk-cs-pad{height:var(--space-80)}
+.sk-cs-foot{position:fixed;left:0;right:0;z-index:21;background:var(--panel);border-top:var(--bw-1) solid var(--edge);padding:var(--space-10) var(--space-16);display:flex;align-items:center;gap:var(--space-8);font-family:Sora,-apple-system,sans-serif;color:var(--ink)}
+.sk-cs-n{flex:1;min-width:0;font-size:var(--type-105);color:var(--muted);line-height:1.3}.sk-cs-n b{display:block;font-size:var(--type-18);color:var(--ink);font-weight:800;transition:opacity .15s}.sk-cs-n b.dim{opacity:.45}
+.sk-cs-clear{min-height:44px;padding:0 var(--space-12);border-radius:var(--radius-12);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);font-weight:800;font-size:var(--type-11);font-family:inherit;cursor:pointer}
+.sk-cs-show{min-height:44px;padding:0 var(--space-14);border-radius:var(--radius-12);background:color-mix(in srgb, var(--brand) 20%, var(--panel));border:var(--bw-1) solid var(--brand);color:var(--brand);font-weight:800;font-size:var(--type-12);font-family:inherit;cursor:pointer}.sk-cs-show:disabled{opacity:.4;cursor:default}
+.sk-warn{color:var(--loss)}
 /* screen table */
 .rulebox{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-left:var(--bw-3) solid var(--brand);border-radius:0 var(--radius-14) var(--radius-14) 0;padding:var(--space-12) var(--space-14);font-size:var(--type-115);line-height:1.55}
 .rulebox .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}
@@ -150,21 +167,26 @@ function ensureSheet(){
   if(SHEET) return SHEET;
   var bd=document.createElement('div'); bd.className='sk-bd'; bd.id='sk-bd'; bd.hidden=true;
   var sh=document.createElement('div'); sh.className='sk-sheet'; sh.id='sk-sheet'; sh.setAttribute('role','dialog'); sh.setAttribute('aria-modal','true'); sh.hidden=true;
-  sh.innerHTML='<div class="sk-sheet-h"><i class="sk-handle" id="sk-handle" role="button" aria-label="Close"></i><div class="sk-sheet-t" id="sk-sheet-t"></div><div class="sk-sheet-m" id="sk-sheet-m"></div><div class="sk-sheet-r" id="sk-sheet-r"></div></div><div class="sk-sheet-b" id="sk-sheet-b"></div><a class="sk-sheet-f" id="sk-sheet-f" href="#"><span>Full table, sortable</span><span>›</span></a>';
+  sh.innerHTML='<div class="sk-sheet-h"><i class="sk-handle" id="sk-handle" role="button" aria-label="Close"></i><div class="sk-sheet-t" id="sk-sheet-t"></div><div class="sk-sheet-m" id="sk-sheet-m"></div><div class="sk-sheet-r" id="sk-sheet-r"></div></div><div class="sk-sheet-b" id="sk-sheet-b"></div><div class="sk-sheet-fx" id="sk-sheet-fx" hidden></div><a class="sk-sheet-f" id="sk-sheet-f" href="#"><span>Full table, sortable</span><span>›</span></a>';
   document.body.appendChild(bd); document.body.appendChild(sh);
   bd.addEventListener('click', closeSheet); document.getElementById('sk-handle').addEventListener('click', closeSheet);
   document.addEventListener('keydown', function(e){ if(e.key==='Escape' && !sh.hidden) closeSheet(); });
   window.addEventListener('popstate', function(){ if(!sh.hidden) hideSheet(); });   // the back button closes the sheet, never the page
   SHEET={bd:bd, sh:sh}; return SHEET;
 }
-function nameRow(r){   // symbol + sector · mcap | GVM (brand colour from 8) + G/V/M compact
-  return '<div class="sk-row"><div><div class="sk-sym">'+esc(r.symbol)+'</div><div class="sk-sec">'+esc(r.sector||'—')+(r.mcap!=null?' · '+cr(r.mcap):'')+'</div></div>'
-    + '<div><div class="sk-gvm'+((r.gvm||0)>=8?' gd':'')+'">'+f2(r.gvm)+'</div><div class="sk-gvm-sub">G '+f1(r.g)+' · V '+f1(r.v)+' · M '+f1(r.m)+'</div></div></div>';
+function pct1(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(1)+'%'; }
+function capWord(c){ return ({large:'Large',mid:'Mid',small:'Small',micro:'Micro'})[c]||''; }
+function bandWord(b){ return ({STRONG_BUY:'Strong buy',ACCUMULATE:'Accumulate',WATCH:'Watch',AVOID:'Avoid'})[b]||(b||'—'); }
+function nameRow(r){   // symbol + sector · mcap | GVM (brand colour from 8) + G/V/M compact; cc#2159: custom rows add Invest score + band + 1-yr
+  var left2=(r.mcap!=null)?esc(r.sector||r.segment||'—')+' · '+cr(r.mcap):esc(r.sector||r.segment||'—')+(r.cap?' · '+capWord(r.cap):'');
+  var extra=(r.invest_score!=null)?'<div class="sk-gvm-sub">Invest '+f2(r.invest_score)+' · '+esc(bandWord(r.invest_band))+(r.year_return!=null?' · 1-yr '+pct1(r.year_return):'')+'</div>':'';
+  return '<div class="sk-row"><div><div class="sk-sym">'+esc(r.symbol)+'</div><div class="sk-sec">'+left2+'</div></div>'
+    + '<div><div class="sk-gvm'+((r.gvm||0)>=8?' gd':'')+'">'+f2(r.gvm)+'</div><div class="sk-gvm-sub">G '+f1(r.g)+' · V '+f1(r.v)+' · M '+f1(r.m)+'</div>'+extra+'</div></div>';
 }
 function renderNamesSheet(title, meta, rows, footerHref){
   var s=ensureSheet(); meta=meta||{};
   document.getElementById('sk-sheet-t').textContent=title||'';
-  document.getElementById('sk-sheet-m').innerHTML=(meta.count!=null?'<b>'+meta.count+'</b> name'+(meta.count===1?'':'s'):'')+(meta.last_run?(meta.count!=null?' · ':'')+'Last run '+esc(dmy(meta.last_run)):'');
+  document.getElementById('sk-sheet-m').innerHTML=meta.text!=null?meta.text:((meta.count!=null?'<b>'+meta.count+'</b> name'+(meta.count===1?'':'s'):'')+(meta.last_run?(meta.count!=null?' · ':'')+'Last run '+esc(dmy(meta.last_run)):''));   // cc#2159: meta.text = a ready line (custom screen)
   document.getElementById('sk-sheet-r').textContent=meta.rule||'';
   var b=document.getElementById('sk-sheet-b');
   if(rows===null) b.innerHTML='<div class="sk-sheet-e">Loading names…</div>';
@@ -172,6 +194,7 @@ function renderNamesSheet(title, meta, rows, footerHref){
   else if(!rows.length) b.innerHTML='<div class="sk-sheet-e">No names in this screen on the last run.</div>';
   else b.innerHTML=rows.map(nameRow).join('');
   var f=document.getElementById('sk-sheet-f'); if(footerHref){ f.setAttribute('href',footerHref); f.hidden=false; } else f.hidden=true;
+  var fx=document.getElementById('sk-sheet-fx'); if(meta.foot){ fx.innerHTML=meta.foot; fx.hidden=false; } else { fx.innerHTML=''; fx.hidden=true; }   // cc#2159: plain footer block (EOD basis line)
   return s;
 }
 var SCROLL_RESTORE='auto';
@@ -218,14 +241,80 @@ function renderList(d){
     h+='<div class="sk-rail" id="rail-'+esc(g.key)+'">'+g.rows.map(card).join('')+'</div>'
      + '<div class="sk-pager" aria-hidden="true">'+g.rows.map(function(_,i){return '<i'+(i===0?' class="on"':'')+'></i>';}).join('')+'</div>';
   });
-  h+='<div class="sec"><h2>Build your own</h2><span class="hint">V13 custom screen</span></div><div class="grid"><a class="sc wide" href="/screeners#custom"><div class="ic">'+ICON.custom+'</div><div><div class="nm">Custom screen</div><div class="n">Pick your own GVM, size and momentum cuts.</div><div class="rule">Opens the web builder. Saved screens: none yet.</div></div><span class="go">›</span></a></div>';
+  h+='<div class="sec"><h2>Build your own</h2><span class="hint">buttons, no typing</span></div><div class="sk-one"><a class="sk-card sk-wide" href="/m/screeners?view=custom"><div class="sk-ic">'+ICON.custom+'</div><div class="sk-body"><div class="sk-nm">Custom screener</div><div class="sk-n">Ten filters, three buttons each. Tap what you want.</div><div class="sk-rule">Live count as you tap · the names open right here</div></div><span class="sk-go">›</span></a></div>';   // cc#2159
   h+='<div class="note"><b>Only quant screens.</b> A screen with a written rule appears here; rank-only client lists do not. Green dot = ran on the latest date; red = stale, with its own date. Swipe a row to see the next screen; tap a screen to see its names right here.</div>';
   document.getElementById('body').innerHTML=h;
   wirePagers();
   var body=document.getElementById('body');
   if(!body._skTap){ body._skTap=true; body.addEventListener('click', function(e){   // cc#2157: a card tap opens the sheet; modifier clicks keep the link
-    var a=e.target.closest('a.sk-card'); if(!a||e.metaKey||e.ctrlKey||e.shiftKey||e.button===1) return;
+    var a=e.target.closest('a.sk-card'); if(!a||!a.getAttribute('data-id')||e.metaKey||e.ctrlKey||e.shiftKey||e.button===1) return;   // the custom card has no data-id: it navigates
     e.preventDefault(); openScreenSheet(a.getAttribute('data-id'), a.getAttribute('data-name')); }); }
+}
+/* cc#2159: the custom screener view. State = CS.sel {filter_key: [button_keys]}; the count comes from /run on every
+   tap (debounced, previous fetch aborted); the names sheet shows the rows /run already returned (no second fetch). */
+var CS={meta:null, sel:{}, last:null, timer:null, ctrl:null, seq:0}, CS_KEY='scorr_custom_screen_v1';
+function csLoadSel(){ try{ var s=JSON.parse(localStorage.getItem(CS_KEY)||'{}'); return (s&&typeof s==='object'&&!Array.isArray(s))?s:{}; }catch(e){ return {}; } }
+function csSaveSel(){ try{ if(Object.keys(CS.sel).length) localStorage.setItem(CS_KEY, JSON.stringify(CS.sel)); else localStorage.removeItem(CS_KEY); }catch(e){} }   // a per-viewer convenience, never a saved screen
+function csQuery(){ var q=[]; Object.keys(CS.sel).forEach(function(k){ if(CS.sel[k].length) q.push(encodeURIComponent(k)+'='+CS.sel[k].map(encodeURIComponent).join(',')); }); return q.join('&'); }
+function csPicked(){ return Object.keys(CS.sel).reduce(function(n,k){ return n+CS.sel[k].length; },0); }
+function csExclText(n){ return n+' name'+(n===1?' has':'s have')+' no technicals today and '+(n===1?'is':'are')+' left out of trend / 52-week / 1-year filters.'; }
+function renderCustom(meta){
+  CS.meta=meta; var known={}; (meta.filters||[]).forEach(function(f){ known[f.key]=f.buttons.map(function(b){ return b.key; }); });
+  var saved=csLoadSel(); CS.sel={}; Object.keys(saved).forEach(function(k){ if(known[k]){ var v=(saved[k]||[]).filter(function(b){ return known[k].indexOf(b)>=0; }); if(v.length) CS.sel[k]=v; } });
+  document.getElementById('pg-title').textContent='Custom screener'; var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/screeners');
+  var a=meta.as_of||{}; var behind=(a.invest&&a.gvm&&a.invest<a.gvm)?' · <span class="sk-warn">Investment score is one day behind</span>':'';
+  document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(a.gvm))+'</b> · EOD only · '+Number(meta.universe||0).toLocaleString('en-IN')+' names'+behind;
+  var h='<div class="sk-cs-head"><div class="sk-cs-t">Custom screener</div><div class="sk-cs-s">Tap what you want. No numbers to type.</div></div><div class="sk-cs" id="cs-panel">';
+  (meta.filters||[]).forEach(function(f){
+    h+='<div class="sk-cs-row" data-key="'+esc(f.key)+'"><div class="sk-cs-l">'+esc(f.label)+'</div><div class="sk-cs-r">'+esc(f.rule_text||'')+'</div><div class="sk-cs-chips">'
+      + (f.buttons||[]).slice(0,3).map(function(b){ var on=(CS.sel[f.key]||[]).indexOf(b.key)>=0; return '<button type="button" class="sk-chip'+(on?' on':'')+'" data-key="'+esc(f.key)+'" data-b="'+esc(b.key)+'" aria-pressed="'+(on?'true':'false')+'"><span class="sk-chip-l">'+esc(b.label)+'</span><span class="sk-chip-n">'+Number(b.alone||0).toLocaleString('en-IN')+'</span></button>'; }).join('')
+      + '</div></div>';
+  });
+  h+='</div><div class="sk-cs-excl" id="cs-excl" hidden></div>';
+  h+='<div class="note"><b>How it works.</b> Buttons in one row are either/or; rows combine. A row you never tap is off. Every button is the same end-of-day band the app shows elsewhere, so a name never passes here and fails there. Nothing is a recommendation.</div><div class="sk-cs-pad"></div>';
+  document.getElementById('body').innerHTML=h;
+  if(!document.getElementById('cs-foot')){
+    var foot=document.createElement('div'); foot.className='sk-cs-foot'; foot.id='cs-foot';
+    foot.innerHTML='<div class="sk-cs-n"><b id="cs-count">—</b><span id="cs-count-l">names match</span></div><button type="button" class="sk-cs-clear" id="cs-clear">Clear</button><button type="button" class="sk-cs-show" id="cs-show" disabled>Show names</button>';
+    document.body.appendChild(foot);
+    document.getElementById('cs-clear').addEventListener('click', function(){ CS.sel={}; csSaveSel(); document.querySelectorAll('#cs-panel .sk-chip').forEach(function(c){ c.classList.remove('on'); c.setAttribute('aria-pressed','false'); }); csRefresh(0); });
+    document.getElementById('cs-show').addEventListener('click', csShow);
+    window.addEventListener('resize', csPlaceFoot);
+  }
+  csPlaceFoot();
+  document.getElementById('cs-panel').addEventListener('click', function(e){
+    var c=e.target.closest('.sk-chip'); if(!c) return; var k=c.getAttribute('data-key'), b=c.getAttribute('data-b'); var arr=CS.sel[k]||[]; var i=arr.indexOf(b);
+    if(i>=0) arr.splice(i,1); else arr.push(b); if(arr.length) CS.sel[k]=arr; else delete CS.sel[k];
+    c.classList.toggle('on', i<0); c.setAttribute('aria-pressed', i<0?'true':'false'); csSaveSel(); csRefresh(250);
+  });
+  csRefresh(0);
+}
+function csPlaceFoot(){ var f=document.getElementById('cs-foot'), nav=document.querySelector('.bnav'); if(f) f.style.bottom=(nav?nav.offsetHeight:0)+'px'; }   // sits on top of the bottom nav
+function csRefresh(delay){
+  if(CS.timer) clearTimeout(CS.timer);
+  var cnt=document.getElementById('cs-count'); if(!cnt) return; cnt.classList.add('dim');   // dims while loading, never blanks
+  CS.timer=setTimeout(function(){
+    if(CS.ctrl){ try{ CS.ctrl.abort(); }catch(e){} }
+    var ctrl=window.AbortController?new AbortController():null; CS.ctrl=ctrl; var my=++CS.seq; var q=csQuery();
+    fetch('/api/mobile/custom_screener/run'+(q?'?'+q:''),{credentials:'same-origin', signal:ctrl?ctrl.signal:undefined}).then(function(r){ return r.json(); }).then(function(d){
+      if(my!==CS.seq) return; cnt.classList.remove('dim'); CS.last=d;
+      var show=document.getElementById('cs-show'), lab=document.getElementById('cs-count-l'), ex=document.getElementById('cs-excl');
+      if(!d||d.error){ cnt.textContent='—'; lab.textContent='could not count'; show.disabled=true; return; }
+      var picked=csPicked(), n=picked?Number(d.count||0):0;
+      cnt.textContent=n.toLocaleString('en-IN'); lab.textContent=picked?(n===1?'name matches':'names match'):'names match · pick at least one filter';
+      show.disabled=!(n>0&&picked>0);
+      var ne=Number(d.excluded_no_technicals||0); if(ne>0&&picked){ ex.textContent=csExclText(ne); ex.hidden=false; } else { ex.textContent=''; ex.hidden=true; }
+    }).catch(function(e){ if(my!==CS.seq||(e&&e.name==='AbortError')) return; cnt.classList.remove('dim'); cnt.textContent='—'; document.getElementById('cs-count-l').textContent='could not count'; document.getElementById('cs-show').disabled=true; });
+  }, delay||0);
+}
+function csShow(){
+  var d=CS.last; if(!d||!d.rows||!csPicked()) return;
+  var words=(d.applied||[]).map(function(x){ return x.label+': '+((x.buttons_label&&x.buttons_label.length)?x.buttons_label:(x.buttons_chosen||[])).join(' / '); }).join(' · ');
+  var a=d.as_of||{}; var foot='EOD basis · GVM '+esc(dmy(a.gvm))+' · Investment '+esc(dmy(a.invest))+' · Technicals '+esc(dmy(a.technicals));
+  var ne=Number(d.excluded_no_technicals||0); if(ne>0) foot+='<br>'+esc(csExclText(ne));
+  if(Number(d.count||0)>d.rows.length) foot+='<br>Showing the first '+d.rows.length+' of '+Number(d.count).toLocaleString('en-IN')+'.';
+  renderNamesSheet('Your screen', {text:'<b>'+Number(d.count||0).toLocaleString('en-IN')+'</b> name'+(d.count===1?'':'s')+' · '+esc(words), foot:foot}, d.rows, null);
+  showSheet();
 }
 var ROWS=[], KEY='gvm', ASC=false;
 function tbl(){
@@ -244,10 +333,11 @@ function renderScreen(d){
     + '<div class="note"><b>What this list is.</b> Every name here passed the rule above on the last run. Scores are the latest GVM; G, V, M are its three pillars. Nothing is a recommendation.</div>';
   ROWS=d.rows||[]; tbl();
 }
-var S=null; try{ S=new URLSearchParams(location.search).get('screen'); }catch(e){}
-fetch(S?'/api/mobile/screeners_app/screen?id='+encodeURIComponent(S):'/api/mobile/screeners_app/list',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+var S=null, VIEW=null; try{ var U=new URLSearchParams(location.search); S=U.get('screen'); VIEW=U.get('view'); }catch(e){}
+var URL0 = VIEW==='custom' ? '/api/mobile/custom_screener/meta' : (S ? '/api/mobile/screeners_app/screen?id='+encodeURIComponent(S) : '/api/mobile/screeners_app/list');
+fetch(URL0,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
   if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
-  S ? renderScreen(d) : renderList(d);
+  VIEW==='custom' ? renderCustom(d) : (S ? renderScreen(d) : renderList(d));
 }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load screens.</div>'; });
 </script>
 </body></html>
