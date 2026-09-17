@@ -372,7 +372,12 @@ PWA_JS = """
     // view"; corrects the cc#1747 spec): Intel is its OWN page now, /intel, served standalone under
     // the canonical nav with no V8 chrome — the GVM pattern. The V8 pane is gone; /dashboard#intel
     // client-redirects here and /news 301s here, so no old link 404s.
-    ['/intel', '\\u2139\\ufe0e', 'Intel'],
+    // cc#2136 (founder 16-Sep-2026): Intel is OUT of this top-level array -- it now sits in the V8
+    // Dashboard's own sub-nav row (v8_dashboard.html #v8toptabs, right after Index Intel), the same
+    // fold-under-V8 treatment cc#2132 gave the QB Universe stop. The /intel route, scorr_news.html,
+    // PROTECTED and _PWA_INJECT_PATHS are unchanged: the page stays gated and still receives this
+    // canonical nav, which is its only way back. NAV_REGISTRY: nav -> tab.
+    // (was: ['/intel', '\\u2139\\ufe0e', 'Intel'])
     // cc#1536 (founder 31-Aug): Alerts (approve surface, NEW desktop page) + Wall of Trades
     // (display) as ADJACENT desktop tabs, Alerts leading (the cc#1526 approve-surface-leads
     // precedent). Both 'd'-flagged: the mobile placements are cc#1535's (grid tile / bottom nav),

@@ -1654,7 +1654,7 @@ NAV_REGISTRY = {
     # view"; corrects the cc#1747 spec): Intel is a STANDALONE page at /intel — canonical nav, then
     # the page, no V8 header / strapline / status strip / sub-nav. The V8 pane is removed. Old
     # links do not 404: /news 301s to /intel (query kept) and /dashboard#intel client-redirects.
-    "/intel":        ("Intel", "nav"),   # cc#1754 rule id=2987
+    "/intel":        ("Intel — V8 sub-nav entry (removed from top nav)", "tab"),   # cc#1754 rule id=2987; cc#2136: folded under the V8 row, same treatment as /v12 (cc#557) and /qb/universe2 (cc#2132)
     "/news":         ("(-> /intel, 301 · old Home / Holdings / CIO links and bookmarks)", "typed-url"),   # cc#1754
     "/dashboard#intel": ("(-> /intel, client redirect · the old V8 pane hash)", "typed-url"),   # cc#1523 -> cc#1747 -> cc#1754
     "/dashboard#model": ("Model Portfolio (V8 tab · /quant-basket folded in)", "tab"),   # cc#1584 rule id=2987

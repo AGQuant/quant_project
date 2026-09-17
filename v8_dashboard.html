@@ -1279,6 +1279,15 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
   <div class="v8toptabs" id="v8toptabs">
     <button class="v8toptab active" data-pane="v8" onclick="showV8Pane('v8')">V8</button>
     <button class="v8toptab" data-pane="index" onclick="showV8Pane('index')">Index Intel</button>
+    <!-- cc#2136 (founder 16-Sep-2026): Intel moves OUT of the main top navbar and INTO this row,
+         right after Index Intel (topically adjacent, but a DIFFERENT page: Index Intel is the
+         #pane-index desk on this page; Intel is /intel, scorr_news.html, the news + research feed).
+         It NAVIGATES rather than swapping in a pane -- cc#1754 delinked Intel from the V8 chrome on
+         the founder's "full screen, like GVM" instruction, so a pane would undo that; the cc#853
+         Digest precedent for a navigating entry in this row applies. A real <a>, styled by the same
+         .v8toptab rule as its sibling buttons (no data-pane, so it never takes the active state).
+         /intel itself, its gate and its injected canonical nav are unchanged. -->
+    <a class="v8toptab" href="/intel" style="text-decoration:none;display:inline-block">Intel</a>
     <!-- cc#1207: V14 Intraday is HIDDEN, not removed. The engine is silent (bg_v14_cycle
          active=false, cc#1170) so the tab has nothing to show, but /dashboard#v14 is a link
          people already hold and the pane still renders for it — the button reveals itself below
