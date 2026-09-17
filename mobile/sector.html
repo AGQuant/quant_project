@@ -56,8 +56,9 @@
 /* themes rail */
 .rl{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}.rl::-webkit-scrollbar{display:none}
 .tc{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
-.tc .rk{font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em10)}
-.tc .nm{font-size:var(--type-14);font-weight:800;margin-top:var(--space-3)}.tc .tg{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3);line-height:1.45}
+/* cc#2166: si- prefixed like cc#2155 -- .rk / .tg / .pil / .v are also mobile_app.css bare selectors (mono font, 48px flex tagline, boxed value pill) */
+.tc .si-rk{font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em10)}
+.tc .nm{font-size:var(--type-14);font-weight:800;margin-top:var(--space-3)}.tc .si-tg{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3);line-height:1.45}
 .tc .lst{margin-top:var(--space-9);border-top:var(--bw-1) solid var(--hi);padding-top:var(--space-6)}
 .tc .r{display:flex;justify-content:space-between;font-size:var(--type-115);padding:var(--space-4) 0}.tc .r b{font-weight:800}.tc .r span{color:var(--muted)}
 /* detail */
@@ -67,12 +68,12 @@
 .hero .nm{font-size:var(--type-22);font-weight:800;line-height:1.05;margin-top:var(--space-3)}
 .hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-8)}
 .hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted)}.hero .big .n b{color:var(--ink)}
-.pil{margin-top:var(--space-10)}.pil .r{display:grid;grid-template-columns:22px 1fr 44px;gap:var(--space-10);align-items:center;padding:var(--space-5) 0}
-.pil .l{font-size:var(--type-12);font-weight:800;color:var(--brand)}.pil .bar{height:6px;border-radius:var(--radius-3);background:var(--hi);overflow:hidden}.pil .bar i{display:block;height:6px;background:var(--brand);border-radius:var(--radius-3)}
-.pil .v{font-size:var(--type-125);font-weight:800;text-align:right}
+.si-pil{margin-top:var(--space-10)}.si-pil .r{display:grid;grid-template-columns:22px 1fr 44px;gap:var(--space-10);align-items:center;padding:var(--space-5) 0}
+.si-pil .l{font-size:var(--type-12);font-weight:800;color:var(--brand)}.si-pil .bar{height:6px;border-radius:var(--radius-3);background:var(--hi);overflow:hidden}.si-pil .bar i{display:block;height:6px;background:var(--brand);border-radius:var(--radius-3)}
+.si-pil .si-pv{font-size:var(--type-125);font-weight:800;text-align:right;color:var(--ink)}
 .strip{display:grid;grid-template-columns:repeat(4,1fr);margin:var(--space-10) var(--space-16) 0;border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);overflow:hidden}
 .strip>div{padding:var(--space-9) var(--space-8);background:var(--panel);border-right:var(--bw-1) solid var(--edge)}.strip>div:last-child{border-right:none}
-.strip .k{font-size:var(--type-8);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.strip .v{font-size:var(--type-13);font-weight:800;margin-top:var(--space-3)}
+.strip .si-sk{font-size:var(--type-8);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.strip .si-sv{font-size:var(--type-13);font-weight:800;margin-top:var(--space-3);color:var(--ink)}
 .card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
 .ch{display:flex;align-items:baseline;justify-content:space-between}
 .ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
@@ -146,7 +147,7 @@ function renderList(d){
   var th=d.themes||[];
   h+='<div class="sec"><h2>Emerging themes</h2><span class="hint">'+th.length+' · swipe →</span></div>';
   h+= th.length ? '<div class="rl">'+th.map(function(t){
-      return '<div class="tc"><div class="rk">Theme '+t.rank+'</div><div class="nm">'+esc(t.name)+'</div><div class="tg">'+esc(t.tagline||'')+'</div><div class="lst">'+(t.top||[]).map(function(c){return '<div class="r"><b>'+esc(c.symbol)+'</b><span>GVM '+f2(c.gvm)+'</span></div>';}).join('')+'</div></div>';
+      return '<div class="tc"><div class="si-rk">Theme '+t.rank+'</div><div class="nm">'+esc(t.name)+'</div><div class="si-tg">'+esc(t.tagline||'')+'</div><div class="lst">'+(t.top||[]).map(function(c){return '<div class="r"><b>'+esc(c.symbol)+'</b><span>GVM '+f2(c.gvm)+'</span></div>';}).join('')+'</div></div>';
     }).join('')+'</div>' : '<div class="card"><div class="emp"><b>No themes on record</b>The theme pass has not written any rows yet.</div></div>';
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Tap a segment for its brief, the numbers behind the score and every member.</div>';
   document.getElementById('body').innerHTML=h;
@@ -182,11 +183,11 @@ function renderSeg(d){
   var s=d.scorecard||{}, e=d.evidence||{}, b=d.brief||{};
   document.getElementById('pg-title').textContent=d.segment; document.getElementById('back').style.display='';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(s.size?s.size.toLowerCase()+' segment · ':'')+e.names+' names';
-  var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+(v==null?0:Math.min(100,v*10))+'%"></i></div><span class="v">'+f1(v)+'</span></div>'; };
+  var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+(v==null?0:Math.min(100,v*10))+'%"></i></div><span class="si-pv">'+f1(v)+'</span></div>'; };
   var h='<div class="hero"><div class="eye">Segment · '+esc(s.verdict||'—')+(d.absorbed&&d.absorbed.length>1?' · covers '+d.absorbed.length+' sub-segments':'')+'</div><div class="nm">'+esc(d.segment)+'</div>'
     +'<div class="big"><div class="r">'+f2(s.gvm)+'</div><div class="n">mcap-weighted GVM<br>Δ since first score <b class="'+cls(s.change)+'">'+sg(s.change)+'</b></div></div>'
-    +'<div class="pil">'+bar('G',s.g)+bar('V',s.v)+bar('M',s.m)+'</div></div>';
-  h+='<div class="strip"><div><div class="k">Names</div><div class="v">'+e.names+'</div></div><div><div class="k">Mcap</div><div class="v">'+cr(e.mcap)+'</div></div><div><div class="k">Inst. flow</div><div class="v '+cls(e.inst)+'">'+(e.inst==null?'—':pct(e.inst))+'</div></div><div><div class="k">QoQ profit</div><div class="v '+cls(e.qoq)+'">'+(e.qoq==null?'—':pct(e.qoq))+'</div></div></div>';
+    +'<div class="si-pil">'+bar('G',s.g)+bar('V',s.v)+bar('M',s.m)+'</div></div>';
+  h+='<div class="strip"><div><div class="si-sk">Names</div><div class="si-sv">'+e.names+'</div></div><div><div class="si-sk">Mcap</div><div class="si-sv">'+cr(e.mcap)+'</div></div><div><div class="si-sk">Inst. flow</div><div class="si-sv '+cls(e.inst)+'">'+(e.inst==null?'—':pct(e.inst))+'</div></div><div><div class="si-sk">QoQ profit</div><div class="si-sv '+cls(e.qoq)+'">'+(e.qoq==null?'—':pct(e.qoq))+'</div></div></div>';
   if(b.what||b.drivers||b.risks){
     h+='<div class="card"><div class="ch"><span class="t">What it is</span><span class="n">brief</span></div><div class="p">'+esc(b.what||'')+'</div>'+(b.model?'<div class="p mu">'+esc(b.model)+'</div>':'')+'</div>';
     if(b.drivers) h+='<div class="card"><div class="ch"><span class="t">What drives it</span></div><div class="p">'+esc(b.drivers)+'</div></div>';
