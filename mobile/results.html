@@ -34,9 +34,20 @@
 .hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
 .split{margin-top:var(--space-12);height:10px;border-radius:var(--radius-5);overflow:hidden;display:flex;background:var(--hi)}.split i{display:block;height:10px}
 .legend{display:flex;justify-content:space-between;margin-top:var(--space-7);font-size:var(--type-105);color:var(--muted)}.legend b{color:var(--ink);font-weight:800}
-.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
-.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
-.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
+.kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}   /* cc#2161: two cells, each a button */
+.cell{display:block;width:100%;min-height:44px;text-align:left;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10);font-family:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.cell[aria-pressed="true"]{border-color:var(--brand);background:color-mix(in srgb, var(--brand) 14%, var(--panel))}
+.cell-k{display:block;font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell-v{display:block;font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}   /* prefixed: mobile_app.css restyles bare .k/.v (cc#2155) */
+.cell-k::after{content:" ▾";font-size:var(--type-8)}.cell[aria-pressed="true"] .cell-k::after{content:" ▴"}
+.kfoot{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-8);line-height:1.45}.kfoot b{color:var(--ink);font-weight:700}
+.lead{margin-top:var(--space-10);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);overflow:hidden;background:var(--hi)}.lead[hidden]{display:none}
+.lead-h{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-8);padding:var(--space-8) var(--space-10);font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);border-bottom:var(--bw-1) solid var(--edge)}
+.lead-r{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:var(--space-8);align-items:center;min-height:40px;padding:var(--space-6) var(--space-10);border-bottom:var(--bw-1) solid var(--edge);text-decoration:none;color:inherit}.lead-r:last-child{border-bottom:none}
+.lead-nm{font-size:var(--type-115);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lead-v{font-size:var(--type-125);font-weight:800;text-align:right;font-variant-numeric:tabular-nums;min-width:58px}
+.lead-n{font-size:var(--type-9);color:var(--muted);white-space:nowrap;text-align:right;min-width:62px}
+.lead-n i{font-style:normal;margin-left:var(--space-4);padding:var(--space-1) var(--space-4);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-6);font-weight:800;text-transform:uppercase;letter-spacing:var(--track-em8);font-size:var(--type-8)}
+.lead-e{padding:var(--space-10);font-size:var(--type-105);color:var(--muted);line-height:1.5}
 /* movers rail */
 .rl{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}.rl::-webkit-scrollbar{display:none}
 .mc{flex:0 0 46vw;max-width:172px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-10) var(--space-11);border-left:var(--bw-3) solid var(--win);text-decoration:none;color:inherit;display:block}
@@ -126,7 +137,8 @@ function renderSeason(d){
   var h='<div class="hero"><div class="eye">Result season · '+esc(q)+'</div><div class="big"><div class="r">'+(s.reported||0)+'</div><div class="n">of <b>'+(s.total||0)+'</b> companies have filed<br>'+(s.beats_sector!=null?'<b>'+s.beats_sector+'</b> beat their sector median':'')+'</div></div>'
     +'<div class="split"><i style="width:'+((s.growing||0)/tot*100)+'%;background:'+tok('--win')+'"></i><i style="width:'+((s.flat||0)/tot*100)+'%;background:'+tok('--muted')+'"></i><i style="width:'+((s.declining||0)/tot*100)+'%;background:'+tok('--loss')+'"></i></div>'
     +'<div class="legend"><span><b class="pos">'+(s.growing||0)+'</b> profit up</span><span><b>'+(s.flat||0)+'</b> flat</span><span><b class="neg">'+(s.declining||0)+'</b> profit down</span></div>'
-    +'<div class="kg"><div class="cell"><div class="k">Median sales YoY</div><div class="v '+cls(s.median_sales_yoy)+'">'+pct(s.median_sales_yoy)+'</div></div><div class="cell"><div class="k">Median profit YoY</div><div class="v '+cls(s.median_pat_yoy)+'">'+pct(s.median_pat_yoy)+'</div></div><div class="cell"><div class="k">On '+(s.pat_n||0)+' filings</div><div class="v">'+((s.basis||{}).detailed||0)+' full · '+((s.basis||{}).basic||0)+' basic</div></div></div></div>';
+    +'<div class="kg"><button type="button" class="cell" id="kc-sales" data-m="sales" aria-pressed="true"><span class="cell-k">Median sales YoY</span><span class="cell-v '+cls(s.median_sales_yoy)+'">'+pct(s.median_sales_yoy)+'</span></button><button type="button" class="cell" id="kc-pat" data-m="pat" aria-pressed="false"><span class="cell-k">Median profit YoY</span><span class="cell-v '+cls(s.median_pat_yoy)+'">'+pct(s.median_pat_yoy)+'</span></button></div>'   // cc#2161: two cells, tap one for its leading sectors
+    +'<div class="kfoot">'+kfoot(s)+'</div><div class="lead" id="lead" hidden></div></div>';
   var mv=d.movers||{};
   h+='<div class="sec"><h2>Biggest profit jumps</h2><span class="hint">vs last year · swipe →</span></div>';
   h+= (mv.up||[]).length ? '<div class="rl">'+mv.up.map(function(c){return mover(c,false);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing yet</b>No filing this season shows profit growth on record.</div></div>';
@@ -145,6 +157,26 @@ function renderSeason(d){
   h+= up.length ? '<div class="cal">'+up.slice(0,12).map(function(u){ return '<div class="cd"><div class="d">'+esc(dm(u.date))+'</div><div class="s">'+esc(u.symbol)+'</div></div>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Quiet calendar</b>No result dates in the next ten days.</div></div>';
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Write-ups are Scorr editorial from filings and calls, never a recommendation.</div>';
   document.getElementById('body').innerHTML=h;
+  LEAD.sectors=d.sectors||[]; LEAD.metric='sales'; drawLead();   // cc#2161: sales strip open on load (the founder's own example)
+  ['sales','pat'].forEach(function(m){ var b=document.getElementById('kc-'+m); if(b) b.addEventListener('click', function(){ LEAD.metric=(LEAD.metric===m)?null:m; drawLead(); }); });
+}
+/* cc#2161: the hero's two cells + the leading-sectors strip. Source = d.sectors (result_corner_v2's own rows, no
+   backend change). Filter n_used >= 3 -- the payload's own tiny_base rule: under three profit readings is one
+   company's quarter wearing a sector's name. Rank by the tapped metric, five rows, 3-4 filings carry a 'thin' tag. */
+function nz(v){ return (v==null||isNaN(Number(v)))?'—':Number(v).toLocaleString('en-IN'); }
+function kfoot(s){ var b=s.basis||{}; return 'Profit median on <b>'+nz(s.pat_n)+'</b> detailed filings · sales median on all <b>'+nz(s.reported)+'</b> · <b>'+nz(b.basic)+'</b> of them are CSV-basic (no profit YoY)'; }
+var LEAD={metric:'sales', sectors:[]};
+function leadKey(m){ return m==='pat'?'pat_yoy':'sales_yoy'; }
+function leadRows(m){ var k=leadKey(m); return LEAD.sectors.filter(function(x){ return Number(x.n_used||0)>=3 && x[k]!=null && !isNaN(Number(x[k])); }).sort(function(a,b){ return Number(b[k])-Number(a[k]); }).slice(0,5); }
+function drawLead(){
+  var el=document.getElementById('lead'); if(!el) return;
+  ['sales','pat'].forEach(function(m){ var b=document.getElementById('kc-'+m); if(b) b.setAttribute('aria-pressed', LEAD.metric===m?'true':'false'); });
+  if(!LEAD.metric){ el.hidden=true; el.innerHTML=''; return; }
+  var k=leadKey(LEAD.metric), rows=leadRows(LEAD.metric);
+  var h='<div class="lead-h"><span>Leading sectors · '+(LEAD.metric==='pat'?'profit':'sales')+' growth</span><span>median · filings</span></div>';
+  h+= rows.length ? rows.map(function(x){ var n=Number(x.n_used||0); return '<a class="lead-r" href="/m/results?view=companies&segment='+encodeURIComponent(x.sector||'')+'"><span class="lead-nm">'+esc(x.sector)+'</span><span class="lead-v '+cls(x[k])+'">'+pct(x[k])+'</span><span class="lead-n">'+n+' filings'+(n<5?'<i>thin</i>':'')+'</span></a>'; }).join('')
+     : '<div class="lead-e">No sector has three or more profit readings yet, so there is no sector median to rank.</div>';
+  el.innerHTML=h; el.hidden=false;
 }
 var ROWS=[], KEY='pat_yoy', ASC=false, COLS=[];
 function tbl(){
