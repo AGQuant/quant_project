@@ -972,8 +972,14 @@ window.addEventListener('scorr:theme', function(){
    (checked scorr_web_tokens.css/scorr_theme_r5.css -- --f-d/--f-m are font-FAMILY vars, not a
    size scale), so this uses the card's own stated fallback: +2px per notch, +4px total,
    10.5px -> 14.5px. Padding unchanged from 5px 12px -- confirmed by real-Chromium render (see
-   report) that the pill shape still holds at the new size, so no padding change was needed. */
-#pane-index .csbchip{font:700 14.5px var(--f-m);padding:5px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer;margin:0 6px 6px 0;display:inline-block}
+   report) that the pill shape still holds at the new size, so no padding change was needed.
+   cc#2117 (founder 16-Sep): "reduce custom screener button builder size by 25%" -- read as the
+   chip's FOOTPRINT, so font AND padding scale together to keep the pill proportions: 14.5px ->
+   10.9px, 5px 12px -> 4px 9px, radius 8px -> 6px; margin untouched (inter-chip spacing, not chip
+   size). Full sequence for the next reader: 10.5 (cc#1822) -> 14.5 (cc#2079) -> 10.9 (this). Yes,
+   that is essentially back to where cc#2079 started two days earlier -- stated on the card for a
+   glass check, not hidden. */
+#pane-index .csbchip{font:700 10.9px var(--f-m);padding:4px 9px;border-radius:6px;border:1px solid var(--line2);background:var(--raise);color:var(--tx2);cursor:pointer;margin:0 6px 6px 0;display:inline-block}
 #pane-index .csbchip.on{background:var(--blu);color:var(--bg);border-color:var(--blu)}
 /* ===== cc#543 V14 pane (namespaced) ===== */
 #pane-v14 header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 12px;border-bottom:1px solid var(--line)}

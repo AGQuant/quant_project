@@ -90,3 +90,21 @@ desc with nulls last, 375 px no page overflow. Screenshots looked at (VISUAL_VER
 ## Not touched
 `invest_check_v2.py` (compute, grading, weights, bands), `investment_check.py` (V1),
 `ic_rule_weights`, any existing job's cadence, mobile Screeners.
+
+## First-run evidence — UPDATED 17-Sep-2026 06:25 IST (the real chained run has now happened)
+- **Seed (score_date 2026-09-15):** 1,793 rows, 1,793 scored — the full gvm_scores universe of
+  that date, all through the real `/batch` engine (slim rows, `components` NULL by design).
+- **First FULL chained run (score_date 2026-09-16):** `scheduler_master.investment_score_eod`
+  `last_run_at 2026-09-16 20:01:16Z` (= 01:31 IST 17-Sep, chained inside `bg_gvm`, whose own run
+  is stamped the same second), `last_status ok`, **`last_duration_ms 38,596`**. Table:
+  **1,773 rows for 2026-09-16 = 1,773 / 1,773 of gvm_scores at that score_date, 0 unscored**,
+  every row with all 9 components stored (`full_rows 1773`), `weight_source ic_rule_weights`.
+  Bands: AVOID 1,022 · WATCH 388 · ACCUMULATE 320 · STRONG_BUY 43. Parity spot-check:
+  RELIANCE 1.96 AVOID, price_date 2026-09-16 — identical to the on-demand engine result captured
+  for the unit test the day before.
+- **Timing, corrected by the production run:** 38.6 s for 1,773 symbols ≈ 22 ms/symbol in-process
+  — far under the ≤34 s / 120 (~0.28 s/symbol) upper bound measured through the HTTP batch path,
+  which included request and tool latency. The benchmark re-fetch the spec worried about is
+  therefore a non-issue at this size; no change to `invest_check_v2.py` proposed.
+- The universe shrank 1,793 → 1,773 between the two dates because gvm_scores itself did (the
+  nightly GVM rebuild is the source; this job follows it by construction).
