@@ -18,27 +18,46 @@ day, no new external dependency or credential, and the images ride along with th
 Revisit S3/R2 only if this grows past chart snapshots (flagged, not built -- YAGNI).
 
 THE WRITE PATH IS SQL, NOT AN ENDPOINT (the card's how_claude_will_use_this): Claude inserts through
-run_sql. ONE statement stores the image and attaches it to an article:
+run_sql. ONE statement stores the image, attaches it to an article and records the setup it shows:
 
     WITH img AS (
       INSERT INTO image_assets (content_type, image_bytes, purpose, width_px, height_px, created_by)
       VALUES ('image/png', decode('<png hex>', 'hex'), 'stock_view_chart', 1200, 640, 'claude_chat')
       RETURNING id)
-    INSERT INTO polished_news_images (news_id, image_id, attached_by)
-    SELECT <polished_news.id>, id, 'claude_chat' FROM img
+    INSERT INTO polished_news_images
+      (news_id, image_id, symbol, side, entry, target, sl, cmp_at_publish, setup_label, as_of, attached_by)
+    SELECT <polished_news.id>, id, '360ONE', 'SELL', 1065.20, 1033.24, 1097.16, 1045.60, 'SELL-MOM',
+           DATE '2026-09-16', 'claude_chat'
+    FROM img
     ON CONFLICT (news_id) DO UPDATE
-      SET image_id = EXCLUDED.image_id, attached_at = now(), attached_by = EXCLUDED.attached_by
+      SET image_id = EXCLUDED.image_id, symbol = EXCLUDED.symbol, side = EXCLUDED.side,
+          entry = EXCLUDED.entry, target = EXCLUDED.target, sl = EXCLUDED.sl,
+          cmp_at_publish = EXCLUDED.cmp_at_publish, setup_label = EXCLUDED.setup_label,
+          as_of = EXCLUDED.as_of, attached_at = now(), attached_by = EXCLUDED.attached_by
     RETURNING news_id, image_id;
+
+A catalyst-only piece with a chart but no levels leaves symbol..as_of NULL; the page then shows the
+chart without the setup strip. CMP and Unrealised % are NEVER stored here: the page's server computes
+them live through cmp_resolver (the same CMP every other surface shows); cmp_at_publish is only the
+number the chart was drawn with.
 
 WHY A LINK TABLE AND NOT THE chart_image_id COLUMN THE CARD NAMES: a new column on polished_news is
 an ALTER TABLE, which MAINTENANCE_LOCK_RULE (cc#351) holds for a weekend Railway-console run and the
 run_sql path hard-blocks. cc#1519 precedent (the screeners `source` column): build the shape that
 works today without the ALTER. polished_news_images has news_id as its PRIMARY KEY, so it is exactly
-one-image-per-article -- the same semantics as a nullable FK column, with FK integrity in both
+one-attachment-per-article -- the same semantics as a nullable FK column, with FK integrity in both
 directions (article deleted -> attachment goes; image row cannot vanish under an attachment). When
 the column lands at a console run, the reader becomes COALESCE(p.chart_image_id, l.image_id);
-`chart_image_ids(cur, ids)` below is the ONE reader every news endpoint should use, so that swap is
-one function, not a hunt. Decision logged on the card (Fable Room) before it was built.
+`attachments(cur, ids)` below is the ONE reader every news endpoint should use, so that swap is one
+function, not a hunt. Decision logged on the card (Fable Room) before it was built.
+
+WHY THE SETUP LEVELS SIT ON THE ATTACHMENT ROW (decided while cc#2139's data side was investigated,
+logged on the card): a Stock View's entry / target / SL / side exist nowhere structured -- only as
+text inside full_summary -- and the design ref's numbers came from tc_scanner_holds, a symbol join
+that is fragile (several holds per symbol, the article may state its own numbers, catalyst pieces
+have none). The chart and the levels are one thing, drawn together at publish time, so they are one
+row. The orientation CHECK refuses an inverted setup (target < entry < sl for SELL, sl < entry <
+target for BUY) -- the mistake a strip cannot recover from.
 
 THE CHECKs ARE THE GUARD RAILS: content_type must be image/* (this is an image host, never a general
 file server -- the endpoint refuses anything else with 415 even if a row slipped past the CHECK);
@@ -77,10 +96,22 @@ CREATE TABLE IF NOT EXISTS image_assets (
     CONSTRAINT image_assets_dims_positive CHECK ((width_px IS NULL OR width_px > 0) AND (height_px IS NULL OR height_px > 0))
 );
 CREATE TABLE IF NOT EXISTS polished_news_images (
-    news_id      BIGINT      PRIMARY KEY REFERENCES polished_news(id) ON DELETE CASCADE,
-    image_id     BIGINT      NOT NULL REFERENCES image_assets(id),
-    attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    attached_by  TEXT
+    news_id         BIGINT        PRIMARY KEY REFERENCES polished_news(id) ON DELETE CASCADE,
+    image_id        BIGINT        NOT NULL REFERENCES image_assets(id),
+    symbol          TEXT,
+    side            TEXT,
+    entry           NUMERIC(12,2),
+    target          NUMERIC(12,2),
+    sl              NUMERIC(12,2),
+    cmp_at_publish  NUMERIC(12,2),
+    setup_label     TEXT,
+    as_of           DATE,
+    attached_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    attached_by     TEXT,
+    CONSTRAINT polished_news_images_side_buy_sell CHECK (side IS NULL OR side IN ('BUY', 'SELL')),
+    CONSTRAINT polished_news_images_levels_positive CHECK ((entry IS NULL OR entry > 0) AND (target IS NULL OR target > 0) AND (sl IS NULL OR sl > 0) AND (cmp_at_publish IS NULL OR cmp_at_publish > 0)),
+    CONSTRAINT polished_news_images_levels_need_symbol CHECK (entry IS NULL OR (symbol IS NOT NULL AND side IS NOT NULL)),
+    CONSTRAINT polished_news_images_levels_orientation CHECK (side IS NULL OR entry IS NULL OR target IS NULL OR sl IS NULL OR (side = 'BUY' AND sl < entry AND entry < target) OR (side = 'SELL' AND target < entry AND entry < sl))
 );
 CREATE INDEX IF NOT EXISTS polished_news_images_image_id_idx ON polished_news_images (image_id);
 """
@@ -114,18 +145,46 @@ def ensure_schema(conn=None):
             conn.close()
 
 
-def chart_image_ids(cur, news_ids):
-    """{polished_news.id: image_id} for the given article ids -- THE reader for the attachment.
+ATTACHMENT_COLS = ("news_id", "image_id", "symbol", "side", "entry", "target", "sl",
+                   "cmp_at_publish", "setup_label", "as_of", "attached_at", "attached_by")
 
-    A news endpoint calls this once per page of rows and sets row['chart_image_id'] from it (None
-    when absent). Raises on a DB error like any query: wrap it and rollback, as the news overlays
-    already do, so a hosting problem never blanks the news page.
+
+def _num(v):
+    return float(v) if v is not None else None
+
+
+def attachments(cur, news_ids):
+    """{polished_news.id: attachment dict} for the given article ids -- THE reader for the attachment.
+
+    Each dict: image_id, url (/api/images/<id>), symbol, side, entry, target, sl, cmp_at_publish,
+    setup_label, as_of, attached_at, attached_by -- numbers as floats, dates as ISO strings, absent
+    fields None. A news endpoint calls this once per page of rows and sets row['chart'] from it
+    (None when the article has no attachment). Raises on a DB error like any query: wrap it and
+    rollback, as the news overlays already do, so a hosting problem never blanks the news page.
     """
     ids = sorted({int(i) for i in news_ids if i is not None})
     if not ids:
         return {}
-    cur.execute("SELECT news_id, image_id FROM polished_news_images WHERE news_id = ANY(%s)", (ids,))
-    return {int(n): int(i) for n, i in cur.fetchall()}
+    cur.execute("SELECT " + ", ".join(ATTACHMENT_COLS) +
+                " FROM polished_news_images WHERE news_id = ANY(%s)", (ids,))
+    out = {}
+    for r in cur.fetchall():
+        d = dict(zip(ATTACHMENT_COLS, r))
+        out[int(d["news_id"])] = {
+            "image_id": int(d["image_id"]), "url": "/api/images/%d" % int(d["image_id"]),
+            "symbol": d["symbol"], "side": d["side"],
+            "entry": _num(d["entry"]), "target": _num(d["target"]), "sl": _num(d["sl"]),
+            "cmp_at_publish": _num(d["cmp_at_publish"]), "setup_label": d["setup_label"],
+            "as_of": str(d["as_of"]) if d["as_of"] else None,
+            "attached_at": str(d["attached_at"]) if d["attached_at"] else None,
+            "attached_by": d["attached_by"],
+        }
+    return out
+
+
+def chart_image_ids(cur, news_ids):
+    """{polished_news.id: image_id} -- the id-only view of attachments()."""
+    return {k: v["image_id"] for k, v in attachments(cur, news_ids).items()}
 
 
 def _etag(image_id: int) -> str:
@@ -175,9 +234,15 @@ def image_meta(image_id: int):
             row = cur.fetchone()
             att = []
             if row:
-                cur.execute("""SELECT news_id, attached_at, attached_by FROM polished_news_images
-                               WHERE image_id = %s ORDER BY news_id""", (image_id,))
-                att = [{"news_id": n, "attached_at": str(a), "attached_by": b} for n, a, b in cur.fetchall()]
+                cur.execute("SELECT " + ", ".join(ATTACHMENT_COLS) +
+                            " FROM polished_news_images WHERE image_id = %s ORDER BY news_id", (image_id,))
+                for r in cur.fetchall():
+                    d = dict(zip(ATTACHMENT_COLS, r))
+                    for k in ("entry", "target", "sl", "cmp_at_publish"):
+                        d[k] = _num(d[k])
+                    for k in ("as_of", "attached_at"):
+                        d[k] = str(d[k]) if d[k] else None
+                    att.append(d)
     except Exception as e:
         raise HTTPException(500, f"image_meta failed: {e}")
     if not row:
