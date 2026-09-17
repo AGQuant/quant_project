@@ -6,7 +6,8 @@
        /m/results?view=companies → every reporter this season, sortable
        /m/results?sym=<symbol>   → one company's numbers + the written analysis
      cc#2161 (17-Sep): hero = two tappable median cells + Leading sectors strip. cc#2162: 'Sectors this season' (Top / Under toggle,
-     size chips with counts, five rows, View more sheet, ?perf=&size= URL state) replaces the Sector by sector ladder.
+     size chips with counts, five rows, View more sheet, ?perf=&size= URL state) replaces the Sector by sector ladder. cc#2163: every
+     sector row opens the same sheet with that sector's companies table (/companies?segment=, sideways scroll, sortable).
      Data: /api/mobile/results_app/season · /companies · /analysis?symbol= (results_app_mobile.py V2), which read
      the web Result Corner's own result_corner_v2 and the Results page's own analysis feed. Contract tokens only. -->
 <html lang="en">
@@ -86,6 +87,12 @@
 .st-sheet-t{font-size:var(--type-16);font-weight:800;margin-top:var(--space-8)}.st-sheet-m{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3)}
 .st-sheet-b{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .st-sheet-b .st-r{padding-left:var(--space-16);padding-right:var(--space-16)}
+.st-sheet,.st-sheet-b{overflow-x:hidden}   /* cc#2163: the table's .scroll wrapper scrolls sideways, the sheet never does */
+.st-co .wrap{margin:var(--space-10) var(--space-16) 0}
+.st-co td:first-child a{display:block}.st-co td:first-child small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.st-dot{display:inline-block;width:6px;height:6px;border-radius:var(--radius-3);background:var(--brand);margin-left:var(--space-5);vertical-align:middle}.st-dot.b{background:var(--muted)}
+.st-gv small{display:block;font-size:var(--type-8);color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:var(--track-em8)}
+.st-co-f{padding:var(--space-10) var(--space-16) var(--space-12);font-size:var(--type-10);color:var(--muted);line-height:1.55}.st-co-f a{color:var(--brand);font-weight:800;text-decoration:none}
 body.st-lock{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 /* written list */
 .wl{margin:0 var(--space-16);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
@@ -176,7 +183,7 @@ function renderSeason(d){
   h+= up.length ? '<div class="cal">'+up.slice(0,12).map(function(u){ return '<div class="cd"><div class="d">'+esc(dm(u.date))+'</div><div class="s">'+esc(u.symbol)+'</div></div>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Quiet calendar</b>No result dates in the next ten days.</div></div>';
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Write-ups are Scorr editorial from filings and calls, never a recommendation.</div>';
   document.getElementById('body').innerHTML=h;
-  LEAD.sectors=d.sectors||[]; LEAD.metric='sales'; drawLead();
+  LEAD.sectors=d.sectors||[]; LEAD.metric='sales'; drawLead(); stTapWire(document.getElementById('lead'));
   stInit(d.sectors||[]);   // cc#2162: the sector table   // cc#2161: sales strip open on load (the founder's own example)
   ['sales','pat'].forEach(function(m){ var b=document.getElementById('kc-'+m); if(b) b.addEventListener('click', function(){ LEAD.metric=(LEAD.metric===m)?null:m; drawLead(); }); });
 }
@@ -194,7 +201,7 @@ function drawLead(){
   if(!LEAD.metric){ el.hidden=true; el.innerHTML=''; return; }
   var k=leadKey(LEAD.metric), rows=leadRows(LEAD.metric);
   var h='<div class="lead-h"><span>Leading sectors · '+(LEAD.metric==='pat'?'profit':'sales')+' growth</span><span>median · filings</span></div>';
-  h+= rows.length ? rows.map(function(x){ var n=Number(x.n_used||0); return '<a class="lead-r" href="/m/results?view=companies&segment='+encodeURIComponent(x.sector||'')+'"><span class="lead-nm">'+esc(x.sector)+'</span><span class="lead-v '+cls(x[k])+'">'+pct(x[k])+'</span><span class="lead-n">'+n+' filings'+(n<5?'<i>thin</i>':'')+'</span></a>'; }).join('')
+  h+= rows.length ? rows.map(function(x){ var n=Number(x.n_used||0); return '<a class="lead-r" data-sector="'+esc(x.sector||'')+'" href="/m/results?view=companies&segment='+encodeURIComponent(x.sector||'')+'"><span class="lead-nm">'+esc(x.sector)+'</span><span class="lead-v '+cls(x[k])+'">'+pct(x[k])+'</span><span class="lead-n">'+n+' filings'+(n<5?'<i>thin</i>':'')+'</span></a>'; }).join('')
      : '<div class="lead-e">No sector has three or more profit readings yet, so there is no sector median to rank.</div>';
   el.innerHTML=h; el.hidden=false;
 }
@@ -207,7 +214,7 @@ function stInSize(list,size){ return size==='all'?list:list.filter(function(x){ 
 function stSorted(list,perf){ return list.slice().sort(function(a,b){ return perf==='under'?Number(a.pat_yoy)-Number(b.pat_yoy):Number(b.pat_yoy)-Number(a.pat_yoy); }); }
 function stView(){ return stSorted(stInSize(stElig(),ST.size),ST.perf); }
 function stSizeWord(){ var s=ST_SIZES.filter(function(x){ return x[0]===ST.size; })[0]; return ST.size==='all'?'':s[1]; }
-function stRow(x){ var n=Number(x.pat_n!=null?x.pat_n:x.n_used); return '<a class="st-r" href="/m/results?view=companies&segment='+encodeURIComponent(x.sector||'')+'"><div><div class="st-nm">'+esc(x.sector)+'</div><div class="st-sub">'+n+' filings · GVM '+esc(x.verdict||'—')+(n<5?'<i>thin</i>':'')+'</div></div><span class="st-p '+cls(x.pat_yoy)+'">'+pct(x.pat_yoy)+'</span><span class="st-s">'+pct(x.sales_yoy)+'</span></a>'; }
+function stRow(x){ var n=Number(x.pat_n!=null?x.pat_n:x.n_used); return '<a class="st-r" data-sector="'+esc(x.sector||'')+'" href="/m/results?view=companies&segment='+encodeURIComponent(x.sector||'')+'"><div><div class="st-nm">'+esc(x.sector)+'</div><div class="st-sub">'+n+' filings · GVM '+esc(x.verdict||'—')+(n<5?'<i>thin</i>':'')+'</div></div><span class="st-p '+cls(x.pat_yoy)+'">'+pct(x.pat_yoy)+'</span><span class="st-s">'+pct(x.sales_yoy)+'</span></a>'; }
 function stEmpty(n){ var w=stSizeWord(); return n===0?('No '+(w?w+' ':'')+'sector has 3+ filings this season.'):('Only '+n+' '+(w?w+' ':'')+'sector'+(n===1?' has':'s have')+' 3+ filings this season.'); }
 function stSyncUrl(){ try{ var q=[]; if(ST.perf!=='top') q.push('perf='+ST.perf); if(ST.size!=='all') q.push('size='+ST.size); history.replaceState(history.state,'','/m/results'+(q.length?'?'+q.join('&'):'')); }catch(e){} }
 function stDraw(){
@@ -221,6 +228,11 @@ function stDraw(){
   el.querySelectorAll('.st-tog button').forEach(function(b){ b.addEventListener('click', function(){ ST.perf=b.getAttribute('data-perf'); stSyncUrl(); stDraw(); }); });
   el.querySelectorAll('.st-chip').forEach(function(b){ b.addEventListener('click', function(){ ST.size=b.getAttribute('data-size'); stSyncUrl(); stDraw(); }); });
   var more=document.getElementById('st-more'); if(more) more.addEventListener('click', function(e){ e.preventDefault(); stOpenSheet(); });
+  stTapWire(el);
+}
+function stTapWire(el){   // cc#2163: a sector row opens its companies sheet; modifier clicks keep the link
+  if(!el||el._stTap) return; el._stTap=true;
+  el.addEventListener('click', function(e){ var a=e.target.closest('a[data-sector]'); if(!a||e.metaKey||e.ctrlKey||e.shiftKey||e.button===1) return; e.preventDefault(); stOpenCompanies(a.getAttribute('data-sector')); });
 }
 function stInit(rows){
   ST.rows=rows||[];
@@ -241,11 +253,15 @@ function stSheet(){
   ST_SHEET={bd:bd, sh:sh}; return ST_SHEET;
 }
 function stOpenSheet(){
-  var s=stSheet(), view=stView();
+  var view=stView(); stSheet();
   document.getElementById('st-sheet-t').textContent=(ST.perf==='under'?'Underperformers':'Top performers')+' · '+(ST.size==='all'?'All sizes':stSizeWord())+' · '+view.length+' sector'+(view.length===1?'':'s');
   document.getElementById('st-sheet-m').textContent='ranked by median profit growth vs last year · sectors with 3+ filings · tap a sector for its companies';
   document.getElementById('st-sheet-b').innerHTML=view.length?('<div class="st-h"><span>Sector · filings</span><span>Profit YoY</span><span>Sales YoY</span></div>'+view.map(stRow).join('')):'<div class="st-emp">'+stEmpty(0)+'</div>';
-  if(!s.sh.hidden) return;
+  stShow();
+}
+function stShow(){
+  var s=stSheet(); stTapWire(document.getElementById('st-sheet-b'));
+  if(!s.sh.hidden){ document.getElementById('st-sheet-b').scrollTop=0; return; }
   ST_SCROLL=window.scrollY||0;
   try{ ST_RESTORE=history.scrollRestoration||'auto'; history.scrollRestoration='manual'; history.pushState({stSheet:1},'',location.href); }catch(e){}   // history entry first, then the lock (cc#2159 lesson)
   document.body.classList.add('st-lock'); document.body.style.top=(-ST_SCROLL)+'px';
@@ -257,9 +273,39 @@ function stHideSheet(){
   try{ history.scrollRestoration=ST_RESTORE; }catch(e){}
 }
 function stCloseSheet(){ var s=stSheet(); if(s.sh.hidden) return; if(history.state&&history.state.stSheet){ history.back(); } else stHideSheet(); }
+/* cc#2163: a sector's companies in the same sheet -- /companies?segment=<name> (the season's own rows, filtered server-side),
+   a sideways-scrolling table, default Profit YoY desc with NULLs last, tap a header to sort. */
+var CO={sector:null, rows:[], meta:null, key:'pat_yoy', asc:false, seq:0};
+function stOpenCompanies(sector){
+  var my=++CO.seq; CO.sector=sector; CO.rows=[]; CO.meta=null; CO.key='pat_yoy'; CO.asc=false;
+  stSheet(); document.getElementById('st-sheet-t').textContent=sector; document.getElementById('st-sheet-m').textContent='Loading…';
+  document.getElementById('st-sheet-b').innerHTML='<div class="st-emp">Loading the companies…</div>';
+  stShow();
+  fetch('/api/mobile/results_app/companies?segment='+encodeURIComponent(sector),{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(my!==CO.seq) return;
+    if(!d||d.error){ coFail(d&&d.error); return; }
+    CO.rows=d.rows||[]; CO.meta=d; drawCompanies();
+  }).catch(function(){ if(my===CO.seq) coFail(); });
+}
+function coFail(msg){ document.getElementById('st-sheet-m').textContent='Could not load'; document.getElementById('st-sheet-b').innerHTML='<div class="st-emp">Could not load the companies'+(msg?': '+esc(msg):'')+'. <a href="#" id="co-retry" style="color:var(--brand);font-weight:800;text-decoration:none">Try again</a></div>'; var r=document.getElementById('co-retry'); if(r) r.addEventListener('click', function(e){ e.preventDefault(); stOpenCompanies(CO.sector); }); }
+function drawCompanies(){
+  var d=CO.meta||{}, m=d.season_medians||{}, n=(d.count!=null?d.count:CO.rows.length), total=d.total;
+  document.getElementById('st-sheet-m').textContent=n+' filed'+(total!=null?' of '+total:'')+' · median profit '+pct(m.pat_yoy)+' · sales '+pct(m.sales_yoy);
+  var rows=CO.rows.slice().sort(cmpBy(CO.key,CO.asc));
+  var cols=[['symbol','Name'],['pat_yoy','Profit YoY'],['pat_qoq','Profit QoQ'],['sales_yoy','Sales YoY'],['sales_qoq','Sales QoQ'],['gvm','GVM']];
+  var th=cols.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(CO.key===c[0]?'on'+(CO.asc?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
+  var tr=rows.map(function(r){ var basic=r.basis==='basic'; return '<tr><td><a href="/m/results?sym='+encodeURIComponent(r.symbol)+'">'+esc(r.symbol)+'<span class="st-dot'+(basic?' b':'')+'" title="'+(basic?'CSV-basic':'detailed filing')+'"></span><small>'+esc(r.company||'')+'</small></a></td><td class="'+cls(r.pat_yoy)+'">'+pct(r.pat_yoy)+'</td><td class="'+cls(r.pat_qoq)+'">'+pct(r.pat_qoq)+'</td><td class="'+cls(r.sales_yoy)+'">'+pct(r.sales_yoy)+'</td><td class="'+cls(r.sales_qoq)+'">'+pct(r.sales_qoq)+'</td><td class="st-gv'+((r.gvm||0)>=8?' gd':'')+'">'+f2(r.gvm)+'<small>'+esc(r.verdict||'')+'</small></td></tr>'; }).join('');
+  var basicN=CO.rows.filter(function(r){ return r.basis==='basic'; }).length;
+  var b=document.getElementById('st-sheet-b');
+  if(!rows.length){ b.innerHTML='<div class="st-emp">No company in this sector has filed this season.</div>'; return; }
+  b.innerHTML='<div class="st-co"><div class="wrap"><div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div></div>'
+    +'<div class="st-co-f">'+(basicN?'CSV-basic rows carry no profit YoY (cc#1192 rule) — sales still shown.<br>':'')+'<a href="/m/results?view=companies&segment='+encodeURIComponent(CO.sector||'')+'">All filings, sortable ›</a></div></div>';
+  b.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===CO.key) CO.asc=!CO.asc; else { CO.key=k; CO.asc=(k==='symbol'); } drawCompanies(); });
+}
 var ROWS=[], KEY='pat_yoy', ASC=false, COLS=[];
+function cmpBy(key,asc){ return function(a,b){ var x=a[key], y=b[key]; if(x==null&&y==null) return 0; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return asc? x.localeCompare(y) : y.localeCompare(x); return asc? x-y : y-x; }; }   // cc#2163: one sorter, NULLs last, for the companies view and the sector sheet
 function tbl(){
-  var rows=ROWS.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
+  var rows=ROWS.slice().sort(cmpBy(KEY,ASC));
   var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
   var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c){ var v=r[c[0]]; return '<td>'+(c[2]?c[2](v,r):esc(v==null?'—':v))+'</td>'; }).join('')+'</tr>'; }).join('');
   document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' companies · tap a header to sort · dash = not filed yet</div>';

@@ -240,9 +240,20 @@ def mobile_results_season(request: Request):
             "note": "Season numbers cover only companies that have filed this quarter. A dash means not filed yet, never zero."}
 
 
+def _sector_row(rc, segment):
+    for s in rc.get("sectors") or []:
+        if s.get("sector") == segment:
+            return s
+    return None
+
+
 @router.get("/api/mobile/results_app/companies")
 @_json_safe
-def mobile_results_companies(request: Request):
+def mobile_results_companies(request: Request, segment: str = ""):
+    """cc#2163: ?segment=<name> narrows the list to that segment (case-exact, the string result_corner_v2 emits)
+    and adds segment, size (cc#2162 rule), the sector's reported / total and season_medians {sales_yoy, pat_yoy,
+    pat_n} from the same sectors list, so the companies sheet can show the sector median line its rows are
+    compared to. No param -> the full list, unchanged."""
     g = _guard(request)
     if g:
         return g
@@ -251,7 +262,14 @@ def mobile_results_companies(request: Request):
     with _conn() as conn, conn.cursor() as cur:
         written = _written_set(cur, quarter) if quarter else set()
     rows = [_co_row(c, written) for c in (rc.get("companies") or [])]
-    return {"quarter": quarter, "rows": rows, "count": len(rows)}
+    if not segment:
+        return {"quarter": quarter, "rows": rows, "count": len(rows)}
+    rows = [r for r in rows if (r.get("segment") or "") == segment]
+    s = _sector_row(rc, segment) or {}
+    return {"quarter": quarter, "rows": rows, "count": len(rows), "segment": segment,
+            "size": sector_size(s.get("avg_mcap")), "reported": s.get("reported"), "total": s.get("total"),
+            "season_medians": {"sales_yoy": _fl(s.get("sales_yoy")), "pat_yoy": _fl(s.get("pat_yoy")),
+                               "pat_n": s.get("pat_n_detailed")}}
 
 
 @router.get("/api/mobile/results_app/analysis")
