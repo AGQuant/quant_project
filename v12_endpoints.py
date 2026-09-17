@@ -97,15 +97,52 @@ _SORTABLE = {
     "tc_score", "company_name", "symbol",
 }
 
-# Canonical 8-table join. Ends at "WHERE 1=1" so callers append " AND ...".
-# cc#154: LEFT JOIN ut (universe_technicals, full ~1766-symbol GVM universe) and
-# COALESCE technicals+pivots -- v8_metrics/v8_paper_pivots (5-min-fresh,
-# futures-only) still wins when present; ut fills the ~1557-row gap for
-# non-futures stocks with EOD-frozen values. sector_week/month/day, vol_ratio,
-# ma9_vs_ma21, eod_chg stay futures-only (not
-# computed by universe_technicals) -- unchanged from before.
+# Canonical join. Ends at "WHERE 1=1" so callers append " AND ...".
+# cc#154 added LEFT JOIN ut (universe_technicals) with COALESCE(m.x, ut.x): v8_metrics (5-min-fresh,
+# futures-only) won whenever present; ut only filled the non-futures gap.
+# cc#2150 (FOUNDER_RULING_16SEP_ALL_DATA_EOD_BASIS; defect named on cc#2123): the basket / screen path
+# is EOD-only now. universe_technicals is THE source for the eleven technical fields; v8_metrics is
+# DROPPED from this query (not demoted to a fallback -- a fallback to a live table is still a live
+# read exactly when the EOD row is missing; measured 17-Sep: all 207 futures rows differed from
+# their EOD row on every one of the eleven fields, rsi_weekly by up to 35.9 points). The
+# tc_universe_ticks LATERAL (the latest 5-min tick) is replaced by tc_scanner_score_daily at its
+# latest score_date (cc#2126's EOD stamp; best score100 across side/bucket, deterministic tie
+# order). `price` is the raw_prices EOD close at its latest price_date -- g.price is the screener
+# CSV's "Current Price" copied at CSV load (weekly), kept beside it as `screener_price`. The six
+# v8_metrics-only fields (sector_week/month/day, vol_ratio, ma9_vs_ma21, eod_chg) have no EOD
+# source, so they are served as NULL under their old names rather than from a tick table.
+# v8_paper_pivots stays: its pivots are EOD-derived and equal universe_technicals' on every
+# overlapping symbol (1,771 of 1,771 measured 17-Sep). v8_qualified is written DURING the session by
+# v8_signal_writer (9 rows by 10:45 IST on 17-Sep, 37 by the close on 16-Sep), so `signal_date =
+# CURRENT_DATE` was a third live read: the join now takes the last COMPLETED session
+# (MAX(signal_date) < CURRENT_DATE) -- the qualified set as of the last close, the same basis as
+# every other column on the row. No caller reads the dropped fields: the only /api/v12/screen
+# consumer is screener.html (retired, 301 to /v13) and it uses none of them.
 # cc#232: 3 dead range/BB metrics dropped from this SELECT.
-_BASE_SQL = """SELECT g.symbol, g.company_name, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, g.rank, g.market_cap, g.price, g.gvm_overall_label, COALESCE(m.rsi_weekly, ut.rsi_weekly) as rsi_weekly, COALESCE(m.rsi_month, ut.rsi_month) as rsi_month, COALESCE(m.daily_rsi, ut.daily_rsi) as daily_rsi, COALESCE(m.dma_50, ut.dma_50) as dma_50, COALESCE(m.dma_200, ut.dma_200) as dma_200, COALESCE(m.dma_20, ut.dma_20) as dma_20, COALESCE(m.week_return, ut.week_return) as week_return, COALESCE(m.month_return, ut.month_return) as month_return, COALESCE(m.year_return, ut.year_return) as year_return, COALESCE(m.mom_2d, ut.mom_2d) as mom_2d, COALESCE(m.week_index_52, ut.week_index_52) as week_index_52, m.sector_week, m.sector_month, m.sector_day, m.vol_ratio, m.ma9_vs_ma21, m.eod_chg, s.pe, s.opm, s.roce, s."Debt to equity" as de_ratio, s."Promoter holding" as promoter_holding, s."Return on equity" as roe, s.profit_growth_3y, s.profit_growth_5y, s.sales_growth_3y, s.sales_growth_5y, s."Sales growth" as sales_growth_1y, s.dividend_yield, s.fii_change, s.dii_change, s."Price to book value" as pb_ratio, s.interest_coverage, s.fixed_asset_growth, s."EPS growth 5Years" as eps_growth_5y, s.opm_latest_q, s.qoq_profit_growth, s.qoq_sales_growth, v.basket as v8_basket, v.signal_date as v8_signal_date, COALESCE(p.pp, ut.pp) as pp, COALESCE(p.r1, ut.r1) as r1, COALESCE(p.r2, ut.r2) as r2, COALESCE(p.s1, ut.s1) as s1, COALESCE(p.s2, ut.s2) as s2, tc.score100 as tc_score, tc.verdict as tc_verdict, tc.side as tc_side, tc.ts as tc_asof, sr.mcap_weighted_gvm as sector_gvm, sr.verdict as sector_rating_verdict, CASE WHEN ec.ticker IS NOT NULL THEN true ELSE false END as in_blackout FROM gvm_scores g LEFT JOIN v8_metrics m ON g.symbol = m.symbol AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics) LEFT JOIN universe_technicals ut ON g.symbol = ut.symbol AND ut.score_date = (SELECT MAX(score_date) FROM universe_technicals) LEFT JOIN screener_raw s ON g.symbol = s.nse_code LEFT JOIN v8_qualified v ON g.symbol = v.symbol AND v.signal_date = CURRENT_DATE LEFT JOIN v8_paper_pivots p ON g.symbol = p.symbol AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots) LEFT JOIN LATERAL (SELECT score100, verdict10 AS verdict, CASE side WHEN 'BUY' THEN 'LONG' WHEN 'SELL' THEN 'SHORT' ELSE side END AS side, ts FROM tc_universe_ticks u WHERE u.symbol = g.symbol ORDER BY u.ts DESC, u.score100 DESC LIMIT 1) tc ON true LEFT JOIN sector_ratings sr ON g.segment = sr.segment AND sr.score_date = (SELECT MAX(score_date) FROM sector_ratings) LEFT JOIN earnings_calendar ec ON g.symbol = ec.ticker AND ec.ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND ec.verified <> 'false' WHERE 1=1"""
+_BASE_SQL = """SELECT g.symbol, g.company_name, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, g.rank, g.market_cap,
+       rp.close AS price, rp.price_date AS price_date, g.price AS screener_price, g.gvm_overall_label,
+       ut.rsi_weekly, ut.rsi_month, ut.daily_rsi, ut.dma_50, ut.dma_200, ut.dma_20, ut.week_return, ut.month_return, ut.year_return, ut.mom_2d, ut.week_index_52,
+       ut.score_date AS technicals_date,
+       NULL::numeric AS sector_week, NULL::numeric AS sector_month, NULL::numeric AS sector_day, NULL::numeric AS vol_ratio, NULL::numeric AS ma9_vs_ma21, NULL::numeric AS eod_chg,
+       s.pe, s.opm, s.roce, s."Debt to equity" as de_ratio, s."Promoter holding" as promoter_holding, s."Return on equity" as roe, s.profit_growth_3y, s.profit_growth_5y, s.sales_growth_3y, s.sales_growth_5y, s."Sales growth" as sales_growth_1y, s.dividend_yield, s.fii_change, s.dii_change, s."Price to book value" as pb_ratio, s.interest_coverage, s.fixed_asset_growth, s."EPS growth 5Years" as eps_growth_5y, s.opm_latest_q, s.qoq_profit_growth, s.qoq_sales_growth,
+       v.basket as v8_basket, v.signal_date as v8_signal_date,
+       COALESCE(p.pp, ut.pp) as pp, COALESCE(p.r1, ut.r1) as r1, COALESCE(p.r2, ut.r2) as r2, COALESCE(p.s1, ut.s1) as s1, COALESCE(p.s2, ut.s2) as s2,
+       tc.score100 as tc_score, tc.verdict as tc_verdict, tc.side as tc_side, tc.score_date as tc_asof,
+       sr.mcap_weighted_gvm as sector_gvm, sr.verdict as sector_rating_verdict,
+       CASE WHEN ec.ticker IS NOT NULL THEN true ELSE false END as in_blackout
+  FROM gvm_scores g
+  LEFT JOIN universe_technicals ut ON g.symbol = ut.symbol AND ut.score_date = (SELECT MAX(score_date) FROM universe_technicals)
+  LEFT JOIN raw_prices rp ON rp.symbol = g.symbol AND rp.price_date = (SELECT MAX(price_date) FROM raw_prices)
+  LEFT JOIN screener_raw s ON g.symbol = s.nse_code
+  LEFT JOIN v8_qualified v ON g.symbol = v.symbol AND v.signal_date = (SELECT MAX(signal_date) FROM v8_qualified WHERE signal_date < CURRENT_DATE)
+  LEFT JOIN v8_paper_pivots p ON g.symbol = p.symbol AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
+  LEFT JOIN LATERAL (SELECT score100, verdict10 AS verdict, CASE side WHEN 'BUY' THEN 'LONG' WHEN 'SELL' THEN 'SHORT' ELSE side END AS side, score_date
+                       FROM tc_scanner_score_daily t
+                      WHERE t.symbol = g.symbol AND t.score_date = (SELECT MAX(score_date) FROM tc_scanner_score_daily)
+                      ORDER BY t.score100 DESC NULLS LAST, t.side, t.bucket LIMIT 1) tc ON true
+  LEFT JOIN sector_ratings sr ON g.segment = sr.segment AND sr.score_date = (SELECT MAX(score_date) FROM sector_ratings)
+  LEFT JOIN earnings_calendar ec ON g.symbol = ec.ticker AND ec.ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND ec.verified <> 'false'
+ WHERE 1=1"""
 
 
 @router.get("/api/v12/screen")
@@ -158,16 +195,15 @@ def v12_screen(
     rng("g.gvm_score", gvm_min, gvm_max, "gvm")
     rng("g.market_cap", market_cap_min, market_cap_max, "market_cap")
     rng("s.pe", pe_min, pe_max, "pe")
-    # cc#154: filter conditions COALESCE the same way as the SELECT list, so a
-    # non-futures stock only visible via universe_technicals filters consistently
-    # with what it displays (was m.x-only, silently excluding ~1557 rows).
-    rng("COALESCE(m.rsi_weekly, ut.rsi_weekly)", rsi_weekly_min, rsi_weekly_max, "rsi_weekly")
-    rng("COALESCE(m.rsi_month, ut.rsi_month)", rsi_month_min, rsi_month_max, "rsi_month")
-    rng("COALESCE(m.dma_50, ut.dma_50)", dma_50_min, dma_50_max, "dma_50")
-    rng("COALESCE(m.dma_200, ut.dma_200)", dma_200_min, dma_200_max, "dma_200")
-    rng("COALESCE(m.week_index_52, ut.week_index_52)", week_index_52_min, week_index_52_max, "week_index_52")
-    rng("COALESCE(m.week_return, ut.week_return)", week_return_min, week_return_max, "week_return")
-    rng("COALESCE(m.month_return, ut.month_return)", month_return_min, month_return_max, "month_return")
+    # cc#154 made these filter the same expression the SELECT shows; cc#2150: that expression is
+    # the universe_technicals column alone (EOD), the same column the row displays.
+    rng("ut.rsi_weekly", rsi_weekly_min, rsi_weekly_max, "rsi_weekly")
+    rng("ut.rsi_month", rsi_month_min, rsi_month_max, "rsi_month")
+    rng("ut.dma_50", dma_50_min, dma_50_max, "dma_50")
+    rng("ut.dma_200", dma_200_min, dma_200_max, "dma_200")
+    rng("ut.week_index_52", week_index_52_min, week_index_52_max, "week_index_52")
+    rng("ut.week_return", week_return_min, week_return_max, "week_return")
+    rng("ut.month_return", month_return_min, month_return_max, "month_return")
 
     if roce_min is not None:
         conds.append("s.roce >= %s"); params.append(roce_min); applied.append("roce_min")
@@ -220,7 +256,9 @@ def v12_screen(
     # sort -- whitelisted column, quoted to dodge reserved words (e.g. rank)
     sb = sort_by if sort_by in _SORTABLE else "gvm_score"
     sd = "ASC" if str(sort_dir).lower() == "asc" else "DESC"
-    order_sql = f' ORDER BY "{sb}" {sd} NULLS LAST'
+    # cc#2150: symbol as the tie-break so two reads of the same page return the same rows in the
+    # same order (byte-identical within a day is the verify on this path).
+    order_sql = f' ORDER BY "{sb}" {sd} NULLS LAST, g.symbol ASC'
 
     # pagination
     size = max(1, min(int(size), 200))
@@ -234,14 +272,18 @@ def v12_screen(
                     params + [size, offset])
         cols = [d[0] for d in cur.description]
         stocks = [dict(zip(cols, r)) for r in cur.fetchall()]
-        # cc#1452 push 3: Vol R (canon live RVOL) rides beside the legacy vol_ratio field for
-        # the returned page only (<= 200 rows, one batch read). vol_ratio stays served per the
-        # 30-Aug written-but-legacy ruling; surfaces should read/label rvol as "Vol R".
+        # cc#1452 push 3 added Vol R (live RVOL) for the returned page. cc#2150: live_rvol_batch
+        # anchors to the latest intraday_prices session -- a live read on the basket path -- so the
+        # page now carries the EOD form of the same canon (rvol_engine.eod_rvol_pair_batch,
+        # raw_prices only: day volume / trailing-21-session average), dated by `rvol_asof`.
+        # vol_ratio (v8_metrics-only) is NULL on this path now; rvol is the number to read.
         if stocks:
-            from rvol_engine import live_rvol_batch
-            _rvl = live_rvol_batch(cur, [s["symbol"] for s in stocks])
+            from rvol_engine import eod_rvol_pair_batch
+            _rv = eod_rvol_pair_batch(cur, [s["symbol"] for s in stocks]) or {}
             for s in stocks:
-                s["rvol"] = _rvl.get(s["symbol"])
+                pair = _rv.get(s["symbol"])
+                s["rvol"] = pair.get("rvol") if pair else None
+                s["rvol_asof"] = pair.get("asof") if pair else None
 
     return {
         "page": page,
@@ -273,10 +315,11 @@ def v12_filters_meta():
         out["pe"] = {"min": pmin, "max": pmax}
         out["roce"] = {"min": rcmin, "max": rcmax}
 
+        # cc#2150: the slider bounds come from the same EOD table the screen filters on.
         cur.execute("""
             SELECT MIN(rsi_weekly), MAX(rsi_weekly), MIN(rsi_month), MAX(rsi_month),
                    MIN(week_return), MAX(week_return), MIN(month_return), MAX(month_return)
-            FROM v8_metrics WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
+            FROM universe_technicals WHERE score_date = (SELECT MAX(score_date) FROM universe_technicals)
         """)
         rw0, rw1, rm0, rm1, wr0, wr1, mr0, mr1 = cur.fetchone()
         out["rsi_weekly"] = {"min": rw0, "max": rw1}
