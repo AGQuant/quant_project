@@ -18,6 +18,9 @@
      live count from /run in a sticky footer, results in the same names sheet. The Build-your-own card points here.
      cc#2160 (Screeners PUSH 5/5): the chip selection is mirrored into the URL (replaceState) so a link reopens to the
      same screen; Share copies that link; count-0 / alone-0 / meta-failure states are explicit, never blank.
+     cc#2175 (founder review 17-Sep 12:21): Save a screen by name (custom_screens via POST /api/mobile/custom_screener/save) + My screens
+     (a card under Build your own -> the shared sheet: name, applied words, live count, Delete; tap -> ?view=custom&saved=<id>, pre-filled
+     and pre-counted, header 'My screen: <name>'). Footer = Clear / Save / Show names; Share is a link on the count line. ?size=... wins over ?saved=.
      cc#2173 (founder review 17-Sep 12:19): chips are label-only (no per-chip count), the ONE live count sits under the
      subtitle, the footer keeps the buttons only, rows are ~30% shorter.
      TOKEN_MAP  #D4AF37 -> --brand · #3DD68C -> --win · #FF5C6C -> --loss · #131316 -> --panel · #1B1B20 -> --hi ·
@@ -103,6 +106,29 @@ body.sk-lock{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 .sk-cs-foot{position:fixed;left:0;right:0;z-index:21;background:var(--panel);border-top:var(--bw-1) solid var(--edge);padding:var(--space-8) var(--space-16);display:flex;align-items:center;justify-content:flex-end;gap:var(--space-8);font-family:Sora,-apple-system,sans-serif;color:var(--ink)}   /* cc#2173: buttons only, right-aligned */
 .sk-cs-clear{min-height:44px;padding:0 var(--space-12);border-radius:var(--radius-12);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);font-weight:800;font-size:var(--type-11);font-family:inherit;cursor:pointer}
 .sk-cs-show{min-height:44px;padding:0 var(--space-14);border-radius:var(--radius-12);background:color-mix(in srgb, var(--brand) 20%, var(--panel));border:var(--bw-1) solid var(--brand);color:var(--brand);font-weight:800;font-size:var(--type-12);font-family:inherit;cursor:pointer}.sk-cs-show:disabled{opacity:.4;cursor:default}
+.sk-cs-save{min-height:44px;padding:0 var(--space-14);border-radius:var(--radius-12);background:var(--panel);border:var(--bw-1) solid var(--brand);color:var(--brand);font-weight:800;font-size:var(--type-12);font-family:inherit;cursor:pointer}.sk-cs-save:disabled{opacity:.4;cursor:default}   /* cc#2175 */
+.sk-cs-count{display:flex;align-items:baseline;gap:var(--space-5)}
+.sk-cs-share{margin-left:auto;background:none;border:none;padding:var(--space-4) 0 var(--space-4) var(--space-8);font-family:inherit;font-size:var(--type-105);font-weight:800;color:var(--brand);cursor:pointer}.sk-cs-share[hidden]{display:none}
+/* cc#2175: the name prompt sits above the footer; the toast above the nav; My screens rows in the shared sheet */
+.sk-prompt{position:fixed;left:0;right:0;z-index:22;background:var(--panel);border-top:var(--bw-1) solid var(--edge);padding:var(--space-12) var(--space-16);font-family:Sora,-apple-system,sans-serif;color:var(--ink)}
+.sk-prompt[hidden]{display:none}
+.sk-prompt-l{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}
+.sk-prompt-q{font-size:var(--type-125);font-weight:600;line-height:1.5;margin-top:var(--space-4)}.sk-prompt-q b{color:var(--ink);font-weight:800}
+.sk-in{display:block;width:100%;min-height:44px;margin-top:var(--space-8);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);color:var(--ink);font:inherit;font-size:var(--type-14);font-weight:600;padding:var(--space-9) var(--space-12);box-sizing:border-box;outline:none}
+.sk-in:focus{border-color:color-mix(in srgb, var(--brand) 55%, transparent)}
+.sk-prompt-b{display:flex;justify-content:flex-end;gap:var(--space-8);margin-top:var(--space-10)}
+.sk-prompt-e{font-size:var(--type-105);color:var(--loss);margin-top:var(--space-6)}.sk-prompt-e[hidden]{display:none}
+.sk-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--space-70) + env(safe-area-inset-bottom,0px));max-width:88vw;background:var(--ink);color:var(--field);font-family:Sora,-apple-system,sans-serif;font-size:var(--type-115);font-weight:700;padding:var(--space-9) var(--space-14);border-radius:var(--radius-20);z-index:65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .18s;pointer-events:none}
+.sk-toast.on{opacity:1}.sk-toast[hidden]{display:none}
+.sk-my-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-10);align-items:center;padding:var(--space-9) var(--space-16);border-bottom:var(--bw-1) solid var(--hi)}.sk-my-row:last-child{border-bottom:none}
+.sk-my-main{min-width:0;cursor:pointer}
+.sk-my-nm{font-size:var(--type-125);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sk-my-w{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sk-my-r{display:flex;align-items:center;gap:var(--space-8)}
+.sk-my-c{font-size:var(--type-16);font-weight:800;text-align:right;line-height:1;font-variant-numeric:tabular-nums}.sk-my-c small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600;margin-top:var(--space-3)}
+.sk-my-del{min-height:36px;padding:0 var(--space-9);border-radius:var(--radius-8);background:none;border:var(--bw-1) solid var(--edge);color:var(--muted);font-family:inherit;font-size:var(--type-10);font-weight:800;cursor:pointer}
+.sk-my-del.go{border-color:var(--loss);color:var(--loss)}
+.sk-my-q{grid-column:1 / -1;display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);font-size:var(--type-115);font-weight:600}.sk-my-q b{font-weight:800}
 .sk-warn{color:var(--loss)}
 /* screen table */
 .rulebox{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-left:var(--bw-3) solid var(--brand);border-radius:0 var(--radius-14) var(--radius-14) 0;padding:var(--space-12) var(--space-14);font-size:var(--type-115);line-height:1.55}
@@ -154,7 +180,8 @@ var ICON={
   'Future Giants':'<svg viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
   'Market Leaders':'<svg viewBox="0 0 24 24"><path d="M4 19h16"/><rect class="f" x="6" y="11" width="3" height="8"/><rect x="6" y="11" width="3" height="8"/><rect class="f" x="11" y="7" width="3" height="12"/><rect x="11" y="7" width="3" height="12"/><rect class="f" x="16" y="4" width="3" height="15"/><rect x="16" y="4" width="3" height="15"/></svg>',
   'Multibagger Hunt':'<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 13.5l2-2.5 1.5 1.5 2.5-3"/></svg>',
-  custom:'<svg viewBox="0 0 24 24"><path d="M4 5h16M6 10h12M8 15h8M10 20h4"/></svg>'
+  custom:'<svg viewBox="0 0 24 24"><path d="M4 5h16M6 10h12M8 15h8M10 20h4"/></svg>',
+  saved:'<svg viewBox="0 0 24 24"><path class="f" d="M6 3h9l4 4v14H6z"/><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg>'
 };
 function card(c){   // cc#2156: one horizontal rail card per screen
   var top=c.top||[];
@@ -196,6 +223,7 @@ function renderNamesSheet(title, meta, rows, footerHref){
   var b=document.getElementById('sk-sheet-b');
   if(rows===null) b.innerHTML='<div class="sk-sheet-e">Loading names…</div>';
   else if(rows===false) b.innerHTML='<div class="sk-sheet-e">Could not load. Try again, or open the full table below.</div>';
+  else if(typeof rows==='string') b.innerHTML=rows;   // cc#2175: a ready block (My screens rows)
   else if(!rows.length) b.innerHTML='<div class="sk-sheet-e">No names in this screen on the last run.</div>';
   else b.innerHTML=rows.map(nameRow).join('');
   var f=document.getElementById('sk-sheet-f'); if(footerHref){ f.setAttribute('href',footerHref); f.hidden=false; } else f.hidden=true;
@@ -247,24 +275,26 @@ function renderList(d){
      + '<div class="sk-pager" aria-hidden="true">'+g.rows.map(function(_,i){return '<i'+(i===0?' class="on"':'')+'></i>';}).join('')+'</div>';
   });
   h+='<div class="sec"><h2>Build your own</h2><span class="hint">buttons, no typing</span></div><div class="sk-one"><a class="sk-card sk-wide" href="/m/screeners?view=custom"><div class="sk-ic">'+ICON.custom+'</div><div class="sk-body"><div class="sk-nm">Custom screener</div><div class="sk-n">Ten filters, three buttons each. Tap what you want.</div><div class="sk-rule">Live count as you tap · the names open right here</div></div><span class="sk-go">›</span></a></div>';   // cc#2159
+  h+='<div class="sk-one"><a class="sk-card sk-wide" id="my-screens" href="/m/screeners?my=1"><div class="sk-ic">'+ICON.saved+'</div><div class="sk-body"><div class="sk-nm">My screens</div><div class="sk-n" id="my-n">Counting…</div><div class="sk-rule">Saved by name · tap to open, each with its live count</div></div><span class="sk-go">›</span></a></div>';   // cc#2175
   h+='<div class="note"><b>Only quant screens.</b> A screen with a written rule appears here; rank-only client lists do not. Green dot = ran on the latest date; red = stale, with its own date. Swipe a row to see the next screen; tap a screen to see its names right here.</div>';
   document.getElementById('body').innerHTML=h;
-  wirePagers();
+  wirePagers(); myScreensCount();
   var body=document.getElementById('body');
   if(!body._skTap){ body._skTap=true; body.addEventListener('click', function(e){   // cc#2157: a card tap opens the sheet; modifier clicks keep the link
-    var a=e.target.closest('a.sk-card'); if(!a||!a.getAttribute('data-id')||e.metaKey||e.ctrlKey||e.shiftKey||e.button===1) return;   // the custom card has no data-id: it navigates
+    var a=e.target.closest('a.sk-card'); if(a&&a.id==='my-screens'&&!(e.metaKey||e.ctrlKey||e.shiftKey||e.button===1)){ e.preventDefault(); openMyScreens(); return; }   // cc#2175
+    if(!a||!a.getAttribute('data-id')||e.metaKey||e.ctrlKey||e.shiftKey||e.button===1) return;   // the custom card has no data-id: it navigates
     e.preventDefault(); openScreenSheet(a.getAttribute('data-id'), a.getAttribute('data-name')); }); }
 }
 /* cc#2159: the custom screener view. State = CS.sel {filter_key: [button_keys]}; the count comes from /run on every
    tap (debounced, previous fetch aborted); the names sheet shows the rows /run already returned (no second fetch). */
-var CS={meta:null, sel:{}, last:null, timer:null, ctrl:null, seq:0}, CS_KEY='scorr_custom_screen_v1';
+var CS={meta:null, sel:{}, last:null, timer:null, ctrl:null, seq:0, saved:null}, CS_KEY='scorr_custom_screen_v1';   // cc#2175: saved = {id, name} while the chips still show a saved screen
 function csLoadSel(){ try{ var s=JSON.parse(localStorage.getItem(CS_KEY)||'{}'); return (s&&typeof s==='object'&&!Array.isArray(s))?s:{}; }catch(e){ return {}; } }
 function csSaveSel(){ try{ if(Object.keys(CS.sel).length) localStorage.setItem(CS_KEY, JSON.stringify(CS.sel)); else localStorage.removeItem(CS_KEY); }catch(e){} }   // a per-viewer convenience, never a saved screen
 function csQuery(){ var q=[]; Object.keys(CS.sel).forEach(function(k){ if(CS.sel[k].length) q.push(encodeURIComponent(k)+'='+CS.sel[k].map(encodeURIComponent).join(',')); }); return q.join('&'); }
 function csPicked(){ return Object.keys(CS.sel).reduce(function(n,k){ return n+CS.sel[k].length; },0); }
 /* cc#2160: URL state. The query string carries the same keys /run takes, so a link reopens to the same screen. */
 function csFromUrl(known){ var sel={}; try{ var u=new URLSearchParams(location.search); Object.keys(known).forEach(function(k){ var v=u.getAll(k).join(',').split(',').map(function(s){ return s.trim().toLowerCase(); }).filter(function(s,i,arr){ return s&&known[k].indexOf(s)>=0&&arr.indexOf(s)===i; }); if(v.length) sel[k]=v; }); }catch(e){} return sel; }
-function csSyncUrl(){ try{ var q=csQuery(); history.replaceState(history.state, '', '/m/screeners?view=custom'+(q?'&'+q:'')); }catch(e){} }
+function csSyncUrl(){ try{ var q=csQuery(); history.replaceState(history.state, '', '/m/screeners?view=custom'+(CS.saved?'&saved='+encodeURIComponent(CS.saved.id):'')+(q?'&'+q:'')); }catch(e){} }   // cc#2175: saved id rides along; the filter keys win on reload (item 5)
 function csShareUrl(){ var q=csQuery(); return location.origin+'/m/screeners?view=custom'+(q?'&'+q:''); }
 function csShare(){
   var url=csShareUrl(), btn=document.getElementById('cs-share'); if(!btn||btn.disabled) return;
@@ -272,9 +302,13 @@ function csShare(){
   function fallback(){ try{ window.prompt('Copy this link', url); }catch(e){} done(false); }
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(function(){ done(true); }).catch(fallback); } else fallback();
 }
-function loadCustom(){   // cc#2160: a failed /meta says so and offers a retry -- never a blank panel
+function csSavedIdFromUrl(){ try{ var u=new URLSearchParams(location.search); var v=u.get('saved'); return (v&&/^\d+$/.test(v))?Number(v):null; }catch(e){ return null; } }
+function loadCustom(){   // cc#2160: a failed /meta says so and offers a retry -- never a blank panel; cc#2175: ?saved=<id> loads that screen alongside /meta
   document.getElementById('body').innerHTML='<div class="err">Loading filters…</div>';
-  fetch('/api/mobile/custom_screener/meta',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){ if(!d||d.error||!d.filters||!d.filters.length) throw new Error((d&&d.error)||'no filters'); renderCustom(d); })
+  var sid=csSavedIdFromUrl();
+  var pm=fetch('/api/mobile/custom_screener/meta',{credentials:'same-origin'}).then(function(r){ return r.json(); });
+  var ps=sid?fetch('/api/mobile/custom_screener/saved/'+sid,{credentials:'same-origin'}).then(function(r){ return r.json(); }).catch(function(){ return {error:'unreachable'}; }):Promise.resolve(null);
+  Promise.all([pm,ps]).then(function(res){ var d=res[0], sv=res[1]; if(!d||d.error||!d.filters||!d.filters.length) throw new Error((d&&d.error)||'no filters'); renderCustom(d, sv); if(sid&&(!sv||sv.error)) skToast('That saved screen is gone.'); })
   .catch(function(){
     document.getElementById('pg-title').textContent='Custom screener'; var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/screeners');
     document.getElementById('asof').textContent='Could not load';
@@ -283,15 +317,17 @@ function loadCustom(){   // cc#2160: a failed /meta says so and offers a retry -
   });
 }
 function csExclText(n){ return n+' name'+(n===1?' has':'s have')+' no technicals today and '+(n===1?'is':'are')+' left out of trend / 52-week / 1-year filters.'; }
-function renderCustom(meta){
-  CS.meta=meta; var known={}; (meta.filters||[]).forEach(function(f){ known[f.key]=f.buttons.map(function(b){ return b.key; }); });
-  var fromUrl=csFromUrl(known); var saved=Object.keys(fromUrl).length?fromUrl:csLoadSel();   // cc#2160: a link's filters win; localStorage only when the URL carries none
+function renderCustom(meta, savedScreen){
+  CS.meta=meta; CS.saved=null; var known={}; (meta.filters||[]).forEach(function(f){ known[f.key]=f.buttons.map(function(b){ return b.key; }); });
+  var fromUrl=csFromUrl(known); var sv=(savedScreen&&!savedScreen.error&&savedScreen.selection&&typeof savedScreen.selection==='object')?savedScreen:null;
+  var saved=Object.keys(fromUrl).length?fromUrl:(sv?sv.selection:csLoadSel());   // cc#2160: a link's filters win; cc#2175: then a ?saved= screen; localStorage only when the URL carries neither
+  if(sv&&!Object.keys(fromUrl).length) CS.saved={id:sv.id, name:sv.name};
   CS.sel={}; Object.keys(saved).forEach(function(k){ if(known[k]){ var v=(saved[k]||[]).filter(function(b){ return known[k].indexOf(b)>=0; }); if(v.length) CS.sel[k]=v; } });
   csSaveSel(); csSyncUrl();
-  document.getElementById('pg-title').textContent='Custom screener'; var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/screeners');
+  csTitles(); var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/screeners');
   var a=meta.as_of||{}; var behind=(a.invest&&a.gvm&&a.invest<a.gvm)?' · <span class="sk-warn">Investment score is one day behind</span>':'';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(a.gvm))+'</b> · EOD only · '+Number(meta.universe||0).toLocaleString('en-IN')+' names'+behind;
-  var h='<div class="sk-cs-head"><div class="sk-cs-t">Custom screener</div><div class="sk-cs-s">Tap what you want. No numbers to type.</div><div class="sk-cs-count"><b id="cs-count">—</b><span id="cs-count-l">names match</span></div></div><div class="sk-cs" id="cs-panel">';   // cc#2173: the one live count sits here
+  var h='<div class="sk-cs-head"><div class="sk-cs-t">Custom screener</div><div class="sk-cs-s">Tap what you want. No numbers to type.</div><div class="sk-cs-count"><b id="cs-count">—</b><span id="cs-count-l">names match</span><button type="button" class="sk-cs-share" id="cs-share" hidden>Share</button></div></div><div class="sk-cs" id="cs-panel">';   // cc#2173: the one live count sits here; cc#2175: Share moved up here as a link
   (meta.filters||[]).forEach(function(f){
     h+='<div class="sk-cs-row" data-key="'+esc(f.key)+'"><div class="sk-cs-h" title="'+esc(f.rule_text||'')+'"><span class="sk-cs-l">'+esc(f.label)+'</span><span class="sk-cs-r">'+esc(f.rule_text||'')+'</span></div><div class="sk-cs-chips">'
       + (f.buttons||[]).slice(0,3).map(function(b){ var on=(CS.sel[f.key]||[]).indexOf(b.key)>=0; return '<button type="button" class="sk-chip'+(on?' on':'')+'" data-key="'+esc(f.key)+'" data-b="'+esc(b.key)+'" aria-pressed="'+(on?'true':'false')+'"><span class="sk-chip-l">'+esc(b.label)+'</span></button>'; }).join('')   // cc#2173: label only; /meta still carries `alone`
@@ -299,13 +335,14 @@ function renderCustom(meta){
   });
   h+='</div><div class="sk-cs-excl" id="cs-excl" hidden></div>';
   h+='<div class="note"><b>How it works.</b> Buttons in one row are either/or; rows combine. A row you never tap is off. Every button is the same end-of-day band the app shows elsewhere, so a name never passes here and fails there. Nothing is a recommendation.</div><div class="sk-cs-pad"></div>';
-  document.getElementById('body').innerHTML=h;
+  document.getElementById('body').innerHTML=h; csTitles();
+  document.getElementById('cs-share').addEventListener('click', csShare);
   if(!document.getElementById('cs-foot')){
     var foot=document.createElement('div'); foot.className='sk-cs-foot'; foot.id='cs-foot';
-    foot.innerHTML='<button type="button" class="sk-cs-clear" id="cs-clear">Clear</button><button type="button" class="sk-cs-clear" id="cs-share" disabled>Share</button><button type="button" class="sk-cs-show" id="cs-show" disabled>Show names</button>';   // cc#2173: buttons only
+    foot.innerHTML='<button type="button" class="sk-cs-clear" id="cs-clear">Clear</button><button type="button" class="sk-cs-save" id="cs-save" disabled>Save</button><button type="button" class="sk-cs-show" id="cs-show" disabled>Show names</button>';   // cc#2173: buttons only; cc#2175: Clear / Save / Show names
     document.body.appendChild(foot);
-    document.getElementById('cs-clear').addEventListener('click', function(){ CS.sel={}; csSaveSel(); csSyncUrl(); document.querySelectorAll('#cs-panel .sk-chip').forEach(function(c){ c.classList.remove('on'); c.setAttribute('aria-pressed','false'); }); csRefresh(0); });
-    document.getElementById('cs-share').addEventListener('click', csShare);
+    document.getElementById('cs-clear').addEventListener('click', function(){ CS.sel={}; csForget(); csSaveSel(); csSyncUrl(); document.querySelectorAll('#cs-panel .sk-chip').forEach(function(c){ c.classList.remove('on'); c.setAttribute('aria-pressed','false'); }); csRefresh(0); });
+    document.getElementById('cs-save').addEventListener('click', csPrompt);
     document.getElementById('cs-show').addEventListener('click', csShow);
     window.addEventListener('resize', csPlaceFoot);
   }
@@ -314,11 +351,11 @@ function renderCustom(meta){
     var hd=e.target.closest('.sk-cs-h'); if(hd){ hd.parentNode.classList.toggle('open'); return; }   // cc#2173: the header line opens the full rule text
     var c=e.target.closest('.sk-chip'); if(!c) return; var k=c.getAttribute('data-key'), b=c.getAttribute('data-b'); var arr=CS.sel[k]||[]; var i=arr.indexOf(b);
     if(i>=0) arr.splice(i,1); else arr.push(b); if(arr.length) CS.sel[k]=arr; else delete CS.sel[k];
-    c.classList.toggle('on', i<0); c.setAttribute('aria-pressed', i<0?'true':'false'); csSaveSel(); csSyncUrl(); csRefresh(250);
+    c.classList.toggle('on', i<0); c.setAttribute('aria-pressed', i<0?'true':'false'); csForget(); csSaveSel(); csSyncUrl(); csRefresh(250);
   });
   csRefresh(0);
 }
-function csPlaceFoot(){ var f=document.getElementById('cs-foot'), nav=document.querySelector('.bnav'); if(f) f.style.bottom=(nav?nav.offsetHeight:0)+'px'; }   // sits on top of the bottom nav
+function csPlaceFoot(){ var f=document.getElementById('cs-foot'), nav=document.querySelector('.bnav'); if(f) f.style.bottom=(nav?nav.offsetHeight:0)+'px'; var p=document.getElementById('cs-prompt'); if(p&&f) p.style.bottom=((nav?nav.offsetHeight:0)+f.offsetHeight)+'px'; }   // sits on top of the bottom nav; cc#2175: the prompt sits on top of the footer
 function csRefresh(delay){
   if(CS.timer) clearTimeout(CS.timer);
   var cnt=document.getElementById('cs-count'); if(!cnt) return; cnt.classList.add('dim');   // dims while loading, never blanks
@@ -328,15 +365,110 @@ function csRefresh(delay){
     fetch('/api/mobile/custom_screener/run'+(q?'?'+q:''),{credentials:'same-origin', signal:ctrl?ctrl.signal:undefined}).then(function(r){ return r.json(); }).then(function(d){
       if(my!==CS.seq) return; cnt.classList.remove('dim'); CS.last=d;
       var show=document.getElementById('cs-show'), lab=document.getElementById('cs-count-l'), ex=document.getElementById('cs-excl'), share=document.getElementById('cs-share');
-      var picked=csPicked(); if(share) share.disabled=!picked;
+      var picked=csPicked(); if(share){ share.disabled=!picked; share.hidden=!picked; } var save=document.getElementById('cs-save'); if(save) save.disabled=!picked;   // cc#2175
       if(!d||d.error){ cnt.textContent='—'; lab.textContent='could not count'; show.disabled=true; return; }
       var n=picked?Number(d.count||0):0;
       cnt.textContent=n.toLocaleString('en-IN');
       lab.textContent=!picked?'names match · pick at least one filter':(n===0?'No name passes all of these today':(n===1?'name matches':'names match'));   // cc#2160: count-0 state
       show.disabled=!(n>0&&picked>0);
       var ne=Number(d.excluded_no_technicals||0); if(ne>0&&picked){ ex.textContent=csExclText(ne); ex.hidden=false; } else { ex.textContent=''; ex.hidden=true; }
-    }).catch(function(e){ if(my!==CS.seq||(e&&e.name==='AbortError')) return; cnt.classList.remove('dim'); cnt.textContent='—'; document.getElementById('cs-count-l').textContent='could not count'; document.getElementById('cs-show').disabled=true; });
+    }).catch(function(e){ if(my!==CS.seq||(e&&e.name==='AbortError')) return; cnt.classList.remove('dim'); cnt.textContent='—'; document.getElementById('cs-count-l').textContent='could not count'; document.getElementById('cs-show').disabled=true; var sv=document.getElementById('cs-save'); if(sv) sv.disabled=true; });
   }, delay||0);
+}
+/* cc#2175: Save by name + My screens */
+function skToast(msg){
+  var t=document.getElementById('sk-toast'); if(!t){ t=document.createElement('div'); t.className='sk-toast'; t.id='sk-toast'; t.setAttribute('role','status'); document.body.appendChild(t); }
+  var nav=document.querySelector('.bnav'), foot=document.getElementById('cs-foot'); t.style.bottom=((nav?nav.offsetHeight:0)+((foot&&!foot.hidden)?foot.offsetHeight:0)+12)+'px';   // above the nav, and above the custom view's footer
+  t.textContent=msg; t.hidden=false; void t.offsetWidth; t.classList.add('on');
+  if(t._t) clearTimeout(t._t); t._t=setTimeout(function(){ t.classList.remove('on'); setTimeout(function(){ if(!t.classList.contains('on')) t.hidden=true; },220); },2200);
+}
+function csTitles(){   // header + view title follow the saved marker
+  var nm=CS.saved?('My screen: '+CS.saved.name):'Custom screener';
+  document.getElementById('pg-title').textContent=nm;
+  var t=document.querySelector('.sk-cs-t'), s=document.querySelector('.sk-cs-s'); if(t) t.textContent=CS.saved?CS.saved.name:'Custom screener'; if(s) s.textContent=CS.saved?'Your saved screen. Tap a chip to change it.':'Tap what you want. No numbers to type.';
+}
+function csForget(){ if(!CS.saved) return; CS.saved=null; csTitles(); }   // the chips no longer show the saved screen
+function csShortName(){   // 'Large/Mid · GVM Good' -- the applied words, shortened, for the name prompt
+  var parts=[]; (CS.meta&&CS.meta.filters||[]).forEach(function(f){ var on=CS.sel[f.key]||[]; if(!on.length) return; var labels=f.buttons.filter(function(b){ return on.indexOf(b.key)>=0; }).map(function(b){ return b.label.replace(' & micro',''); }).join('/'); parts.push(f.key==='size'?labels:(f.label.replace(/ rating$/,'')+' '+labels)); });
+  var s=parts.join(' · '); if(s.length>40){ s=s.slice(0,40); s=s.replace(/\s*·?\s*\S*$/,'')||s.slice(0,40); } return s;
+}
+function csPrompt(){
+  if(!csPicked()) return;
+  var p=document.getElementById('cs-prompt');
+  if(!p){ p=document.createElement('div'); p.className='sk-prompt'; p.id='cs-prompt'; p.setAttribute('role','dialog'); document.body.appendChild(p); }
+  p.innerHTML='<div class="sk-prompt-l">Name this screen</div><input class="sk-in" id="cs-name" type="text" maxlength="40" autocomplete="off" aria-label="Screen name"><div class="sk-prompt-e" id="cs-perr" hidden></div><div class="sk-prompt-b"><button type="button" class="sk-cs-clear" id="cs-pcancel">Cancel</button><button type="button" class="sk-cs-show" id="cs-psave">Save</button></div>';
+  p.hidden=false; csPlaceFoot();
+  var inp=document.getElementById('cs-name'); inp.value=csShortName(); inp.focus(); try{ inp.select(); }catch(e){}
+  inp.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); csSaveNow(false); } if(e.key==='Escape') csPromptClose(); });
+  document.getElementById('cs-pcancel').addEventListener('click', csPromptClose);
+  document.getElementById('cs-psave').addEventListener('click', function(){ csSaveNow(false); });
+}
+function csPromptClose(){ var p=document.getElementById('cs-prompt'); if(p) p.hidden=true; }
+function csPromptAsk(name, id){   // the name is taken: ask before overwriting
+  var p=document.getElementById('cs-prompt'); if(!p) return;
+  p.innerHTML='<div class="sk-prompt-l">Name in use</div><div class="sk-prompt-q">A screen named <b>'+esc(name)+'</b> already exists. Overwrite it with these chips?</div><div class="sk-prompt-b"><button type="button" class="sk-cs-clear" id="cs-pcancel">Cancel</button><button type="button" class="sk-cs-show" id="cs-pover">Overwrite</button></div>';
+  document.getElementById('cs-pcancel').addEventListener('click', csPrompt);   // back to the name box
+  document.getElementById('cs-pover').addEventListener('click', function(){ csSaveNow(true, name); });
+}
+function csSaveNow(overwrite, nameGiven){
+  var inp=document.getElementById('cs-name'), name=(nameGiven!=null?nameGiven:(inp?inp.value:'')).replace(/\s+/g,' ').trim(), err=document.getElementById('cs-perr');
+  if(!name){ if(err){ err.textContent='Give the screen a name.'; err.hidden=false; } if(inp) inp.focus(); return; }
+  var btn=document.getElementById(overwrite?'cs-pover':'cs-psave'); if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
+  fetch('/api/mobile/custom_screener/save',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({name:name, selection:CS.sel, overwrite:!!overwrite})}).then(function(r){ return r.json(); }).then(function(d){
+    if(d&&d.exists&&!overwrite){ csPromptAsk(d.name||name, d.id); return; }
+    if(!d||d.error||d.id==null) throw new Error((d&&d.error)||'no id');
+    CS.saved={id:d.id, name:d.name||name}; csTitles(); csSyncUrl(); csPromptClose(); skToast('Saved as '+CS.saved.name);
+  }).catch(function(e){
+    if(btn){ btn.disabled=false; btn.textContent=overwrite?'Overwrite':'Save'; }
+    var el=document.getElementById('cs-perr'); if(el){ el.textContent='Could not save: '+(e&&e.message?e.message:'try again'); el.hidden=false; } else skToast('Could not save. Try again.');
+  });
+}
+function myScreensCount(){   // the list card's line: how many saved screens (no live counts here -- one cheap call)
+  var el=document.getElementById('my-n'); if(!el) return;
+  fetch('/api/mobile/custom_screener/saved?counts=0',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(!d||d.error) throw new Error(); var n=Number(d.count||0);
+    el.innerHTML=n?('<b>'+n+'</b> saved screen'+(n===1?'':'s')):'No saved screens yet. Save one from the custom screener.';
+  }).catch(function(){ el.textContent='Could not count your screens.'; });
+}
+function myRow(s){
+  var c=(s.count==null)?'—':Number(s.count).toLocaleString('en-IN');
+  return '<div class="sk-my-row" data-id="'+esc(s.id)+'" data-name="'+esc(s.name)+'"><div class="sk-my-main"><div class="sk-my-nm">'+esc(s.name)+'</div><div class="sk-my-w">'+esc(s.words||s.note||'')+'</div></div><div class="sk-my-r"><div class="sk-my-c">'+c+'<small>name'+(s.count===1?'':'s')+'</small></div><button type="button" class="sk-my-del">Delete</button></div></div>';
+}
+function myEmpty(){ return '<div class="sk-sheet-e">No saved screens yet. Tap Save on the custom screener to keep one by name.</div>'; }
+function openMyScreens(){
+  var my=++SHEET_SEQ;
+  renderNamesSheet('My screens', {text:'Saved by name · live count each'}, null, null); showSheet();
+  fetch('/api/mobile/custom_screener/saved',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(my!==SHEET_SEQ) return;
+    if(!d||d.error) { renderNamesSheet('My screens', {text:'Could not load your screens.'}, false, null); return; }
+    var list=d.screens||[];
+    renderNamesSheet('My screens', {text:'<b>'+list.length+'</b> saved screen'+(list.length===1?'':'s')+' · live count each · tap to open', foot:'Counts are live: the same end-of-day query the custom screener runs. Delete removes the saved screen only.'}, list.length?list.map(myRow).join(''):myEmpty(), null);
+    wireMyRows();
+  }).catch(function(){ if(my===SHEET_SEQ) renderNamesSheet('My screens', {text:'Could not load your screens.'}, false, null); });
+}
+function wireMyRows(){
+  var b=document.getElementById('sk-sheet-b'); if(!b||b._myWired) return; b._myWired=true;
+  b.addEventListener('click', function(e){
+    var row=e.target.closest('.sk-my-row'); if(!row) return;
+    if(e.target.closest('.sk-my-keep')){ myRestore(row); return; }
+    if(e.target.closest('.sk-my-go')){ deleteSaved(row); return; }
+    if(e.target.closest('.sk-my-del')){ myConfirm(row); return; }   // the confirm buttons share this class: checked last
+    if(e.target.closest('.sk-my-main')){ location.href='/m/screeners?view=custom&saved='+encodeURIComponent(row.getAttribute('data-id')); }
+  });
+  var hold=null;   // long-press on a row also asks to delete
+  b.addEventListener('pointerdown', function(e){ var row=e.target.closest('.sk-my-row'); if(!row||e.target.closest('button')) return; hold=setTimeout(function(){ hold=null; myConfirm(row); },550); });
+  ['pointerup','pointercancel','pointermove','pointerleave'].forEach(function(ev){ b.addEventListener(ev, function(){ if(hold){ clearTimeout(hold); hold=null; } }); });
+}
+function myConfirm(row){ if(row._html==null) row._html=row.innerHTML; row.innerHTML='<div class="sk-my-q"><span>Delete <b>'+esc(row.getAttribute('data-name'))+'</b>?</span><span><button type="button" class="sk-my-del sk-my-keep">Keep</button> <button type="button" class="sk-my-del go sk-my-go">Delete</button></span></div>'; }
+function myRestore(row){ if(row._html!=null) row.innerHTML=row._html; }
+function deleteSaved(row){
+  var id=row.getAttribute('data-id'), name=row.getAttribute('data-name');
+  fetch('/api/mobile/custom_screener/saved/'+encodeURIComponent(id),{method:'DELETE',credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(!d||d.error) throw new Error((d&&d.error)||'failed');
+    row.parentNode.removeChild(row); var b=document.getElementById('sk-sheet-b'); var left=b.querySelectorAll('.sk-my-row').length; if(!left) b.innerHTML=myEmpty();
+    document.getElementById('sk-sheet-m').innerHTML='<b>'+left+'</b> saved screen'+(left===1?'':'s')+' · live count each · tap to open';
+    skToast('Deleted '+name); myScreensCount();
+  }).catch(function(){ myRestore(row); skToast('Could not delete. Try again.'); });
 }
 function csShow(){
   var d=CS.last; if(!d||!d.rows||!csPicked()) return;
@@ -364,11 +496,11 @@ function renderScreen(d){
     + '<div class="note"><b>What this list is.</b> Every name here passed the rule above on the last run. Scores are the latest GVM; G, V, M are its three pillars. Nothing is a recommendation.</div>';
   ROWS=d.rows||[]; tbl();
 }
-var S=null, VIEW=null; try{ var U=new URLSearchParams(location.search); S=U.get('screen'); VIEW=U.get('view'); }catch(e){}
+var S=null, VIEW=null, MY=false; try{ var U=new URLSearchParams(location.search); S=U.get('screen'); VIEW=U.get('view'); MY=U.get('my')==='1'; }catch(e){}
 if(VIEW==='custom'){ loadCustom(); }
 else fetch(S?'/api/mobile/screeners_app/screen?id='+encodeURIComponent(S):'/api/mobile/screeners_app/list',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
   if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
-  S ? renderScreen(d) : renderList(d);
+  S ? renderScreen(d) : renderList(d); if(!S&&MY) openMyScreens();
 }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load screens.</div>'; });
 </script>
 </body></html>

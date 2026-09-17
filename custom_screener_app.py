@@ -287,3 +287,219 @@ def custom_screener_run(request: Request):
     if tech_on:
         out["excluded_no_technicals"] = int(row["excluded_no_technicals"] or 0)
     return out
+
+
+# ══ cc#2175: SAVED SCREENS -- Save by name + My screens ═══════════════════════════════════════════
+# The first saved-screen store in the app (cc#2159 shipped localStorage-only memory of the last selection;
+# the founder now wants real named saves that reopen pre-filled and pre-counted).
+#
+# OWNER. The app has ONE password and no user table (scorr_auth: SCORR_AUTH_PASSWORD, one session token per
+# login, no identity behind it), so every screen belongs to the one app identity APP_OWNER. The column is
+# there so a per-user login later needs no migration -- only _owner() changes.
+#
+# TABLE. custom_screens, CREATE TABLE IF NOT EXISTS from the router's startup hook (the cc#879 pattern: after
+# the app is up, never per request, never at import where the DB is often unreachable on a cold boot) and
+# retried lazily on the first save / list if the hook failed. No ALTER, ever (MAINTENANCE_LOCK_RULE).
+#
+# SELECTION. A saved selection is validated through parse_selection on the way IN (unknown key or button ->
+# error, no row) and again on the way OUT (a button retired from the registry later can never break /run).
+# The live count is run_sql(selection, limit=0) -- the same statement /run uses, so the number on a saved
+# screen is the number the custom view shows for the same chips.
+#
+# Endpoints (app guard, JSON-safe):
+#   POST   /api/mobile/custom_screener/save         {name, selection{key:[buttons]}, overwrite?}
+#          -> {id, name, count, words, saved_at, overwritten} | {exists:true, id, name} when the name is taken
+#             and overwrite is not set (the app asks first) | {error}
+#   GET    /api/mobile/custom_screener/saved        -> {screens[<=20], count}; each screen carries a LIVE count
+#                                                     (?counts=0 skips the counts -- the list page only needs the number of screens)
+#   GET    /api/mobile/custom_screener/saved/{id}   -> one screen (the ?saved=<id> load of the custom view)
+#   DELETE /api/mobile/custom_screener/saved/{id}   -> {deleted: id} | {error: 'not found'}
+APP_OWNER = "scorr_app"
+SCREEN_NAME_MAX = 40
+SAVED_CAP = 20
+SCREENS_SCHEMA_SQL = """CREATE TABLE IF NOT EXISTS custom_screens (
+    id          serial PRIMARY KEY,
+    owner       text NOT NULL,
+    name        text NOT NULL,
+    selection   jsonb NOT NULL,
+    created_at  timestamptz DEFAULT now(),
+    updated_at  timestamptz DEFAULT now(),
+    UNIQUE (owner, name)
+)"""
+UPSERT_SQL = ("INSERT INTO custom_screens (owner, name, selection) VALUES (%s, %s, %s::jsonb) "
+              "ON CONFLICT (owner, name) DO UPDATE SET selection = EXCLUDED.selection, updated_at = now() "
+              "RETURNING id, created_at, updated_at")
+_SCREENS_READY = False
+
+
+def ensure_screens_table(conn=None):
+    """CREATE TABLE IF NOT EXISTS, once per process. Safe to call again: a no-op after the first success."""
+    global _SCREENS_READY
+    if _SCREENS_READY:
+        return True
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCREENS_SCHEMA_SQL)
+        conn.commit()
+        _SCREENS_READY = True
+    finally:
+        if own:
+            conn.close()
+    return True
+
+
+@router.on_event("startup")
+def _ensure_screens_on_startup():
+    try:
+        ensure_screens_table()
+        log.info("cc#2175: custom_screens ensured at startup")
+    except Exception as e:                       # loud, never fatal -- the app must boot
+        log.error("cc#2175: custom_screens ensure FAILED at startup: %s -- retried on the first save / list", e)
+
+
+def _owner(request):
+    """One app identity today (single password, no user table). The only line to change for per-user logins."""
+    return APP_OWNER
+
+
+def clean_name(raw):
+    """-> (name, None) | (None, error). Whitespace collapsed, 1..SCREEN_NAME_MAX characters."""
+    name = " ".join(str(raw or "").split())
+    if not name:
+        return None, {"error": "name required"}
+    if len(name) > SCREEN_NAME_MAX:
+        return None, {"error": "name too long (max %d characters)" % SCREEN_NAME_MAX}
+    return name, None
+
+
+def selection_from_body(body):
+    """{selection: {key: [buttons] | 'a,b'}} -> (selection in registry order, None) | (None, error).
+    Unknown key or button -> error (nothing is written); nothing selected -> error."""
+    sel = body.get("selection") if isinstance(body, dict) else None
+    if not isinstance(sel, dict):
+        return None, {"error": "selection must be an object of filter -> buttons", "known": KNOWN}
+    selection, err = parse_selection({str(k): (v if isinstance(v, (list, tuple)) else [v]) for k, v in sel.items()})
+    if err:
+        return None, err
+    if not selection:
+        return None, {"error": "pick at least one filter before saving"}
+    return selection, None
+
+
+def words(selection):
+    """'Size: Large / Mid · GVM: Good' -- the applied words, one string."""
+    return " · ".join(a["label"] + ": " + " / ".join(a["buttons_label"] or a["buttons_chosen"]) for a in applied(selection))
+
+
+def _count(cur, selection):
+    cur.execute(run_sql(selection, limit=0))
+    return int(_one(cur)["total"] or 0)
+
+
+def _stored_selection(raw):
+    """jsonb -> selection, re-validated against the registry. (selection, None) | (None, note)."""
+    sel = raw if isinstance(raw, dict) else (json.loads(raw) if raw else {})
+    selection, err = parse_selection({str(k): (v if isinstance(v, (list, tuple)) else [v]) for k, v in (sel or {}).items()})
+    if err:
+        return None, err["error"]
+    if not selection:
+        return None, "empty selection"
+    return selection, None
+
+
+def _screen(r, selection, note=None):
+    out = {"id": int(r[0]), "name": r[1], "selection": selection or {}, "applied": applied(selection) if selection else [],
+           "words": words(selection) if selection else "", "saved_at": r[4].isoformat() if r[4] else None,
+           "created_at": r[3].isoformat() if r[3] else None}
+    if note:
+        out["note"] = note
+    return out
+
+
+_SCREEN_COLS = "id, name, selection, created_at, updated_at"
+
+
+@router.post("/api/mobile/custom_screener/save")
+@_json_safe
+def custom_screener_save(request: Request, body: dict):
+    g = _guard(request)
+    if g:
+        return g
+    name, err = clean_name(body.get("name") if isinstance(body, dict) else None)
+    if err:
+        return err
+    selection, err = selection_from_body(body)
+    if err:
+        return err
+    overwrite = bool(body.get("overwrite"))
+    owner = _owner(request)
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_screens_table(conn)
+        cur.execute("SELECT id FROM custom_screens WHERE owner = %s AND name = %s", (owner, name))
+        hit = cur.fetchone()
+        if hit and not overwrite:
+            return {"exists": True, "id": int(hit[0]), "name": name,
+                    "note": "a screen with this name exists; send overwrite:true to replace it"}
+        cur.execute(UPSERT_SQL, (owner, name, json.dumps(selection)))
+        sid, created_at, updated_at = cur.fetchone()
+        count = _count(cur, selection)
+        conn.commit()
+    return {"id": int(sid), "name": name, "count": count, "selection": selection, "words": words(selection),
+            "saved_at": updated_at.isoformat() if updated_at else None, "overwritten": bool(hit)}
+
+
+@router.get("/api/mobile/custom_screener/saved")
+@_json_safe
+def custom_screener_saved(request: Request, counts: int = 1):
+    g = _guard(request)
+    if g:
+        return g
+    owner = _owner(request)
+    t0 = time.time()
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_screens_table(conn)
+        cur.execute("SELECT " + _SCREEN_COLS + " FROM custom_screens WHERE owner = %s ORDER BY updated_at DESC, id DESC LIMIT %s",
+                    (owner, SAVED_CAP))
+        rows = cur.fetchall()
+        screens = []
+        for r in rows:
+            selection, note = _stored_selection(r[2])
+            item = _screen(r, selection, note)
+            item["count"] = _count(cur, selection) if (selection and counts) else None
+            screens.append(item)
+    return {"screens": screens, "count": len(screens), "cap": SAVED_CAP, "counts": bool(counts),
+            "query_ms": int((time.time() - t0) * 1000), "basis": BASIS_LINE}
+
+
+@router.get("/api/mobile/custom_screener/saved/{sid}")
+@_json_safe
+def custom_screener_saved_one(request: Request, sid: int):
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_screens_table(conn)
+        cur.execute("SELECT " + _SCREEN_COLS + " FROM custom_screens WHERE owner = %s AND id = %s", (_owner(request), sid))
+        r = cur.fetchone()
+    if not r:
+        return {"error": "not found", "id": sid}
+    selection, note = _stored_selection(r[2])
+    return _screen(r, selection, note)
+
+
+@router.delete("/api/mobile/custom_screener/saved/{sid}")
+@_json_safe
+def custom_screener_saved_delete(request: Request, sid: int):
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_screens_table(conn)
+        cur.execute("DELETE FROM custom_screens WHERE owner = %s AND id = %s RETURNING id, name", (_owner(request), sid))
+        r = cur.fetchone()
+        conn.commit()
+    if not r:
+        return {"error": "not found", "id": sid}
+    return {"deleted": int(r[0]), "name": r[1]}
