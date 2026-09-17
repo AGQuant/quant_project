@@ -20,7 +20,7 @@ Reuses, does not invent (per this card's own instruction):
     option_chain.ts (naive IST) would silently reintroduce the "phantom 330 minutes" class of bug
     this codebase has already hit and documented (mobile_home2.py).
 
-NOT touched: option_chain's writer, worker/**, pcr_intraday, option_iv_daily, and main.py beyond
+NOT touched: option_chain's writer, worker/**, pcr_intraday, the option IV slice, and main.py beyond
 the one router import + include_router line (per this card's own do_not_touch).
 NOT built here: Black-Scholes/Greeks (cc#2034 already owns that, a different surface) or the real
 page templates (2038 web, 2039 app).

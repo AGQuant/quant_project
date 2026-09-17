@@ -1,7 +1,7 @@
 """
 option_ivp.py — cc#1859 OPTION VALUE: skew-aware IV percentile fair value from the bhavcopy year.
 
-Reads the nightly bhavcopy slice (cc#1858 option_iv_daily then; option_eod_slice solved on read since
+Reads the nightly bhavcopy slice (cc#1858's stored-iv table then; option_eod_slice solved on read since
 cc#2205 -- see AMENDED cc#2205 at the end of this docstring), populated by option_iv_history.py off the NSE F&O
 bhavcopy) ONLY. Never writes it (do_not_touch on the card). No new tables, no ALTER TABLE.
 
@@ -10,7 +10,7 @@ THE METHOD, exactly as ruled across cc_task_logs on cc#1859/1199 (session_log tr
 
   LEVEL (the ATM anchor) — RULED 3, log 6301: the ATM fair IV for a session is the AVERAGE of
   that session's ATM CALL IV and ATM PUT IV (same strike-nearest-to-spot, same expiry — every
-  (symbol, trade_date) in option_iv_daily carries exactly one expiry, confirmed empirically, so
+  (symbol, trade_date) in the slice carries exactly one expiry, confirmed empirically, so
   "nearest expiry" needs no tie-break). A call and a put at the same strike/expiry have IDENTICAL
   VEGA, so a synthetic-forward error moves the two solved IVs by equal and opposite amounts and
   averaging cancels it to first order — this is why the level uses the blend.
@@ -55,7 +55,7 @@ module's OWN pricing now goes through those instead — see AMENDED cc#2031 belo
 changed.
 
 AMENDED cc#2031 (15-Sep-2026, Fable's 13-Sep audit of this module + deriv_metrics.py +
-option_iv_daily). Supersedes the PRICER/WING-TAG/BUCKETS pieces of THE METHOD above; the
+the stored-iv table). Supersedes the PRICER/WING-TAG/BUCKETS pieces of THE METHOD above; the
 LEVEL/SHAPE/WINDOW/BANDS ruling text above is preserved verbatim as the historical record and
 stays in force except where this section overrides it. Full evidence + before/after proof:
 reports/CC2031_option_black76_wingtag_buckets.md.
@@ -84,12 +84,12 @@ reports/CC2031_option_black76_wingtag_buckets.md.
   (the price) is UNCHANGED: still LEVEL (median_atm_iv) + this bucket's median skew, exactly the
   original ruling — only what the percentile ranks against moved. ATM cell unchanged (S5 case).
 
-  BUCKETS — two defects fixed together. (1) option_iv_daily carries only ONE expiry per (symbol,
+  BUCKETS — two defects fixed together. (1) the slice carries only ONE expiry per (symbol,
   trade_date) today (monthly) — the wk/mo (DTE<=10 / >10) key split had nothing real to split ON,
   and instead starved every non-ATM tag for the last ~7 sessions of each monthly cycle (40
   sessions < BUCKET_MIN_SESSIONS 60; e3_wk_mo_starvation evidence). Dropped — key is now
   (option_type, sigma_bucket), no expiry_class. IF WEEKLY EXPIRIES ARE EVER LOADED into
-  option_iv_daily alongside monthlies, THIS SPLIT MUST RETURN — merging a weekly and a monthly
+  the slice alongside monthlies, THIS SPLIT MUST RETURN — merging a weekly and a monthly
   ATM at the same moneyness would blend two genuinely different distributions into one. (2)
   whole-percent-of-spot moneyness collapsed NIFTY's 50pt strike spacing (0.21% of spot) into one
   bucket across its entire ATM+-2 band, ranking a real strike against near-zero-variance noise
@@ -100,7 +100,7 @@ reports/CC2031_option_black76_wingtag_buckets.md.
   into the identical grid (ONE_REGISTRY_ONE_DERIVATION_V1, session_log 33549 — the same principle
   deriv_metrics._price_rows already names). This bucket-assignment F is always the carry-based
   proxy (spot*e^(R_FREE*T)) — deliberately NEVER the live parity forward chain_tags prices with:
-  option_iv_daily has no forward column to look a past session's real parity forward back up from
+  the slice has no forward column to look a past session's real parity forward back up from
   (do_not_touch: no ALTER TABLE), and conflating "which bucket" with "how it's priced" would let
   the same word quietly answer two different, drifting questions. BUCKET_MIN_SESSIONS stays 60 —
   never lowered (G1/G2).
@@ -168,7 +168,7 @@ def _sigma_moneyness_bucket(K: float, F: float, sigma_atm: float, T: float) -> O
     the CARRY-based forward (spot*e^(R_FREE*T)) in every caller, historical and live alike — never
     the live parity forward chain_tags uses for actual PRICING (F_price) — a bucket only needs a
     stable, always-available moneyness proxy to classify strikes consistently across sessions; the
-    parity forward is not stored per historical session (option_iv_daily carries no forward
+    parity forward is not stored per historical session (the slice carries no forward
     column, do_not_touch on ALTER TABLE), and re-deriving it per session would silently make
     "bucket" and "fair_value" answer two different, drifting questions with the same word. None
     (never a fabricated bucket) when sigma_atm or T cannot support the division — T<=0 is an
@@ -185,11 +185,6 @@ _CACHE_MAX_SYMBOLS = 64                   # ~1 MB per symbol of solved tuples; t
 _CACHE_LOCK = threading.Lock()            # FastAPI sync endpoints run on a threadpool; the LRU touch/evict is a two-step edit
 _SLICE_SQL = ("SELECT trade_date, expiry, strike, option_type, close, spot FROM option_eod_slice "
               "WHERE symbol = %s ORDER BY trade_date, expiry, strike, option_type")
-# TRANSITIONAL (cc#2205 push 1 only, removed in the dead-code push): while option_eod_slice has no rows
-# for a symbol -- the minutes between this deploy and the fill job's commit -- read the SAME raw columns
-# from the old table and solve them on read. Its stored iv is never read.
-_LEGACY_SQL = ("SELECT trade_date, expiry, strike, option_type, close, spot FROM option_iv_daily "
-               "WHERE symbol = %s ORDER BY trade_date, expiry, strike, option_type")
 
 
 def solved_from(rows, iv) -> List[Tuple]:
@@ -221,7 +216,7 @@ def solved_rows(cur, symbol: str) -> List[Tuple]:
             _SOLVED_CACHE.pop(symbol, None)
             _SOLVED_CACHE[symbol] = hit      # LRU touch
             return hit[1]
-    cur.execute(_SLICE_SQL if max_d is not None else _LEGACY_SQL, (symbol,))
+    cur.execute(_SLICE_SQL, (symbol,))
     rows = cur.fetchall()
     if rows:
         from option_iv_history import solve_iv

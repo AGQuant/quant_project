@@ -8,8 +8,8 @@ AMENDED cc#2205 (founder ruling 17-Sep-2026 ~18:30 IST, Fable card 7072): IV IS 
     into Black-76 vols WHEN A PAGE IS OPENED (option_ivp.solved_rows, cached per (symbol, max
     trade_date)), so a formula change is a code push and nothing else -- no stored answers to rewrite,
     no backup, no gated re-solve card (the cc#2020 / cc#2031 / cc#2202 pattern this ends). The
-    old option_iv_daily (stored iv, 252 sessions) and its cc#2031 backup are read by the one-off
-    slice_fill_run() job only (measure, then fill the last 130 sessions) and are DROPPED on Fable's
+    old stored-iv table (252 sessions) and its cc#2031 backup were read ONCE by the one-off fill job
+    (measure, then fill the last 130 sessions -- push 8b03fc0, removed in the dead-code push) and are DROPPED on Fable's
     "GO DROP cc#2205" after one clean 23:05 tick has written the new table. The history below this
     block describes the table as it was built; where it says "solved IV" read "raw close + spot".
 
@@ -40,14 +40,14 @@ AMENDED cc#2031 (15-Sep-2026) -- SOLVER CHANGED from spot-based Black-Scholes to
     NIFTY/BANKNIFTY put-call parity implies an actual carry of 0.2-0.7%, never near 7% (cc#2031
     e1_forward_error evidence). _b76_price_vec/_b76_iv_vec below are the vectorised twin of
     deriv_metrics._b76_price/_b76_iv (same d1/d2 family, same [1e-4,5.0]/64-iteration bisection,
-    additive -- _bs_price_vec/_bs_iv_vec above are UNCHANGED and still defined, just no longer
+    additive -- the spot-based _bs_price_vec/_bs_iv_vec pair was removed by cc#2205, no caller left,
     called from ingest_date()). Per (symbol, trade_date), F = the real put-call-parity-implied
     forward (K_atm + (C_atm-P_atm)*e^(R_FREE*T), K_atm = the strike nearest spot with BOTH legs
     priced that day) when such a pair exists; F = spot*e^(R_FREE*T) otherwise (algebraically
-    IDENTICAL to what _bs_price_vec/_bs_iv_vec would have produced -- proven in deriv_metrics.
+    IDENTICAL to what the old spot-based solve would have produced -- proven in deriv_metrics.
     _b76_price's own docstring -- so a symbol/day with no valid ATM pair sees the exact same
-    stored iv as before, never a fabricated forward). Fallback count is returned from
-    ingest_date() and surfaced in run_backfill()/run_forward_tick()'s own result dicts, per the
+    vol as before, never a fabricated forward). cc#2205: the solve runs on read (solve_iv), so
+    the fallback is a property of the read -- measured once by the fill job -- not of the load,
     card's own instruction to state it, not just log it.
 
 ATM WINDOW DEFINITION -- ONE_REGISTRY_ONE_DERIVATION_V1
@@ -58,8 +58,8 @@ ATM WINDOW DEFINITION -- ONE_REGISTRY_ONE_DERIVATION_V1
     second way.
 
 VECTORISED IV SOLVE -- founder-mandated (id 5654): "Vectorised IV solve and bulk COPY insert are
-    still mandatory -- row-by-row will not finish in any window." _bs_iv_vec() below is the SAME
-    Black-Scholes formula and bisection algorithm as deriv_metrics._bs_price/_bs_iv (same R_FREE,
+    still mandatory -- row-by-row will not finish in any window." _b76_iv_vec() below is the SAME
+    Black-76 formula and bisection algorithm as deriv_metrics._b76_price/_b76_iv (same R_FREE,
     same d1/d2, same [1e-4, 5.0] bounds, same 64 iterations) applied to whole numpy arrays instead
     of one contract per Python call -- ~8,753 rows/day solved in well under a second, versus
     8,753 x 64 scalar Black-Scholes evaluations per day if called through the existing function
@@ -68,7 +68,7 @@ VECTORISED IV SOLVE -- founder-mandated (id 5654): "Vectorised IV solve and bulk
 
 BULK INSERT -- founder-mandated: COPY, never row-by-row. Each date's rows land in a per-connection
     TEMP staging table via psycopg's native COPY, then one INSERT ... SELECT ... ON CONFLICT DO
-    UPDATE folds staging into option_iv_daily -- idempotent (a re-run of an already-loaded date
+    UPDATE folds staging into option_eod_slice -- idempotent (a re-run of an already-loaded date
     overwrites its own rows with the same values, never duplicates).
 
 RESUMABLE, PER-DAY STATUS -- founder-mandated: option_iv_backfill_status is one row per trading
@@ -170,43 +170,10 @@ def _ensure_tables(cur):
         PRIMARY KEY (trade_date, symbol))""")
 
 
-# ── vectorised Black-Scholes -- SAME formula as deriv_metrics._bs_price/_bs_iv, array-wise ──────
-def _bs_price_vec(S, K, T, sigma, is_call):
-    with np.errstate(all="ignore"):
-        sqrtT = np.sqrt(T)
-        d1 = (np.log(S / K) + (R_FREE + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
-        d2 = d1 - sigma * sqrtT
-        disc = np.exp(-R_FREE * T)
-        call_px = S * ndtr(d1) - K * disc * ndtr(d2)
-        put_px = K * disc * ndtr(-d2) - S * ndtr(-d1)
-    return np.where(is_call, call_px, put_px)
-
-
-def _bs_iv_vec(price, S, K, T, is_call):
-    """Vectorised bisection on [1e-4, 5.0], 64 iterations -- identical bounds/iteration count to
-    deriv_metrics._bs_iv, applied to whole arrays. Returns NaN for any row with an invalid input
-    (mirrors _bs_iv returning None on the same conditions)."""
-    n = price.shape[0]
-    lo = np.full(n, 1e-4, dtype=float)
-    hi = np.full(n, 5.0, dtype=float)
-    valid = (price > 0) & (S > 0) & (K > 0) & (T > 0)
-    for _ in range(64):
-        mid = (lo + hi) / 2.0
-        p = _bs_price_vec(S, K, T, mid, is_call)
-        p = np.where(np.isfinite(p), p, -np.inf)   # a bad d1/d2 (e.g. sigma underflow) never wins the bisection
-        gt = p > price
-        hi = np.where(gt, mid, hi)
-        lo = np.where(gt, lo, mid)
-    iv = (lo + hi) / 2.0
-    return np.where(valid, iv, np.nan)
-
-
 # ── cc#2031 A2: vectorised Black-76 -- SAME formula as deriv_metrics._b76_price/_b76_iv, array-
-# wise, mirroring _bs_price_vec/_bs_iv_vec's own structure exactly (same bounds, same iteration
-# count). Prices off a FORWARD (F) instead of assuming one from spot+R_FREE -- r is used for
-# DISCOUNTING ONLY, no drift term in d1. _bs_price_vec/_bs_iv_vec above are unchanged and no
-# longer called from ingest_date() (see AMENDED cc#2031 at the top of this file) but stay defined
-# in case a future caller needs the old spot-based behaviour explicitly.
+# wise (same bounds, same iteration count as the scalar solver). Prices off a FORWARD (F) instead
+# of assuming one from spot+R_FREE -- r is used for DISCOUNTING ONLY, no drift term in d1. The
+# spot-based _bs_price_vec/_bs_iv_vec pair that preceded it was removed by cc#2205 (no caller).
 def _b76_price_vec(F, K, T, sigma, is_call):
     with np.errstate(all="ignore"):
         sqrtT = np.sqrt(T)
@@ -220,8 +187,8 @@ def _b76_price_vec(F, K, T, sigma, is_call):
 
 def _b76_iv_vec(price, F, K, T, is_call):
     """Vectorised bisection on [1e-4, 5.0], 64 iterations -- identical bounds/iteration count to
-    _bs_iv_vec / deriv_metrics._b76_iv, applied to whole arrays. Returns NaN for any row with an
-    invalid input (mirrors _b76_iv returning None on the same conditions)."""
+    deriv_metrics._b76_iv, applied to whole arrays. Returns NaN for any row with an invalid input
+    (mirrors _b76_iv returning None on the same conditions)."""
     n = price.shape[0]
     lo = np.full(n, 1e-4, dtype=float)
     hi = np.full(n, 5.0, dtype=float)
@@ -249,9 +216,9 @@ def solve_iv(rows, with_meta: bool = False):
     CHOLAFIN 15-Sep, FEDERALBNK 16-Sep, TATAELXSI 16-Sep, spot exactly midway, 1.8 vol pts at
     most); a session with no such pair falls back to the carry forward spot*e^(R_FREE*T). Then _b76_iv_vec (bisection on [1e-4, 5.0], 64
     iterations). This is exactly the solve ingest_date() ran at load time from cc#2031 A2 onward
-    and the one a4_resolve_rows() re-ran on stored closes -- ONE method, in ONE place, now run
-    when a page is opened instead of when a file is loaded. Rows loaded since 15-Sep-2026 and the
-    three cc#2031 symbols therefore solve to their stored iv to 1e-9 (the card's parity test).
+    and the one the cc#2031 A4 re-solve ran on stored closes -- ONE method, in ONE place, now run
+    when a page is opened instead of when a file is loaded (the card's parity test: the rows the
+    old table had solved with this same method matched this function to 1e-9, row for row).
     with_meta=True also returns {groups, parity_groups, fallback_groups, atm_pairs} -- atm_pairs is
     the (CE row index, PE row index) of each session's parity anchor, for gap statistics."""
     n = len(rows)
@@ -563,6 +530,7 @@ def run_forward_tick() -> dict:
             cur.execute("""UPDATE option_iv_backfill_status
                            SET status='done', rows_written=%s, finished_at=NOW(), error=NULL
                            WHERE trade_date=%s""", (res.get("rows_written", 0), d))
+            res["retention"] = _apply_retention(cur)   # cc#2205 step 5: bounded to SLICE_SESSIONS dates, every tick
         else:
             cur.execute("""UPDATE option_iv_backfill_status
                            SET status='error', error=%s, finished_at=NOW()
@@ -611,483 +579,23 @@ def _maybe_start() -> bool:
     return True
 
 
-# ── cc#2205: the ONE-OFF migration job -- MEASURE, then FILL option_eod_slice from option_iv_daily's RAW columns ──
-# Runs once on the app (the sandbox has no HTTP path to prod and cannot pull 1.1M rows through run_sql):
-# set app_config[SLICE_FLAG_KEY] = {"status":"pending","task_id":2205,"dry_run":false} and the next boot
-# claims it and runs slice_fill_run() on a daemon thread; the numbers land in the flag value and as one
-# cc_task_logs line. Everything the card's verify block asks for is measured HERE, on the real rows:
-#   PARITY  -- solve_iv() on the raw columns vs the stored iv, NIFTY/BANKNIFTY/RELIANCE + every row since
-#              15-Sep-2026 (all Black-76 already): max |diff|, rows compared, null flips. A mismatch > 1e-9
-#              STOPS the fill (nothing written) unless the flag says force.
-#   WIDTH   -- for every active symbol, the non-null tags chain_tags() returns for an ATM+-5 request from
-#              (a) ATM+-10 history and (b) ATM+-5 history, both on the last 130 sessions, both solved on
-#              read. (b) losing more than 2 pct of (a)'s tags -> fill +-10, else +-5. Both counts posted.
-#   GAP     -- ATM same-strike |CE-PE| median (vol points) per symbol, stored vs on-read.
-#   TAG DIFF-- the ATM cell's CHEAP/FAIR/EXPENSIVE/none count across symbols, stored-iv history vs on-read.
-#   LATENCY -- chain_tags cold (cache cleared) and warm, p50/p95 over 20 symbols on the filled table.
-# The whole job goes with the A4 code in the dead-code push once it has run (step 6), so the step-8
-# re-grep for option_iv_daily reads zero.
-SLICE_FLAG_KEY = "option_eod_slice_fill"
-SLICE_SESSIONS = 130                      # the card: last 130 trading dates present in the table
-PARITY_SYMS = ("NIFTY", "BANKNIFTY", "RELIANCE")
-PARITY_FROM = date(2026, 9, 15)           # every row loaded from here on is Black-76 already
-GAP_REPORT_SYMS = ("NIFTY", "BANKNIFTY", "RELIANCE", "NIFTYNXT50", "SAIL")
-_slice_running = False
+# ── cc#2205 step 5: RETENTION -- the slice keeps the SLICE_SESSIONS most recent trade_dates, by construction ──
+SLICE_SESSIONS = 130   # the card: last 130 trading dates (option_ivp's window is 120 sessions; 10 of margin)
 
 
-def _atm_n_subset(rows, n_each_side: int):
-    """Indices of `rows` (the solve_iv shape) inside the (2n+1)-strike window nearest each
-    session's spot -- the SAME rule select_atm_window applies at load time (strikes sorted by
-    |K - spot|, the first 2n+1), with n instead of 10. Pure."""
-    groups: Dict = {}
-    for i, r in enumerate(rows):
-        groups.setdefault((r[0], r[1]), []).append(i)
-    keep = set()
-    for idxs in groups.values():
-        spot = next((float(rows[i][5]) for i in idxs if rows[i][5] is not None and float(rows[i][5]) > 0), None)
-        strikes = sorted({float(rows[i][2]) for i in idxs})
-        sel = set(strikes) if spot is None else set(sorted(strikes, key=lambda k: abs(k - spot))[: 2 * n_each_side + 1])
-        for i in idxs:
-            if float(rows[i][2]) in sel:
-                keep.add(i)
-    return keep
-
-
-def _pctl(vals, q):
-    return round(float(np.percentile(vals, q)), 1) if len(vals) else None
-
-
-def slice_fill_run(dry_run: bool = False, force: bool = False, latency_symbols: int = 20) -> dict:
-    import option_ivp
-    t0 = time.time()
-    conn = _conn()
-    try:
-        cur = conn.cursor()
-        _ensure_tables(cur)
-        cur.execute("SELECT DISTINCT trade_date FROM option_iv_daily ORDER BY trade_date DESC LIMIT %s", (SLICE_SESSIONS,))
-        sessions = sorted(r[0] for r in cur.fetchall())
-        if not sessions:
-            return {"ok": False, "error": "option_iv_daily has no sessions"}
-        floor_d, latest_d = sessions[0], sessions[-1]
-        cur.execute("SELECT DISTINCT symbol FROM option_iv_daily WHERE trade_date >= %s ORDER BY symbol", (floor_d,))
-        symbols = [r[0] for r in cur.fetchall()]
-        cur.execute("""CREATE TEMP TABLE option_eod_fill (
-            symbol TEXT, trade_date DATE, expiry DATE, strike NUMERIC, option_type TEXT,
-            close NUMERIC, spot NUMERIC, is_settlement BOOLEAN, in_atm5 BOOLEAN) ON COMMIT DROP""")
-        parity = {"rows_compared": 0, "max_abs_diff": 0.0, "null_flips": 0, "mismatches_gt_1e-9": 0, "symbols": 0,
-                  "rule": "NIFTY/BANKNIFTY/RELIANCE all sessions + every symbol's rows with trade_date >= 2026-09-15"}
-        cov = {"tags_atm10": 0, "tags_atm5": 0, "cells_requested": 0, "symbols_with_request": 0}
-        tag_before = {"CHEAP": 0, "FAIR": 0, "EXPENSIVE": 0, "none": 0}
-        tag_after = dict(tag_before)
-        gap: Dict[str, Dict] = {}
-        staged = {"atm10": 0, "atm5": 0}
-        req: Dict[str, tuple] = {}
-        for sym in symbols:
-            cur.execute("""SELECT trade_date, expiry, strike, option_type, close, spot, is_settlement, iv
-                           FROM option_iv_daily WHERE symbol=%s AND trade_date >= %s
-                           ORDER BY trade_date, expiry, strike, option_type""", (sym, floor_d))
-            rows = cur.fetchall()
-            if not rows:
-                continue
-            base = [(r[0], r[1], r[2], r[3], r[4], r[5]) for r in rows]
-            iv_new, meta = solve_iv(base, with_meta=True)
-            stored = np.array([float(r[7]) if r[7] is not None else np.nan for r in rows], dtype=float)
-            pmask = np.array([(sym in PARITY_SYMS) or (r[0] >= PARITY_FROM) for r in rows], dtype=bool)
-            if pmask.any():
-                both = pmask & np.isfinite(stored) & np.isfinite(iv_new)
-                dif = np.abs(stored[both] - iv_new[both])
-                parity["rows_compared"] += int(both.sum())
-                parity["symbols"] += 1
-                if dif.size:
-                    parity["max_abs_diff"] = max(parity["max_abs_diff"], float(dif.max()))
-                    parity["mismatches_gt_1e-9"] += int((dif > 1e-9).sum())
-                parity["null_flips"] += int((pmask & (np.isfinite(stored) != np.isfinite(iv_new))).sum())
-            gb = [abs(stored[a] - stored[b]) * 100.0 for a, b in meta["atm_pairs"] if np.isfinite(stored[a]) and np.isfinite(stored[b])]
-            ga = [abs(iv_new[a] - iv_new[b]) * 100.0 for a, b in meta["atm_pairs"] if np.isfinite(iv_new[a]) and np.isfinite(iv_new[b])]
-            gap[sym] = {"stored": round(float(np.median(gb)), 3) if gb else None,
-                        "on_read": round(float(np.median(ga)), 3) if ga else None,
-                        "parity_sessions": len(meta["atm_pairs"]), "fallback_sessions": meta["fallback_groups"]}
-            keep5 = _atm_n_subset(base, 5)
-            k5 = sorted(keep5)
-            solved10 = option_ivp.solved_from(base, iv_new)
-            solved5 = option_ivp.solved_from([base[i] for i in k5], iv_new[k5])
-            solved_before = option_ivp.solved_from(base, stored)
-            last_d = rows[-1][0]
-            last = [r for r in rows if r[0] == last_d]
-            spot = next((float(r[5]) for r in last if r[5] is not None and float(r[5]) > 0), None)
-            exp = last[0][1]
-            if spot and exp:
-                dte = max((exp - last_d).days, 0)
-                strikes = sorted(sorted({float(r[2]) for r in last}, key=lambda k: abs(k - spot))[:11])
-                req[sym] = (spot, strikes, dte)
-                ta, _ = option_ivp.chain_tags(None, sym, spot, strikes, dte, solved=solved10)
-                tb, _ = option_ivp.chain_tags(None, sym, spot, strikes, dte, solved=solved5)
-                tz, _ = option_ivp.chain_tags(None, sym, spot, strikes, dte, solved=solved_before)
-                cov["tags_atm10"] += sum(1 for v in ta.values() if v.get("tag"))
-                cov["tags_atm5"] += sum(1 for v in tb.values() if v.get("tag"))
-                cov["cells_requested"] += len(ta)
-                cov["symbols_with_request"] += 1
-                atm_k = min(strikes, key=lambda s: abs(s - spot))
-                tag_before[(tz.get((atm_k, "CE")) or {}).get("tag") or "none"] += 1
-                tag_after[(ta.get((atm_k, "CE")) or {}).get("tag") or "none"] += 1
-            with cur.copy("COPY option_eod_fill (symbol, trade_date, expiry, strike, option_type, close, spot, "
-                          "is_settlement, in_atm5) FROM STDIN") as cp:
-                for i, r in enumerate(rows):
-                    cp.write_row((sym, r[0], r[1], r[2], r[3], r[4], r[5], r[6], i in keep5))
-            staged["atm10"] += len(rows)
-            staged["atm5"] += len(keep5)
-        loss_pct = (round(100.0 * (1.0 - cov["tags_atm5"] / cov["tags_atm10"]), 3) if cov["tags_atm10"] else None)
-        width = 10 if (loss_pct is None or loss_pct > 2.0) else 5
-        parity["ok"] = parity["mismatches_gt_1e-9"] == 0 and parity["null_flips"] == 0
-        gap_all_on_read = [g["on_read"] for g in gap.values() if g["on_read"] is not None]
-        gap_all_stored = [g["stored"] for g in gap.values() if g["stored"] is not None]
-        result = {"ok": True, "dry_run": bool(dry_run), "ran_at_ist": _ist_now().isoformat(timespec="seconds"),
-                  "sessions": {"count": len(sessions), "floor": str(floor_d), "latest": str(latest_d)},
-                  "symbols": len(symbols), "parity": parity,
-                  "coverage": {**cov, "loss_pct_atm5_vs_atm10": loss_pct, "rule": "fill +-10 if +-5 loses > 2 pct of tags", "width_chosen": width},
-                  "gap_vol_pts": {"reported": {s: gap.get(s) for s in GAP_REPORT_SYMS},
-                                  "median_of_symbol_medians": {"stored": round(float(np.median(gap_all_stored)), 3) if gap_all_stored else None,
-                                                               "on_read": round(float(np.median(gap_all_on_read)), 3) if gap_all_on_read else None}},
-                  "tag_diff_atm_cell": {"before_stored_iv": tag_before, "after_on_read": tag_after},
-                  "staged_rows": staged, "gap_per_symbol": gap}
-        if dry_run:
-            conn.rollback()
-            result["action"] = "DRY RUN: nothing written"
-            result["elapsed_s"] = round(time.time() - t0, 1)
-            return result
-        if not parity["ok"] and not force:
-            conn.rollback()
-            result.update(ok=False, action="STOPPED: parity failed, nothing written")
-            result["elapsed_s"] = round(time.time() - t0, 1)
-            return result
-        cur.execute("""INSERT INTO option_eod_slice
-                       (symbol, trade_date, expiry, strike, option_type, close, spot, is_settlement, loaded_at)
-                       SELECT symbol, trade_date, expiry, strike, option_type, close, spot, is_settlement, NOW()
-                       FROM option_eod_fill WHERE %s OR in_atm5
-                       ON CONFLICT (symbol, trade_date, expiry, strike, option_type) DO NOTHING""", (width == 10,))
-        result["rows_inserted"] = cur.rowcount
-        conn.commit()
-        cur.execute("""SELECT COUNT(*), COUNT(DISTINCT trade_date), COUNT(DISTINCT symbol), MIN(trade_date), MAX(trade_date)
-                       FROM option_eod_slice""")
-        c = cur.fetchone()
-        result["slice"] = {"rows": int(c[0]), "sessions": int(c[1]), "symbols": int(c[2]), "min": str(c[3]), "max": str(c[4])}
-        # latency on the filled table: cold = cache cleared, warm = second call
-        cold, warm = [], []
-        lat_syms = [s for s in PARITY_SYMS if s in req] + [s for s in symbols if s in req and s not in PARITY_SYMS]
-        for sym in lat_syms[:latency_symbols]:
-            spot, strikes, dte = req[sym]
-            option_ivp.invalidate(sym)
-            t1 = time.time(); option_ivp.chain_tags(cur, sym, spot, strikes, dte); cold.append((time.time() - t1) * 1000.0)
-            t1 = time.time(); option_ivp.chain_tags(cur, sym, spot, strikes, dte); warm.append((time.time() - t1) * 1000.0)
-        result["latency_ms"] = {"symbols": len(cold), "cold_p50": _pctl(cold, 50), "cold_p95": _pctl(cold, 95),
-                                "warm_p50": _pctl(warm, 50), "warm_p95": _pctl(warm, 95)}
-        result["action"] = f"COMMITTED: option_eod_slice filled at ATM+-{width}"
-        result["elapsed_s"] = round(time.time() - t0, 1)
-        return result
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}", "action": "ROLLBACK on error",
-                "elapsed_s": round(time.time() - t0, 1)}
-    finally:
-        conn.close()
-
-
-def _job_claim(key: str):
-    """Atomically claim a pending flag-job from app_config (the pattern _a4_claim / _claim_flag use);
-    a 'claimed' flag older than 10 minutes with no result is re-claimed (its container was replaced
-    by a later deploy). Returns the config dict or None."""
-    try:
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT value, updated_at < NOW() - INTERVAL '10 minutes' FROM app_config WHERE key=%s FOR UPDATE", (key,))
-            r = cur.fetchone()
-            if not r:
-                return None
-            try:
-                cfg = json.loads(r[0])
-            except Exception:
-                return None
-            if not isinstance(cfg, dict):
-                return None
-            if cfg.get("status") == "pending" or (cfg.get("status") == "claimed" and r[1] and "result" not in cfg):
-                cfg["status"] = "claimed"
-                cfg["claimed_at_ist"] = _ist_now().isoformat(timespec="seconds")
-                cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key=%s", (json.dumps(cfg), key))
-                conn.commit()
-                return cfg
-            return None
-    except Exception as e:
-        log.error(f"flag-job claim failed ({key}): {e}")
-        return None
-
-
-def _job_finish(key: str, cfg, result, label: str):
-    """Write the outcome where CC can read it: the flag value and one cc_task_logs line (compact --
-    the per-symbol block stays in the flag value only)."""
-    try:
-        with _conn() as conn, conn.cursor() as cur:
-            cfg = dict(cfg or {})
-            cfg["status"] = "done" if result.get("ok") else "error"
-            cfg["result"] = result
-            cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key=%s", (json.dumps(cfg, default=str), key))
-            task_id = int(cfg.get("task_id") or 0)
-            if task_id:
-                compact = {k: v for k, v in result.items() if k != "gap_per_symbol"}
-                cur.execute("INSERT INTO cc_task_logs (task_id, actor, message) VALUES (%s, 'claude_code', %s)",
-                            (task_id, (label + ": " + json.dumps(compact, default=str))[:6000]))
-            conn.commit()
-    except Exception as e:
-        log.error(f"flag-job finish-write failed ({key}): {e} -- result was {json.dumps(result, default=str)[:800]}")
-
-
-def _slice_thread(cfg):
-    global _slice_running
-    try:
-        res = slice_fill_run(dry_run=bool(cfg.get("dry_run", False)), force=bool(cfg.get("force", False)),
-                             latency_symbols=int(cfg.get("latency_symbols", 20)))
-    except Exception as e:
-        res = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
-    finally:
-        _slice_running = False
-    log.info(f"option_eod_slice fill: {json.dumps(res, default=str)[:500]}")
-    _job_finish(SLICE_FLAG_KEY, cfg, res, "SLICE FILL SERVER RUN (option_iv_history.slice_fill_run, started by the app_config flag)")
-
-
-def _slice_maybe_start() -> bool:
-    global _slice_running
-    if _slice_running:
-        return False
-    cfg = _job_claim(SLICE_FLAG_KEY)
-    if not cfg:
-        return False
-    _slice_running = True
-    threading.Thread(target=_slice_thread, args=(cfg,), name="cc2205-slice-fill", daemon=True).start()
-    return True
-
-
-# ── cc#2031 A4: the GATED re-solve of STORED option_iv_daily.iv rows on the Black-76 parity forward ──
-# Phases A-C (2d4711c, 15-Sep-2026) changed the method for NEW rows only. This is the destructive
-# part the card gated on a founder GO: Fable's RECO (cc_task_logs 6864, founder-delegated,
-# 17-Sep) set four conditions -- (1) a plain CREATE TABLE backup first, (2) outside 09:15-15:30
-# IST, (3) the UPDATE in ONE transaction reporting rows changed vs the dry run, (4) ROLLBACK if the
-# changed count is more than 5% away from the dry run. All four live in a4_run() below. The
-# re-solve rule is ingest_date()'s own (parity forward off the strike nearest spot with BOTH legs
-# priced, carry fallback, _b76_iv_vec) applied to the stored close/spot -- one method, not a
-# second copy. Trigger: the same app_config flag pattern _startup_trigger() already uses for the
-# backfill (the CC sandbox has no HTTP path to prod): set A4_FLAG_KEY to a JSON
-# {"status":"pending","symbols":[...],"expect_outside":109,"tolerance":0.05,"dry_run":false,
-# "task_id":2031}; the next boot claims it and runs it on a daemon thread; the result lands in the
-# flag value AND as a cc_task_logs line on the task. Or POST /api/admin/option_iv/a4 with the token.
-A4_FLAG_KEY = "option_iv_a4_resolve"
-A4_BACKUP_TABLE = "option_iv_daily_bak_cc2031"
-A4_BAND_LO, A4_BAND_HI = 0.03, 1.50      # option_ivp's read-time sanity band (IV_FLOOR / IV_CEILING)
-_a4_running = False
-
-
-def a4_resolve_rows(rows):
-    """PURE (no DB). rows = list of (trade_date, expiry, strike, option_type, close, spot, iv) for
-    ONE symbol, any order. Re-solves every row's iv exactly as ingest_date() does for a fresh
-    bhavcopy: per (trade_date, expiry) group the parity forward F = K_atm + (C_atm - P_atm) *
-    e^(R_FREE*T) off the strike nearest that day's spot with BOTH legs priced (> 0); otherwise the
-    carry forward spot*e^(R_FREE*T); then the Black-76 bisection (_b76_iv_vec). A row with no
-    price stays NULL. Returns (iv_new ndarray aligned to rows, stats dict). Stats compare the
-    stored iv with the re-solve: rows_changed, null_flips, inside_to_outside / outside_to_inside
-    (the [0.03, 1.50] band), band_hits before/after (<= lo or >= hi), and the ATM same-strike
-    |CE - PE| gap in vol points (median / p95 over the parity groups) before and after."""
-    n = len(rows)
-    # cc#2205: the solve itself is solve_iv() -- the one solver -- this function only adds the stats.
-    iv_new, meta = solve_iv([r[:6] for r in rows], with_meta=True)
-    groups = meta["groups"]
-    atm_pairs = meta["atm_pairs"]
-    fallback_groups = meta["fallback_groups"]
-    old = np.array([float(r[6]) if r[6] is not None else np.nan for r in rows], dtype=float)
-    lo, hi = A4_BAND_LO, A4_BAND_HI
-    both = np.isfinite(old) & np.isfinite(iv_new)
-    changed = both & (np.abs(old - iv_new) > 1e-9)
-    null_flips = int(np.sum(np.isfinite(old) != np.isfinite(iv_new)))
-    in_old = both & (old >= lo) & (old <= hi)
-    out_old = both & ((old < lo) | (old > hi))
-    in_new = both & (iv_new >= lo) & (iv_new <= hi)
-    out_new = both & ((iv_new < lo) | (iv_new > hi))
-
-    def _pct(vals, q):
-        return round(float(np.percentile(vals, q)), 3) if len(vals) else None
-
-    gb = [abs(old[a] - old[b]) * 100.0 for a, b in atm_pairs if np.isfinite(old[a]) and np.isfinite(old[b])]
-    ga = [abs(iv_new[a] - iv_new[b]) * 100.0 for a, b in atm_pairs if np.isfinite(iv_new[a]) and np.isfinite(iv_new[b])]
-    stats = {
-        "rows": n, "groups": groups, "parity_groups": len(atm_pairs), "fallback_groups": fallback_groups,
-        "rows_with_iv_before": int(np.sum(np.isfinite(old))), "rows_with_iv_after": int(np.sum(np.isfinite(iv_new))),
-        "rows_changed": int(changed.sum()), "null_flips": null_flips,
-        "inside_to_outside": int(np.sum(in_old & out_new)), "outside_to_inside": int(np.sum(out_old & in_new)),
-        "band_hits_before": int(np.sum(np.isfinite(old) & ((old <= lo) | (old >= hi)))),
-        "band_hits_after": int(np.sum(np.isfinite(iv_new) & ((iv_new <= lo) | (iv_new >= hi)))),
-        "atm_gap_before_median": _pct(gb, 50), "atm_gap_before_p95": _pct(gb, 95),
-        "atm_gap_after_median": _pct(ga, 50), "atm_gap_after_p95": _pct(ga, 95),
-        "gap_unit": "vol points (iv x 100), ATM same-strike |CE - PE| per parity group",
-    }
-    return iv_new, stats
-
-
-def a4_run(symbols, expect_outside=None, tolerance=0.05, dry_run=True, backup_table=A4_BACKUP_TABLE) -> dict:
-    """The gated run. dry_run=True: read + re-solve + stats, nothing written (the connection is
-    rolled back). dry_run=False: refuses inside 09:15-15:30 IST on a weekday; then, in ONE
-    transaction: CREATE TABLE <backup_table> AS SELECT * FROM option_iv_daily (a plain CREATE --
-    a re-run against an existing backup fails and rolls back rather than overwriting it), COPY the
-    re-solved ivs into a temp table, UPDATE only the rows whose iv actually differs, and commit --
-    unless the gate fails (inside_to_outside more than `tolerance` away from `expect_outside`),
-    in which case everything including the backup is rolled back and the result says so."""
-    now = _ist_now()
-    if not dry_run and now.weekday() < 5 and dt_time(9, 15) <= now.time() <= dt_time(15, 30):
-        return {"ok": False, "error": "market hours -- A4 writes run outside 09:15-15:30 IST only", "now_ist": now.isoformat(timespec="seconds")}
-    symbols = [str(x).strip().upper() for x in (symbols or []) if str(x).strip()]
-    if not symbols:
-        return {"ok": False, "error": "no symbols"}
-    conn = _conn()
-    try:
-        cur = conn.cursor()
-        per = {}
-        staging = []
-        for sym in symbols:
-            cur.execute("""SELECT trade_date, expiry, strike, option_type, close, spot, iv
-                           FROM option_iv_daily WHERE symbol=%s
-                           ORDER BY trade_date, expiry, strike, option_type""", (sym,))
-            rows = cur.fetchall()
-            if not rows:
-                per[sym] = {"rows": 0, "note": "no stored rows"}
-                continue
-            iv_new, st = a4_resolve_rows(rows)
-            per[sym] = st
-            for i, r in enumerate(rows):
-                v = float(iv_new[i]) if np.isfinite(iv_new[i]) else None
-                staging.append((sym, r[0], r[1], r[2], r[3], v))
-        total_outside = sum(int(s.get("inside_to_outside", 0)) for s in per.values())
-        total_changed = sum(int(s.get("rows_changed", 0)) for s in per.values())
-        gate = None
-        if expect_outside is not None:
-            diff = abs(total_outside - int(expect_outside)) / max(1, int(expect_outside))
-            gate = {"expect_outside": int(expect_outside), "actual_outside": total_outside,
-                    "diff_pct": round(diff * 100.0, 2), "tolerance_pct": round(float(tolerance) * 100.0, 2),
-                    "pass": bool(diff <= float(tolerance))}
-        result = {"ok": True, "dry_run": bool(dry_run), "symbols": symbols, "ran_at_ist": now.isoformat(timespec="seconds"),
-                  "per_symbol": per, "rows_changed": total_changed, "inside_to_outside": total_outside, "gate": gate}
-        if dry_run:
-            conn.rollback()
-            result["action"] = "DRY RUN: nothing written"
-            return result
-        if gate is not None and not gate["pass"]:
-            conn.rollback()
-            result.update(ok=False, action="ROLLBACK: gate failed, nothing written (no backup left behind either)")
-            return result
-        cur.execute(f"CREATE TABLE {backup_table} AS SELECT * FROM option_iv_daily")
-        cur.execute("""CREATE TEMP TABLE option_iv_a4_staging (
-            symbol TEXT, trade_date DATE, expiry DATE, strike NUMERIC, option_type TEXT, iv NUMERIC
-        ) ON COMMIT DROP""")
-        with cur.copy("COPY option_iv_a4_staging (symbol, trade_date, expiry, strike, option_type, iv) FROM STDIN") as cp:
-            for row in staging:
-                cp.write_row(row)
-        cur.execute("""UPDATE option_iv_daily o SET iv = s.iv, loaded_at = NOW()
-                       FROM option_iv_a4_staging s
-                       WHERE o.symbol = s.symbol AND o.trade_date = s.trade_date AND o.expiry = s.expiry
-                         AND o.strike = s.strike AND o.option_type = s.option_type
-                         AND o.iv IS DISTINCT FROM s.iv""")
-        result["rows_updated"] = cur.rowcount
-        cur.execute(f"SELECT COUNT(*) FROM {backup_table}")
-        result["backup_table"] = backup_table
-        result["backup_rows"] = int(cur.fetchone()[0])
-        conn.commit()
-        result["action"] = "COMMITTED (one transaction: backup + update)"
-        return result
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}", "action": "ROLLBACK on error"}
-    finally:
-        conn.close()
-
-
-def _a4_claim():
-    """Atomically claim a pending A4 request from app_config; returns the config dict or None."""
-    try:
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT value FROM app_config WHERE key=%s FOR UPDATE", (A4_FLAG_KEY,))
-            r = cur.fetchone()
-            if not r:
-                return None
-            try:
-                cfg = json.loads(r[0])
-            except Exception:
-                return None
-            if not isinstance(cfg, dict) or cfg.get("status") != "pending":
-                return None
-            cfg["status"] = "claimed"
-            cfg["claimed_at_ist"] = _ist_now().isoformat(timespec="seconds")
-            cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key=%s", (json.dumps(cfg), A4_FLAG_KEY))
-            conn.commit()
-            return cfg
-    except Exception as e:
-        log.error(f"option_iv A4 flag claim failed: {e}")
-        return None
-
-
-def _a4_finish(cfg, result):
-    """Write the outcome where CC can read it: the flag value and one cc_task_logs line."""
-    try:
-        with _conn() as conn, conn.cursor() as cur:
-            cfg = dict(cfg or {})
-            cfg["status"] = "done" if result.get("ok") else "error"
-            cfg["result"] = result
-            cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key=%s", (json.dumps(cfg, default=str), A4_FLAG_KEY))
-            task_id = int(cfg.get("task_id") or 0)
-            if task_id:
-                cur.execute("INSERT INTO cc_task_logs (task_id, actor, message) VALUES (%s, 'claude_code', %s)",
-                            (task_id, ("A4 SERVER RUN (option_iv_history.a4_run, started by the app_config flag): "
-                                       + json.dumps(result, default=str))[:6000]))
-            conn.commit()
-    except Exception as e:
-        log.error(f"option_iv A4 finish-write failed: {e} -- result was {json.dumps(result, default=str)[:800]}")
-
-
-def _a4_thread(cfg):
-    global _a4_running
-    try:
-        res = a4_run(cfg.get("symbols") or [], expect_outside=cfg.get("expect_outside"),
-                     tolerance=float(cfg.get("tolerance", 0.05)), dry_run=bool(cfg.get("dry_run", True)))
-    except Exception as e:
-        res = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
-    finally:
-        _a4_running = False
-    log.info(f"option_iv A4 run: {json.dumps(res, default=str)[:500]}")
-    _a4_finish(cfg, res)
-
-
-def _a4_maybe_start() -> bool:
-    global _a4_running
-    if _a4_running:
-        return False
-    cfg = _a4_claim()
-    if not cfg:
-        return False
-    _a4_running = True
-    threading.Thread(target=_a4_thread, args=(cfg,), name="cc2031-a4-resolve", daemon=True).start()
-    return True
-
-
-@router.post("/api/admin/option_iv/a4")
-def option_iv_a4(symbols: str = "NIFTY,BANKNIFTY,RELIANCE", dry_run: bool = True,
-                 expect_outside: Optional[int] = None, tolerance: float = 0.05,
-                 x_admin_token: Optional[str] = Header(None)):
-    """On-demand A4 (token-gated). dry_run=true is read-only; dry_run=false writes under the same
-    four gates as the flag path. Runs inline (30k rows per symbol solve in well under a second;
-    the write path's full-table backup copy is the slow part -- prefer the flag path for that)."""
-    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(403, "invalid admin token")
-    return a4_run([x for x in symbols.split(",") if x.strip()], expect_outside=expect_outside,
-                  tolerance=tolerance, dry_run=dry_run)
+def _apply_retention(cur) -> dict:
+    """Delete every option_eod_slice row older than the SLICE_SESSIONS-th most recent trade_date
+    present in the table. Plain DELETE, never VACUUM FULL (MAINTENANCE_LOCK_RULE). Runs at the end
+    of every forward tick, so the table is bounded by construction and never needs a maintenance
+    card. Fewer than SLICE_SESSIONS dates present -> the floor is the oldest date -> deletes nothing."""
+    cur.execute("""SELECT MIN(trade_date) FROM (SELECT DISTINCT trade_date FROM option_eod_slice
+                   ORDER BY trade_date DESC LIMIT %s) t""", (SLICE_SESSIONS,))
+    r = cur.fetchone()
+    floor = r[0] if r else None
+    if floor is None:
+        return {"deleted": 0, "floor": None}
+    cur.execute("DELETE FROM option_eod_slice WHERE trade_date < %s", (floor,))
+    return {"deleted": cur.rowcount, "floor": str(floor)}
 
 
 @router.on_event("startup")
@@ -1104,8 +612,6 @@ async def _startup_trigger():
         log.error(f"option_eod_slice ensure-table at boot failed: {e}")
     if _claim_flag():
         _maybe_start()
-    _a4_maybe_start()   # cc#2031 A4: same flag pattern, its own key (A4_FLAG_KEY)
-    _slice_maybe_start()   # cc#2205: the one-off measure-then-fill job, its own key (SLICE_FLAG_KEY)
 
 
 @router.post("/api/admin/option_iv/seed")

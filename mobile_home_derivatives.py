@@ -3,7 +3,7 @@ summary, NIFTY + BANKNIFTY only). ADDITIVE — the existing home cards (My Portf
 the cc#1867 Approved Trades slider, Card 1/2/3 of the mood swipe deck) are untouched. Phase 2 (IV
 percentile) is NOT built here — gated on cc#1863 proving bg_option_iv_daily's first run tonight
 (ENGINE_LIVENESS_RULE, session_log 13829): the job is registered in scheduler_master but
-last_run_at is NULL, so option_iv_daily is nine days stale and there is no live IV source to
+last_run_at is NULL, so the option IV slice is nine days stale and there is no live IV source to
 derive a percentile from without inventing a number.
 
 ONE SOURCE, NOT A SECOND COMPOSER: this endpoint is a thin wrapper over oi_structure.oi_structure(),
@@ -41,7 +41,7 @@ to open without a second fetch. The per-strike rows are read with max_pain.LATES
 exact SQL oi_structure() and pcr_mood.live_pcr() already use for this same purpose — not a fourth
 copy of the query.
 
-READ-ONLY. Nothing here writes to option_chain, option_iv_daily, or any table the feed owns."""
+READ-ONLY. Nothing here writes to option_chain, the option IV slice, or any table the feed owns."""
 import os
 
 import psycopg

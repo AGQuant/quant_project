@@ -2,8 +2,7 @@
 surface from raw closes off the parity forward, falls back to carry, never fabricates a vol for a row
 without a price; option_ivp solves the raw slice on read through a per-(symbol, max trade_date) cache,
 applies the G3 band after the solve, and chain_tags does ONE fetch per request; the cc#1994 gap map
-reads the same solve. The fill job's ATM+-n subset keeps the (2n+1) strikes nearest spot. No DB, no
-network -- a fake cursor stands in for psycopg."""
+reads the same solve. No DB, no network -- a fake cursor stands in for psycopg."""
 from datetime import date, timedelta
 
 import numpy as np
@@ -82,15 +81,7 @@ def test_solve_iv_carry_fallback_and_no_price_stays_nan():
     assert oih.solve_iv([]).shape == (0,)
 
 
-def test_a4_resolve_rows_delegates_to_the_one_solver():
-    d, exp = date(2026, 9, 11), date(2026, 9, 29)
-    rows6 = _session(d, exp, 23500.0, 0.004, [23400.0, 23500.0, 23600.0], lambda K: 0.15)
-    rows7 = [r + (None,) for r in rows6]
-    iv_a4, st = oih.a4_resolve_rows(rows7)
-    assert np.allclose(iv_a4, oih.solve_iv(rows6), equal_nan=True) and st["parity_groups"] == 1 and st["rows"] == 6
-
-
-def test_solved_rows_caches_per_symbol_and_max_date_and_falls_back_while_the_slice_is_empty():
+def test_solved_rows_caches_per_symbol_and_max_date_and_never_caches_an_empty_slice():
     option_ivp.invalidate()
     rows = _history(3)
     cur = FakeCur(date(2026, 9, 16), rows)
@@ -101,10 +92,9 @@ def test_solved_rows_caches_per_symbol_and_max_date_and_falls_back_while_the_sli
     cur.max_date = date(2026, 9, 17)                               # the nightly tick landed a new date
     r3 = option_ivp.solved_rows(cur, "TESTSYM")
     assert r3 is not r1 and len(cur.executed) == 5
-    empty = FakeCur(None, rows)                                    # slice empty for this symbol -> legacy raw columns, not cached
-    option_ivp.solved_rows(empty, "OTHER")
-    option_ivp.solved_rows(empty, "OTHER")
-    assert sum("option_iv_daily" in q for q in empty.executed) == 2 and "OTHER" not in option_ivp._SOLVED_CACHE
+    empty = FakeCur(None, [])                                      # no rows for this symbol yet -> nothing cached, re-asked next time
+    assert option_ivp.solved_rows(empty, "OTHER") == [] and option_ivp.solved_rows(empty, "OTHER") == []
+    assert len(empty.executed) == 4 and "OTHER" not in option_ivp._SOLVED_CACHE
     option_ivp.invalidate("TESTSYM")
     assert "TESTSYM" not in option_ivp._SOLVED_CACHE
 
@@ -144,14 +134,3 @@ def test_latest_session_iv_feeds_the_gap_map():
     assert asof2 == str(rows[-1][0]) and len(gap) == 11
     assert all(v["gap_vol_pts"] == round(v["put_iv"] - v["call_iv"], 1) for v in gap.values())
     assert max(abs(v["gap_vol_pts"]) for v in gap.values()) == 0.0   # one solve, one forward: both legs agree at every strike
-
-
-def test_atm_n_subset_keeps_the_nearest_strikes_per_session():
-    rows = _history(4, n_each_side=10)
-    keep = oih._atm_n_subset(rows, 5)
-    assert len(rows) == 4 * 42 and len(keep) == 4 * 22
-    for s in {r[0] for r in rows}:
-        sess = [i for i, r in enumerate(rows) if r[0] == s]
-        spot = rows[sess[0]][5]
-        kept = sorted({rows[i][2] for i in sess if i in keep})
-        assert len(kept) == 11 and all(abs(k - spot) <= abs(o - spot) for k in kept for o in {rows[i][2] for i in sess} - set(kept))

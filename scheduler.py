@@ -3165,8 +3165,9 @@ def _bg_fo_eod():
 
 def _bg_option_iv_daily():
     """cc#1858 step 1: ~23:05 IST weekdays, 5 min after _bg_fo_eod fetches the same day's F&O
-    bhavcopy — forward-captures today's per-strike option data (close, OI, solved IV) at ATM +-10
-    into option_iv_daily via option_iv_history.run_forward_tick(). Idempotent (a re-run of an
+    bhavcopy — forward-captures today's per-strike RAW option data (close, spot, settlement flag) at
+    ATM +-10 into option_eod_slice via option_iv_history.run_forward_tick() (cc#2205: no stored iv --
+    solved on read; the tick also keeps the slice to its last 130 sessions). Idempotent (a re-run of an
     already-'done' date is a no-op) and independent of option_iv_history's separate historical
     backfill — storage keeps accumulating from the day this shipped whether or not the backfill
     ever runs again. Trading days only."""
@@ -3176,9 +3177,9 @@ def _bg_option_iv_daily():
     try:
         import option_iv_history
         res = option_iv_history.run_forward_tick()
-        log.info(f"option_iv_daily: {res}")
+        log.info(f"option_eod_slice: {res}")
     except Exception as e:
-        log.error(f"option_iv_daily: {e}")
+        log.error(f"option_eod_slice: {e}")
 
 
 def _bg_fo_ban_fetch():
