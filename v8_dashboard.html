@@ -9583,21 +9583,25 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
    of available width with realistic row data, well below any real desktop viewport this box
    renders at). 12.5px->13.5px, cell padding +1-2px; still nowhere near forcing a scroll that
    wasn't already there. */
-.tc13-wrap .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
-.tc13-wrap .tbl th{font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:10px 14px;border-bottom:1px solid var(--line)}
-.tc13-wrap .tbl th:first-child,.tc13-wrap .tbl th:nth-child(2),.tc13-wrap .tbl td:first-child,.tc13-wrap .tbl td:nth-child(2){text-align:left}
-.tc13-wrap .tbl td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
+/* cc#2119: the Closed Book now renders through the shared sortTbl() too (parity with the Open
+   Book, cc#1884 item 1), whose <table> carries no .tbl class -- so these rules, which used to
+   target the hand-built <table class="tbl">, are addressed by the sortTbl wrapper id exactly the
+   way #tw_tc13open is below. Same values, same look; nothing else on the page used .tbl. */
+#tw_tc13closed table{width:100%;border-collapse:collapse;font-size:13.5px}
+#tw_tc13closed th{font:600 9.5px var(--f-m);letter-spacing:.1em;color:var(--tx3);text-transform:uppercase;text-align:right;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+#tw_tc13closed th:first-child,#tw_tc13closed th:nth-child(2),#tw_tc13closed td:first-child,#tw_tc13closed td:nth-child(2){text-align:left}
+#tw_tc13closed td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right;font-family:var(--f-m)}
 /* cc#2074: closed-trade rows get their own surface, distinct from the ambient --well the
    .tc13-card sits on (both tables share that card). var(--panel) — this page's own two-state
    contract, scorr_web_tokens.css — is literal #FFFFFF in the light theme (html[data-theme=light])
    and #121A33 in dark, so this reads as the requested white in light mode without a hardcoded
    literal blinding out the dark theme (the cc#2055/2060/2069/2070 theme_leak defect class this
-   card's own spec flagged). .tbl is unique to this hand-built table on the page (the Open Book's
-   sortTbl()-rendered table carries no class at all), so this touches the Closed Book only. */
-.tc13-wrap .tbl tbody tr{background:var(--panel)}
-.tc13-wrap .tbl tr:last-child td{border-bottom:none}
-.tc13-wrap .tbl tr:hover td{background:var(--raise)}
-.tc13-wrap .tbl .sym{font:700 13.5px var(--f-d);font-family:var(--f-d)!important}
+   card's own spec flagged). Addressed by the Closed Book's own sortTbl wrapper id (cc#2119; it
+   was .tbl while the table was hand-built), so this still touches the Closed Book only. */
+#tw_tc13closed tbody tr{background:var(--panel)}
+#tw_tc13closed tr:last-child td{border-bottom:none}
+#tw_tc13closed tr:hover td{background:var(--raise)}
+#tw_tc13closed .sym{font:700 13.5px var(--f-d);font-family:var(--f-d)!important}
 .tc13-wrap .side{font:700 9px var(--f-m);letter-spacing:.1em;padding:3px 7px;border-radius:4px;border:1px solid}
 .tc13-wrap .side.buy{color:var(--gr);border-color:rgba(var(--gr-rgb),.45)}
 .tc13-wrap .side.sell{color:var(--rd);border-color:rgba(var(--rd-rgb),.45)}
@@ -9617,14 +9621,14 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
 #tw_tc13open tr:last-child td{border-bottom:none}
 #tw_tc13open tr:hover td{background:var(--raise)}
 #tw_tc13open .sym{font:700 13.5px var(--f-d);font-family:var(--f-d)!important}
-#tw_tc13open .scroll{position:relative;overflow-x:auto;scrollbar-width:thin}
-#tw_tc13open .scroll::-webkit-scrollbar{height:7px}
-#tw_tc13open .scroll::-webkit-scrollbar-track{background:transparent}
-#tw_tc13open .scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
-#tw_tc13open .scroll::after{content:'';position:absolute;top:0;right:0;bottom:0;width:36px;
+#tw_tc13open .scroll,#tw_tc13closed .scroll{position:relative;overflow-x:auto;scrollbar-width:thin}   /* cc#2119: + Closed Book */
+#tw_tc13open .scroll::-webkit-scrollbar,#tw_tc13closed .scroll::-webkit-scrollbar{height:7px}
+#tw_tc13open .scroll::-webkit-scrollbar-track,#tw_tc13closed .scroll::-webkit-scrollbar-track{background:transparent}
+#tw_tc13open .scroll::-webkit-scrollbar-thumb,#tw_tc13closed .scroll::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+#tw_tc13open .scroll::after,#tw_tc13closed .scroll::after{content:'';position:absolute;top:0;right:0;bottom:0;width:36px;
     pointer-events:none;opacity:0;transition:opacity .18s ease;background:linear-gradient(90deg,transparent,var(--well))}
-#tw_tc13open .scroll.clipped::after{opacity:1}
-#tw_tc13open .empty{text-align:center;color:var(--tx3);font-family:var(--f-d);padding:22px 12px}
+#tw_tc13open .scroll.clipped::after,#tw_tc13closed .scroll.clipped::after{opacity:1}
+#tw_tc13open .empty,#tw_tc13closed .empty{text-align:center;color:var(--tx3);font-family:var(--f-d);padding:22px 12px}
 .tc13-wrap .prox{width:96px;display:inline-block}
 .tc13-wrap .prail{position:relative;height:4px;border-radius:2px;background:linear-gradient(90deg,rgba(var(--rd-rgb),.4),var(--line2) 46%,var(--line2) 54%,rgba(var(--gr-rgb),.4))}
 .tc13-wrap .pdot{position:absolute;top:50%;width:7px;height:7px;border-radius:50%;transform:translate(-50%,-50%);background:var(--cy);box-shadow:0 0 6px var(--cy)}
@@ -9871,6 +9875,18 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     // _daysN (numeric, cc#1884 item 1/V6) — it is a monotonic twin of entry_ts, so it still sorts
     // this column chronologically; only the rendered text in tc13OpenRow() below changed.
     ["_prox","SL · Target"],["entry_ts","Entry Time"],["_daysN","Open Date"]];
+  // cc#2119: the Closed Book's cols for the SAME shared sortTbl() -- parity with the Open Book
+  // (cc#1884 item 1), not a second sorter. Same eight columns, same labels the hand-built <thead>
+  // rendered (incl. cc#2077's "Closed Date" and the lot-rule title on the P&L ₹ header, carried on a
+  // span inside the th since sortTbl builds the th itself). exit_ts arrives as the endpoint's own
+  // str(datetime) -- "YYYY-MM-DD HH:MM:SS[.ffffff]", fixed-width up to the seconds -- so
+  // drawTbl's string compare IS chronological on it (confirmed on real rows in the card's harness,
+  // reports/CC2119_closed_book_sort.md); no _daysN-style numeric twin needed. exit_reason sorts on
+  // the raw string behind reasonPill(), so SL / TARGET / TIME rows group together.
+  var TC13_CLOSED_COLS=[["symbol","Symbol"],["side","Side"],["entry_price","Entry"],["exit_price","Exit"],
+    ["exit_reason","Result"],["pnl_pct","P&L%"],
+    ["pnl_rs",'<span title="one lot per signal (futures_universe.lot_size), display only">P&amp;L &#8377; (1 lot)</span>'],
+    ["exit_ts","Closed Date"]];
   function tc13OpenRow(r){
     return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
       +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
@@ -9931,6 +9947,19 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
   // cc#2073: `range` is the endpoint's OWN closed_range ({from,to}) — the range it actually
   // queried, not a UI-only guess — so the two date inputs and the badge always agree with the
   // rows on screen. from=null means unbounded lower (the default: every closure up to `to`).
+  // cc#2119: pure extraction of closedTable()'s former row closure -- same cells, same classes
+  // (.sym, .side buy/sell, cl2/pnlTxt/rsTxt/reasonPill/dShort), same lot-size title. Now the
+  // rowFn the shared sortTbl() calls per row.
+  function tc13ClosedRow(r){
+    return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
+      +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
+      +'<td>'+n2(r.entry_price)+'</td>'
+      +'<td>'+n2(r.exit_price)+'</td>'
+      +'<td>'+reasonPill(r.exit_reason)+'</td>'
+      +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
+      +'<td class="'+cl2(r.pnl_rs)+'" title="one lot ('+(r.lot_size!=null?r.lot_size:'no lot size')+') x price move, realised at exit">'+rsTxt(r.pnl_rs)+'</td>'
+      +'<td>'+dShort(r.exit_ts)+'</td></tr>';
+  }
   function closedTable(rows, range, lastClosure){
     range = range || {from:null, to:null};
     var fRows = _tc13ClosedSide==='ALL' ? rows : rows.filter(function(r){return r.side===_tc13ClosedSide;});
@@ -9938,18 +9967,18 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     var kpi=closedKpis(fRows);
     var rangeBadge = range.from ? (esc(range.from)+' &rarr; '+esc(range.to||'')) : ('through '+esc(range.to||''));
     var rangeDesc = range.from ? ('between '+esc(range.from)+' and '+esc(range.to||'')) : ('up to '+esc(range.to||'now'));
-    var body=closed.length ? closed.map(function(r){
-      return '<tr><td class="sym">'+esc(r.symbol)+'</td>'
-        +'<td><span class="side '+(r.side==='SELL'?'sell':'buy')+'">'+esc(r.side)+'</span></td>'
-        +'<td>'+n2(r.entry_price)+'</td>'
-        +'<td>'+n2(r.exit_price)+'</td>'
-        +'<td>'+reasonPill(r.exit_reason)+'</td>'
-        +'<td class="'+cl2(r.pnl_pct)+'">'+pnlTxt(r.pnl_pct)+'</td>'
-        +'<td class="'+cl2(r.pnl_rs)+'" title="one lot ('+(r.lot_size!=null?r.lot_size:'no lot size')+') x price move, realised at exit">'+rsTxt(r.pnl_rs)+'</td>'
-        +'<td>'+dShort(r.exit_ts)+'</td></tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="8">No closed '
+    // cc#2119: the empty sentence keeps its side-aware wording + last-closure suffix, now handed to
+    // sortTbl through opts.empty so it never degrades to the component's generic "No rows".
+    var emptyMsg='No closed '
         +(_tc13ClosedSide!=='ALL'?(_tc13ClosedSide==='BUY'?'Long ':'Short '):'')+'TC Scanner positions '+rangeDesc
-        +(lastClosure?' &middot; last closures: '+esc(lastClosure):'')+'</td></tr>';
+        +(lastClosure?' &middot; last closures: '+esc(lastClosure):'');
+    // cc#2119: sort must survive render() -- every side-filter tap and every date-range refetch
+    // rebuilds this whole section from scratch (same as the Open Book, cc#1884 item 2), so the
+    // CURRENT sort is carried into the fresh sortTbl() call. Default sortKey null = the endpoint's
+    // own order, unchanged from the hand-built table; sorting starts when a header is clicked.
+    var _prevCSort=SORTREG['tc13closed'];
+    var closedTbl=sortTbl('tc13closed', TC13_CLOSED_COLS, closed, tc13ClosedRow,
+      {sortKey:_prevCSort?_prevCSort.sortKey:null, dir:_prevCSort?_prevCSort.dir:-1, empty:emptyMsg, wrapClass:''});
     var realised=bookRs(closed);
     return '<section><div class="sh"><h2>Closed Book</h2>'
       +'<span class="scrollhint">SCROLL &rarr;</span>'
@@ -9983,11 +10012,10 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
       +tc13Cap('Avg Profit', kpi.avg_profit_rs!=null?rsTxt(kpi.avg_profit_rs):'—', kpi.avg_profit_rs!=null?cl2(kpi.avg_profit_rs):'flat',
           'mean P&amp;L across all '+kpi.priced+' priced closed trades, winners and losers')
       +'</div>'
-      +'<div class="tc13-card"><div class="tbl-hold"><div class="tbl-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th>'
-      // cc#2077: header was "Date" -- the cell below renders dShort(r.exit_ts), the exit/closing
-      // date (cc#1599 basis), unambiguous now that the table mixes rows entered on different days.
-      +'<th>Exit</th><th>Result</th><th>P&amp;L%</th><th title="one lot per signal (futures_universe.lot_size), display only">P&amp;L &#8377; (1 lot)</th><th>Closed Date</th></tr></thead>'
-      +'<tbody>'+body+'</tbody></table></div></div></div></section>';
+      // cc#2119: the table itself now comes from the shared sortTbl() (header labels live in
+      // TC13_CLOSED_COLS above, incl. cc#2077's "Closed Date"); the .tc13-card wrapper stays exactly
+      // as the Open Book keeps its own.
+      +'<div class="tc13-card">'+closedTbl+'</div></section>';
   }
 
   // cc#1544: same measurement convention as #pane-index's idxMarkScroll (cc#1168) — the clipped/
@@ -10012,7 +10040,7 @@ window.addEventListener('hashchange',function(){var TABS=['index','v14','tcscan'
     // cc#1884: the Open Book's sortTbl()-rendered table has ONE scroll div (#tw_tc13open .scroll),
     // not the two-layer .tbl-hold>.tbl-scroll the hand-built tables use — same fade-hint behaviour,
     // the div toggling its own 'clipped' class since there is no separate wrapper here.
-    host.querySelectorAll('#tw_tc13open .scroll').forEach(function(sc){
+    host.querySelectorAll('#tw_tc13open .scroll, #tw_tc13closed .scroll').forEach(function(sc){   // cc#2119: Closed Book too
       var section=sc.closest('section');
       var hint=section?section.querySelector('.scrollhint'):null;
       var mark=function(){
