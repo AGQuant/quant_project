@@ -35,13 +35,14 @@ when a newer screener batch exists that has not been ranked, or the rank is more
 two weeks old. nifty500_universe is retired as this page's source (not dropped -- other
 readers are a separate card).
 """
+import json
 import os
 from datetime import date
 from typing import Optional, List
 
 import psycopg
-from fastapi import APIRouter, Request, Query
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request, Query, Body
+from fastapi.responses import HTMLResponse, JSONResponse
 
 router = APIRouter()
 
@@ -735,6 +736,247 @@ def qb_universe2_segments():
         cur.execute("SELECT MAX(score_date) FROM gvm_scores")
         as_of = cur.fetchone()[0]
     return {"segments": segs, "count": len(segs), "as_of_date": str(as_of) if as_of else None}
+
+
+# ── cc#2149: SAVE / LOAD universe definitions ───────────────────────────────────────────────────
+# Until this card the page was stateless (the cc#2126 docstring says so: "preview-only/stateless,
+# no saved-filter mechanism"). Step 1 of the Build-a-Basket flow now persists the way steps 2-4 do:
+# ONE row per (basket_name, def_name) in qb_universe_defs -- the same key convention as
+# qb_entry/exit/risk_rulesets (basket_name + a name DEFAULT 'default', UNIQUE on the pair), so a
+# reconciliation can join all four on basket_name. The row holds the pool set (cc#2143 multi-
+# select), every APPLIED filter row in the page's own order with its AND/OR, duration, values and
+# NOTE, the score_date it was last previewed on and the count that preview gave. CREATE only,
+# never ALTER (MAINTENANCE_LOCK_RULE, rule 10). The preview SQL is untouched by this card.
+_DEFS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS qb_universe_defs (
+  id SERIAL PRIMARY KEY,
+  basket_name TEXT NOT NULL,
+  def_name TEXT NOT NULL DEFAULT 'default',
+  pools JSONB NOT NULL,
+  filters JSONB NOT NULL,
+  as_of_score_date DATE,
+  preview_count INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (basket_name, def_name)
+)"""
+_NAME_MAX, _NOTE_MAX = 80, 500
+
+# How the page sends each row's values (mirrors buildQuery in scorr_qb_universe.html). Kept here so
+# /load can also hand back the preview query string the saved rows resolve to -- a caller can then
+# verify "reload = identical preview" with two calls and no browser.
+_ROW_KIND = {"verdict": "list", "verdict_migration": "list_n", "segments": "multi",
+             "gvm_consistency": "kofn", "promoter": "promoter",
+             "gvm_change": "range_days", "m_change": "range_days", "price_change": "range_window"}
+_MAX_ONLY, _MIN_ONLY = {"de"}, {"div_yield"}
+
+
+def _clean_name(v, what):
+    s = str(v or "").strip()
+    if not s:
+        raise ValueError(what + " is required")
+    if len(s) > _NAME_MAX:
+        raise ValueError(what + " is longer than %d characters" % _NAME_MAX)
+    return s
+
+
+def _num(v, what):
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        raise ValueError("%s is not a number: %r" % (what, v))
+
+
+def _int_or_none(v, what):
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ValueError("%s is not a whole number: %r" % (what, v))
+
+
+def _clean_filters(rows):
+    """Ordered rows exactly as the page holds them: key + AND/OR + the row's own values + note.
+    Unknown keys are rejected -- a saved key the preview cannot evaluate would reload as a silent
+    no-op, which is the opposite of a strategy record. Rows come back in _FILTER_ORDER whatever
+    order they were sent: the page's fixed row order is the only order the preview combines in."""
+    if not isinstance(rows, list):
+        raise ValueError("filters must be a list")
+    by_key = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            raise ValueError("each filter must be an object")
+        key = str(r.get("key") or "").strip()
+        if key not in _FILTER_ORDER:
+            raise ValueError("unknown filter key: " + (key or "(blank)"))
+        if key in by_key:
+            raise ValueError("duplicate filter key: " + key)
+        lst = r.get("list") or []
+        if not isinstance(lst, list):
+            raise ValueError("list must be a list on " + key)
+        note = str(r.get("note") or "").strip()
+        if len(note) > _NOTE_MAX:
+            raise ValueError("note longer than %d characters on %s" % (_NOTE_MAX, key))
+        dur = r.get("duration")
+        by_key[key] = {"key": key, "op": "OR" if str(r.get("op") or "AND").upper() == "OR" else "AND",
+                       "min": _num(r.get("min"), key + " min"), "max": _num(r.get("max"), key + " max"),
+                       "list": [str(x) for x in lst][:200],
+                       "duration": (dur if isinstance(dur, (int, str)) and dur != "" else None),
+                       "n": _int_or_none(r.get("n"), key + " n"), "k": _int_or_none(r.get("k"), key + " k"),
+                       "note": note}
+    return [by_key[k] for k in _FILTER_ORDER if k in by_key]
+
+
+def _qs(v):
+    """A number the way the page's input holds it: 5, not 5.0."""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _enc(v):
+    from urllib.parse import quote
+    return quote(str(v), safe="-_.!~*'()")   # encodeURIComponent's exact safe set
+
+
+def _def_query(pools, filters):
+    """The preview query string a saved definition resolves to -- byte-for-byte what the page's
+    buildQuery sends for the same rows (checked in the cc#2149 harness)."""
+    q = ["pools=" + _enc(k) for k in pools]
+    ops = []
+    for r in filters:
+        key, kind = r["key"], _ROW_KIND.get(r["key"], "range")
+        lo, hi = r.get("min"), r.get("max")
+        if kind == "promoter":
+            if lo is not None:
+                q.append("promoter_min=" + _enc(_qs(lo)))
+            if hi is not None:
+                q.append("pledge_max=" + _enc(_qs(hi)))
+        elif kind == "kofn":
+            q.append(key + "_k=" + _qs(r.get("k") if r.get("k") is not None else 3))
+            q.append(key + "_n=" + _qs(r.get("n") if r.get("n") is not None else 5))
+        elif kind == "multi":
+            for v in r.get("list") or []:
+                q.append("segments=" + _enc(v))
+        elif kind in ("list", "list_n"):
+            for v in r.get("list") or []:
+                q.append(key + "=" + _enc(v))
+            if kind == "list_n":
+                q.append(key + "_n=" + _qs(r.get("n") if r.get("n") is not None else 5))
+        else:
+            if lo is not None and key not in _MAX_ONLY:
+                q.append(key + "_min=" + _enc(_qs(lo)))
+            if hi is not None and key not in _MIN_ONLY:
+                q.append(key + "_max=" + _enc(_qs(hi)))
+            if kind == "range_days" and r.get("duration") is not None:
+                q.append(key + "_days=" + _qs(r["duration"]))
+            if kind == "range_window" and r.get("duration") is not None:
+                q.append(key + "_window=" + _enc(r["duration"]))
+        ops.append(key + ":" + r.get("op", "AND"))
+    if ops:
+        q.append("ops=" + _enc(",".join(ops)))
+    return "&".join(q)
+
+
+def _def_row(r):
+    return {"id": r[0], "basket_name": r[1], "def_name": r[2], "pools": r[3], "filters": r[4],
+            "as_of_score_date": str(r[5]) if r[5] else None, "preview_count": r[6],
+            "created_at": str(r[7]) if r[7] else None, "updated_at": str(r[8]) if r[8] else None}
+
+
+@router.post("/api/qb/universe2/save")
+def qb_universe2_save(payload: dict = Body(...)):
+    """cc#2149: upsert ONE definition for (basket_name, def_name). Body = the page's current state:
+    {basket_name, def_name?, pools:[keys], filters:[{key, op, min, max, list, duration, n, k, note}],
+    as_of_score_date?, preview_count?}. A second save on the same pair overwrites (ON CONFLICT DO
+    UPDATE), never duplicates; `created` says which happened."""
+    try:
+        basket = _clean_name(payload.get("basket_name"), "basket_name")
+        def_name = _clean_name(payload.get("def_name") or "default", "def_name")
+        pools = _pool_keys(payload.get("pools"), None)
+        if not pools:
+            raise ValueError("select at least one pool")
+        unknown = [k for k in pools if k not in _POOL_SQL]
+        if unknown:
+            raise ValueError("unknown pool: " + ", ".join(unknown))
+        filters = _clean_filters(payload.get("filters") or [])
+        as_of = payload.get("as_of_score_date") or None
+        if as_of:
+            as_of = date.fromisoformat(str(as_of)[:10])
+        cnt = _int_or_none(payload.get("preview_count"), "preview_count")
+    except (ValueError, TypeError, AttributeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(_DEFS_SCHEMA)
+        cur.execute("""
+            INSERT INTO qb_universe_defs (basket_name, def_name, pools, filters, as_of_score_date, preview_count, updated_at)
+            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s, NOW())
+            ON CONFLICT (basket_name, def_name) DO UPDATE SET
+                pools = EXCLUDED.pools, filters = EXCLUDED.filters,
+                as_of_score_date = EXCLUDED.as_of_score_date, preview_count = EXCLUDED.preview_count,
+                updated_at = NOW()
+            RETURNING id, created_at, updated_at, (xmax = 0) AS inserted
+        """, (basket, def_name, json.dumps(pools), json.dumps(filters), as_of, cnt))
+        rid, created_at, updated_at, inserted = cur.fetchone()
+        conn.commit()
+    return {"ok": True, "id": rid, "basket_name": basket, "def_name": def_name, "pools": pools,
+            "filters_saved": len(filters), "notes_saved": sum(1 for f in filters if f["note"]),
+            "as_of_score_date": str(as_of) if as_of else None, "preview_count": cnt,
+            "created": bool(inserted), "created_at": str(created_at), "updated_at": str(updated_at),
+            "preview_query": _def_query(pools, filters)}
+
+
+@router.get("/api/qb/universe2/load")
+def qb_universe2_load(basket_name: str, def_name: str = "default"):
+    """cc#2149: the saved definition for (basket_name, def_name) plus the CURRENT score_date, so the
+    page can say both dates when the definition is loaded on a later day. `preview_query` is the
+    exact query string the saved rows resolve to."""
+    basket, name = str(basket_name or "").strip(), (str(def_name or "").strip() or "default")
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        cur_d = cur.fetchone()[0]
+        cur.execute("SELECT to_regclass('qb_universe_defs')")
+        r = None
+        if cur.fetchone()[0] is not None:
+            cur.execute("SELECT id, basket_name, def_name, pools, filters, as_of_score_date, preview_count, "
+                        "created_at, updated_at FROM qb_universe_defs WHERE basket_name = %s AND def_name = %s",
+                        (basket, name))
+            r = cur.fetchone()
+    if not r:
+        return {"found": False, "basket_name": basket, "def_name": name,
+                "current_score_date": str(cur_d) if cur_d else None}
+    out = _def_row(r)
+    out.update({"found": True, "current_score_date": str(cur_d) if cur_d else None,
+                "score_date_moved": bool(r[5] and cur_d and r[5] != cur_d),
+                "preview_query": _def_query(out["pools"], out["filters"])})
+    return out
+
+
+@router.get("/api/qb/universe2/defs")
+def qb_universe2_defs(basket_name: Optional[str] = None):
+    """cc#2149: every saved definition (or one basket's), newest first -- the page's Load list."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('qb_universe_defs')")
+        if cur.fetchone()[0] is None:
+            return {"defs": [], "count": 0}
+        sql = ("SELECT id, basket_name, def_name, pools, filters, as_of_score_date, preview_count, created_at, updated_at "
+               "FROM qb_universe_defs")
+        params = ()
+        if basket_name:
+            sql += " WHERE basket_name = %s"
+            params = (basket_name.strip(),)
+        cur.execute(sql + " ORDER BY updated_at DESC LIMIT 200", params)
+        rows = cur.fetchall()
+    defs = []
+    for r in rows:
+        d = _def_row(r)
+        d["n_pools"], d["n_filters"] = len(d.pop("pools") or []), len(d["filters"] or [])
+        d["n_notes"] = sum(1 for f in (d.pop("filters") or []) if f.get("note"))
+        defs.append(d)
+    return {"defs": defs, "count": len(defs)}
 
 
 @router.get("/qb/universe2", response_class=HTMLResponse)

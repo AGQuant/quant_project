@@ -84,6 +84,26 @@
   .recon b{color:var(--txt)}
   .recon.warn{color:var(--amber)}
   .recon.warn b{color:var(--amber)}
+  /* cc#2149: the basket-definition bar (Save / Load), the per-row NOTE, notes on the results header */
+  .defbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .defbar input[type=text]{flex:1 1 160px;min-width:0;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12.5px}
+  .defbar .winsel{flex:1 1 220px;min-width:0}
+  .defbtn{padding:7px 14px;border-radius:7px;border:1px solid var(--line);background:var(--card2);color:var(--txt);font:inherit;font-size:12px;font-weight:800;cursor:pointer;flex:0 0 auto}
+  .defbtn:hover{border-color:var(--blu);color:var(--blu)}
+  .defbtn.primary{background:var(--blu);border-color:var(--blu);color:#fff}
+  .defbtn.primary:hover{color:#fff;filter:brightness(1.08)}
+  .defstatus{margin-top:9px;font-size:11.5px;color:var(--mut);line-height:1.55}
+  .defstatus b{color:var(--txt)}
+  .defstatus.warn{color:var(--amber)}
+  .defstatus.warn b{color:var(--amber)}
+  .fnote{margin-top:8px}
+  .noteinput{width:100%;max-width:560px;padding:6px 9px;border-radius:6px;border:1px dashed var(--line2);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
+  .noteinput:focus{border-style:solid;border-color:var(--blu);outline:none}
+  .notemark{display:inline-block;margin-left:8px;font-size:10px;font-weight:700;color:var(--blu);vertical-align:middle}
+  .notes{font-size:11.5px;color:var(--mut);line-height:1.6;padding:8px 0 10px}
+  .notes:empty{display:none}
+  .notes b{color:var(--txt)}
+  .notes .nk{color:var(--blu);font-weight:700}
   .winsel{padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
   .covline{margin-top:6px;font-size:10.5px;color:var(--dim);line-height:1.5}
   .covline b{color:var(--txt)}
@@ -131,7 +151,21 @@
     (gvm_scores as of its latest score_date) — this is a Quant Basket engine, not a screener.
     <b>V1</b>: pool selection and five filter categories are live (GVM/component scores, Sector &amp; Segment, Change &amp; Delta, Price &amp; Momentum, Quality/Valuation/Size/Ownership). Quarterly Results and Alpha &amp; Risk are
     shown below so you can see the full shape of the page — they are not wired to real filtering
-    yet.
+    yet. <b>Save</b> the universe under a basket name (pools, every applied row with its AND/OR, duration and
+    note, and the date it was previewed on) and <b>Load</b> it back on any day — the notes are the strategy record.
+  </div>
+
+  <!-- cc#2149: the basket definition -- ONE row per (basket name, definition name) in qb_universe_defs -->
+  <div class="card" id="defCard">
+    <h2>Basket definition <span class="hcount" id="defHint">saved with its pools, rows and notes</span></h2>
+    <div class="defbar">
+      <input type="text" id="defBasket" maxlength="80" placeholder="Basket name" autocomplete="off" aria-label="Basket name">
+      <input type="text" id="defName" maxlength="80" value="default" placeholder="Definition name" autocomplete="off" aria-label="Definition name">
+      <button type="button" class="defbtn primary" id="defSave" onclick="saveDef()">Save</button>
+      <button type="button" class="defbtn" id="defLoad" onclick="loadDef()">Load</button>
+      <select id="defList" class="winsel" onchange="pickDef(this.value)" aria-label="Saved definitions"><option value="">Saved definitions…</option></select>
+    </div>
+    <div class="defstatus" id="defStatus">Nothing loaded — the page starts empty. Save records the pools, every applied row (AND/OR, duration, values, note) and the score_date it was previewed on; a second save on the same name overwrites.</div>
   </div>
 
   <div class="card">
@@ -155,6 +189,7 @@
     <div class="as-of" id="asOf"></div>
     <div class="as-of" id="reconLine"></div>   <!-- cc#2147: earliest honest reconstruction date -->
     <div id="resultsWrap" style="display:none">
+      <div class="notes" id="notesLine"></div>   <!-- cc#2149: the applied rows' notes, on the click-through header -->
       <div class="scroll"><table id="resultsTbl"><thead id="resultsHead"></thead><tbody id="resultsBody"></tbody></table></div>
     </div>
   </div>
@@ -229,7 +264,9 @@ var CATEGORIES_COMING = [
 ];
 
 var STATE = { pools:[], sel:[], rows:{}, last:null, seq:0 };   /* cc#2143: sel = selected pool keys, any number */
-ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[], days:(f.days ? f.days[0] : null), win:(f.windows ? (f.windows.filter(function(w){ return w.v === '1M' && !w.dis; })[0] || f.windows.filter(function(w){ return !w.dis; })[0]).v : null), n:5, k:3}; });
+function freshRow(f){ return {open:false, applied:false, op:'AND', min:'', max:'', list:[], days:(f.days ? f.days[0] : null), win:(f.windows ? (f.windows.filter(function(w){ return w.v === '1M' && !w.dis; })[0] || f.windows.filter(function(w){ return !w.dis; })[0]).v : null), n:5, k:3, note:''}; }   /* cc#2149: the note rides on the row */
+ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = freshRow(f); });
+STATE.def = {loaded:null};   /* cc#2149: the definition this page is working on, once saved or loaded */
 STATE.coverage = null;   /* cc#2146: /api/qb/universe2/coverage, loaded once */
 STATE.segments = [];   /* cc#2145: the universe's segments for the multi-select, loaded once */
 STATE.segq = '';
@@ -438,7 +475,7 @@ function filterRowHtml(f){
   var pc = passCountHtml(f.key);
   return '<div class="frow'+(st.open?' open':'')+'" id="frow-'+f.key+'">'
     + '<div class="fhead" onclick="toggleRow(\''+f.key+'\')">'
-    +   '<div class="plusbtn">+</div><div class="fname">'+esc(f.label)+badges+'</div>'
+    +   '<div class="plusbtn">+</div><div class="fname">'+esc(f.label)+badges+'<span class="notemark" id="nm-'+f.key+'" style="display:'+(st.note ? '' : 'none')+'">\u270e note</span></div>'   /* cc#2149 */
     +   '<div class="rowcomb" onclick="event.stopPropagation()" title="How this row combines with the rows above it (left-to-right, top-to-bottom)">'
     +     '<button type="button" class="'+(st.op==='AND'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'AND\')">AND</button>'
     +     '<button type="button" class="'+(st.op==='OR'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'OR\')">OR</button></div>'
@@ -446,7 +483,7 @@ function filterRowHtml(f){
     + '</div>'
     + '<div class="fbody"><div class="finputs">' + inputs
     +   '<button type="button" class="applywrap" onclick="toggleApply(\''+f.key+'\')"><span class="tick'+(st.applied?' on':'')+'">✓</span><span class="applylabel">Apply</span></button>'
-    + '</div>' + covline + '<div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div>'+(f.key === 'seg_rank' ? segCtxHtml() : '')+'</div>'
+    + '</div>' + covline + '<div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div>'+(f.key === 'seg_rank' ? segCtxHtml() : '')+noteHtml(f, st)+'</div>'   /* cc#2149: a note on every applied row */
     + '</div>';
 }
 /* cc#2144: every applied row shows BOTH numbers -- ALONE (this filter by itself against the pool,
@@ -533,6 +570,7 @@ function refresh(){
       if (seq !== STATE.seq) return;   // a newer request superseded this one
       if (d.error){ document.getElementById('resultVal').innerHTML = '<span class="of">Error — '+esc(d.error)+'</span>'; return; }
       STATE.last = d;
+      defStatusFromPreview(d);   /* cc#2149: both dates when a loaded definition meets a newer score_date */
       document.getElementById('resultVal').innerHTML = fmtN(d.count) + ' <span class="of">stocks of ' + fmtN(d.pool_count) + ' in ' + esc(d.pool_label) + '</span>';
       document.getElementById('exprLine').textContent = d.expression ? ('evaluated: ' + d.expression) : '';
       document.getElementById('bindingLine').textContent = d.binding_filter ? ('binding filter: ' + labelOf(d.binding_filter.filter) + ' alone leaves ' + fmtN(d.binding_filter.cut_to)) : '';
@@ -563,6 +601,7 @@ function renderResults(d){
   });
   if (!keys.length) cols.push({h:'GVM', k:'gvm_score'}, {h:'Segment Rank', k:'seg_rank'});
   document.getElementById('resultsHead').innerHTML = '<tr>' + cols.map(function(c){return '<th>'+esc(c.h)+'</th>';}).join('') + '</tr>';
+  document.getElementById('notesLine').innerHTML = notesHtml();   /* cc#2149 */
   var rows = d.rows || [];
   document.getElementById('resultsBody').innerHTML = rows.length
     ? rows.map(function(r){
@@ -588,10 +627,114 @@ document.getElementById('resultVal').addEventListener('click', toggleResults);
   window.addEventListener('load', post);
 })();
 
+/* ── cc#2149: SAVE / LOAD the universe definition ─────────────────────────────────────────
+   ONE row per (basket name, definition name) in qb_universe_defs: the pool set, every APPLIED row in
+   page order with its AND/OR, duration, values and NOTE, plus the score_date it was previewed on and
+   the count. Notes are the strategy record -- typed on the applied row, shown again on the results
+   header. Loading on a later date re-runs the preview and shows BOTH dates. */
+function defStatus(html, warn){ var el = document.getElementById('defStatus'); el.innerHTML = html; el.className = 'defstatus' + (warn ? ' warn' : ''); }
+function defNames(){ return {basket: document.getElementById('defBasket').value.trim(), name: (document.getElementById('defName').value.trim() || 'default')}; }
+function defRows(){
+  return appliedKeys().map(function(key){
+    var f = ALL_FILTERS.filter(function(x){ return x.key === key; })[0]; var st = STATE.rows[key];
+    return {key:key, op:st.op, min:(st.min === '' ? null : st.min), max:(st.max === '' ? null : st.max), list:st.list.slice(),
+            duration:(f.days ? st.days : (f.windows ? st.win : null)),
+            n:((f.kind === 'kofn' || f.nInput) ? st.n : null), k:(f.kind === 'kofn' ? st.k : null), note:(st.note || '')};
+  });
+}
+function saveDef(){
+  var nm = defNames();
+  if (!nm.basket){ defStatus('Give the basket a name first — the definition is saved under it.', true); document.getElementById('defBasket').focus(); return; }
+  if (!STATE.sel.length){ defStatus('Select at least one pool before saving.', true); return; }
+  var body = {basket_name:nm.basket, def_name:nm.name, pools:STATE.sel.slice(), filters:defRows(),
+              as_of_score_date:(STATE.last && STATE.last.as_of_date) || null, preview_count:(STATE.last ? STATE.last.count : null)};
+  defStatus('Saving…', false);
+  fetchWithTimeout('/api/qb/universe2/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.error){ defStatus('Not saved — ' + esc(d.error), true); return; }
+      STATE.def.loaded = {basket_name:d.basket_name, def_name:d.def_name, as_of_score_date:d.as_of_score_date, preview_count:d.preview_count, updated_at:d.updated_at, skipped:[]};
+      defStatus((d.created ? 'Saved' : 'Updated') + ' <b>' + esc(d.basket_name) + ' / ' + esc(d.def_name) + '</b> — ' + fmtN(d.filters_saved) + ' applied row' + (d.filters_saved === 1 ? '' : 's') + ', ' + fmtN(d.notes_saved) + ' note' + (d.notes_saved === 1 ? '' : 's') + ', pools ' + esc((d.pools || []).join(' + ')) + (d.as_of_score_date ? ' · previewed as of <b>' + esc(d.as_of_score_date) + '</b> (' + fmtN(d.preview_count) + ' stocks)' : ' · not previewed yet'), false);
+      loadDefList();
+      try { if (window.parent !== window) window.parent.postMessage({scorrEmbed:'universe', saved:{basket_name:d.basket_name, def_name:d.def_name}}, '*'); } catch(e){}
+    })
+    .catch(function(e){ defStatus('Not saved — ' + esc(e.message), true); });
+}
+function loadDef(){
+  var nm = defNames();
+  if (!nm.basket){ defStatus('Type the basket name to load, or pick one from the list.', true); document.getElementById('defBasket').focus(); return; }
+  defStatus('Loading…', false);
+  fetchWithTimeout('/api/qb/universe2/load?basket_name=' + encodeURIComponent(nm.basket) + '&def_name=' + encodeURIComponent(nm.name))
+    .then(function(r){ return r.json(); }).then(applyDef)
+    .catch(function(e){ defStatus('Not loaded — ' + esc(e.message), true); });
+}
+function applyDef(d){
+  if (d.error){ defStatus('Not loaded — ' + esc(d.error), true); return; }
+  if (!d.found){ defStatus('No saved definition <b>' + esc(d.basket_name) + ' / ' + esc(d.def_name) + '</b> — nothing on the page changed.', true); return; }
+  var known = STATE.pools.map(function(p){ return p.key; });
+  STATE.sel = (d.pools || []).filter(function(k){ return !known.length || known.indexOf(k) >= 0; });
+  ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = freshRow(f); });
+  var skipped = [];
+  (d.filters || []).forEach(function(r){
+    var f = ALL_FILTERS.filter(function(x){ return x.key === r.key; })[0];
+    if (!f){ skipped.push(r.key); return; }
+    var st = STATE.rows[r.key];
+    st.applied = true; st.open = true; st.op = (r.op === 'OR' ? 'OR' : 'AND');
+    st.min = (r.min == null ? '' : String(r.min)); st.max = (r.max == null ? '' : String(r.max));
+    st.list = Array.isArray(r.list) ? r.list.slice() : [];
+    if (f.days && r.duration != null) st.days = parseInt(r.duration, 10);
+    if (f.windows && r.duration != null) st.win = String(r.duration);
+    if (r.n != null) st.n = parseInt(r.n, 10);
+    if (r.k != null) st.k = parseInt(r.k, 10);
+    st.note = r.note || '';
+  });
+  STATE.def.loaded = {basket_name:d.basket_name, def_name:d.def_name, as_of_score_date:d.as_of_score_date, preview_count:d.preview_count, updated_at:d.updated_at, skipped:skipped};
+  document.getElementById('defBasket').value = d.basket_name; document.getElementById('defName').value = d.def_name;
+  renderPools(); renderFilters(); refresh();
+  defStatus('Loaded <b>' + esc(d.basket_name) + ' / ' + esc(d.def_name) + '</b> (saved ' + esc(String(d.updated_at || '').slice(0, 16)) + ') — ' + (d.as_of_score_date ? 'previewed as of <b>' + esc(d.as_of_score_date) + '</b> (' + fmtN(d.preview_count) + ' stocks)' : 'never previewed') + ' · re-running the preview now…' + (skipped.length ? ' Rows this page does not have were skipped: ' + esc(skipped.join(', ')) : ''), false);
+}
+function defStatusFromPreview(d){
+  var L = STATE.def.loaded; if (!L) return;
+  var head = '<b>' + esc(L.basket_name) + ' / ' + esc(L.def_name) + '</b>';
+  var skip = (L.skipped && L.skipped.length) ? ' · skipped rows: ' + esc(L.skipped.join(', ')) : '';
+  if (!L.as_of_score_date){ defStatus(head + ' — previewed now as of <b>' + esc(d.as_of_date) + '</b>: ' + fmtN(d.count) + ' stocks (the saved definition carried no preview date; save again to record it)' + skip, false); return; }
+  if (L.as_of_score_date === d.as_of_date){
+    var same = (L.preview_count == null) || (L.preview_count === d.count);
+    defStatus(head + ' — as of <b>' + esc(d.as_of_date) + '</b>: ' + fmtN(d.count) + ' stocks now' + (L.preview_count != null ? ' · ' + fmtN(L.preview_count) + ' when saved' + (same ? ' (identical)' : ' (DIFFERENT on the same score_date — the data changed under the definition)') : '') + skip, !same);
+    return;
+  }
+  defStatus(head + ' — saved as of <b>' + esc(L.as_of_score_date) + '</b> (' + fmtN(L.preview_count) + ' stocks) · previewed now as of <b>' + esc(d.as_of_date) + '</b> (' + fmtN(d.count) + ' stocks). The score_date moved; save again to move the definition with it.' + skip, true);
+}
+function loadDefList(){
+  fetchWithTimeout('/api/qb/universe2/defs').then(function(r){ return r.json(); }).then(function(d){
+    var sel = document.getElementById('defList'); var defs = d.defs || [];
+    sel.innerHTML = '<option value="">' + (defs.length ? 'Saved definitions (' + defs.length + ')…' : 'No saved definitions yet') + '</option>' + defs.map(function(x){
+      return '<option value="' + esc(x.basket_name) + '\u0001' + esc(x.def_name) + '">' + esc(x.basket_name) + ' / ' + esc(x.def_name) + ' · ' + fmtN(x.n_filters) + ' rows · as of ' + esc(x.as_of_score_date || '—') + (x.preview_count != null ? ' · ' + fmtN(x.preview_count) + ' stocks' : '') + '</option>';
+    }).join('');
+  }).catch(function(){ /* the list is a convenience; Save and Load work without it */ });
+}
+function pickDef(v){ if (!v) return; var i = v.indexOf('\u0001'); document.getElementById('defBasket').value = v.slice(0, i); document.getElementById('defName').value = v.slice(i + 1); loadDef(); }
+function setNote(key, v){ STATE.rows[key].note = v; var m = document.getElementById('nm-' + key); if (m) m.style.display = v ? '' : 'none'; }
+function noteHtml(f, st){
+  if (!st.applied) return '';
+  return '<div class="fnote"><input type="text" class="noteinput" maxlength="500" placeholder="Note — why this row is in the universe (saved with the definition)" value="' + esc(st.note || '') + '" oninput="setNote(\'' + f.key + '\', this.value)"></div>';
+}
+function notesHtml(){
+  var items = appliedKeys().filter(function(k){ return STATE.rows[k].note; }).map(function(k){ return '<span class="nk">' + esc(labelOf(k)) + '</span> — ' + esc(STATE.rows[k].note); });
+  return items.length ? '<b>Notes</b> · ' + items.join(' · ') : '';
+}
+function defAutoLoad(){
+  var qs = new URLSearchParams(location.search); var b = qs.get('basket_name'); if (!b) return;
+  document.getElementById('defBasket').value = b; document.getElementById('defName').value = qs.get('def_name') || 'default';
+  loadDef();
+}
+
 loadPools();
 loadSegments();   /* cc#2145 */
 loadCoverage();   /* cc#2146 */
 renderFilters();
+loadDefList();    /* cc#2149 */
+defAutoLoad();    /* cc#2149: ?basket_name=&def_name= opens a saved definition */
 </script>
 </body>
 </html>
