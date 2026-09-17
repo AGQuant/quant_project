@@ -163,8 +163,7 @@ def mobile_screeners_app(request: Request):
         "custom_builder": {
             "message": "Pick your own filters and run them across the universe. Your last four "
                        "filter choices are remembered.",
-            "footnote": "A TC score column is being added under cc#1881.",
-        },
+        },   # cc#2160: the cc#1881 footnote about a trading-scanner column is gone -- founder ruling 17-Sep: it has no place here
         "saved_screens_card": {
             "count": 0,
             "message": "Screens you build are not stored yet. There is no saved-screen table, "

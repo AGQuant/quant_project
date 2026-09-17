@@ -9,13 +9,15 @@
      from mobile/sector.html .rl/.tc), one horizontal card per screen with a three-name preview from the list
      endpoint's `top`, equal heights per rail, a dot pager per rail. Class names are sk-* on purpose:
      /static/mobile_app.css carries bare .rail / .sc / .chip / .body rules that would restyle shorter names
-     (cc#2155 root cause). The 3-column .grid/.sc stays only for the Build-your-own wide card (push 4 rewires it).
+     (cc#2155 root cause). The old 3-column .grid/.sc is gone (cc#2159 rebuilt the Build-your-own card as an sk-card).
      cc#2157 (Screeners PUSH 2/5): a card tap opens the NAMES SHEET on this page (renderNamesSheet -- the one shared
      sheet, push 4 reuses it with its own rows) instead of leaving for /m/screeners?screen=<id>; that page stays as
      the 'Full table' target. Body scroll locks while open; pushState so the back button closes the sheet.
      cc#2159 (Screeners PUSH 4/5): /m/screeners?view=custom = the CUSTOM SCREENER view (same route, so no NAV change):
      renderCustom(meta) from /api/mobile/custom_screener/meta -- ten filter rows, three chips each, multi-select,
      live count from /run in a sticky footer, results in the same names sheet. The Build-your-own card points here.
+     cc#2160 (Screeners PUSH 5/5): the chip selection is mirrored into the URL (replaceState) so a link reopens to the
+     same screen; Share copies that link; count-0 / alone-0 / meta-failure states are explicit, never blank.
      TOKEN_MAP  #D4AF37 -> --brand · #3DD68C -> --win · #FF5C6C -> --loss · #131316 -> --panel · #1B1B20 -> --hi ·
      #2A2A32 -> --edge · #F5F2EA -> --ink · #8E8A7E -> --muted -->
 <html lang="en">
@@ -257,10 +259,32 @@ function csLoadSel(){ try{ var s=JSON.parse(localStorage.getItem(CS_KEY)||'{}');
 function csSaveSel(){ try{ if(Object.keys(CS.sel).length) localStorage.setItem(CS_KEY, JSON.stringify(CS.sel)); else localStorage.removeItem(CS_KEY); }catch(e){} }   // a per-viewer convenience, never a saved screen
 function csQuery(){ var q=[]; Object.keys(CS.sel).forEach(function(k){ if(CS.sel[k].length) q.push(encodeURIComponent(k)+'='+CS.sel[k].map(encodeURIComponent).join(',')); }); return q.join('&'); }
 function csPicked(){ return Object.keys(CS.sel).reduce(function(n,k){ return n+CS.sel[k].length; },0); }
+/* cc#2160: URL state. The query string carries the same keys /run takes, so a link reopens to the same screen. */
+function csFromUrl(known){ var sel={}; try{ var u=new URLSearchParams(location.search); Object.keys(known).forEach(function(k){ var v=u.getAll(k).join(',').split(',').map(function(s){ return s.trim().toLowerCase(); }).filter(function(s,i,arr){ return s&&known[k].indexOf(s)>=0&&arr.indexOf(s)===i; }); if(v.length) sel[k]=v; }); }catch(e){} return sel; }
+function csSyncUrl(){ try{ var q=csQuery(); history.replaceState(history.state, '', '/m/screeners?view=custom'+(q?'&'+q:'')); }catch(e){} }
+function csShareUrl(){ var q=csQuery(); return location.origin+'/m/screeners?view=custom'+(q?'&'+q:''); }
+function csShare(){
+  var url=csShareUrl(), btn=document.getElementById('cs-share'); if(!btn||btn.disabled) return;
+  function done(ok){ btn.textContent=ok?'Link copied':'Share'; if(ok) setTimeout(function(){ btn.textContent='Share'; },1500); }
+  function fallback(){ try{ window.prompt('Copy this link', url); }catch(e){} done(false); }
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(function(){ done(true); }).catch(fallback); } else fallback();
+}
+function loadCustom(){   // cc#2160: a failed /meta says so and offers a retry -- never a blank panel
+  document.getElementById('body').innerHTML='<div class="err">Loading filters…</div>';
+  fetch('/api/mobile/custom_screener/meta',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){ if(!d||d.error||!d.filters||!d.filters.length) throw new Error((d&&d.error)||'no filters'); renderCustom(d); })
+  .catch(function(){
+    document.getElementById('pg-title').textContent='Custom screener'; var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/screeners');
+    document.getElementById('asof').textContent='Could not load';
+    document.getElementById('body').innerHTML='<div class="err">Could not load the filters.<br><br><button type="button" class="sk-cs-clear" id="cs-retry">Try again</button></div>';
+    document.getElementById('cs-retry').addEventListener('click', loadCustom);
+  });
+}
 function csExclText(n){ return n+' name'+(n===1?' has':'s have')+' no technicals today and '+(n===1?'is':'are')+' left out of trend / 52-week / 1-year filters.'; }
 function renderCustom(meta){
   CS.meta=meta; var known={}; (meta.filters||[]).forEach(function(f){ known[f.key]=f.buttons.map(function(b){ return b.key; }); });
-  var saved=csLoadSel(); CS.sel={}; Object.keys(saved).forEach(function(k){ if(known[k]){ var v=(saved[k]||[]).filter(function(b){ return known[k].indexOf(b)>=0; }); if(v.length) CS.sel[k]=v; } });
+  var fromUrl=csFromUrl(known); var saved=Object.keys(fromUrl).length?fromUrl:csLoadSel();   // cc#2160: a link's filters win; localStorage only when the URL carries none
+  CS.sel={}; Object.keys(saved).forEach(function(k){ if(known[k]){ var v=(saved[k]||[]).filter(function(b){ return known[k].indexOf(b)>=0; }); if(v.length) CS.sel[k]=v; } });
+  csSaveSel(); csSyncUrl();
   document.getElementById('pg-title').textContent='Custom screener'; var bk=document.getElementById('back'); bk.style.display=''; bk.setAttribute('href','/m/screeners');
   var a=meta.as_of||{}; var behind=(a.invest&&a.gvm&&a.invest<a.gvm)?' · <span class="sk-warn">Investment score is one day behind</span>':'';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(a.gvm))+'</b> · EOD only · '+Number(meta.universe||0).toLocaleString('en-IN')+' names'+behind;
@@ -275,9 +299,10 @@ function renderCustom(meta){
   document.getElementById('body').innerHTML=h;
   if(!document.getElementById('cs-foot')){
     var foot=document.createElement('div'); foot.className='sk-cs-foot'; foot.id='cs-foot';
-    foot.innerHTML='<div class="sk-cs-n"><b id="cs-count">—</b><span id="cs-count-l">names match</span></div><button type="button" class="sk-cs-clear" id="cs-clear">Clear</button><button type="button" class="sk-cs-show" id="cs-show" disabled>Show names</button>';
+    foot.innerHTML='<div class="sk-cs-n"><b id="cs-count">—</b><span id="cs-count-l">names match</span></div><button type="button" class="sk-cs-clear" id="cs-clear">Clear</button><button type="button" class="sk-cs-clear" id="cs-share" disabled>Share</button><button type="button" class="sk-cs-show" id="cs-show" disabled>Show names</button>';
     document.body.appendChild(foot);
-    document.getElementById('cs-clear').addEventListener('click', function(){ CS.sel={}; csSaveSel(); document.querySelectorAll('#cs-panel .sk-chip').forEach(function(c){ c.classList.remove('on'); c.setAttribute('aria-pressed','false'); }); csRefresh(0); });
+    document.getElementById('cs-clear').addEventListener('click', function(){ CS.sel={}; csSaveSel(); csSyncUrl(); document.querySelectorAll('#cs-panel .sk-chip').forEach(function(c){ c.classList.remove('on'); c.setAttribute('aria-pressed','false'); }); csRefresh(0); });
+    document.getElementById('cs-share').addEventListener('click', csShare);
     document.getElementById('cs-show').addEventListener('click', csShow);
     window.addEventListener('resize', csPlaceFoot);
   }
@@ -285,7 +310,7 @@ function renderCustom(meta){
   document.getElementById('cs-panel').addEventListener('click', function(e){
     var c=e.target.closest('.sk-chip'); if(!c) return; var k=c.getAttribute('data-key'), b=c.getAttribute('data-b'); var arr=CS.sel[k]||[]; var i=arr.indexOf(b);
     if(i>=0) arr.splice(i,1); else arr.push(b); if(arr.length) CS.sel[k]=arr; else delete CS.sel[k];
-    c.classList.toggle('on', i<0); c.setAttribute('aria-pressed', i<0?'true':'false'); csSaveSel(); csRefresh(250);
+    c.classList.toggle('on', i<0); c.setAttribute('aria-pressed', i<0?'true':'false'); csSaveSel(); csSyncUrl(); csRefresh(250);
   });
   csRefresh(0);
 }
@@ -298,10 +323,12 @@ function csRefresh(delay){
     var ctrl=window.AbortController?new AbortController():null; CS.ctrl=ctrl; var my=++CS.seq; var q=csQuery();
     fetch('/api/mobile/custom_screener/run'+(q?'?'+q:''),{credentials:'same-origin', signal:ctrl?ctrl.signal:undefined}).then(function(r){ return r.json(); }).then(function(d){
       if(my!==CS.seq) return; cnt.classList.remove('dim'); CS.last=d;
-      var show=document.getElementById('cs-show'), lab=document.getElementById('cs-count-l'), ex=document.getElementById('cs-excl');
+      var show=document.getElementById('cs-show'), lab=document.getElementById('cs-count-l'), ex=document.getElementById('cs-excl'), share=document.getElementById('cs-share');
+      var picked=csPicked(); if(share) share.disabled=!picked;
       if(!d||d.error){ cnt.textContent='—'; lab.textContent='could not count'; show.disabled=true; return; }
-      var picked=csPicked(), n=picked?Number(d.count||0):0;
-      cnt.textContent=n.toLocaleString('en-IN'); lab.textContent=picked?(n===1?'name matches':'names match'):'names match · pick at least one filter';
+      var n=picked?Number(d.count||0):0;
+      cnt.textContent=n.toLocaleString('en-IN');
+      lab.textContent=!picked?'names match · pick at least one filter':(n===0?'No name passes all of these today':(n===1?'name matches':'names match'));   // cc#2160: count-0 state
       show.disabled=!(n>0&&picked>0);
       var ne=Number(d.excluded_no_technicals||0); if(ne>0&&picked){ ex.textContent=csExclText(ne); ex.hidden=false; } else { ex.textContent=''; ex.hidden=true; }
     }).catch(function(e){ if(my!==CS.seq||(e&&e.name==='AbortError')) return; cnt.classList.remove('dim'); cnt.textContent='—'; document.getElementById('cs-count-l').textContent='could not count'; document.getElementById('cs-show').disabled=true; });
@@ -334,10 +361,10 @@ function renderScreen(d){
   ROWS=d.rows||[]; tbl();
 }
 var S=null, VIEW=null; try{ var U=new URLSearchParams(location.search); S=U.get('screen'); VIEW=U.get('view'); }catch(e){}
-var URL0 = VIEW==='custom' ? '/api/mobile/custom_screener/meta' : (S ? '/api/mobile/screeners_app/screen?id='+encodeURIComponent(S) : '/api/mobile/screeners_app/list');
-fetch(URL0,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+if(VIEW==='custom'){ loadCustom(); }
+else fetch(S?'/api/mobile/screeners_app/screen?id='+encodeURIComponent(S):'/api/mobile/screeners_app/list',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
   if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
-  VIEW==='custom' ? renderCustom(d) : (S ? renderScreen(d) : renderList(d));
+  S ? renderScreen(d) : renderList(d);
 }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load screens.</div>'; });
 </script>
 </body></html>
