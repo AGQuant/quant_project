@@ -243,8 +243,11 @@ def solve_iv(rows, with_meta: bool = False):
     sessions. Returns an ndarray of Black-76 implied vols aligned to rows; NaN wherever the row has
     no positive price or its session has no usable forward. Per (trade_date, expiry) group the
     forward is the put-call-parity one, F = K_atm + (C_atm - P_atm) * e^(R_FREE*T), off the strike
-    nearest that session's spot with BOTH legs priced (> 0); a session with no such pair falls
-    back to the carry forward spot*e^(R_FREE*T). Then _b76_iv_vec (bisection on [1e-4, 5.0], 64
+    nearest that session's spot with BOTH legs priced (> 0) -- two strikes EQUIDISTANT from spot:
+    the LOWER one wins (the slice's own ascending strike order; the load-time solve left this to
+    bhavcopy row order, which is what the fill job's parity run found on 71 rows of 33,030 --
+    CHOLAFIN 15-Sep, FEDERALBNK 16-Sep, TATAELXSI 16-Sep, spot exactly midway, 1.8 vol pts at
+    most); a session with no such pair falls back to the carry forward spot*e^(R_FREE*T). Then _b76_iv_vec (bisection on [1e-4, 5.0], 64
     iterations). This is exactly the solve ingest_date() ran at load time from cc#2031 A2 onward
     and the one a4_resolve_rows() re-ran on stored closes -- ONE method, in ONE place, now run
     when a page is opened instead of when a file is loaded. Rows loaded since 15-Sep-2026 and the
