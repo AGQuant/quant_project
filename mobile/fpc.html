@@ -29,7 +29,7 @@
 .cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
 .cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
 .seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
-.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
+.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16);transition:background-color .12s,color .12s,box-shadow .12s}
 .lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
 .row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
 .row:last-child{border-bottom:none}
@@ -66,7 +66,9 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:var(--r
 .qq{padding:var(--space-12) 0 var(--space-6)}.qt{font-size:var(--type-125);font-weight:700;line-height:1.4}
 .qt .qn{color:var(--brand);font-weight:800;margin-right:var(--space-2)}
 .fpc-derived{font-size:var(--type-105);color:var(--muted);line-height:1.5;margin-top:var(--space-6);padding-bottom:var(--space-4);border-bottom:var(--bw-1) solid var(--edge)}
-.qo{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6);margin-top:var(--space-8)}.qo span{font-size:var(--type-105);font-weight:700;color:var(--muted);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-9);text-align:center;line-height:1.3}.qo span.on{color:var(--brand);border-color:var(--brand)}
+.qo{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6);margin-top:var(--space-8)}.qo span{font-size:var(--type-105);font-weight:700;color:var(--muted);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-9);text-align:center;line-height:1.3}.qo span{transition:background-color .12s,color .12s,border-color .12s,box-shadow .12s}
+/* cc#2192: a chosen option is FILLED -- brand fill, field-coloured label (the page's own primary-button pairing), a little lift -- so the choice reads at a glance. One rule for every option grid on the page (.qo) and the tap rows of step 1 (.seg). */
+.qo span.on,.seg span.on{color:var(--fpc-on-fg,var(--field));background:var(--brand);border-color:var(--brand);box-shadow:0 var(--space-2) var(--space-6) color-mix(in srgb, var(--brand) 35%, transparent)}
 .auto{margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) dashed var(--edge)}.ar{display:flex;justify-content:space-between;font-size:var(--type-105);color:var(--muted);padding:var(--space-4) 0}.ar b{color:var(--ink)}
 .pil{margin-top:var(--space-10)}.pil .r{display:grid;grid-template-columns:70px 1fr 34px;gap:var(--space-10);align-items:center;padding:var(--space-5) 0}
 .pil .l{font-size:var(--type-11);font-weight:800;color:var(--muted)}.pil .bar{height:6px;border-radius:var(--radius-3);background:var(--hi);overflow:hidden}.pil .bar i{display:block;height:6px;border-radius:var(--radius-3)}.pil .v{font-size:var(--type-125);font-weight:800;text-align:right}
@@ -132,6 +134,16 @@ function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ ret
 function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
 function inrL(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v), a=Math.abs(x); var t=a>=1e7?(a/1e7).toFixed(2)+' Cr':(a>=1e5?(a/1e5).toFixed(a>=1e6?1:2)+' L':Math.round(a).toLocaleString('en-IN')); return (x<0?'−':'')+'₹'+t; }
 function words(v){ v=Math.round(v); if(v>=1e7) return (v/1e7).toFixed(2).replace(/\.?0+$/,'')+' crore'; if(v>=1e5) return (v/1e5).toFixed(2).replace(/\.?0+$/,'')+' lakh'; if(v>=1000) return (v/1000).toFixed(1).replace(/\.0$/,'')+' thousand'; return String(v); }
+/* cc#2192: the label on a brand-filled chip takes whichever of the theme's two text tokens reads better on
+   the fill (--field on the dark sets, --ink on a light set whose brand is a pale colour). Tokens only. */
+(function(){ try{
+  var g=function(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); };
+  var toRgb=function(h){ var d=document.createElement('div'); d.style.color=h; document.body.appendChild(d); var c=getComputedStyle(d).color; d.remove(); return (c.match(/[\d.]+/g)||[]).slice(0,3).map(Number); };
+  var lum=function(c){ var f=function(v){ v/=255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4); }; return 0.2126*f(c[0])+0.7152*f(c[1])+0.0722*f(c[2]); };
+  var cr=function(a,b){ var x=lum(a), y=lum(b), hi=Math.max(x,y), lo=Math.min(x,y); return (hi+0.05)/(lo+0.05); };
+  var br=toRgb(g('--brand'));
+  document.body.style.setProperty('--fpc-on-fg', cr(toRgb(g('--ink')),br)>cr(toRgb(g('--field')),br)?'var(--ink)':'var(--field)');
+}catch(e){} })();
 /* ── state ── */
 var I={age:35, retire_at:60, dependants:1, take_home:100000, spending:50000, emis:0, cash:500000, investments:1000000, life_cover:0, sip:20000, goal:null, goal_cost:2500000, goal_years:10};
 var R={a1:3, a4:3, b1:2, b2:2, b3:2, b4:2, b5:2};
