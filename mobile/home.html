@@ -2069,6 +2069,11 @@ var G_GROUPS = [
       svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>' },
   ] },
   { name: 'My Scorr', tiles: [
+    // cc#2194 (founder 17-Sep 15:10): the NEW My Portfolio tile — the founder's own client portfolio (Adaptive Dashboard
+    // row + the web /health report as swipeable cards). Its own page, /m/portfolio; the old /m/myportfolio tile below stays
+    // hidden (cc#2197). Donut icon, distinct from SmartGain's briefcase.
+    { href: '/m/portfolio', label: 'My Portfolio', web: false,
+      svg: '<svg viewBox="0 0 24 24"><path class="f" d="M12 3a9 9 0 019 9h-9z"/><path d="M12 3a9 9 0 019 9h-9z"/><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>' },
     { href: '/m/myportfolio', label: 'My Portfolio', web: false,
       svg: '<svg viewBox="0 0 24 24"><rect class="f" x="3" y="7" width="18" height="13" rx="2"/><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M3 12h18"/></svg>' },
     { href: '/m/myalerts', label: 'My Alerts', web: false,

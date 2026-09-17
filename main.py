@@ -131,6 +131,7 @@ from custom_screener_app import router as custom_screener_router   # cc#2158: /a
 from sector_app_mobile import router as sector_app_mobile_router   # cc#1900: /api/mobile/sector_app — Sector Intel app section
 from results_app_mobile import router as results_app_mobile_router   # cc#1901: /api/mobile/results_app — Results app section
 from health_app_mobile import router as health_app_mobile_router   # cc#1902: /m/health + /api/mobile/health_app — Portfolio Health app section
+from portfolio_app_mobile import router as portfolio_app_mobile_router   # cc#2194: /m/portfolio + /api/mobile/portfolio — My Portfolio (My Scorr tile): the Adaptive row + the health report as cards
 from mf_app_mobile import router as mf_app_mobile_router   # cc#1903: /m/mf + /api/mobile/mf_app — Mutual Funds app section
 from aicio_app_mobile import router as aicio_app_mobile_router   # cc#1904: /m/aicio + /api/mobile/aicio_app — AI CIO app section
 from smartgain_reconcile import router as smartgain_reconcile_router
@@ -364,6 +365,10 @@ PROTECTED.add("/m/sector")
 # PROTECTED so the page is gated like every other /m/ screen even while reachable by typed URL
 # only; NAV_REGISTRY below uses "typed-url" (main.py's own /preview precedent), not "grid-tile".
 PROTECTED.add("/m/health")
+# cc#2194: /m/portfolio — NEW page, the My Portfolio tile in My Scorr (grid-tile tier like /m/sector: the Home
+# grid tile is its entry point, not the NAV array / More sheet). PROTECTED like every /m/ screen; deliberately
+# NOT _PWA_INJECT_PATHS (desktop-only theme injection, the cc#874 rule every /m/ page follows).
+PROTECTED.add("/m/portfolio")
 # cc#1903: /m/mf — NEW page, no prior /m/ MF route or Home-grid tile existed (unlike /m/health,
 # there was no conflicting tile to preserve). Wired straight to "nav-mobile" tier (PROTECTED +
 # NAV_REGISTRY + NAV array with the 'm' flag), per Fable's own cc#1907 correction that /m/ routes
@@ -1004,6 +1009,7 @@ app.include_router(custom_screener_router)   # cc#2158: /api/mobile/custom_scree
 app.include_router(sector_app_mobile_router)   # cc#1900: /api/mobile/sector_app (mobile/sector.html's new condensed summary, additive)
 app.include_router(results_app_mobile_router)   # cc#1901: /api/mobile/results_app (mobile/results.html's new condensed summary, additive)
 app.include_router(health_app_mobile_router)   # cc#1902: /m/health + /api/mobile/health_app (new page, typed-url only — see ARCHITECTURE FLAG in health_app_mobile.py)
+app.include_router(portfolio_app_mobile_router)   # cc#2194: /m/portfolio + /api/mobile/portfolio + /api/mobile/portfolio/clients (My Portfolio tile, My Scorr)
 app.include_router(mf_app_mobile_router)   # cc#1903: /m/mf + /api/mobile/mf_app (new page, wired via the NAV array's More sheet)
 app.include_router(aicio_app_mobile_router)   # cc#1904: /m/aicio + /api/mobile/aicio_app (new page, wired via the NAV array's More sheet)
 app.include_router(trade_wall_router)   # cc#991: /api/tradewall + /m/trades + /trades
@@ -1592,6 +1598,7 @@ NAV_REGISTRY = {
     "/m/options":    ("Option Strategy Builder (mobile)", "nav-mobile"),   # cc#2039: OPT sprint 4/5, More sheet ('m' flag, not a bottom-nav slot)
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — Home grid tile HIDDEN 17-Sep-2026 (cc#2199), folded into My Portfolio (cc#2194); route + page alive", "typed-url"),   # cc#1902, hidden cc#2199
+    "/m/portfolio":  ("My Portfolio (mobile) — the client's Adaptive Dashboard row as 3 snapshot cards + the web /health report as swipeable cards + client picker; Home grid tile (My Scorr)", "grid-tile"),   # cc#2194
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
     "/m/aicio":      ("AICIO (mobile) — bottom-bar slot 3 since cc#2170 (founder 17-Sep); More sheet + Home grid too", "nav-mobile"),   # cc#1904 page; cc#2170 slot
     "/m/learn":      ("Learn (mobile) — Knowledge Hub articles (knowledge_endpoints); Home grid tile + More sheet", "nav-mobile"),   # cc#1961

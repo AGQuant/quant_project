@@ -1,0 +1,331 @@
+<!doctype html>
+<!-- ══ mobile/portfolio.html — My Portfolio app page (cc#2194, founder 17-Sep-2026 15:10 IST). Data: /api/mobile/portfolio?pid= (the Adaptive
+     Dashboard's own shelf row, portfolio_app_mobile.py) + /api/mobile/health_app/report?pid= (the web /health report's own dict,
+     health_app_mobile.py V2). The page PRESENTS; nothing is computed here. Three snapshot cards, then View Portfolio Health Report ->
+     one swipeable card per web report section (the eyebrow on every card names the web section it re-presents). Filter icon ->
+     full-page client picker (search + every hr_portfolios name; last pick in localStorage; ?pid= always wins; default 165).
+     PDF: the existing /api/health/report_pdf_self/{pid} signed link, opened the way the web SAVE PDF button opens it. Contract tokens only;
+     every class is pf- prefixed so nothing in the shared mobile CSS selects it. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A0A0C">
+<meta name="color-scheme" content="dark">
+<title>My Portfolio · Scorr</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/mobile_app.css">
+<link rel="stylesheet" href="/static/scorr_themes.css">
+<link rel="stylesheet" href="/static/scorr_appshell.css">
+<script src="/static/scorr_appshell.js" defer></script>
+<style>
+body{min-height:100dvh;background:var(--field)}
+.pf-pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.pf-asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7);line-height:1.5}.pf-asof b{color:var(--ink);font-weight:600}
+.pf-pos{color:var(--win)}.pf-neg{color:var(--loss)}.pf-gd{color:var(--brand)}.pf-mu{color:var(--muted)}
+.pf-back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800;display:inline-block;min-width:32px;text-align:center}
+.pf-fbtn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--radius-10);border:var(--bw-1) solid var(--edge);background:var(--panel);color:var(--brand);vertical-align:middle;cursor:pointer;padding:0}
+.pf-fbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pf-fbtn.pf-on{background:var(--brand);color:var(--field);border-color:var(--brand)}
+/* ─ snapshot cards ─ */
+.pf-card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.pf-card::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.pf-eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12);display:flex;justify-content:space-between;gap:var(--space-8)}.pf-eye span{font-weight:600;letter-spacing:var(--track-em7);text-transform:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pf-big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6);flex-wrap:wrap}
+.pf-big .pf-r{font-size:var(--type-34);font-weight:800;line-height:1;letter-spacing:-.02em}.pf-big .pf-n{font-size:var(--type-11);color:var(--muted);line-height:1.45}.pf-big .pf-n b{color:var(--ink);font-weight:700}
+.pf-line{font-size:var(--type-115);line-height:1.55;margin-top:var(--space-8)}.pf-line b{font-weight:800}.pf-line.pf-mu{color:var(--muted);font-size:var(--type-105)}
+.pf-cells{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
+.pf-cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10);min-width:0}
+.pf-cell .pf-k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pf-cell .pf-v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pf-cell .pf-v small{font-size:var(--type-9);color:var(--muted);font-weight:700}
+.pf-cells.pf-two{grid-template-columns:1fr 1fr}
+.pf-rows{margin-top:var(--space-10);border-top:var(--bw-1) solid var(--hi)}
+.pf-row{display:grid;grid-template-columns:1fr auto;gap:var(--space-8);align-items:center;padding:var(--space-8) 0;border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit}.pf-row:last-child{border-bottom:none}
+.pf-row .pf-nm{font-size:var(--type-125);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pf-row .pf-sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pf-row .pf-rv{text-align:right}.pf-row .pf-rv .pf-n{font-size:var(--type-135);font-weight:800;line-height:1.1}.pf-row .pf-rv .pf-c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
+.pf-tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
+.pf-tag.pf-g{color:var(--win)}.pf-tag.pf-s{color:var(--loss)}.pf-tag.pf-b{color:var(--brand)}
+.pf-mix{margin-top:var(--space-10);height:10px;border-radius:var(--radius-6);overflow:hidden;display:flex;background:var(--hi)}.pf-mix i{display:block;height:10px}
+.pf-mixl{display:flex;flex-wrap:wrap;gap:var(--space-5) var(--space-12);margin-top:var(--space-8);font-size:var(--type-10);color:var(--muted)}.pf-mixl b{color:var(--ink);font-weight:700}
+.pf-dot{display:inline-block;width:7px;height:7px;border-radius:var(--radius-4);margin-right:var(--space-4);vertical-align:middle}
+.pf-note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.pf-note b{color:var(--ink)}
+.pf-err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center;line-height:1.6}
+.pf-skel{height:14px;border-radius:var(--radius-6);background:var(--hi);margin-top:var(--space-8)}
+/* ─ action card ─ */
+.pf-act{margin:var(--space-14) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--brand);border-radius:var(--radius-16);padding:var(--space-14)}
+.pf-act .pf-teaser{display:flex;align-items:center;gap:var(--space-12)}
+.pf-act .pf-score{font-size:var(--type-26);font-weight:800;line-height:1;color:var(--brand);flex:none}.pf-act .pf-score small{font-size:var(--type-11);color:var(--muted);font-weight:700}
+.pf-act .pf-tx{font-size:var(--type-115);line-height:1.5;min-width:0}.pf-act .pf-tx b{font-weight:800}
+.pf-btn,.pf-btn2{display:flex;align-items:center;justify-content:center;gap:var(--space-8);width:100%;margin-top:var(--space-10);padding:var(--space-12);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:800;cursor:pointer;box-sizing:border-box;text-decoration:none}
+.pf-btn{background:var(--brand);color:var(--pf-on-fg,var(--field));border:none}.pf-btn[disabled],.pf-btn.pf-wait{opacity:.5;pointer-events:none}
+.pf-btn2{background:var(--hi);color:var(--brand);border:var(--bw-1) solid var(--edge);font-size:var(--type-115);padding:var(--space-10)}
+.pf-btn2 svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pf-msg{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-7);line-height:1.5;text-align:center}
+/* ─ report rail ─ */
+.pf-rhead{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-10) var(--space-16) 0}
+.pf-rcount{flex:none;font-size:var(--type-10);font-weight:800;color:var(--brand);letter-spacing:var(--track-em8);min-width:44px}
+.pf-idx{display:flex;gap:var(--space-6);overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}.pf-idx::-webkit-scrollbar{display:none}
+.pf-ic{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel);white-space:nowrap;cursor:pointer}
+.pf-ic.pf-on{color:var(--pf-on-fg,var(--field));background:var(--brand);border-color:var(--brand)}
+.pf-rail{display:flex;gap:var(--space-12);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-10) var(--space-16) var(--space-6);scrollbar-width:none;-webkit-overflow-scrolling:touch;align-items:flex-start}.pf-rail::-webkit-scrollbar{display:none}
+.pf-rc{flex:0 0 calc(100vw - var(--space-16) - var(--space-16));max-width:448px;scroll-snap-align:center;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);display:flex;flex-direction:column;min-width:0;position:relative;overflow:hidden}
+.pf-rc::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.pf-rc .pf-ct{font-size:var(--type-17);font-weight:800;margin-top:var(--space-4);letter-spacing:-.01em}
+.pf-rc .pf-hd{font-size:var(--type-34);font-weight:800;line-height:1;margin-top:var(--space-8);letter-spacing:-.02em}.pf-rc .pf-hd small{font-size:var(--type-12);color:var(--muted);font-weight:700;letter-spacing:0}
+.pf-rc .pf-vd{font-size:var(--type-115);line-height:1.55;margin-top:var(--space-6);color:var(--ink)}.pf-rc .pf-vd b{font-weight:800}
+.pf-rc .pf-bd{margin-top:var(--space-10);max-height:42vh;overflow-y:auto;-webkit-overflow-scrolling:touch;font-size:var(--type-115);line-height:1.55}
+.pf-rc .pf-bd .pf-cells{margin-top:var(--space-8)}
+.pf-rc .pf-ins{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-8);line-height:1.55}
+.pf-dots{display:flex;justify-content:center;gap:var(--space-4);padding:var(--space-8) var(--space-16) 0;flex-wrap:wrap}.pf-dots i{transition:width .15s}
+.pf-dots i{display:block;width:5px;height:5px;border-radius:var(--radius-3);background:var(--edge)}.pf-dots i.pf-on{background:var(--brand);width:14px}
+.pf-hint{text-align:center;font-size:var(--type-10);color:var(--muted);padding:var(--space-8) var(--space-16) 0}
+.pf-bar{margin-top:var(--space-8)}.pf-bar .pf-br{display:grid;grid-template-columns:22px 1fr 44px;gap:var(--space-10);align-items:center;padding:var(--space-4) 0}
+.pf-bar .pf-bl{font-size:var(--type-12);font-weight:800;color:var(--brand)}.pf-bar .pf-tr{height:6px;border-radius:var(--radius-3);background:var(--hi);overflow:hidden}.pf-bar .pf-tr i{display:block;height:6px;border-radius:var(--radius-3)}.pf-bar .pf-bv{font-size:var(--type-125);font-weight:800;text-align:right}
+.pf-tb{width:100%;border-collapse:collapse;font-size:var(--type-11)}.pf-tb th{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);text-align:right;padding:var(--space-6) var(--space-4);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap;position:sticky;top:0;background:var(--panel)}
+.pf-tb td{padding:var(--space-6) var(--space-4);border-bottom:var(--bw-1) solid var(--hi);text-align:right;font-weight:600;white-space:nowrap}.pf-tb th:first-child,.pf-tb td:first-child{text-align:left;padding-left:0}.pf-tb td:first-child{font-weight:800}.pf-tb td small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}.pf-tb tr:last-child td{border-bottom:none}
+.pf-tb td a{color:inherit;text-decoration:none}
+.pf-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.pf-scroll .pf-tb th:first-child,.pf-scroll .pf-tb td:first-child{position:sticky;left:0;background:var(--panel);padding-right:var(--space-8)}
+.pf-ul{margin:var(--space-6) 0 0;padding-left:var(--space-18);line-height:1.6}.pf-ul li{margin-bottom:var(--space-5)}
+.pf-take{font-size:var(--type-125);line-height:1.7}
+.pf-emp{font-size:var(--type-115);color:var(--muted);line-height:1.6;padding:var(--space-8) 0}
+.pf-foot{font-size:var(--type-10);color:var(--muted);margin-top:var(--space-8);line-height:1.5}
+/* ─ picker ─ */
+.pf-search{margin:var(--space-12) var(--space-16) 0}
+.pf-search input{display:block;width:100%;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);color:var(--ink);font:inherit;font-size:var(--type-14);font-weight:600;padding:var(--space-11) var(--space-12);box-sizing:border-box}
+.pf-search input::placeholder{color:var(--muted)}
+.pf-list{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.pf-cl{display:grid;grid-template-columns:1fr auto;gap:var(--space-8);align-items:center;padding:var(--space-12) var(--space-13);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit;cursor:pointer;min-height:44px;box-sizing:border-box}.pf-cl:last-child{border-bottom:none}
+.pf-cl .pf-nm{font-size:var(--type-125);font-weight:800}.pf-cl .pf-sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2)}.pf-cl .pf-tick{color:var(--brand);font-weight:800;font-size:var(--type-15)}
+</style>
+</head>
+<body data-theme="goldnight">
+<script>(function(){try{var t=localStorage.getItem('scorr_theme');
+if(t){}}catch(e){}
+var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;var cs=document.querySelector('meta[name="color-scheme"]'),csm=fc&&/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(fc);if(cs&&csm){var csch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},cslum=0.2126*csch(csm[1])+0.7152*csch(csm[2])+0.0722*csch(csm[3]);cs.content=cslum>0.5?'light':'dark';}
+/* cc#2192 rule: the label on a brand-filled control is chosen by contrast, never assumed. */
+var bs=getComputedStyle(document.body),bc=bs.getPropertyValue('--brand').trim(),bm=/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bc);if(bm){var ch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},bl=0.2126*ch(bm[1])+0.7152*ch(bm[2])+0.0722*ch(bm[3]);document.body.style.setProperty('--pf-on-fg',bl>0.5?'var(--ink)':'var(--field)');}}catch(e){}})();</script>
+<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t" id="pg-title">My Portfolio</span><div class="s" id="pf-client">&nbsp;</div></div><div class="as-slot"><a class="pf-back" id="pf-back" href="/m/portfolio" style="display:none" aria-label="Back">‹</a> <button class="pf-fbtn" id="pf-filter" type="button" aria-label="Choose a portfolio"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg></button></div></div>
+<div class="pf-pg">
+<div class="pf-asof" id="pf-asof">Loading…</div>
+<div id="pf-body"><div class="pf-err">Loading…</div></div>
+</div>
+<nav class="bnav">
+  <a class="bn on" href="/m/home"><span class="i">◧</span>Home</a>
+  <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
+  <a class="bn" href="/m/aicio"><span class="i">⊙</span>AICIO</a>
+  <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
+  <a class="bn" href="/m/alerts"><span class="i">◬</span>Alerts</a>
+</nav>
+<script>
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]+' '+p[0].slice(2)):String(iso); }
+function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
+function cls(v){ return v==null?'':(Number(v)>0?'pf-pos':(Number(v)<0?'pf-neg':'')); }
+function f1(v){ return v==null||isNaN(Number(v))?'—':Number(v).toFixed(1); } function f2(v){ return v==null||isNaN(Number(v))?'—':Number(v).toFixed(2); }
+function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
+function inrL(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v), a=Math.abs(x); var t=a>=1e7?(a/1e7).toFixed(2)+' Cr':(a>=1e5?(a/1e5).toFixed(2)+' L':Math.round(a).toLocaleString('en-IN')); return (x<0?'−':(s&&x>0?'+':''))+'₹'+t; }
+function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+function vc(v){ return v==='Excellent'||v==='Good'?'pf-g':(v==='Weak'?'pf-s':''); }
+function shortName(n){ var s=String(n||''); var i=s.indexOf(' - '); return i>-1?s.slice(0,i):s; }
+var DEFAULT_PID=165, LS='scorr_pf_pid';
+var Q={}; try{ var u=new URLSearchParams(location.search); Q.pid=u.get('pid'); Q.view=u.get('view'); }catch(e){}
+var PID=Number(Q.pid)||0; if(!PID){ try{ PID=Number(localStorage.getItem(LS))||0; }catch(e){} } if(!PID) PID=DEFAULT_PID;
+var VIEW=Q.view||'snap', SNAP=null, REP=null, CLIENTS=null, NAME='';
+function setUrl(view){ var q='?pid='+PID+(view&&view!=='snap'?'&view='+view:''); try{ history.pushState({view:view},'',location.pathname+q); }catch(e){} }
+function hdr(view){
+  var back=document.getElementById('pf-back'), fb=document.getElementById('pf-filter'), t=document.getElementById('pg-title');
+  back.style.display=(view==='snap')?'none':''; back.setAttribute('href','/m/portfolio?pid='+PID);
+  fb.classList.toggle('pf-on', view==='pick');
+  t.textContent = view==='report'?'Health Report':(view==='pick'?'Choose portfolio':'My Portfolio');
+  document.getElementById('pf-client').textContent = view==='pick'?'tap a name':(NAME||('Portfolio #'+PID));
+}
+/* ═══ SNAPSHOT (three cards + the report button) ═══ */
+function cardValue(d){
+  var s=d.snapshot||{};
+  var h='<div class="pf-card" id="pf-c1"><div class="pf-eye">Value<span>'+(s.start_date?'since '+esc(dm(s.start_date)):'no start date')+'</span></div>'
+   +'<div class="pf-big"><div class="pf-r">'+inrL(s.total_portfolio)+'</div><div class="pf-n">'+(s.n_holdings||0)+' holdings'+(s.cash?' + cash':'')+'<br>'+(s.category?'<b>'+esc(s.category)+'</b>':'')+(s.active===false?' · inactive':'')+'</div></div>';
+  if(s.pnl_pct!=null) h+='<div class="pf-line">P&amp;L <b class="'+cls(s.pnl)+'">'+inrL(s.pnl,true)+'</b> · <b class="'+cls(s.pnl_pct)+'">'+pct(s.pnl_pct,2)+'</b> on '+inrL(s.invested)+' invested</div>';
+  else h+='<div class="pf-line pf-mu">'+esc(d.basis_note||'')+'</div>';
+  h+='<div class="pf-line">'+(s.alpha_pct!=null?'Alpha vs Nifty 50 <b class="'+cls(s.alpha_pct)+'">'+pct(s.alpha_pct,1)+'</b> <span class="pf-mu">· Nifty 50 '+pct(s.nifty_pct,1)+' over the same window</span>':'<span class="pf-mu">Alpha vs Nifty 50 — not measurable'+(s.start_date?'':' without a start date')+'</span>')+'</div>';
+  h+='<div class="pf-line">'+(s.xirr!=null?'XIRR <b class="'+cls(s.xirr)+'">'+pct(s.xirr,1)+'</b> <span class="pf-mu">· Nifty 50 XIRR '+pct(s.nifty_xirr,1)+(s.alpha_xirr!=null?' · alpha '+pct(s.alpha_xirr,1):'')+'</span>':'<span class="pf-mu">XIRR — '+esc(d.xirr_note||'not available')+'</span>')+'</div>';
+  h+='<div class="pf-cells"><div class="pf-cell"><div class="pf-k">Invested</div><div class="pf-v">'+(s.needs_invested_amount?'—':inrL(s.invested))+'</div></div><div class="pf-cell"><div class="pf-k">Holdings</div><div class="pf-v">'+inrL(s.current)+'</div></div><div class="pf-cell"><div class="pf-k">Cash</div><div class="pf-v">'+inrL(s.cash)+'</div></div></div></div>';
+  return h;
+}
+function cardHoldings(d){
+  var s=d.snapshot||{}; var h='<div class="pf-card" id="pf-c2"><div class="pf-eye">Holdings<span>'+(s.n_holdings||0)+' names · top 3 by weight</span></div>';
+  if(!REP){ h+='<div class="pf-skel" style="width:70%"></div><div class="pf-skel" style="width:55%"></div><div class="pf-skel" style="width:62%"></div><div class="pf-line pf-mu">Loading the holdings from the report…</div></div>'; return h; }
+  var hs=(REP.holdings||[]).slice().sort(function(a,b){ return (b.weight||0)-(a.weight||0); });
+  h+='<div class="pf-rows">'+hs.slice(0,3).map(function(x){ return '<a class="pf-row" href="/m/check?sym='+encodeURIComponent(x.symbol)+'"><div><div class="pf-nm">'+esc(x.symbol)+(x.verdict?'<span class="pf-tag '+vc(x.verdict)+'">'+esc(x.verdict)+'</span>':'')+'</div><div class="pf-sub">'+esc(x.company_name||x.segment||'')+'</div></div><div class="pf-rv"><div class="pf-n">'+f1(x.weight)+'%</div><div class="pf-c '+cls(x.pnl_pct)+'">'+pct(x.pnl_pct,1)+'</div></div></a>'; }).join('')+'</div>';
+  var strip=(REP.sector||{}).strip||[], cols=palette();
+  if(strip.length){ h+='<div class="pf-mix">'+strip.map(function(x,i){ return '<i style="width:'+x.weight+'%;background:'+cols[i%cols.length]+'"></i>'; }).join('')+'</div><div class="pf-mixl">'+strip.slice(0,4).map(function(x,i){ return '<span><i class="pf-dot" style="background:'+cols[i%cols.length]+'"></i><b>'+f1(x.weight)+'%</b> '+esc(x.segment)+'</span>'; }).join('')+(strip.length>4?'<span>+'+(strip.length-4)+' more sectors</span>':'')+'</div>'; }
+  h+='</div>'; return h;
+}
+function cardCash(d){
+  var c=d.cash_flows||{}; var h='<div class="pf-card" id="pf-c3"><div class="pf-eye">Cash flows<span>'+(c.has_ledger?esc(c.period||'')+(c.ledger_last_date?' · to '+esc(dm(c.ledger_last_date)):''):'no ledger on record')+'</span></div>';
+  h+='<div class="pf-cells"><div class="pf-cell"><div class="pf-k">Pay-in</div><div class="pf-v">'+inrL(c.payin_total)+'</div></div><div class="pf-cell"><div class="pf-k">Payout</div><div class="pf-v">'+inrL(c.payout_total)+'</div></div><div class="pf-cell"><div class="pf-k">Net pay-in</div><div class="pf-v">'+inrL(c.net_payin)+(c.invested_set_manually?'<small> *</small>':'')+'</div></div></div>';
+  h+= c.has_ledger ? '<div class="pf-line pf-mu">'+(c.ledger_rows||0)+' ledger rows · internal transfers are not counted'+(c.invested_set_manually?' · * Invested is set manually for this account':'')+'</div>'
+                   : '<div class="pf-line pf-mu">No ledger has been loaded for this portfolio, so pay-in and payout are not known — a dash, never a zero.</div>';
+  h+='</div>'; return h;
+}
+function cardAction(){
+  var rt=(REP||{}).ratings||{};
+  var h='<div class="pf-act" id="pf-act"><div class="pf-teaser">'+(REP?'<div class="pf-score">'+f1(rt.overall)+'<small> / 10</small></div><div class="pf-tx"><b>Portfolio health rating · '+esc(rt.verdict||'—')+'</b><br><span class="pf-mu">'+esc(rt.insight||'')+'</span></div>':'<div class="pf-tx"><b>Portfolio health report</b><br><span class="pf-mu">Building the report from live prices…</span></div>')+'</div>'
+   +'<a class="pf-btn'+(REP?'':' pf-wait')+'" id="pf-open" href="/m/portfolio?pid='+PID+'&view=report">View Portfolio Health Report ›</a>'
+   +'<a class="pf-btn2" id="pf-pdf" href="#"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>Download PDF</a><div class="pf-msg" id="pf-pdf-msg"></div></div>';
+  return h;
+}
+function renderSnap(){
+  hdr('snap');
+  if(!SNAP){ document.getElementById('pf-body').innerHTML='<div class="pf-err">Loading…</div>'; return; }
+  var s=SNAP.snapshot||{};
+  document.getElementById('pf-asof').innerHTML='<b>'+esc(shortName(SNAP.name))+'</b> · portfolio #'+SNAP.pid+' · '+(s.n_holdings||0)+' holdings · live prices';
+  document.getElementById('pf-body').innerHTML=cardValue(SNAP)+cardHoldings(SNAP)+cardCash(SNAP)+cardAction()
+   +'<div class="pf-note"><b>Same numbers as the web.</b> This card set is the Adaptive Dashboard row for this client, and the report is the web Portfolio Health report — one computation, two screens. '+esc(SNAP.basis_note||'')+'</div>';
+  document.getElementById('pf-open').addEventListener('click', function(e){ e.preventDefault(); if(!REP) return; VIEW='report'; setUrl('report'); renderReport(); window.scrollTo(0,0); });
+  document.getElementById('pf-pdf').addEventListener('click', function(e){ e.preventDefault(); downloadPdf(); });
+}
+/* PDF — the web SAVE PDF button's own path: mint a signed link, fetch it, save it; fall back to the print view. */
+function downloadPdf(){
+  var msg=document.getElementById('pf-pdf-msg'); msg.textContent='Preparing the PDF…';
+  fetch('/api/health/report_pdf_self/'+encodeURIComponent(PID),{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(!d||!d.url){ msg.textContent=(d&&d.error)||'Could not prepare the PDF.'; return; }
+    var fallback=function(){ if(d.html_url){ msg.textContent='PDF engine busy — opening the print view.'; location.href=d.html_url; } else { msg.textContent='Could not build the PDF.'; } };
+    fetch(d.url,{credentials:'same-origin'}).then(function(pr){ var ct=(pr.headers.get('content-type')||''); if(!pr.ok||ct.indexOf('application/pdf')<0){ fallback(); return; } return pr.blob().then(function(b){ var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=d.filename||'Portfolio_Health.pdf'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },4000); msg.textContent='Saved '+(d.filename||'the PDF')+'.'; }); }).catch(fallback);
+  }).catch(function(){ msg.textContent='Could not prepare the PDF.'; });
+}
+/* ═══ REPORT RAIL — one card per web /health section ═══ */
+function palette(){ return [tok('--brand'),tok('--wayfind')||tok('--win'),tok('--muted'),tok('--gold-lo')||tok('--brand'),tok('--label')||tok('--ink'),tok('--win'),tok('--loss'),tok('--accent')||tok('--brand'),tok('--gold-hi')||tok('--brand'),tok('--ink')]; }
+function cells(list){ return '<div class="pf-cells'+(list.length===2||list.length===4?' pf-two':'')+'">'+list.map(function(c){ return '<div class="pf-cell"><div class="pf-k">'+c[0]+'</div><div class="pf-v '+(c[2]||'')+'">'+c[1]+'</div></div>'; }).join('')+'</div>'; }
+function mixbar(weights,counts){ var cols=palette(); var ks=Object.keys(weights||{}).sort(function(a,b){ return (weights[b]||0)-(weights[a]||0); }); return '<div class="pf-mix">'+ks.map(function(k,i){ return '<i style="width:'+weights[k]+'%;background:'+cols[i%cols.length]+'"></i>'; }).join('')+'</div><div class="pf-mixl">'+ks.map(function(k,i){ return '<span><i class="pf-dot" style="background:'+cols[i%cols.length]+'"></i><b>'+f1(weights[k])+'%</b> '+esc(k)+(counts&&counts[k]!=null?' ('+counts[k]+')':'')+'</span>'; }).join('')+'</div>'; }
+function bar(l,v,c){ return '<div class="pf-br"><span class="pf-bl">'+l+'</span><div class="pf-tr"><i style="width:'+(v==null?0:Math.min(100,v*10))+'%;background:'+c+'"></i></div><span class="pf-bv">'+f1(v)+'</span></div>'; }
+function nameRows(list,valFn,subFn){ return '<div class="pf-rows">'+list.map(function(x){ var v=valFn(x); return '<a class="pf-row" href="/m/check?sym='+encodeURIComponent(x.symbol)+'"><div><div class="pf-nm">'+esc(x.symbol)+'</div><div class="pf-sub">'+esc(subFn?subFn(x):(x.company_name||''))+'</div></div><div class="pf-rv"><div class="pf-n '+(v[2]||'')+'">'+v[0]+'</div><div class="pf-c">'+(v[1]||'')+'</div></div></a>'; }).join('')+'</div>'; }
+function buildCards(d){
+  var p=d.portfolio||{}, s=d.snapshot||{}, rt=d.ratings||{}, bm=d.benchmark||{}, val=d.valuation||{}, yl=d.yield||{}, rm=d.risk_metrics, sec=d.sector||{}, wl=d.winners_losers||{}, cb=d.cap_bands||{}, qb=d.quality_bands||{};
+  var G=tok('--win'), T=tok('--wayfind')||tok('--brand'), B=tok('--brand'), P=tok('--accent')||tok('--brand'), cols=palette();
+  var C=[];
+  /* 1 Invested · Current Value · P&L */
+  C.push({web:'Invested · Current value · P&L', title:'Snapshot', head:(s.pnl_pct!=null?'<span class="'+cls(s.pnl_pct)+'">'+pct(s.pnl_pct,1)+'</span>':'—'), verdict:(s.pnl_abs!=null?'<b class="'+cls(s.pnl_abs)+'">'+inrL(s.pnl_abs,true)+'</b> on '+inrL(s.invested)+' invested · '+(s.holdings_count||0)+' holdings':esc('Invested amount not set — profit % cannot be stated honestly.')),
+    body:cells([['Invested',s.needs_invested_amount?'—':inrL(s.invested)],['Current'+(s.cash?' + cash':''),inrL(s.current_total!=null?s.current_total:s.current)],['Realised',inrL(s.realised_pnl,true),cls(s.realised_pnl)],['Unrealised',inrL(s.unrealised_pnl,true),cls(s.unrealised_pnl)]])+'<div class="pf-ins">Holdings cost '+inrL(s.holdings_cost)+(s.cash?' · cash '+inrL(s.cash):'')+' · basis: '+esc(s.basis||'')+'</div>'});
+  /* 2 Alpha */
+  C.push({web:'Alpha', title:'Alpha vs the index', head:(s.alpha_n50!=null?'<span class="'+cls(s.alpha_n50)+'">'+pct(s.alpha_n50,1)+'</span><small> vs Nifty 50</small>':'—'), verdict:(s.alpha_since?'Money return minus the index, both since <b>'+esc(s.alpha_label||dm(s.alpha_since))+'</b>.':'No start date — alpha cannot be measured.'),
+    body:cells([['vs Nifty 50',pct(s.alpha_n50,1),cls(s.alpha_n50)],['vs Nifty 500',pct(s.alpha_n500,1),cls(s.alpha_n500)]])+'<div class="pf-ins">Portfolio money return '+pct(s.pnl_pct,1)+' over the same window.</div>'});
+  /* 3 Scorr Parameters + overall rating */
+  C.push({web:'Scorr Parameters · rating', title:'Rating', head:f1(rt.overall)+'<small> / 10 · '+esc(rt.verdict||'—')+'</small>', verdict:esc(rt.insight||''),
+    body:'<div class="pf-bar">'+bar('G',rt.growth,G)+bar('V',rt.value,T)+bar('M',rt.momentum,B)+bar('Q',rt.quality,P)+'</div><div class="pf-ins">Growth · Value · Momentum · Quality, each out of 10, weighted by value.</div>'});
+  /* 4 1-yr Return vs Benchmarks */
+  C.push({web:'1-yr Return vs Benchmarks', title:'One-year return', head:(bm.portfolio_1y!=null?'<span class="'+cls(bm.portfolio_1y)+'">'+pct(bm.portfolio_1y,1)+'</span>':'—'), verdict:(bm.portfolio_1y!=null&&bm.nifty50_1y!=null?(bm.portfolio_1y>bm.nifty50_1y?'Ahead of':'Behind')+' the Nifty 50 over the last year.':'One-year return not available.'),
+    body:cells([['Portfolio',pct(bm.portfolio_1y,1),cls(bm.portfolio_1y)],['Nifty 50',pct(bm.nifty50_1y,1),cls(bm.nifty50_1y)],['Nifty 500',pct(bm.nifty500_1y,1),cls(bm.nifty500_1y)]])+'<div class="pf-ins">Price return of the holdings held today, value-weighted.</div>'});
+  /* 5 Valuation & Yield */
+  C.push({web:'Valuation & Yield', title:'Valuation & yield', head:f1(val.portfolio_pe)+'<small> portfolio P/E</small>', verdict:esc(val.insight||'Valuation figures as available.'),
+    body:cells([['Portfolio PE',f1(val.portfolio_pe)],['Sector PE',f1(val.sector_pe)],['Nifty PE',f1(val.nifty_pe)],['Div yield',f1(yl.portfolio_yield)+'%'],['Sector yield',f1(yl.sector_yield)+'%'],['Nifty yield',f1(yl.nifty_yield)+'%']])+'<div class="pf-ins">Nifty PE and yield: '+esc(val.nifty_pe_note||'')+'.</div>'});
+  /* 6 Portfolio Risk Metrics */
+  C.push({web:'Portfolio Risk Metrics', title:'Risk', head:(rm?f2(rm.beta)+'<small> beta</small>':'—'), verdict:(rm?'Trailing '+(rm.window_days||'')+' trading days against the Nifty 50.':'Risk metrics unavailable — not enough price history.'),
+    body:(rm?cells([['Beta',f2(rm.beta)],['Std dev',f1(rm.std_dev)],['Sharpe',f2(rm.sharpe)],['Sortino',f2(rm.sortino)],['Max drawdown',(rm.max_drawdown!=null?f1(rm.max_drawdown)+'%':'—'),'pf-neg'],['R-squared',f2(rm.r_squared)]])+'<div class="pf-ins">Risk-free rate '+f1(rm.risk_free_rate)+'%.'+((rm.excluded||[]).length?' Left out for short history: '+esc((rm.excluded||[]).join(', '))+'.':'')+'</div>':'')});
+  /* 7 Sector Split + Sector Ratings */
+  var strip=sec.strip||[];
+  C.push({web:'Sector Split · Sector Ratings', title:'Sectors', head:(strip[0]?f1(strip[0].weight)+'%<small> '+esc(strip[0].segment)+'</small>':'—'), verdict:esc(sec.insight||''),
+    body:'<div class="pf-mix">'+strip.map(function(x,i){ return '<i style="width:'+x.weight+'%;background:'+cols[i%cols.length]+'"></i>'; }).join('')+'</div><table class="pf-tb" style="margin-top:8px"><thead><tr><th>Sector</th><th>Weight</th><th>Call</th></tr></thead><tbody>'+(sec.table||[]).map(function(x){ return '<tr><td>'+esc(x.segment)+'</td><td>'+f1(x.weight)+'%</td><td class="'+(x.call==='Strong'?'pf-pos':(x.call==='Weak'?'pf-neg':''))+'">'+esc(x.call||'—')+(x.score!=null?' <small>'+f1(x.score)+'</small>':'')+'</td></tr>'; }).join('')+'</tbody></table>'});
+  /* 8 Winners vs Losers */
+  var wtot=(wl.winners||0)+(wl.losers||0);
+  C.push({web:'Winners vs Losers', title:'Winners vs losers', head:(wl.winners||0)+'<small> : </small>'+(wl.losers||0), verdict:esc(wl.insight||''),
+    body:'<div class="pf-mix"><i style="width:'+(wtot?(wl.winners||0)/wtot*100:0)+'%;background:'+G+'"></i><i style="width:'+(wtot?(wl.losers||0)/wtot*100:0)+'%;background:'+tok('--loss')+'"></i></div><div class="pf-mixl"><span><i class="pf-dot" style="background:'+G+'"></i><b>'+(wl.winners||0)+'</b> in profit</span><span><i class="pf-dot" style="background:'+tok('--loss')+'"></i><b>'+(wl.losers||0)+'</b> in loss</span><span>ratio <b>'+f2(wl.ratio)+'</b></span></div>'});
+  /* 9 Cap Diversification */
+  var capTop=Object.keys(cb.weights||{}).sort(function(a,b){ return (cb.weights[b]||0)-(cb.weights[a]||0); })[0];
+  C.push({web:'Cap Diversification', title:'Company size', head:(capTop?f1(cb.weights[capTop])+'%<small> '+esc(capTop)+'</small>':'—'), verdict:esc(cb.insight||''), body:mixbar(cb.weights,cb.counts)});
+  /* 10 Quality · GVM Bands */
+  var qTop=Object.keys(qb.weights||{}).sort(function(a,b){ return (qb.weights[b]||0)-(qb.weights[a]||0); })[0];
+  C.push({web:'Quality · GVM Bands', title:'Quality bands', head:(qTop?f1(qb.weights[qTop])+'%<small> '+esc(qTop)+'</small>':'—'), verdict:esc(qb.insight||''), body:mixbar(qb.weights,qb.counts)});
+  /* 11 Top Gainers */
+  var gn=d.gainers||[], ls=d.losers||[];
+  C.push({web:'Top Gainers', title:'Top gainers', head:(gn[0]?'<span class="pf-pos">'+pct(gn[0].pnl_pct,1)+'</span><small> '+esc(gn[0].symbol)+'</small>':'—'), verdict:(gn.length?gn.length+' best performers by P&amp;L on cost.':'No holding is in profit.'),
+    body:nameRows(gn,function(x){ return [pct(x.pnl_pct,1),inrL(x.pnl_abs,true)+' · '+f1(x.weight)+'% wt','pf-pos']; })});
+  /* 12 Top Losers */
+  C.push({web:'Top Losers', title:'Top losers', head:(ls[0]?'<span class="pf-neg">'+pct(ls[0].pnl_pct,1)+'</span><small> '+esc(ls[0].symbol)+'</small>':'—'), verdict:(ls.length?ls.length+' weakest by P&amp;L on cost.':'No holding is in loss.'),
+    body:nameRows(ls,function(x){ return [pct(x.pnl_pct,1),inrL(x.pnl_abs,true)+' · '+f1(x.weight)+'% wt','pf-neg']; })});
+  /* 13 Upcoming Results */
+  var up=d.upcoming||[];
+  C.push({web:'Upcoming Results', title:'Upcoming results', head:up.length+'<small> scheduled</small>', verdict:(up.length?'Next: <b>'+esc(up[0].symbol)+'</b> on '+esc(dm(up[0].date))+(up[0].days_to!=null?' ('+up[0].days_to+' days)':'')+'.':'No results scheduled for these holdings.'),
+    body:(up.length?nameRows(up,function(x){ return [esc(dm(x.date)),(x.days_to!=null?'in '+x.days_to+' days':''),'']; },function(x){ return x.event||'Results'; }):'')});
+  /* 14 Red Flags */
+  var rf=d.red_flags||[];
+  C.push({web:'Red Flags', title:'Red flags', head:rf.length+'<small> flag'+(rf.length===1?'':'s')+'</small>', verdict:(rf.length?'Pledge, FII selling and drawdown screens.':'Nothing on the pledge, FII and drawdown screens.'),
+    body:(rf.length?'<div class="pf-rows">'+rf.map(function(x){ return '<a class="pf-row" href="/m/check?sym='+encodeURIComponent(x.symbol)+'"><div><div class="pf-nm">'+esc(x.symbol)+'<span class="pf-tag pf-s">'+esc(x.flag)+'</span></div><div class="pf-sub">'+esc(x.detail||'')+'</div></div><div class="pf-rv"></div></a>'; }).join('')+'</div>':'')});
+  /* 15 Replacement Idea */
+  var rp=d.replacements||[];
+  C.push({web:'Replacement Idea', title:'Replacement ideas', head:rp.length+'<small> to review</small>', verdict:(rp.length?'Holdings rated Weak, with higher-rated peers in the same segment.':'No holding rates Weak — nothing to replace.'),
+    body:(rp.length?'<div class="pf-rows">'+rp.map(function(x){ return '<div class="pf-row"><div><div class="pf-nm">'+esc(x.holding)+'<span class="pf-tag pf-s">'+esc(x.action||'review')+'</span></div><div class="pf-sub">'+esc(x.segment||'')+' · peers: '+esc((x.peers||[]).map(function(pp){ return pp.symbol||pp; }).join(', '))+'</div></div><div class="pf-rv"></div></div>'; }).join('')+'</div>':'')+'<div class="pf-ins">'+esc(d.replacement_note||'')+'</div>'});
+  /* 16 Holdings — Full Detail */
+  var hs=(d.holdings||[]).slice().sort(function(a,b){ return (b.weight||0)-(a.weight||0); });
+  C.push({web:'Holdings — Full Detail', title:'Holdings', head:hs.length+'<small> names</small>', verdict:'Weight by market value · P&amp;L on cost · rating out of 10.',
+    body:'<div class="pf-scroll"><table class="pf-tb"><thead><tr><th>Stock</th><th>Wt</th><th>CMP</th><th>P&amp;L</th><th>Rating</th><th>Size</th></tr></thead><tbody>'+hs.map(function(x){ return '<tr><td><a href="/m/check?sym='+encodeURIComponent(x.symbol)+'">'+esc(x.symbol)+'<small>'+esc(x.segment||'')+'</small></a></td><td>'+f1(x.weight)+'%</td><td>'+f2(x.cmp)+'</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct,1)+'</td><td class="'+((x.gvm||0)>=7?'pf-gd':'')+'">'+f1(x.gvm)+(x.verdict?'<small>'+esc(x.verdict)+'</small>':'')+'</td><td>'+esc(x.cap||'—')+'</td></tr>'; }).join('')+'</tbody></table></div><div class="pf-foot">Tap a name for its check page.</div>'});
+  /* 17 Latest Result Analysis / Results this quarter */
+  var rq=d.results_this_quarter||[], ra=d.result_analysis||[];
+  C.push({web:'Latest Result Analysis', title:'Results this quarter', head:rq.filter(function(x){ return !x.pending; }).length+'<small> reported · '+(d.results_yet_to_report||0)+' yet to</small>', verdict:(rq.length?'Sales and profit growth for the holdings that announced this quarter.':'No holding has reported this quarter yet.'),
+    body:(rq.length?'<table class="pf-tb"><thead><tr><th>Name</th><th>Sales</th><th>Profit</th><th>FY27 est</th></tr></thead><tbody>'+rq.map(function(x){ return '<tr><td>'+esc(x.symbol)+(x.pending?'<small>numbers awaited</small>':'')+'</td><td class="'+cls(x.sales_growth)+'">'+pct(x.sales_growth,1)+'</td><td class="'+cls(x.profit_growth)+'">'+pct(x.profit_growth,1)+'</td><td>'+pct(x.fy27_est,1)+'</td></tr>'; }).join('')+'</tbody></table>':'')+(ra.length?'<div class="pf-rows">'+ra.map(function(x){ return '<div class="pf-row"><div><div class="pf-nm">'+esc(x.symbol)+(x.chip?'<span class="pf-tag '+(x.chip==='Strong'?'pf-g':(x.chip==='Weak'?'pf-s':''))+'">'+esc(x.chip)+'</span>':'')+'</div><div class="pf-sub" style="white-space:normal">'+esc(x.analysis||'')+'</div></div></div>'; }).join('')+'</div>':'')});
+  /* 18 Key Highlights */
+  C.push({web:'Key Highlights', title:'What stands out', head:(d.highlights||[]).length+'<small> points</small>', verdict:'The section insights, in one place.', body:'<ul class="pf-ul">'+(d.highlights||[]).map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('')+'</ul>'});
+  /* 19 Expert take */
+  C.push({web:'Expert take', title:'Expert take', head:'<small>Rule-generated · research, not advice</small>', verdict:'', body:'<div class="pf-take">'+esc(d.expert_take||'')+'</div>'});
+  /* 20 Breakup tab — rating breakup */
+  var rb=d.rating_breakup||[]; var params=[]; rb.forEach(function(r){ if(!params.length&&r.rated&&r.params) params=Object.keys(r.params); });
+  var restN=Math.max(0,(d.holdings||[]).length-rb.length), restW=restN?(d.holdings||[]).slice().sort(function(a,b){ return (b.weight||0)-(a.weight||0); }).slice(rb.length).reduce(function(t,x){ return t+(x.weight||0); },0):0;
+  C.push({web:'Breakup tab (rating breakup)', title:'Rating breakup', head:params.length+'<small> parameters × '+rb.length+' holdings</small>', verdict:'Each rating parameter per holding, out of 10. Scroll sideways.'+(restN?' +'+restN+' more holdings ('+f1(restW)+'% weight) not shown, as on the web.':''),
+    body:(rb.length&&params.length?'<div class="pf-scroll"><table class="pf-tb"><thead><tr><th>Stock</th>'+params.map(function(k){ return '<th>'+esc(k)+'</th>'; }).join('')+'</tr></thead><tbody>'+rb.map(function(r){ return '<tr><td>'+esc(r.symbol)+'<small>'+f1(r.weight)+'% wt'+(r.rated?'':' · not rated')+'</small></td>'+params.map(function(k){ var v=r.rated?(r.params||{})[k]:null; return '<td>'+(v==null?'—':f1(v))+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div>':'<div class="pf-emp">No rating breakup rows.</div>')});
+  return C;
+}
+var RAILN=0, RAILI=0;
+function renderReport(){
+  hdr('report');
+  if(!REP){ document.getElementById('pf-body').innerHTML='<div class="pf-err">Building the report from live prices…</div>'; return; }
+  var C=buildCards(REP), p=REP.portfolio||{}; RAILN=C.length; RAILI=0;
+  document.getElementById('pf-asof').innerHTML='<b>'+esc(shortName(p.name||NAME))+'</b> · '+C.length+' sections · swipe sideways, or tap a section';
+  var h='<div class="pf-rhead"><span class="pf-rcount" id="pf-rcount">1 / '+C.length+'</span><div class="pf-idx" id="pf-idx">'+C.map(function(c,i){ return '<span class="pf-ic'+(i===0?' pf-on':'')+'" data-i="'+i+'">'+esc(c.title)+'</span>'; }).join('')+'</div></div>';
+  h+='<div class="pf-dots" id="pf-dots">'+C.map(function(c,i){ return '<i'+(i===0?' class="pf-on"':'')+'></i>'; }).join('')+'</div>';
+  h+='<div class="pf-rail" id="pf-rail">'+C.map(function(c,i){ return '<div class="pf-rc" data-i="'+i+'"><div class="pf-eye">'+(i+1)+' of '+C.length+'<span>web: '+esc(c.web)+'</span></div><div class="pf-ct">'+esc(c.title)+'</div><div class="pf-hd">'+c.head+'</div>'+(c.verdict?'<div class="pf-vd">'+c.verdict+'</div>':'')+'<div class="pf-bd">'+c.body+'</div></div>'; }).join('')+'</div>';
+  h+='<div class="pf-hint">Every card is a section of the web Portfolio Health report. Research, not advice.</div>';
+  h+='<div class="pf-act" style="margin-top:14px"><a class="pf-btn2" id="pf-pdf" href="#"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>Download PDF</a><div class="pf-msg" id="pf-pdf-msg"></div></div>';
+  document.getElementById('pf-body').innerHTML=h;
+  var rail=document.getElementById('pf-rail'), idx=document.getElementById('pf-idx'), dots=document.getElementById('pf-dots');
+  function step(){ var c=rail.querySelector('.pf-rc'); return c?c.getBoundingClientRect().width+12:1; }
+  function setIdx(i){ if(i===RAILI) return; RAILI=i; document.getElementById('pf-rcount').textContent=(i+1)+' / '+RAILN; var ics=idx.querySelectorAll('.pf-ic'), ds=dots.querySelectorAll('i'); for(var k=0;k<ics.length;k++){ ics[k].classList.toggle('pf-on',k===i); ds[k].classList.toggle('pf-on',k===i); } var on=ics[i]; if(on&&on.scrollIntoView) on.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'}); }
+  var tick=false; rail.addEventListener('scroll', function(){ if(tick) return; tick=true; requestAnimationFrame(function(){ tick=false; setIdx(Math.max(0,Math.min(RAILN-1,Math.round(rail.scrollLeft/step())))); }); });
+  idx.addEventListener('click', function(e){ var t=e.target.closest('.pf-ic'); if(!t) return; var i=Number(t.getAttribute('data-i')); rail.scrollTo({left:i*step(),behavior:'smooth'}); setIdx(i); });
+  document.getElementById('pf-pdf').addEventListener('click', function(e){ e.preventDefault(); downloadPdf(); });
+  window.pfGo=function(i){ rail.scrollTo({left:i*step()}); setIdx(i); };
+}
+/* ═══ CLIENT PICKER (founder 15:15: filter icon -> full page, search on top, every name below) ═══ */
+function renderPick(){
+  hdr('pick');
+  document.getElementById('pf-asof').innerHTML=(CLIENTS?'<b>'+CLIENTS.length+'</b> saved portfolios · tap one to switch':'Loading the list…');
+  var h='<div class="pf-search"><input id="pf-q" type="search" placeholder="Search by name" autocomplete="off" aria-label="Search portfolios"></div><div class="pf-list" id="pf-list"></div>';
+  document.getElementById('pf-body').innerHTML=h;
+  var q=document.getElementById('pf-q'); q.addEventListener('input', drawPick); drawPick(); try{ q.focus(); }catch(e){}
+}
+function drawPick(){
+  var q=(document.getElementById('pf-q').value||'').trim().toLowerCase(), list=document.getElementById('pf-list');
+  if(!CLIENTS){ list.innerHTML='<div class="pf-emp" style="padding:12px">Loading…</div>'; return; }
+  var rows=CLIENTS.filter(function(c){ return !q||String(c.name||'').toLowerCase().indexOf(q)>-1; });
+  list.innerHTML= rows.length ? rows.map(function(c){ return '<a class="pf-cl" href="/m/portfolio?pid='+c.id+'" data-id="'+c.id+'"><div><div class="pf-nm">'+esc(c.name)+'</div><div class="pf-sub">portfolio #'+c.id+(c.id===DEFAULT_PID?' · reference':'')+'</div></div>'+(c.id===PID?'<span class="pf-tick" aria-label="selected">✓</span>':'<span class="pf-mu">›</span>')+'</a>'; }).join('') : '<div class="pf-emp" style="padding:12px">No name matches “'+esc(q)+'”.</div>';
+  list.onclick=function(e){ var a=e.target.closest('.pf-cl'); if(!a) return; try{ localStorage.setItem(LS, a.getAttribute('data-id')); }catch(x){} };
+}
+function loadClients(){ if(CLIENTS) return Promise.resolve(CLIENTS); return fetch('/api/mobile/portfolio/clients',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){ CLIENTS=d.rows||[]; return CLIENTS; }); }
+/* ═══ BOOT ═══ */
+document.getElementById('pf-filter').addEventListener('click', function(){ if(VIEW==='pick'){ VIEW='snap'; setUrl('snap'); renderSnap(); return; } VIEW='pick'; setUrl('pick'); renderPick(); loadClients().then(function(){ if(VIEW==='pick') renderPick(); }).catch(function(){ document.getElementById('pf-asof').textContent='Could not load the portfolio list.'; }); });
+document.getElementById('pf-back').addEventListener('click', function(e){ e.preventDefault(); VIEW='snap'; setUrl('snap'); renderSnap(); window.scrollTo(0,0); });
+window.addEventListener('popstate', function(){ var v='snap'; try{ v=new URLSearchParams(location.search).get('view')||'snap'; }catch(e){} VIEW=v; route(); });
+function route(){ if(VIEW==='pick'){ renderPick(); loadClients().then(function(){ if(VIEW==='pick') renderPick(); }); } else if(VIEW==='report'){ renderReport(); } else { renderSnap(); } }
+function fail(m){ document.getElementById('pf-asof').textContent=''; document.getElementById('pf-body').innerHTML='<div class="pf-err">'+esc(m)+'<br><a class="pf-gd" href="/m/portfolio?pid='+DEFAULT_PID+'">Open the reference portfolio</a></div>'; }
+try{ if(Q.pid) localStorage.setItem(LS, String(PID)); }catch(e){}
+route();
+fetch('/api/mobile/portfolio?pid='+PID,{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+  if(!d||d.error){ fail('Could not load portfolio #'+PID+(d&&d.error?': '+d.error:'.')); return; }
+  SNAP=d; NAME=shortName(d.name); if(VIEW==='snap') renderSnap(); else hdr(VIEW);
+}).catch(function(){ fail('Could not load the portfolio.'); });
+fetch('/api/mobile/health_app/report?pid='+PID,{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+  if(!d||d.error){ if(VIEW==='report') fail('Could not build the report'+(d&&d.error?': '+d.error:'.')); return; }
+  REP=d; if(!NAME&&d.portfolio) NAME=shortName(d.portfolio.name);
+  if(VIEW==='report') renderReport(); else if(VIEW==='snap'&&SNAP) renderSnap();
+}).catch(function(){ if(VIEW==='report') fail('Could not build the report.'); });
+</script>
+</body></html>
