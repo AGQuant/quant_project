@@ -1,12 +1,12 @@
 # cc#2167 — /m/results: "no write-up" on every mover and "Nothing written yet" under 774 analyses
 
-Founder screenshot 17-Sep-2026 11:41 IST. Fixed 17-Sep-2026, 13:40–13:52 IST.
+Founder screenshot 17-Sep-2026 11:41 IST. Fixed 17-Sep-2026, landed on main 13:20 IST (times corrected to the git commit clock).
 
 ## The bug, in one line
 
 `results_app_mobile.py` looked up `result_analysis_v2` with the season's **display** label `Q1 FY27` (from `result_corner._fq_label`, with a space) while the table stores `Q1FY27` (no space), so `_written_set()` came back empty (every company row `written: false`) and `result_analysis_v2_list(quarter='Q1 FY27')` returned nothing.
 
-Proved on production rows (13:44 IST):
+Proved on production rows (≈13:17 IST):
 
 | Lookup | Rows |
 |---|---|

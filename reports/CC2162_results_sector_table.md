@@ -1,6 +1,6 @@
 # cc#2162 — Results app PUSH 2/5: sector table with Top / Under toggle, size chips, five rows, View more sheet
 
-Sprint RESULTS_APP_V3. Built 17-Sep-2026, 14:18–14:40 IST.
+Sprint RESULTS_APP_V3. Built 17-Sep-2026, landed on main 13:35 IST (times corrected to the git commit clock).
 
 ## What shipped
 
@@ -21,7 +21,7 @@ Sprint RESULTS_APP_V3. Built 17-Sep-2026, 14:18–14:40 IST.
 
 ## Counts (spec verify item 1)
 
-Production replicate of the payload's sector rows (same method as `result_corner_v2()`: same-quarter reporters, detailed + CSV-basic, per-segment medians, `n_used` = profit readings; average market cap over the sector's full universe membership, `COALESCE(screener_raw.market_cap, gvm_scores.market_cap)`), 17-Sep 14:20 IST:
+Production replicate of the payload's sector rows (same method as `result_corner_v2()`: same-quarter reporters, detailed + CSV-basic, per-segment medians, `n_used` = profit readings; average market cap over the sector's full universe membership, `COALESCE(screener_raw.market_cap, gvm_scores.market_cap)`), 17-Sep ≈13:31 IST:
 
 | Eligible (3+ profit readings) | Large (≥ 20,000 Cr avg) | Mid (≥ 5,000) | Small | unsized |
 |---|---|---|---|---|

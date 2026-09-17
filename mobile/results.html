@@ -2,12 +2,14 @@
 <!-- ══ mobile/results.html — Results app section. Fable single-mode build 10-Sep-2026 (founder: read the web
      APIs, build intuitively). Supersedes the cc#1901 build and the older calendar-first page. ONE page, three views:
        /m/results                → THE SEASON: who has filed, PAT growing/flat/declining bar, medians, biggest movers,
-                                   sector ladder, written-up analyses, next 10 days
+                                   sector table, written-up analyses, next 10 days
        /m/results?view=companies → every reporter this season, sortable
        /m/results?sym=<symbol>   → one company's numbers + the written analysis
      cc#2161 (17-Sep): hero = two tappable median cells + Leading sectors strip. cc#2162: 'Sectors this season' (Top / Under toggle,
-     size chips with counts, five rows, View more sheet, ?perf=&size= URL state) replaces the Sector by sector ladder. cc#2163: every
-     sector row opens the same sheet with that sector's companies table (/companies?segment=, sideways scroll, sortable).
+     size chips with counts, five rows, View more sheet, ?perf=&size= URL state) replaces the old sector ladder. cc#2163: every
+     sector row opens the same sheet with that sector's companies table (/companies?segment=, sideways scroll, sortable). cc#2164:
+     ?view=companies&segment= is honoured (title = the sector, Clear filter), movers show Read > only when written, section order =
+     hero -> Sectors this season -> Biggest profit jumps -> Biggest profit falls -> Written up -> Next 10 days -> note.
      Data: /api/mobile/results_app/season · /companies · /analysis?symbol= (results_app_mobile.py V2), which read
      the web Result Corner's own result_corner_v2 and the Results page's own analysis feed. Contract tokens only. -->
 <html lang="en">
@@ -23,6 +25,7 @@
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <style>
+body{margin:0;min-height:100vh;min-height:100dvh;background:var(--field)}   /* cc#2164: a short view (companies for one segment) must not show the html fallback colour beneath it (cc#2155 pattern) */
 .rs{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
 .rs-asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}
 .rs-asof b{color:var(--ink);font-weight:600}
@@ -37,7 +40,7 @@
 .hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
 .split{margin-top:var(--space-12);height:10px;border-radius:var(--radius-5);overflow:hidden;display:flex;background:var(--hi)}.split i{display:block;height:10px}
 .legend{display:flex;justify-content:space-between;margin-top:var(--space-7);font-size:var(--type-105);color:var(--muted)}.legend b{color:var(--ink);font-weight:800}
-.kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}   /* cc#2161: two cells, each a button */
+.medians{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}   /* cc#2161: two cells, each a button (cc#2164: renamed from the old three-cell grid class) */
 .cell{display:block;width:100%;min-height:44px;text-align:left;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10);font-family:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .cell[aria-pressed="true"]{border-color:var(--brand);background:color-mix(in srgb, var(--brand) 14%, var(--panel))}
 .cell-k{display:block;font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell-v{display:block;font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}   /* prefixed: mobile_app.css restyles bare .k/.v (cc#2155) */
@@ -126,6 +129,7 @@ td a{color:inherit;text-decoration:none}tr:last-child td{border-bottom:none}.gd{
 .note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
 .err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
 .back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800}
+.clr{color:var(--brand);font-weight:800;text-decoration:none}   /* cc#2164: the Clear filter link on a segment-filtered companies view */
 </style>
 </head>
 <body data-theme="goldnight">
@@ -158,7 +162,7 @@ function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim
 function mover(c,dn){
   return '<a class="mc '+(dn?'dn':'')+'" href="/m/results?sym='+encodeURIComponent(c.symbol)+'"><div class="s">'+esc(c.symbol)+'</div><div class="seg">'+esc(c.segment||'')+(c.tier?' · '+c.tier.toLowerCase():'')+'</div>'
     +'<div class="p '+cls(c.pat_yoy)+'">'+pct(c.pat_yoy)+'</div><div class="pl">profit vs last year · sales '+pct(c.sales_yoy)+'</div>'
-    +'<div class="g"><span>GVM <b>'+f2(c.gvm)+'</b></span>'+(c.written?'<span class="rd">Read ›</span>':'<span>no write-up</span>')+'</div></a>';
+    +'<div class="g"><span>GVM <b>'+f2(c.gvm)+'</b></span>'+(c.written?'<span class="rd">Read ›</span>':'')+'</div></a>';   // cc#2164: an unwritten name shows nothing here, only a written one gets the Read link
 }
 function renderSeason(d){
   var s=d.summary||{}, q=(d.season||{}).quarter||'—';
@@ -167,14 +171,14 @@ function renderSeason(d){
   var h='<div class="hero"><div class="eye">Result season · '+esc(q)+'</div><div class="big"><div class="r">'+(s.reported||0)+'</div><div class="n">of <b>'+(s.total||0)+'</b> companies have filed<br>'+(s.beats_sector!=null?'<b>'+s.beats_sector+'</b> beat their sector median':'')+'</div></div>'
     +'<div class="split"><i style="width:'+((s.growing||0)/tot*100)+'%;background:'+tok('--win')+'"></i><i style="width:'+((s.flat||0)/tot*100)+'%;background:'+tok('--muted')+'"></i><i style="width:'+((s.declining||0)/tot*100)+'%;background:'+tok('--loss')+'"></i></div>'
     +'<div class="legend"><span><b class="pos">'+(s.growing||0)+'</b> profit up</span><span><b>'+(s.flat||0)+'</b> flat</span><span><b class="neg">'+(s.declining||0)+'</b> profit down</span></div>'
-    +'<div class="kg"><button type="button" class="cell" id="kc-sales" data-m="sales" aria-pressed="true"><span class="cell-k">Median sales YoY</span><span class="cell-v '+cls(s.median_sales_yoy)+'">'+pct(s.median_sales_yoy)+'</span></button><button type="button" class="cell" id="kc-pat" data-m="pat" aria-pressed="false"><span class="cell-k">Median profit YoY</span><span class="cell-v '+cls(s.median_pat_yoy)+'">'+pct(s.median_pat_yoy)+'</span></button></div>'   // cc#2161: two cells, tap one for its leading sectors
+    +'<div class="medians"><button type="button" class="cell" id="kc-sales" data-m="sales" aria-pressed="true"><span class="cell-k">Median sales YoY</span><span class="cell-v '+cls(s.median_sales_yoy)+'">'+pct(s.median_sales_yoy)+'</span></button><button type="button" class="cell" id="kc-pat" data-m="pat" aria-pressed="false"><span class="cell-k">Median profit YoY</span><span class="cell-v '+cls(s.median_pat_yoy)+'">'+pct(s.median_pat_yoy)+'</span></button></div>'   // cc#2161: two cells, tap one for its leading sectors
     +'<div class="kfoot">'+kfoot(s)+'</div><div class="lead" id="lead" hidden></div></div>';
+  h+='<div class="sec"><h2>Sectors this season</h2><span class="hint">five per view</span></div><div class="st-basis">ranked by median profit growth vs last year · sectors with 3+ filings</div><div id="st"></div>';   // cc#2162; cc#2164: sits right under the hero
   var mv=d.movers||{};
   h+='<div class="sec"><h2>Biggest profit jumps</h2><span class="hint">vs last year · swipe →</span></div>';
   h+= (mv.up||[]).length ? '<div class="rl">'+mv.up.map(function(c){return mover(c,false);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing yet</b>No filing this season shows profit growth on record.</div></div>';
   h+='<div class="sec"><h2>Biggest profit falls</h2><span class="hint">vs last year · swipe →</span></div>';
   h+= (mv.down||[]).length ? '<div class="rl">'+mv.down.map(function(c){return mover(c,true);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing yet</b>No filing this season shows a profit fall on record.</div></div>';
-  h+='<div class="sec"><h2>Sectors this season</h2><span class="hint">five per view</span></div><div class="st-basis">ranked by median profit growth vs last year · sectors with 3+ filings</div><div id="st"></div>';   // cc#2162
   var w=d.written||{}, wr=w.rows||[];
   h+='<div class="sec"><h2>Written up</h2><span class="hint">'+(w.total||0)+' analyses · last '+esc(dm(w.last))+'</span></div>';
   h+= wr.length ? '<div class="wl">'+wr.slice(0,8).map(function(r){ return '<a class="wr" href="/m/results?sym='+encodeURIComponent(r.symbol)+'"><div class="t"><span class="s">'+esc(r.symbol)+'</span><span class="d">'+esc(dm(r.result_date||r.polished_at))+'</span></div><div class="co">'+esc(r.company||'')+'</div><div class="tz">'+esc(r.teaser||'')+'</div></a>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing written yet</b>No result analysis on record for this quarter.</div></div>';
@@ -312,10 +316,11 @@ function tbl(){
   document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='symbol'); } tbl(); });
 }
 function renderCompanies(d){
-  document.getElementById('pg-title').textContent='All filings'; document.getElementById('back').style.display='';
-  document.getElementById('asof').innerHTML='Season <b>'+esc(d.quarter||'—')+'</b> · '+d.count+' companies';
+  var seg=(Q.segment||d.segment||'');   // cc#2164: a segment filter, from the URL (the fetch already asked for it)
+  ROWS=(d.rows||[]).filter(function(r){ return !seg || (r.segment||'')===seg; });
+  document.getElementById('pg-title').textContent=seg||'All filings'; document.getElementById('back').style.display='';
+  document.getElementById('asof').innerHTML= seg ? ('<b>'+ROWS.length+'</b> compan'+(ROWS.length===1?'y':'ies')+' · '+esc(seg)+' · <a class="clr" href="/m/results?view=companies">Clear filter</a>') : ('Season <b>'+esc(d.quarter||'—')+'</b> · '+d.count+' companies');
   document.getElementById('body').innerHTML='<div class="wrap" id="tb"></div>';
-  ROWS=d.rows||[];
   var pc=function(v){return '<span class="'+cls(v)+'">'+pct(v)+'</span>';};
   COLS=[['symbol','Name',function(v,r){return '<a href="/m/results?sym='+encodeURIComponent(v)+'">'+esc(v)+(r.written?' <span class="gd">•</span>':'')+'<small>'+esc(r.segment||'')+'</small></a>';}],['pat_yoy','Profit YoY',pc],['sales_yoy','Sales YoY',pc],['pat_qoq','Profit QoQ',pc],['gvm','GVM',f2],['pe','P/E',f1],['reported','Filed',function(v){return esc(dm(v));}]];
   tbl();
@@ -335,8 +340,8 @@ function renderAnalysis(d){
   } else h+='<div class="card"><div class="emp"><b>No write-up for this one</b>'+(n.symbol?'The numbers above are from the filing. Nothing has been written about it yet.':'This symbol has not filed this season, or is outside the tracked universe.')+'</div></div>';
   document.getElementById('body').innerHTML=h;
 }
-var Q={}; try{ var u=new URLSearchParams(location.search); Q.sym=u.get('sym'); Q.view=u.get('view'); }catch(e){}
-var url = Q.sym ? '/api/mobile/results_app/analysis?symbol='+encodeURIComponent(Q.sym) : (Q.view==='companies' ? '/api/mobile/results_app/companies' : '/api/mobile/results_app/season');
+var Q={}; try{ var u=new URLSearchParams(location.search); Q.sym=u.get('sym'); Q.view=u.get('view'); Q.segment=(u.get('segment')||'').trim(); }catch(e){}   // cc#2164: ?segment= narrows the companies view
+var url = Q.sym ? '/api/mobile/results_app/analysis?symbol='+encodeURIComponent(Q.sym) : (Q.view==='companies' ? '/api/mobile/results_app/companies'+(Q.segment?'?segment='+encodeURIComponent(Q.segment):'') : '/api/mobile/results_app/season');
 fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
   if(d.error){ document.getElementById('body').innerHTML='<div class="err">Could not load: '+esc(d.error)+'</div>'; return; }
   Q.sym ? renderAnalysis(d) : (Q.view==='companies' ? renderCompanies(d) : renderSeason(d));

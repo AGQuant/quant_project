@@ -1,6 +1,6 @@
 # cc#2161 — Results app PUSH 1/5: season hero to two cells, tap a median to see its five leading sectors
 
-Sprint RESULTS_APP_V3 (Fable-owned; founder handover 17-Sep-2026 11:37 IST). Built 17-Sep-2026, 13:58–14:12 IST. Page only: `mobile/results.html`. No backend change (`result_corner.py`, `results_app_mobile.py` untouched).
+Sprint RESULTS_APP_V3 (Fable-owned; founder handover 17-Sep-2026 11:37 IST). Built 17-Sep-2026, landed on main 13:27 IST (times corrected to the git commit clock). Page only: `mobile/results.html`. No backend change (`result_corner.py`, `results_app_mobile.py` untouched).
 
 ## What changed in the hero
 

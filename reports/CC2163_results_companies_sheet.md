@@ -1,6 +1,6 @@
 # cc#2163 — Results app PUSH 3/5: tap a sector to open its companies table (QoQ, YoY, GVM) in a scrollable sheet
 
-Sprint RESULTS_APP_V3. Built 17-Sep-2026, 14:48–15:05 IST.
+Sprint RESULTS_APP_V3. Built 17-Sep-2026, landed on main 13:42 IST (times corrected to the git commit clock).
 
 ## What shipped
 
@@ -20,7 +20,7 @@ Sprint RESULTS_APP_V3. Built 17-Sep-2026, 14:48–15:05 IST.
 
 ## Harness (Playwright, real Chromium, `scratchpad/cc2163_test.py`) — ALL PASS at 375×812, goldnight + aquawhite
 
-Fixture: the 87 sector rows from cc#2162 plus the company rows for two segments replicated on production at 14:48 IST with `result_corner_v2()`'s method (detailed rows from `fundamentals_history` with QoQ against the previous quarter and YoY against four quarters back; CSV-basic rows from `screener_raw` with no profit YoY): Shipping & Maritime (6 filed of 7: KMEW +472.7%, GESHIP +159.7%, SCI +74.9%, SHREEJISPG +18.9%, then JITFINFRA and SEAMECLTD as CSV-basic) and Retail - Mid (25 filed, 5 detailed + 20 basic, EMIL +450.0% first). The Shipping medians the sheet header shows (+117.3% / +40.6%) are the medians of exactly these rows.
+Fixture: the 87 sector rows from cc#2162 plus the company rows for two segments replicated on production at ≈13:38 IST with `result_corner_v2()`'s method (detailed rows from `fundamentals_history` with QoQ against the previous quarter and YoY against four quarters back; CSV-basic rows from `screener_raw` with no profit YoY): Shipping & Maritime (6 filed of 7: KMEW +472.7%, GESHIP +159.7%, SCI +74.9%, SHREEJISPG +18.9%, then JITFINFRA and SEAMECLTD as CSV-basic) and Retail - Mid (25 filed, 5 detailed + 20 basic, EMIL +450.0% first). The Shipping medians the sheet header shows (+117.3% / +40.6%) are the medians of exactly these rows.
 
 1. Tap Shipping & Maritime in the hero strip → the sheet asks `/companies?segment=Shipping & Maritime`; header "Shipping & Maritime / 6 filed of 7 · median profit +117.3% · sales +40.6%" (= the tapped sector row); six rows in Profit YoY order with the two basic rows last, dashes in Profit YoY and muted dots; GESHIP 8.19 Excellent in brand colour; six headers with Profit YoY marked; footer line + "All filings, sortable ›" to the segment; KMEW links to `/m/results?sym=KMEW`; table scrolls sideways, sheet / body / page do not; body locked.
 2. Tap the Sales YoY header → KMEW, GESHIP, SEAMECLTD, SCI, SHREEJISPG, JITFINFRA (desc); tap again → ascending.
