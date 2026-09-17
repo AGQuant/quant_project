@@ -189,6 +189,7 @@ function renderSnap(){
 function downloadPdf(){
   var msg=document.getElementById('pf-pdf-msg'); msg.textContent='Preparing the PDF…';
   fetch('/api/health/report_pdf_self/'+encodeURIComponent(PID),{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+    if(unauth(d)) return;
     if(!d||!d.url){ msg.textContent=(d&&d.error)||'Could not prepare the PDF.'; return; }
     var fallback=function(){ if(d.html_url){ msg.textContent='PDF engine busy — opening the print view.'; location.href=d.html_url; } else { msg.textContent='Could not build the PDF.'; } };
     fetch(d.url,{credentials:'same-origin'}).then(function(pr){ var ct=(pr.headers.get('content-type')||''); if(!pr.ok||ct.indexOf('application/pdf')<0){ fallback(); return; } return pr.blob().then(function(b){ var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=d.filename||'Portfolio_Health.pdf'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },4000); msg.textContent='Saved '+(d.filename||'the PDF')+'.'; }); }).catch(fallback);
@@ -309,7 +310,12 @@ function drawPick(){
   list.innerHTML= rows.length ? rows.map(function(c){ return '<a class="pf-cl" href="/m/portfolio?pid='+c.id+'" data-id="'+c.id+'"><div><div class="pf-nm">'+esc(c.name)+'</div><div class="pf-sub">portfolio #'+c.id+(c.id===DEFAULT_PID?' · reference':'')+'</div></div>'+(c.id===PID?'<span class="pf-tick" aria-label="selected">✓</span>':'<span class="pf-mu">›</span>')+'</a>'; }).join('') : '<div class="pf-emp" style="padding:12px">No name matches “'+esc(q)+'”.</div>';
   list.onclick=function(e){ var a=e.target.closest('.pf-cl'); if(!a) return; try{ localStorage.setItem(LS, a.getAttribute('data-id')); }catch(x){} };
 }
-function loadClients(){ if(CLIENTS) return Promise.resolve(CLIENTS); return fetch('/api/mobile/portfolio/clients',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){ CLIENTS=d.rows||[]; return CLIENTS; }); }
+/* cc#2208: the XHR endpoints answer a logged-out browser with 401 {error:'unauthorized', login_url:'/login'} (mobile_endpoints._guard).
+   That is a session state, not a data error -- go to the login page instead of printing it. Plain /login: the app's login flow lands
+   every page on /m/home afterwards (login.html's hidden next=/m/home; login_get reads no ?next=), so no return-to param is invented here. */
+var GOING=false;
+function unauth(d){ if(d&&(d.error==='unauthorized'||d.login_url)){ if(!GOING){ GOING=true; var u=(typeof d.login_url==='string'&&d.login_url.charAt(0)==='/')?d.login_url:'/login'; location.replace(u); } return true; } return false; }
+function loadClients(){ if(CLIENTS) return Promise.resolve(CLIENTS); return fetch('/api/mobile/portfolio/clients',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){ if(unauth(d)) return []; CLIENTS=d.rows||[]; return CLIENTS; }); }
 /* ═══ BOOT ═══ */
 document.getElementById('pf-filter').addEventListener('click', function(){ if(VIEW==='pick'){ VIEW='snap'; setUrl('snap'); renderSnap(); return; } VIEW='pick'; setUrl('pick'); renderPick(); loadClients().then(function(){ if(VIEW==='pick') renderPick(); }).catch(function(){ document.getElementById('pf-asof').textContent='Could not load the portfolio list.'; }); });
 document.getElementById('pf-back').addEventListener('click', function(e){ e.preventDefault(); VIEW='snap'; setUrl('snap'); renderSnap(); window.scrollTo(0,0); });
@@ -319,10 +325,12 @@ function fail(m){ document.getElementById('pf-asof').textContent=''; document.ge
 try{ if(Q.pid) localStorage.setItem(LS, String(PID)); }catch(e){}
 route();
 fetch('/api/mobile/portfolio?pid='+PID,{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+  if(unauth(d)) return;
   if(!d||d.error){ fail('Could not load portfolio #'+PID+(d&&d.error?': '+d.error:'.')); return; }
   SNAP=d; NAME=shortName(d.name); if(VIEW==='snap') renderSnap(); else hdr(VIEW);
 }).catch(function(){ fail('Could not load the portfolio.'); });
 fetch('/api/mobile/health_app/report?pid='+PID,{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
+  if(unauth(d)) return;
   if(!d||d.error){ if(VIEW==='report') fail('Could not build the report'+(d&&d.error?': '+d.error:'.')); return; }
   REP=d; if(!NAME&&d.portfolio) NAME=shortName(d.portfolio.name);
   if(VIEW==='report') renderReport(); else if(VIEW==='snap'&&SNAP) renderSnap();
