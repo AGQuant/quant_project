@@ -1591,7 +1591,7 @@ NAV_REGISTRY = {
     "/m/screeners":  ("Screeners (mobile)",     "nav-mobile"),   # cc#1899, tier fixed cc#1907
     "/m/options":    ("Option Strategy Builder (mobile)", "nav-mobile"),   # cc#2039: OPT sprint 4/5, More sheet ('m' flag, not a bottom-nav slot)
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
-    "/m/health":     ("Portfolio Health (mobile) — not yet linked from the Home grid, pending a 16915 ruling", "typed-url"),   # cc#1902
+    "/m/health":     ("Portfolio Health (mobile) — Home grid tile HIDDEN 17-Sep-2026 (cc#2199), folded into My Portfolio (cc#2194); route + page alive", "typed-url"),   # cc#1902, hidden cc#2199
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
     "/m/aicio":      ("AICIO (mobile) — bottom-bar slot 3 since cc#2170 (founder 17-Sep); More sheet + Home grid too", "nav-mobile"),   # cc#1904 page; cc#2170 slot
     "/m/learn":      ("Learn (mobile) — Knowledge Hub articles (knowledge_endpoints); Home grid tile + More sheet", "nav-mobile"),   # cc#1961
