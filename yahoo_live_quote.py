@@ -167,21 +167,42 @@ async def _fetch_one(client, sem, nse_sym, fetched_at):
             await asyncio.sleep(SLEEP_S)
 
 
-async def _fetch_live_quotes_async(symbols):
+async def _fetch_live_quotes_async(symbols, budget_sec=None):
     fetched_at = _ist_now().replace(microsecond=0).isoformat()
     uniq = list(dict.fromkeys(s for s in symbols if s))
     sem = asyncio.Semaphore(SEM_SIZE)
+    out = {}
     async with httpx.AsyncClient(
         timeout=TIMEOUT_SEC,
         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
         limits=httpx.Limits(max_connections=SEM_SIZE * 2, max_keepalive_connections=SEM_SIZE),
     ) as client:
-        tasks = [_fetch_one(client, sem, s, fetched_at) for s in uniq]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
-    return {sym: q for sym, q in results if q is not None}
+        tasks = [asyncio.ensure_future(_fetch_one(client, sem, s, fetched_at)) for s in uniq]
+        if budget_sec is None:
+            results = await asyncio.gather(*tasks, return_exceptions=False)
+            return {sym: q for sym, q in results if q is not None}
+        # cc#2198: a HARD overall budget. Whatever answered inside it is returned; the rest is
+        # cancelled and simply absent (never zero-filled). The pacing above (SEM_SIZE x SLEEP_S per
+        # symbol) means a long list can never fit a short budget -- callers with a deadline pass
+        # short lists; the full-universe sweep belongs on a background thread (mobile_home2).
+        done, pending = await asyncio.wait(tasks, timeout=budget_sec)
+        for t in pending:
+            t.cancel()
+        if pending:
+            log.warning("yahoo_live_quote: %.1fs budget hit -- %d of %d symbols answered, %d dropped "
+                        "(not fabricated)", budget_sec, len(done), len(tasks), len(pending))
+            await asyncio.gather(*pending, return_exceptions=True)   # let the cancels unwind before the client closes
+        for t in done:
+            try:
+                sym, q = t.result()
+            except Exception:
+                continue
+            if q is not None:
+                out[sym] = q
+    return out
 
 
-def fetch_live_quotes(symbols):
+def fetch_live_quotes(symbols, budget_sec=None):
     """Live quote fetch, one v8/finance/chart call per symbol, concurrency-limited (cc#2096 --
     see the module doc's ENDPOINT CORRECTION for why this is no longer the v7/finance/quote batch
     call). Returns {nse_symbol: {price, chg_pct, prev_close, open, high, low, asof, source}} for
@@ -192,4 +213,4 @@ def fetch_live_quotes(symbols):
     event loop), asyncio.run() is safe to use here."""
     if not symbols:
         return {}
-    return asyncio.run(_fetch_live_quotes_async(symbols))
+    return asyncio.run(_fetch_live_quotes_async(symbols, budget_sec))

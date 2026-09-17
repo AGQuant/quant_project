@@ -6302,6 +6302,7 @@ function homeRefresh(){
     .then(function(d){
       if (d && d.error) throw new Error(d.error);
       renderHome(d, null);
+      homeFallbackNote(d);   /* cc#2198 */
       homePollSync();
     })
     .catch(function(){ /* keep the page as it was — see the block comment above */ })
@@ -6333,12 +6334,39 @@ document.addEventListener('visibilitychange', function(){
    the bar, never the card (Promise.all would have let it take the whole screen down). cc#1844's
    buildup-banner fetch rides alongside the same way, for the same reason. */
 loadBuildupBanner();
+/* cc#2198: "Loading your dashboard..." is never left alone. After 8 s the line says so and offers
+   Retry; the request itself keeps running (fetchWithTimeout aborts it at 15 s, handled below). */
+var HOME_SLOW_T = setTimeout(function(){
+  var l = document.querySelector('#body .loading');
+  if (l) l.innerHTML = 'Still loading&hellip; a live source is slow.'
+    + ' <button type="button" class="chip" onclick="location.reload()" style="margin-left:8px">Retry</button>';
+}, 8000);
+/* cc#2198: the payload says when the cash feed is stale and the index / breadth figures come from
+   the backup source or are the last known values -- one plain line at the top of the deck. */
+function homeFallbackNote(d){
+  var old = document.getElementById('homeLiveNote');
+  if (old) old.remove();
+  var lf = d && d.live_fallback;
+  if (!lf || !lf.engaged) return;
+  var body = document.getElementById('body');
+  if (!body) return;
+  var el = document.createElement('div');
+  el.id = 'homeLiveNote';
+  el.setAttribute('role', 'status');
+  el.style.cssText = 'font-size:var(--type-11);color:var(--muted);padding:var(--space-6) var(--space-10) 0';
+  el.textContent = 'Live cash feed paused' + (lf.fyers_eq_age_min != null ? ' ' + lf.fyers_eq_age_min + ' min ago' : '')
+    + ' \u00b7 index and breadth figures are ' + (lf.indices === 'yahoo_cache' ? 'from the backup source' : 'the last known values')
+    + (lf.refreshing ? ' \u00b7 refreshing' : '');
+  body.insertBefore(el, body.firstChild);
+}
 Promise.all([
   fetchWithTimeout('/api/mobile/home2').then(function(r){ return r.json(); }),
   fetchWithTimeout('/api/paper/pivots?symbol=NIFTY50,BANKNIFTY')
     .then(function(r){ return r.json(); }).catch(function(){ return null; })
 ]).then(function(res){
+  clearTimeout(HOME_SLOW_T);
   renderHome(res[0], res[1]);
+  homeFallbackNote(res[0]);
   homePollSync();   /* cc#1411: arm (or skip) the 5-min poll off the fresh payload's own flag */
   /* cc#2066: #index-trades hash-deep-link for the new Index Trades ANALYTICS tile. openV10/v10ov/
      v10bd are static markup already in the page (line ~1936), not something renderHome() builds --
@@ -6358,8 +6386,14 @@ Promise.all([
     if (location.hash === '#index-trades') openV10(null, 'NIFTY50', 'OPT', true);
   });
 }).catch(function(e){
+  clearTimeout(HOME_SLOW_T);
+  /* cc#2198: fetchWithTimeout gives up at 15 s ("Request timed out after 15000ms: ...", or a bare
+     AbortError on older engines) -- say that in plain words, with the cause the founder can act on. */
+  var msg = (e && (e.name === 'AbortError' || /timed out/i.test(e.message || '')))
+    ? 'The dashboard took too long to answer (15 s). A live source may be slow -- try again.'
+    : ((e && e.message) || 'unknown error');
   document.getElementById('body').innerHTML =
-    '<div class="empty"><b>Could not load</b>' + esc(e.message)
+    '<div class="empty"><b>Could not load</b>' + esc(msg)
     + '<div style="margin-top:12px"><button class="chip" onclick="location.reload()">Retry</button></div></div>';
   HOME_SESS_LINE = '';   /* cc#1634: nothing to fold into the hero line on a failed load */
 });

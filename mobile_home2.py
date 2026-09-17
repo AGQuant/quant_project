@@ -45,6 +45,8 @@ DATA DOCTRINE, inherited:
 """
 
 import logging
+import threading
+import time as _time
 from datetime import datetime, time as dt_time
 
 from fastapi import APIRouter, Request
@@ -924,6 +926,106 @@ def mobile_v10chart(request: Request, symbol: str = "NIFTY50", days: int = 92, b
     }
 
 
+# ── cc#2198: the Yahoo live fallback (cc#1417) runs OFF the request, into this module cache ────
+# 17-Sep-2026 15:10 IST the fyers_eq cash leg stopped; at 15:20 it crossed feed_guardian's
+# STALE_MIN and the fallback engaged INSIDE every /api/mobile/home2 call: one Yahoo chart call per
+# active futures symbol, paced 0.4 s x 3-wide = ~28 s for 208 symbols, plus a transaction held open
+# on futures_universe for the whole sweep. Every call walled at 31.5 s, the page's 15 s fetch
+# budget aborted, Home stayed on "Loading your dashboard". The request handler now only READS this
+# cache; one daemon thread fills it (indices first, then the ADR sweep), each on its own short
+# connection, and a stale cache means "last known values, refresh kicked" -- never a wait.
+_YF = {"lock": threading.Lock(), "running": False,
+       "idx": None, "idx_at": 0.0,      # {sym: quote} from fetch_live_quotes + monotonic stamp
+       "adr": None, "adr_at": 0.0,      # {advances, declines, unchanged, source, resolved, universe}
+       "last_err": None, "last_run_s": None}
+_YF_IDX_TTL = 60.0        # older than this -> kick a refresh (the request still does not wait)
+_YF_IDX_MAX_AGE = 300.0   # older than this -> not served at all; last-known DB values stand
+_YF_ADR_MAX_AGE = 300.0   # the sweep itself takes ~28 s; a 5-min-old breadth beats an empty one
+_YF_IDX_BUDGET = 6.0      # hard budget for the two index calls on the refresher thread
+
+
+def _yahoo_snapshot():
+    """A copy of the cache under the lock, with ages in seconds (None while empty)."""
+    m = _time.monotonic()
+    with _YF["lock"]:
+        return {"idx": dict(_YF["idx"]) if _YF["idx"] else None,
+                "idx_age": (m - _YF["idx_at"]) if _YF["idx"] else None,
+                "adr": dict(_YF["adr"]) if _YF["adr"] else None,
+                "adr_age": (m - _YF["adr_at"]) if _YF["adr"] else None,
+                "running": _YF["running"], "last_err": _YF["last_err"], "last_run_s": _YF["last_run_s"]}
+
+
+def _yahoo_refresh():
+    """Daemon-thread body. Indices first (cached the moment they land), then the ADR sweep over the
+    active futures universe (same rule as before: rows without a price or a previous close are
+    skipped, a thin batch under 50 resolved names is NOT written -- last real breadth stands).
+    The universe read and the previous-close read are two short connections; nothing stays open
+    while Yahoo is being called."""
+    t0 = _time.monotonic()
+    try:
+        from yahoo_live_quote import fetch_live_quotes
+        q = fetch_live_quotes(["NIFTY50", "BANKNIFTY"], budget_sec=_YF_IDX_BUDGET)
+        if q:
+            with _YF["lock"]:
+                _YF["idx"] = q
+                _YF["idx_at"] = _time.monotonic()
+        with _conn() as _c, _c.cursor() as _cur:
+            _cur.execute("SELECT symbol FROM futures_universe WHERE is_active=TRUE")
+            universe = [r[0] for r in _cur.fetchall()]
+        uq = fetch_live_quotes(universe) if universe else {}
+        prev = {}
+        if uq:
+            with _conn() as _c, _c.cursor() as _cur:
+                _cur.execute("""
+                    SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
+                    WHERE symbol = ANY(%s) AND price_date < CURRENT_DATE
+                    ORDER BY symbol, price_date DESC
+                """, (list(uq.keys()),))
+                prev = {r[0]: float(r[1]) for r in _cur.fetchall() if r[1] is not None}
+        adv = dec = unc = 0
+        for sym, qq in uq.items():
+            pc = prev.get(sym)
+            if pc is None or qq.get("price") is None:
+                continue
+            if qq["price"] > pc: adv += 1
+            elif qq["price"] < pc: dec += 1
+            else: unc += 1
+        tot = adv + dec + unc
+        with _YF["lock"]:
+            if tot >= 50:   # SAME floor _write_adr_intraday gates on -- a thin batch must not pass as breadth
+                _YF["adr"] = {"advances": adv, "declines": dec, "unchanged": unc,
+                              "source": "yahoo_live_fallback", "resolved": tot, "universe": len(universe)}
+                _YF["adr_at"] = _time.monotonic()
+            else:
+                log.warning("home2: Yahoo ADR fallback resolved %d/%d symbols (<50 floor) -- "
+                            "cache not written, last real adr_detail stands", tot, len(universe))
+            _YF["last_err"] = None
+    except Exception as e:
+        with _YF["lock"]:
+            _YF["last_err"] = str(e)[:200]
+        log.warning("home2: yahoo background refresh failed: %s", e)
+    finally:
+        with _YF["lock"]:
+            _YF["running"] = False
+            _YF["last_run_s"] = round(_time.monotonic() - t0, 1)
+
+
+def _yahoo_kick():
+    """Start one refresh if none is running. Returns True when a thread was started."""
+    with _YF["lock"]:
+        if _YF["running"]:
+            return False
+        _YF["running"] = True
+    try:
+        threading.Thread(target=_yahoo_refresh, name="home2-yahoo-refresh", daemon=True).start()
+    except Exception as e:   # thread start failure must never reach the request
+        with _YF["lock"]:
+            _YF["running"] = False
+            _YF["last_err"] = str(e)[:200]
+        return False
+    return True
+
+
 @router.get("/api/mobile/home2")
 @_json_safe
 def mobile_home2(request: Request):
@@ -1255,64 +1357,58 @@ def mobile_home2(request: Request):
     adr_detail = (mood or {}).get("adr_detail") or {}
     adr_ratio = next((c["value"] for c in chips if c["label"] == "ADR"), None)
 
-    # ── cc#1417: LIVE YAHOO FALLBACK, market-hours Fyers outages only ──────────────────────────
-    # Card 1's index tile (idx, above) and the ADR/breadth figures just above both ultimately read
-    # the fyers_eq cash leg -- domestic_live()'s intraday_prices scan, and _write_adr_intraday()'s
-    # identical table. ONE outage check for both, reusing feed_guardian's own per-leg staleness
-    # (not a second detector -- explicit instruction). Full design, the real (measured, not
-    # ~1800-assumed) universe size, and the honest not-live-tested-from-this-session disclosure on
-    # the batch quote endpoint itself are in yahoo_live_quote.py's module doc.
+    # ── cc#1417 -> cc#2198: LIVE YAHOO FALLBACK, market-hours Fyers outages only, NEVER inline ──
+    # Card 1's index tile (idx, above) and the ADR/breadth figures both ultimately read the
+    # fyers_eq cash leg. ONE outage check (feed_guardian's own per-leg staleness, not a second
+    # detector). When it fires, the values come from the module cache that _yahoo_refresh() fills
+    # on a background thread (see the block above @router.get): fresh -> served; stale -> a refresh
+    # is kicked and the last-known values computed above stand. This request waits on nothing.
+    # The payload states which it did (live_fallback) so the page can mark the card, and the index
+    # quotes are written where the tape and the response actually read them (idx["indices"] --
+    # the cc#1417 block wrote idx[sym] one level up, which nothing read).
+    _live_fallback = None
     try:
-        from yahoo_live_quote import fyers_eq_outage, fetch_live_quotes
+        from yahoo_live_quote import fyers_eq_outage
         with _conn() as _yconn, _yconn.cursor() as _ycur:
             _outage, _age = fyers_eq_outage(_ycur, now)
         if _outage:
-            log.warning("home2: fyers_eq leg stale %.1fmin during market hours -- Yahoo live "
-                        "fallback engaged", _age)
-            # 1) INDICES -- NIFTY50 + BANKNIFTY, same shape domestic_live() already returns, so
-            # the template needs no branch of its own; only the "source" tag tells them apart.
-            for sym, q in fetch_live_quotes(["NIFTY50", "BANKNIFTY"]).items():
-                idx[sym] = {
-                    "price_date": now.date().isoformat(),
-                    "open": q["open"], "high": q["high"], "low": q["low"],
-                    "close": round(q["price"], 2), "prev_close": q["prev_close"],
-                    "chg_pct": round(q["chg_pct"], 2) if q["chg_pct"] is not None else None,
-                    "source": q["source"],
-                }
-            # 2) ADR/BREADTH -- the real universe (measured ~208-212 across 8 trading days, NOT
-            # the card's assumed ~1800), futures_universe(is_active) is the static candidate list
-            # an outage needs: _write_adr_intraday's own universe is "whatever has an
-            # intraday_prices row today", which is exactly what an outage leaves empty.
-            with _conn() as _uconn, _uconn.cursor() as _ucur:
-                _ucur.execute("SELECT symbol FROM futures_universe WHERE is_active=TRUE")
-                _universe = [r[0] for r in _ucur.fetchall()]
-                _uq = fetch_live_quotes(_universe)
-                _prev = {}
-                if _uq:
-                    _ucur.execute("""
-                        SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
-                        WHERE symbol = ANY(%s) AND price_date < CURRENT_DATE
-                        ORDER BY symbol, price_date DESC
-                    """, (list(_uq.keys()),))
-                    _prev = {r[0]: float(r[1]) for r in _ucur.fetchall() if r[1] is not None}
-            adv = dec = unc = 0
-            for sym, q in _uq.items():
-                pc = _prev.get(sym)
-                if pc is None or q["price"] is None:
-                    continue
-                if q["price"] > pc: adv += 1
-                elif q["price"] < pc: dec += 1
-                else: unc += 1
-            tot = adv + dec + unc
-            if tot >= 50:   # SAME floor _write_adr_intraday itself gates on -- a thin/partial
-                            # batch response must not silently overwrite a real reading with noise
-                adr_detail = {"advances": adv, "declines": dec, "unchanged": unc,
-                              "source": "yahoo_live_fallback"}
-                adr_ratio = round(adv / dec, 3) if dec else float(adv)
-            else:
-                log.warning("home2: Yahoo ADR fallback only resolved %d/%d symbols (<50 floor) "
-                            "-- keeping the last real adr_detail rather than a thin/noisy count",
-                            tot, len(_universe))
+            snap = _yahoo_snapshot()
+            kicked = False
+            if snap["idx_age"] is None or snap["idx_age"] > _YF_IDX_TTL:
+                kicked = _yahoo_kick()
+            idx_src = "last_known"
+            if snap["idx"] and snap["idx_age"] is not None and snap["idx_age"] <= _YF_IDX_MAX_AGE:
+                for sym, q in snap["idx"].items():
+                    idx.setdefault("indices", {})[sym] = {
+                        "price_date": now.date().isoformat(),
+                        "open": q.get("open"), "high": q.get("high"), "low": q.get("low"),
+                        "close": round(q["price"], 2) if q.get("price") is not None else None,
+                        "prev_close": q.get("prev_close"),
+                        "chg_pct": round(q["chg_pct"], 2) if q.get("chg_pct") is not None else None,
+                        "source": q.get("source"), "asof": q.get("asof"),
+                    }
+                idx_src = "yahoo_cache"
+            adr_src = "last_known"
+            if snap["adr"] and snap["adr_age"] is not None and snap["adr_age"] <= _YF_ADR_MAX_AGE:
+                _a = snap["adr"]
+                adr_detail = {"advances": _a["advances"], "declines": _a["declines"],
+                              "unchanged": _a["unchanged"], "source": _a["source"]}
+                adr_ratio = round(_a["advances"] / _a["declines"], 3) if _a["declines"] else float(_a["advances"])
+                adr_src = "yahoo_cache"
+            _live_fallback = {
+                "engaged": True,
+                "fyers_eq_age_min": round(_age, 1) if _age is not None else None,
+                "indices": idx_src, "adr": adr_src,
+                "refreshing": bool(snap["running"] or kicked),
+                "idx_age_s": round(snap["idx_age"]) if snap["idx_age"] is not None else None,
+                "adr_age_s": round(snap["adr_age"]) if snap["adr_age"] is not None else None,
+                "last_error": snap["last_err"], "last_run_s": snap["last_run_s"],
+                "note": "fyers_eq cash leg stale in market hours; Yahoo values are served from a "
+                        "background refresh, never fetched inside this request (cc#2198); "
+                        "last_known = the values computed from the database above",
+            }
+            log.warning("home2: fyers_eq leg stale %.1fmin -- Yahoo fallback from cache (indices %s, "
+                        "adr %s, refreshing %s)", _age or 0.0, idx_src, adr_src, _live_fallback["refreshing"])
     except Exception as e:
         # a fallback failure must never break the page -- normal (possibly stale-flagged) values
         # simply stand as they already were computed above.
@@ -1372,6 +1468,7 @@ def mobile_home2(request: Request):
         # list of its own: it tests membership, it does not restate the set.
         "trend_intraday": list(_INTRADAY_KINDS),
         # retained one deploy for any cached template; the ticker replaces this grid
+        "live_fallback": _live_fallback,   # cc#2198: None normally; engaged/indices/adr/refreshing during a cash-leg outage
         "indices": [{
             "name": "Nifty 50" if k == "NIFTY50" else "Bank Nifty",
             "close": v.get("close"), "chg_pct": v.get("chg_pct"),
