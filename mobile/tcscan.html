@@ -167,7 +167,7 @@ function tcTagRes(reason){
   return '<span class="tag res '+c+'">'+esc(txt)+'</span>';
 }
 /* cc#2101 item 3: SL/entry/CMP/target rail -- TC Scanner had no bar before this card. Built on the
-   shared scorr_position_row.js geometry (trkAxis/trkFrac/trkTickStyle/trkFixLabels), this page's own
+   shared scorr_position_row.js geometry (trkAxis/trkFrac/trkTickStyle; trkFixLabels runs after draw(), cc#2177), this page's own
    f2() price formatter and field names (target/sl/entry/cmp, not V8's stop_loss/entry_price). */
 function tcTrkLabels(r, fz, fc, slEnd, tgtEnd){
   var ts = window.ScorrPositionRow.trkTickStyle;
@@ -306,6 +306,11 @@ function draw(){
   h+='<div class="note"><b>Track record, plainly.</b> '+esc(d.note||'')+' As of '+esc(d.as_of||'')+'.</div>';
   document.getElementById('asof').innerHTML='As of <b>'+esc(d.as_of||'')+'</b> · '+(o.count||0)+' open · last closure '+esc(dm(d.last_closure));
   document.getElementById('body').innerHTML=h;
+  /* cc#2177: run the shared label-collision pass on every rendered rail (the cc#1726 rule, the same
+     call mobile/v8.html makes after its own render): ENTRY drops below the rail when it would touch
+     CMP, and is nudged clear of the SL / TGT end labels. This page built its rails on the shared
+     geometry (cc#2101) but never called the pass, so close prices printed "CMP 1053ENTRY 1065.20". */
+  if(window.ScorrPositionRow&&window.ScorrPositionRow.trkFixLabels) window.ScorrPositionRow.trkFixLabels(document.getElementById('body'));
   var tkr=document.getElementById('tk-rail');
   if(tkr){ if(tkLeft) tkr.scrollLeft=tkLeft; tkDots(); tkr.addEventListener('scroll', tkDots, {passive:true});
     document.getElementById('tk-dots').addEventListener('click', function(e){ var i=Array.prototype.indexOf.call(e.currentTarget.children, e.target); if(i<0) return; tkr.scrollTo({left:i*tkPitch(tkr), behavior:'smooth'}); }); }
@@ -328,5 +333,8 @@ document.getElementById('body').addEventListener('click', function(e){
   var cst = e.target.closest('[data-card-strip]'); if(cst){ window.ScorrPositionRow.cardStripToggle(cst); return; }
 });
 load('');
+/* cc#2177: a rotation changes the rail width and with it where the labels land -- redraw from the
+   cached payload so the collision pass runs again on the new geometry (150 ms debounce). */
+var tkRz=null; window.addEventListener('resize', function(){ clearTimeout(tkRz); tkRz=setTimeout(function(){ if(D) draw(); }, 150); });
 </script>
 </body></html>
