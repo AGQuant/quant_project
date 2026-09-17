@@ -157,8 +157,15 @@ def _rc():
     return rc
 
 
+def _qkey(quarter):
+    """cc#2167: the ONE normalisation. result_corner's season label is the display form 'Q1 FY27' (space,
+    from _fq_label -- left as is, other surfaces show it); result_analysis_v2.quarter is stored as 'Q1FY27'.
+    Every lookup against result_analysis_v2 goes through this key. Stored rows are never rewritten."""
+    return str(quarter or "").replace(" ", "")
+
+
 def _written_set(cur, quarter):
-    cur.execute("SELECT UPPER(symbol) FROM result_analysis_v2 WHERE quarter=%s", (quarter,))
+    cur.execute("SELECT UPPER(symbol) FROM result_analysis_v2 WHERE quarter=%s", (_qkey(quarter),))
     return {r[0] for r in cur.fetchall()}
 
 
@@ -200,7 +207,7 @@ def mobile_results_season(request: Request):
                         "sales_yoy": _fl(s.get("sales_yoy")), "pat_yoy": _fl(s.get("pat_yoy")),
                         "pct_positive": s.get("pct_positive"), "gvm": _fl(s.get("gvm")), "verdict": s.get("gvm_verdict"),
                         "tiny": bool(s.get("tiny_base")), "avg_mcap": _fl(s.get("avg_mcap")), "n_used": s.get("n_used")})
-    wl = result_analysis_v2_list(limit=12, quarter=quarter or "")
+    wl = result_analysis_v2_list(limit=12, quarter=_qkey(quarter))   # cc#2167: stored spelling, never the display label
     written_rows = [{"symbol": r.get("symbol"), "company": r.get("company"), "quarter": r.get("quarter"),
                      "polished_at": r.get("polished_at"), "teaser": r.get("teaser"), "result_date": r.get("result_date")}
                     for r in (wl.get("results") or [])] if isinstance(wl, dict) else []
