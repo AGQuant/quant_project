@@ -1541,9 +1541,16 @@ MOBILE_TABLES_JS = """
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scan);
   else scan();
-  if (window.MutationObserver) {
+  // cc#2142: the observer needs document.body, which is still null while this script runs from
+  // <head> (main.py _MOBILE_HEAD injects it at </head> on every page). observe(null) threw
+  // "parameter 1 is not of type 'Node'" on every /m/* load, so the observer never attached and a
+  // .mtable added after load never got initWrap/initTable. Guarded exactly like scan() above.
+  function observe() {
+    if (!window.MutationObserver || !document.body) return;
     new MutationObserver(scanSoon).observe(document.body, {childList: true, subtree: true});
   }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', observe);
+  else observe();
 })();
 """
 
