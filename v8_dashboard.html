@@ -2915,6 +2915,14 @@ let MASTER_BASKET='all';
 // dma (5DMA cross square). OR among the chosen markers, AND with the side/basket chips. In memory
 // only for the visit (no localStorage). Empty set = no marker filter.
 let MASTER_MARKERS=new Set();
+// cc#2131 (founder 16-Sep-2026, "old tabs"): the 5>20 / 5<20 DMA-STATE chips are HIDDEN from the
+// Open Positions marker row on this web page only -- the newer 5M>20 / 5M<20 window-cross pair
+// beside them (cc#2115) is what the founder reads. DISPLAY ONLY: the dmaUp/dmaDn keys, their
+// _mkCounts, markerKeysFor()'s filter logic and the engine tagging behind PIVOT_DMA are untouched
+// (mobile/v8.html carries its OWN copy of this row and is untouched too). A key can only enter
+// MASTER_MARKERS through its own chip and the Set is in-memory, so hiding the chips cannot leave
+// an invisible filter behind. Remove a key from this Set to bring its chip back.
+const MKQ_HIDDEN=new Set(['dmaUp','dmaDn']);
 function setMasterMarker(k){ if(MASTER_MARKERS.has(k))MASTER_MARKERS.delete(k); else MASTER_MARKERS.add(k); const el=document.getElementById('panel0'); if(el)el.innerHTML=renderMaster(); }
 // The row's OWN filtered fired object — the same pipeline markerFlag() renders the glyph from
 // (cc#1547 maps + cc#1558 ScorrMarkerFlagFilter against the row's side), so a chip count can never
@@ -3710,6 +3718,7 @@ function renderMaster(){
   // prints) matched by its family word — never retyped here; no legend yet -> the title alone.
   const _legLine=(...words)=>{ const L=Array.isArray(MK_LEGEND)?MK_LEGEND:[]; return L.find(t=>words.some(w=>String(t).toLowerCase().indexOf(w)>=0))||''; };
   const mchip=(key,icon,iconCol,title,cnt,tip,onTint)=>{
+    if(MKQ_HIDDEN.has(key))return '';   // cc#2131: hidden, not deleted -- the call sites below stay as they were
     const on=MASTER_MARKERS.has(key);
     const st=on?`background:${onTint};color:var(--txt);border:1px solid ${iconCol}`:'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
     return `<button type="button" class="mkq" onclick="setMasterMarker('${key}')" title="${tip.replace(/"/g,'&quot;')}" aria-pressed="${on}" style="${st};font:inherit;font-size:11px;font-weight:600;cursor:pointer;padding:5px 7px;border-radius:8px;transition:.15s;white-space:nowrap;min-height:34px;display:inline-flex;align-items:center;gap:4px"><span style="color:${iconCol};font-size:13px;line-height:1">${icon}</span>${title} <b style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-weight:800">${cnt}</b></button>`;
