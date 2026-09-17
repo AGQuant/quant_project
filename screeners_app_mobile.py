@@ -183,6 +183,7 @@ def mobile_screeners_app(request: Request):
 # ═══ QB_APP-STYLE V2 (SCREENERS_APP_R2_LOCK, session_log 42826; Fable 10-Sep-2026) ═════════════════
 # Two additive endpoints. The cc#1899 endpoint above is untouched.
 #   GET /api/mobile/screeners_app/list          → quant screens only, grouped, rule in plain words
+#                                                 (+ cc#2156: `top` = up to three symbols per card, additive)
 #   GET /api/mobile/screeners_app/screen?id=<n> → the screen's names for the sortable table
 # QUANT vs client list: filters non-empty vs empty on v13_presets (rule 1). Groups from the filters
 # (rule 2). Never a name list.
@@ -279,12 +280,26 @@ def mobile_screeners_list(request: Request):
         if ids and top:
             cur.execute("SELECT COUNT(DISTINCT symbol) FROM v13_screen_results WHERE screen_id = ANY(%s) AND last_seen = %s", (ids, top))
             names_today = cur.fetchone()[0] or 0
+        # cc#2156: the three-name preview strip on each rail card -- ONE grouped query, the screen's own
+        # order (rank NULLS LAST, symbol), at most three per screen. Additive: nothing else in the payload moves.
+        tops = {}
+        if ids:
+            cur.execute("""
+                SELECT screen_id, symbol FROM (
+                    SELECT screen_id, symbol,
+                           ROW_NUMBER() OVER (PARTITION BY screen_id ORDER BY rank NULLS LAST, symbol) AS rn
+                      FROM v13_screen_results WHERE screen_id = ANY(%s)) t
+                 WHERE rn <= 3 ORDER BY screen_id, rn
+            """, (ids,))
+            for sid, sym in cur.fetchall():
+                tops.setdefault(sid, []).append(sym)
     cards = []
     for r in rows:
         stale = bool(r["last_run"] and top and r["last_run"] != top)
         cards.append({"id": r["id"], "name": r["name"], "members": int(r["members"] or 0),
                       "last_run": str(r["last_run"]) if r["last_run"] else None, "stale": stale,
-                      "rule": _rule_words(r["filters"]), "group": _group_of(r["filters"])})
+                      "rule": _rule_words(r["filters"]), "group": _group_of(r["filters"]),
+                      "top": tops.get(r["id"], [])[:3]})   # cc#2156
     groups = []
     for key, title, hint in _GROUPS:
         gs = sorted([c for c in cards if c["group"] == key], key=lambda c: -c["members"])

@@ -5,6 +5,11 @@
        /m/screeners             → quant screens only, three groups + Build your own, from /api/mobile/screeners_app/list
        /m/screeners?screen=<id> → the screen's names, sortable table, from /api/mobile/screeners_app/screen?id=
      Contract tokens only; the 48px disc / 26px icon are layout geometry.
+     cc#2156 (17-Sep-2026, Screeners PUSH 1/5): the three groups render as horizontal snap rails (geometry copied
+     from mobile/sector.html .rl/.tc), one horizontal card per screen with a three-name preview from the list
+     endpoint's `top`, equal heights per rail, a dot pager per rail. Class names are sk-* on purpose:
+     /static/mobile_app.css carries bare .rail / .sc / .chip / .body rules that would restyle shorter names
+     (cc#2155 root cause). The 3-column .grid/.sc stays only for the Build-your-own wide card (push 4 rewires it).
      TOKEN_MAP  #D4AF37 -> --brand · #3DD68C -> --win · #FF5C6C -> --loss · #131316 -> --panel · #1B1B20 -> --hi ·
      #2A2A32 -> --edge · #F5F2EA -> --ink · #8E8A7E -> --muted -->
 <html lang="en">
@@ -40,6 +45,21 @@
 .wide .ic{flex:none;margin:0}.wide .nm{margin:0;min-height:0}.wide .n{margin-top:var(--space-2)}.wide .rule{border-top:none;padding-top:0;margin-top:var(--space-2);width:auto}
 .wide .go{margin-left:auto;color:var(--brand);font-weight:800;font-size:var(--type-16)}
 .emp{margin:0 var(--space-16);background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}
+/* cc#2156: per-group snap rail -- same geometry as mobile/sector.html .rl/.tc (copied, not imported) */
+.sk-rail{display:flex;align-items:stretch;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scroll-padding-left:var(--space-16);scrollbar-width:none;-webkit-overflow-scrolling:touch}.sk-rail::-webkit-scrollbar{display:none}
+.sk-card{flex:0 0 86vw;max-width:360px;min-height:118px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-12) var(--space-13);display:flex;gap:var(--space-12);align-items:flex-start;text-decoration:none;color:inherit;position:relative;overflow:hidden}
+.sk-card::before{content:"";position:absolute;inset:0;background:radial-gradient(90% 60% at 50% 0%,color-mix(in srgb, var(--brand) 9%, transparent),transparent 65%);pointer-events:none}
+.sk-ic{flex:none;width:44px;height:44px;border-radius:var(--radius-14);background:var(--hi);border:var(--bw-1) solid var(--edge);display:flex;align-items:center;justify-content:center;position:relative}
+.sk-ic svg{width:24px;height:24px;stroke:var(--brand);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.sk-ic svg .f{fill:var(--brand);stroke:none;opacity:.22}
+.sk-body{flex:1;min-width:0;position:relative}
+.sk-nm{font-size:var(--type-14);font-weight:800;line-height:1.2;padding-right:var(--space-12);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sk-n{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3)}.sk-n b{color:var(--ink);font-weight:800}
+.sk-rule{font-size:var(--type-10);color:var(--muted);margin-top:var(--space-6);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sk-top{display:flex;gap:var(--space-5);margin-top:var(--space-8);overflow:hidden}
+.sk-top span{flex:none;font-size:var(--type-9);font-weight:800;padding:var(--space-2) var(--space-6);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--ink);white-space:nowrap}
+.sk-dot{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:var(--radius-3);background:var(--win);z-index:1}.sk-dot.st{background:var(--loss)}
+.sk-pager{display:flex;justify-content:center;gap:var(--space-5);padding:var(--space-6) var(--space-16) 0}
+.sk-pager i{display:block;width:6px;height:6px;border-radius:var(--radius-3);background:var(--edge)}.sk-pager i.on{background:var(--brand)}
 /* screen table */
 .rulebox{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-left:var(--bw-3) solid var(--brand);border-radius:0 var(--radius-14) var(--radius-14) 0;padding:var(--space-12) var(--space-14);font-size:var(--type-115);line-height:1.55}
 .rulebox .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}
@@ -92,10 +112,21 @@ var ICON={
   'Multibagger Hunt':'<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 13.5l2-2.5 1.5 1.5 2.5-3"/></svg>',
   custom:'<svg viewBox="0 0 24 24"><path d="M4 5h16M6 10h12M8 15h8M10 20h4"/></svg>'
 };
-function card(c){
-  return '<a class="sc" href="/m/screeners?screen='+c.id+'"><span class="dot'+(c.stale?' st':'')+'"></span><div class="ic">'+(ICON[c.name]||ICON[c.group])+'</div>'
-    + '<div class="nm">'+esc(c.name)+'</div><div class="n"><b>'+c.members+'</b> name'+(c.members===1?'':'s')+(c.stale?' · ran '+esc(dm(c.last_run)):'')+'</div>'
-    + '<div class="rule">'+esc(c.rule||'no rule on record')+'</div></a>';
+function card(c){   // cc#2156: one horizontal rail card per screen
+  var top=c.top||[];
+  return '<a class="sk-card" href="/m/screeners?screen='+c.id+'"><span class="sk-dot'+(c.stale?' st':'')+'"></span><div class="sk-ic">'+(ICON[c.name]||ICON[c.group])+'</div>'
+    + '<div class="sk-body"><div class="sk-nm">'+esc(c.name)+'</div><div class="sk-n"><b>'+c.members+'</b> name'+(c.members===1?'':'s')+(c.stale?' · ran '+esc(dm(c.last_run)):'')+'</div>'
+    + '<div class="sk-rule">'+esc(c.rule||'no rule on record')+'</div>'
+    + (top.length?'<div class="sk-top">'+top.map(function(s){return '<span>'+esc(s)+'</span>';}).join('')+'</div>':'')+'</div></a>';
+}
+function wirePagers(){   // cc#2156: one dot per card, the active dot follows the snapped card
+  document.querySelectorAll('.sk-rail').forEach(function(rail){
+    var pg=rail.nextElementSibling, dots=(pg&&pg.classList.contains('sk-pager'))?pg.querySelectorAll('i'):[]; if(!dots.length) return;
+    var tick=null;
+    function upd(){ tick=null; var k=rail.children; if(k.length<2) return; var step=k[1].offsetLeft-k[0].offsetLeft; if(step<=0) return;
+      var i=Math.max(0,Math.min(dots.length-1,Math.round(rail.scrollLeft/step))); dots.forEach(function(x,j){x.classList.toggle('on',j===i);}); }
+    rail.addEventListener('scroll',function(){ if(!tick) tick=requestAnimationFrame(upd); },{passive:true});
+  });
 }
 function renderList(d){
   var k=d.key_metrics||{};
@@ -104,12 +135,13 @@ function renderList(d){
   (d.groups||[]).forEach(function(g){
     h+='<div class="sec"><h2>'+esc(g.title)+'</h2><span class="hint">'+esc(g.hint)+'</span></div>';
     if(!g.rows.length){ h+='<div class="emp">No quant screen hunts this today.</div>'; return; }
-    var cards=g.rows.map(card); while(cards.length%3) cards.push('<a class="sc" style="visibility:hidden"></a>');
-    h+='<div class="grid">'+cards.join('')+'</div>';
+    h+='<div class="sk-rail" id="rail-'+esc(g.key)+'">'+g.rows.map(card).join('')+'</div>'
+     + '<div class="sk-pager" aria-hidden="true">'+g.rows.map(function(_,i){return '<i'+(i===0?' class="on"':'')+'></i>';}).join('')+'</div>';
   });
   h+='<div class="sec"><h2>Build your own</h2><span class="hint">V13 custom screen</span></div><div class="grid"><a class="sc wide" href="/screeners#custom"><div class="ic">'+ICON.custom+'</div><div><div class="nm">Custom screen</div><div class="n">Pick your own GVM, size and momentum cuts.</div><div class="rule">Opens the web builder. Saved screens: none yet.</div></div><span class="go">›</span></a></div>';
-  h+='<div class="note"><b>Only quant screens.</b> A screen with a written rule appears here; rank-only client lists do not. Green dot = ran on the latest date; red = stale, with its own date. Tap a screen for its names.</div>';
+  h+='<div class="note"><b>Only quant screens.</b> A screen with a written rule appears here; rank-only client lists do not. Green dot = ran on the latest date; red = stale, with its own date. Swipe a row to see the next screen; tap a screen for all its names.</div>';
   document.getElementById('body').innerHTML=h;
+  wirePagers();
 }
 var ROWS=[], KEY='gvm', ASC=false;
 function tbl(){
