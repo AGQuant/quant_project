@@ -313,6 +313,7 @@ def render_report_html(rep):
     bench = rep.get("benchmark") or {}
     val = rep.get("valuation") or {}
     yld = rep.get("yield") or {}
+    bench_extra = rep.get("benchmark") or {}   # cc#2209: nifty50_1y / nifty500_1y beside 1yr Port
     sector = rep.get("sector") or {}
     name = port.get("name") or "Portfolio"
     today = date.today().strftime("%d %b %Y")
@@ -397,6 +398,84 @@ def render_report_html(rep):
 
     # highlights
     hl = "".join(f'<li>{_esc(x)}</li>' for x in (rep.get("highlights") or []) if x)
+
+    # cc#2209: the six sections the app's 20-card report already shows, from the SAME build_report() fields the app reads
+    # (portfolio_app_mobile.py / mobile/portfolio.html buildCards): risk_metrics, winners_losers, cap_bands, quality_bands,
+    # upcoming, rating_breakup -- plus benchmark.nifty50_1y / nifty500_1y beside the existing 1yr Port cell. Same .sec /
+    # .cols / .lbl / .track / .chip / .note language and the same colour tokens as the sections above; no new style.
+    rm = rep.get("risk_metrics")
+    if rm:
+        _rx = rm.get("excluded") or []
+        _mdd = _pct(rm.get("max_drawdown"), 1, signed=False) if rm.get("max_drawdown") is not None else "&#8212;"
+        risk_sec = ('<div class="sec"><h3>Risk Metrics</h3><table>'
+                    f'<tr><td class="l">Beta</td><td>{_f2(rm.get("beta"))}</td><td class="l">Std dev</td><td>{_f2(rm.get("std_dev"))}</td></tr>'
+                    f'<tr><td class="l">Sharpe</td><td>{_f2(rm.get("sharpe"))}</td><td class="l">Sortino</td><td>{_f2(rm.get("sortino"))}</td></tr>'
+                    f'<tr><td class="l">Max drawdown</td><td style="color:#B52432;">{_mdd}</td><td class="l">R-squared</td><td>{_f2(rm.get("r_squared"))}</td></tr></table>'
+                    f'<div class="note">Trailing {_esc(rm.get("window_days") or "&#8212;")} trading days against the Nifty 50 &middot; '
+                    f'risk-free rate {_pct(rm.get("risk_free_rate"), 1, signed=False)}'
+                    + (' &middot; left out (short history): ' + _esc(", ".join(str(x) for x in _rx)) if _rx else '') + '</div></div>')
+    else:
+        risk_sec = ('<div class="sec"><h3>Risk Metrics</h3><div class="muted">Risk metrics unavailable &mdash; not enough price history.'
+                    '</div></div>')
+    bench_row = (f'<tr><td class="l">1yr Nifty 50</td><td>{_pct(bench_extra.get("nifty50_1y"))}</td>'
+                 f'<td class="l">1yr Nifty 500</td><td>{_pct(bench_extra.get("nifty500_1y"))}</td></tr>')
+    wl = rep.get("winners_losers") or {}
+    _w, _l = int(wl.get("winners") or 0), int(wl.get("losers") or 0)
+    _wt = _w + _l
+    wl_sec = ('<div class="sec"><h3>Winners vs Losers</h3>'
+              f'<div style="font-size:21px;font-weight:700;"><span style="color:#0B6E42;">{_w}</span>'
+              '<span style="color:#9098A8;font-size:12px;font-weight:600;"> in profit &nbsp;&middot;&nbsp; </span>'
+              f'<span style="color:#B52432;">{_l}</span><span style="color:#9098A8;font-size:12px;font-weight:600;"> in loss</span></div>'
+              f'<div class="track" style="margin-top:8px;"><div class="fill" style="width:{(_w / _wt * 100) if _wt else 0:.0f}%;background:#0B6E42;"></div></div>'
+              f'<div class="note">Green = the share of holdings in profit on cost. {_esc(wl.get("insight"))}</div></div>')
+
+    def _band_col(bd, title):
+        wts = bd.get("weights") or {}
+        cts = bd.get("counts") or {}
+        keys = sorted(wts.keys(), key=lambda k: -(wts.get(k) or 0))
+        if not keys:
+            return f'<div class="col"><h3 class="lbl" style="margin-bottom:8px;">{title}</h3><div class="muted">&#8212;</div></div>'
+        rows = "".join(f'<tr><td class="l">{_esc(k)}</td><td>{_pct(wts.get(k), 1, signed=False)}</td><td>{_esc(cts.get(k, "&#8212;"))}</td></tr>'
+                       for k in keys)
+        return (f'<div class="col"><h3 class="lbl" style="margin-bottom:8px;">{title}</h3>'
+                f'<table><tr><th>Band</th><th>Weight</th><th>Names</th></tr>{rows}</table>'
+                f'<div class="note">{_esc(bd.get("insight"))}</div></div>')
+    bands_cols = ('<div class="cols">' + _band_col(rep.get("cap_bands") or {}, "Company Size")
+                  + _band_col(rep.get("quality_bands") or {}, "Quality Bands") + '</div>')
+    upc = rep.get("upcoming") or []
+    if upc:
+        _ur = ""
+        for u in upc:
+            _when = ("in " + str(u.get("days_to")) + " days") if u.get("days_to") is not None else "&#8212;"
+            _ur += (f'<tr><td class="l" style="font-weight:700;">{_esc(u.get("symbol"))}</td><td>{_esc(u.get("date"))}</td>'
+                    f'<td>{_when}</td><td>{_esc(u.get("event") or "Results")}</td></tr>')
+        up_sec = (f'<div class="sec"><h3>Upcoming Results</h3><table><tr><th>Symbol</th><th>Date</th><th>When</th><th>Event</th></tr>'
+                  f'{_ur}</table></div>')
+    else:
+        up_sec = '<div class="sec"><h3>Upcoming Results</h3><div class="muted">No results scheduled for these holdings.</div></div>'
+    rb = rep.get("rating_breakup") or []
+    _params = []
+    for r in rb:
+        if r.get("rated") and r.get("params"):
+            _params = list(r["params"].keys())
+            break
+    _hold_all = sorted(rep.get("holdings") or [], key=lambda h: -(h.get("weight") or 0))
+    _rest_n = max(0, len(_hold_all) - len(rb))
+    _rest_w = sum((h.get("weight") or 0) for h in _hold_all[len(rb):]) if _rest_n else 0
+    if rb and _params:
+        _rbr = ""
+        for r in rb:
+            _cells = "".join(f'<td>{_f2((r.get("params") or {}).get(k)) if r.get("rated") else "&#8212;"}</td>' for k in _params)
+            _rbr += (f'<tr><td class="l" style="font-weight:700;">{_esc(r.get("symbol"))}'
+                     + ('' if r.get("rated") else ' <span class="muted">not rated</span>') + '</td>'
+                     f'<td>{_pct(r.get("weight"), 1, signed=False)}</td>{_cells}</tr>')
+        rb_sec = ('<div class="sec"><h3>Rating Breakup</h3><table><tr><th>Stock</th><th>Weight</th>'
+                  + "".join(f'<th>{_esc(k)}</th>' for k in _params) + f'</tr>{_rbr}</table>'
+                  '<div class="note">Each rating parameter per holding, out of 10.'
+                  + (f' +{_rest_n} more holdings ({_pct(_rest_w, 1, signed=False)} weight) not shown, as on the web.' if _rest_n else '')
+                  + '</div></div>')
+    else:
+        rb_sec = '<div class="sec"><h3>Rating Breakup</h3><div class="muted">No rating breakup on record for these holdings.</div></div>'
 
     pnl_col = "#0B6E42" if (snap.get("pnl_abs") or 0) >= 0 else "#B52432"
     overall = rt.get("overall")
@@ -503,23 +582,28 @@ ul {{ margin:0; padding-left:18px; }} li {{ font-size:11.5px; color:#5B667D; mar
     <h3 class="lbl" style="margin-bottom:8px;">Valuation &amp; Yield</h3>
     <table><tr><td class="l">Portfolio PE</td><td>{_f2(val.get('portfolio_pe'))}</td><td class="l">Yield</td><td>{_pct(yld.get('portfolio_yield'),2,signed=False)}</td></tr>
     <tr><td class="l">Sector PE</td><td>{_f2(val.get('sector_pe'))}</td><td class="l">Sector Yld</td><td>{_pct(yld.get('sector_yield'),2,signed=False)}</td></tr>
-    <tr><td class="l">Nifty PE</td><td>{_f2(val.get('nifty_pe'))}</td><td class="l">1yr Port</td><td>{_pct(bench.get('portfolio_1y'))}</td></tr></table>
+    <tr><td class="l">Nifty PE</td><td>{_f2(val.get('nifty_pe'))}</td><td class="l">1yr Port</td><td>{_pct(bench.get('portfolio_1y'))}</td></tr>{bench_row}</table>
     <div class="note">{_esc(val.get('insight'))}</div>
   </div>
 </div>
+{risk_sec}
 <div class="sec"><h3>Sector Allocation</h3>
   <table><tr><th>Sector</th><th>Weight</th><th>Score</th><th>Call</th></tr>{sec_rows or '<tr><td class="l muted">No sector data</td></tr>'}</table>
   <div class="note">{_esc(sector.get('insight'))}</div></div>
+{bands_cols}
+{wl_sec}
 <div class="cols">
   <div class="col"><h3 class="lbl" style="margin-bottom:8px;">Top Gainers</h3>{_mover_rows(rep.get('gainers'), True)}</div>
   <div class="col"><h3 class="lbl" style="margin-bottom:8px;">Top Losers</h3>{_mover_rows(rep.get('losers'), False)}</div>
 </div>
 <div class="sec"><h3>Holdings — Full Detail</h3>
   <table><tr><th>Stock</th><th>CMP</th><th>Qty</th><th>Weight</th><th>P&amp;L %</th><th>Rating</th><th>From ATH</th><th>Verdict</th></tr>{hold_rows}</table></div>
+{rb_sec}
 <div class="cols">
   <div class="col"><h3 class="lbl" style="margin-bottom:8px;">Results This Quarter</h3>{ra_rows}</div>
   <div class="col"><h3 class="lbl" style="margin-bottom:8px;">Red Flags</h3>{rf_rows}</div>
 </div>
+{up_sec}
 <div class="sec"><h3>Replacement Ideas</h3>{rep_rows}
   <div class="note">{_esc(rep.get('replacement_note'))}</div></div>
 <div class="sec"><h3>Key Highlights</h3><ul>{hl}</ul></div>

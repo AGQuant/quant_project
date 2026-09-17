@@ -61,11 +61,9 @@ body{min-height:100dvh;background:var(--field)}
 .pf-btn2 svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .pf-msg{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-7);line-height:1.5;text-align:center}
 /* ─ report rail ─ */
-.pf-rhead{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-10) var(--space-16) 0}
 .pf-rcount{flex:none;font-size:var(--type-10);font-weight:800;color:var(--brand);letter-spacing:var(--track-em8);min-width:44px}
-.pf-idx{display:flex;gap:var(--space-6);overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}.pf-idx::-webkit-scrollbar{display:none}
-.pf-ic{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel);white-space:nowrap;cursor:pointer}
-.pf-ic.pf-on{color:var(--pf-on-fg,var(--field));background:var(--brand);border-color:var(--brand)}
+.pf-cat{padding-top:var(--space-4)}   /* cc#2209: one vertical section per category; the rail inside swipes only within it */
+.pf-cath{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-16) var(--space-16) 0}.pf-cath h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}
 .pf-rail{display:flex;gap:var(--space-12);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-10) var(--space-16) var(--space-6);scrollbar-width:none;-webkit-overflow-scrolling:touch;align-items:flex-start}.pf-rail::-webkit-scrollbar{display:none}
 .pf-rc{flex:0 0 calc(100vw - var(--space-16) - var(--space-16));max-width:448px;scroll-snap-align:center;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);display:flex;flex-direction:column;min-width:0;position:relative;overflow:hidden}
 .pf-rc::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
@@ -206,94 +204,114 @@ function buildCards(d){
   var G=tok('--win'), T=tok('--wayfind')||tok('--brand'), B=tok('--brand'), P=tok('--accent')||tok('--brand'), cols=palette();
   var C=[];
   /* 1 Invested · Current Value · P&L */
-  C.push({web:'Invested · Current value · P&L', title:'Snapshot', head:(s.pnl_pct!=null?'<span class="'+cls(s.pnl_pct)+'">'+pct(s.pnl_pct,1)+'</span>':'—'), verdict:(s.pnl_abs!=null?'<b class="'+cls(s.pnl_abs)+'">'+inrL(s.pnl_abs,true)+'</b> on '+inrL(s.invested)+' invested · '+(s.holdings_count||0)+' holdings':esc('Invested amount not set — profit % cannot be stated honestly.')),
+  C.push({key:'snapshot', web:'Invested · Current value · P&L', title:'Snapshot', head:(s.pnl_pct!=null?'<span class="'+cls(s.pnl_pct)+'">'+pct(s.pnl_pct,1)+'</span>':'—'), verdict:(s.pnl_abs!=null?'<b class="'+cls(s.pnl_abs)+'">'+inrL(s.pnl_abs,true)+'</b> on '+inrL(s.invested)+' invested · '+(s.holdings_count||0)+' holdings':esc('Invested amount not set — profit % cannot be stated honestly.')),
     body:cells([['Invested',s.needs_invested_amount?'—':inrL(s.invested)],['Current'+(s.cash?' + cash':''),inrL(s.current_total!=null?s.current_total:s.current)],['Realised',inrL(s.realised_pnl,true),cls(s.realised_pnl)],['Unrealised',inrL(s.unrealised_pnl,true),cls(s.unrealised_pnl)]])+'<div class="pf-ins">Holdings cost '+inrL(s.holdings_cost)+(s.cash?' · cash '+inrL(s.cash):'')+' · basis: '+esc(s.basis||'')+'</div>'});
   /* 2 Alpha */
-  C.push({web:'Alpha', title:'Alpha vs the index', head:(s.alpha_n50!=null?'<span class="'+cls(s.alpha_n50)+'">'+pct(s.alpha_n50,1)+'</span><small> vs Nifty 50</small>':'—'), verdict:(s.alpha_since?'Money return minus the index, both since <b>'+esc(s.alpha_label||dm(s.alpha_since))+'</b>.':'No start date — alpha cannot be measured.'),
+  C.push({key:'alpha', web:'Alpha', title:'Alpha vs the index', head:(s.alpha_n50!=null?'<span class="'+cls(s.alpha_n50)+'">'+pct(s.alpha_n50,1)+'</span><small> vs Nifty 50</small>':'—'), verdict:(s.alpha_since?'Money return minus the index, both since <b>'+esc(s.alpha_label||dm(s.alpha_since))+'</b>.':'No start date — alpha cannot be measured.'),
     body:cells([['vs Nifty 50',pct(s.alpha_n50,1),cls(s.alpha_n50)],['vs Nifty 500',pct(s.alpha_n500,1),cls(s.alpha_n500)]])+'<div class="pf-ins">Portfolio money return '+pct(s.pnl_pct,1)+' over the same window.</div>'});
   /* 3 Scorr Parameters + overall rating */
-  C.push({web:'Scorr Parameters · rating', title:'Rating', head:f1(rt.overall)+'<small> / 10 · '+esc(rt.verdict||'—')+'</small>', verdict:esc(rt.insight||''),
+  C.push({key:'rating', web:'Scorr Parameters · rating', title:'Rating', head:f1(rt.overall)+'<small> / 10 · '+esc(rt.verdict||'—')+'</small>', verdict:esc(rt.insight||''),
     body:'<div class="pf-bar">'+bar('G',rt.growth,G)+bar('V',rt.value,T)+bar('M',rt.momentum,B)+bar('Q',rt.quality,P)+'</div><div class="pf-ins">Growth · Value · Momentum · Quality, each out of 10, weighted by value.</div>'});
   /* 4 1-yr Return vs Benchmarks */
-  C.push({web:'1-yr Return vs Benchmarks', title:'One-year return', head:(bm.portfolio_1y!=null?'<span class="'+cls(bm.portfolio_1y)+'">'+pct(bm.portfolio_1y,1)+'</span>':'—'), verdict:(bm.portfolio_1y!=null&&bm.nifty50_1y!=null?(bm.portfolio_1y>bm.nifty50_1y?'Ahead of':'Behind')+' the Nifty 50 over the last year.':'One-year return not available.'),
+  C.push({key:'oneyear', web:'1-yr Return vs Benchmarks', title:'One-year return', head:(bm.portfolio_1y!=null?'<span class="'+cls(bm.portfolio_1y)+'">'+pct(bm.portfolio_1y,1)+'</span>':'—'), verdict:(bm.portfolio_1y!=null&&bm.nifty50_1y!=null?(bm.portfolio_1y>bm.nifty50_1y?'Ahead of':'Behind')+' the Nifty 50 over the last year.':'One-year return not available.'),
     body:cells([['Portfolio',pct(bm.portfolio_1y,1),cls(bm.portfolio_1y)],['Nifty 50',pct(bm.nifty50_1y,1),cls(bm.nifty50_1y)],['Nifty 500',pct(bm.nifty500_1y,1),cls(bm.nifty500_1y)]])+'<div class="pf-ins">Price return of the holdings held today, value-weighted.</div>'});
   /* 5 Valuation & Yield */
-  C.push({web:'Valuation & Yield', title:'Valuation & yield', head:f1(val.portfolio_pe)+'<small> portfolio P/E</small>', verdict:esc(val.insight||'Valuation figures as available.'),
+  C.push({key:'valuation', web:'Valuation & Yield', title:'Valuation & yield', head:f1(val.portfolio_pe)+'<small> portfolio P/E</small>', verdict:esc(val.insight||'Valuation figures as available.'),
     body:cells([['Portfolio PE',f1(val.portfolio_pe)],['Sector PE',f1(val.sector_pe)],['Nifty PE',f1(val.nifty_pe)],['Div yield',f1(yl.portfolio_yield)+'%'],['Sector yield',f1(yl.sector_yield)+'%'],['Nifty yield',f1(yl.nifty_yield)+'%']])+'<div class="pf-ins">Nifty PE and yield: '+esc(val.nifty_pe_note||'')+'.</div>'});
   /* 6 Portfolio Risk Metrics */
-  C.push({web:'Portfolio Risk Metrics', title:'Risk', head:(rm?f2(rm.beta)+'<small> beta</small>':'—'), verdict:(rm?'Trailing '+(rm.window_days||'')+' trading days against the Nifty 50.':'Risk metrics unavailable — not enough price history.'),
+  C.push({key:'risk', web:'Portfolio Risk Metrics', title:'Risk', head:(rm?f2(rm.beta)+'<small> beta</small>':'—'), verdict:(rm?'Trailing '+(rm.window_days||'')+' trading days against the Nifty 50.':'Risk metrics unavailable — not enough price history.'),
     body:(rm?cells([['Beta',f2(rm.beta)],['Std dev',f1(rm.std_dev)],['Sharpe',f2(rm.sharpe)],['Sortino',f2(rm.sortino)],['Max drawdown',(rm.max_drawdown!=null?f1(rm.max_drawdown)+'%':'—'),'pf-neg'],['R-squared',f2(rm.r_squared)]])+'<div class="pf-ins">Risk-free rate '+f1(rm.risk_free_rate)+'%.'+((rm.excluded||[]).length?' Left out for short history: '+esc((rm.excluded||[]).join(', '))+'.':'')+'</div>':'')});
   /* 7 Sector Split + Sector Ratings */
   var strip=sec.strip||[];
-  C.push({web:'Sector Split · Sector Ratings', title:'Sectors', head:(strip[0]?f1(strip[0].weight)+'%<small> '+esc(strip[0].segment)+'</small>':'—'), verdict:esc(sec.insight||''),
+  C.push({key:'sectors', web:'Sector Split · Sector Ratings', title:'Sectors', head:(strip[0]?f1(strip[0].weight)+'%<small> '+esc(strip[0].segment)+'</small>':'—'), verdict:esc(sec.insight||''),
     body:'<div class="pf-mix">'+strip.map(function(x,i){ return '<i style="width:'+x.weight+'%;background:'+cols[i%cols.length]+'"></i>'; }).join('')+'</div><table class="pf-tb" style="margin-top:8px"><thead><tr><th>Sector</th><th>Weight</th><th>Call</th></tr></thead><tbody>'+(sec.table||[]).map(function(x){ return '<tr><td>'+esc(x.segment)+'</td><td>'+f1(x.weight)+'%</td><td class="'+(x.call==='Strong'?'pf-pos':(x.call==='Weak'?'pf-neg':''))+'">'+esc(x.call||'—')+(x.score!=null?' <small>'+f1(x.score)+'</small>':'')+'</td></tr>'; }).join('')+'</tbody></table>'});
   /* 8 Winners vs Losers */
   var wtot=(wl.winners||0)+(wl.losers||0);
-  C.push({web:'Winners vs Losers', title:'Winners vs losers', head:(wl.winners||0)+'<small> : </small>'+(wl.losers||0), verdict:esc(wl.insight||''),
+  C.push({key:'winners', web:'Winners vs Losers', title:'Winners vs losers', head:(wl.winners||0)+'<small> : </small>'+(wl.losers||0), verdict:esc(wl.insight||''),
     body:'<div class="pf-mix"><i style="width:'+(wtot?(wl.winners||0)/wtot*100:0)+'%;background:'+G+'"></i><i style="width:'+(wtot?(wl.losers||0)/wtot*100:0)+'%;background:'+tok('--loss')+'"></i></div><div class="pf-mixl"><span><i class="pf-dot" style="background:'+G+'"></i><b>'+(wl.winners||0)+'</b> in profit</span><span><i class="pf-dot" style="background:'+tok('--loss')+'"></i><b>'+(wl.losers||0)+'</b> in loss</span><span>ratio <b>'+f2(wl.ratio)+'</b></span></div>'});
   /* 9 Cap Diversification */
   var capTop=Object.keys(cb.weights||{}).sort(function(a,b){ return (cb.weights[b]||0)-(cb.weights[a]||0); })[0];
-  C.push({web:'Cap Diversification', title:'Company size', head:(capTop?f1(cb.weights[capTop])+'%<small> '+esc(capTop)+'</small>':'—'), verdict:esc(cb.insight||''), body:mixbar(cb.weights,cb.counts)});
+  C.push({key:'size', web:'Cap Diversification', title:'Company size', head:(capTop?f1(cb.weights[capTop])+'%<small> '+esc(capTop)+'</small>':'—'), verdict:esc(cb.insight||''), body:mixbar(cb.weights,cb.counts)});
   /* 10 Quality · GVM Bands */
   var qTop=Object.keys(qb.weights||{}).sort(function(a,b){ return (qb.weights[b]||0)-(qb.weights[a]||0); })[0];
-  C.push({web:'Quality · GVM Bands', title:'Quality bands', head:(qTop?f1(qb.weights[qTop])+'%<small> '+esc(qTop)+'</small>':'—'), verdict:esc(qb.insight||''), body:mixbar(qb.weights,qb.counts)});
+  C.push({key:'quality', web:'Quality · GVM Bands', title:'Quality bands', head:(qTop?f1(qb.weights[qTop])+'%<small> '+esc(qTop)+'</small>':'—'), verdict:esc(qb.insight||''), body:mixbar(qb.weights,qb.counts)});
   /* 11 Top Gainers */
   var gn=d.gainers||[], ls=d.losers||[];
-  C.push({web:'Top Gainers', title:'Top gainers', head:(gn[0]?'<span class="pf-pos">'+pct(gn[0].pnl_pct,1)+'</span><small> '+esc(gn[0].symbol)+'</small>':'—'), verdict:(gn.length?gn.length+' best performers by P&amp;L on cost.':'No holding is in profit.'),
+  C.push({key:'gainers', web:'Top Gainers', title:'Top gainers', head:(gn[0]?'<span class="pf-pos">'+pct(gn[0].pnl_pct,1)+'</span><small> '+esc(gn[0].symbol)+'</small>':'—'), verdict:(gn.length?gn.length+' best performers by P&amp;L on cost.':'No holding is in profit.'),
     body:nameRows(gn,function(x){ return [pct(x.pnl_pct,1),inrL(x.pnl_abs,true)+' · '+f1(x.weight)+'% wt','pf-pos']; })});
   /* 12 Top Losers */
-  C.push({web:'Top Losers', title:'Top losers', head:(ls[0]?'<span class="pf-neg">'+pct(ls[0].pnl_pct,1)+'</span><small> '+esc(ls[0].symbol)+'</small>':'—'), verdict:(ls.length?ls.length+' weakest by P&amp;L on cost.':'No holding is in loss.'),
+  C.push({key:'losers', web:'Top Losers', title:'Top losers', head:(ls[0]?'<span class="pf-neg">'+pct(ls[0].pnl_pct,1)+'</span><small> '+esc(ls[0].symbol)+'</small>':'—'), verdict:(ls.length?ls.length+' weakest by P&amp;L on cost.':'No holding is in loss.'),
     body:nameRows(ls,function(x){ return [pct(x.pnl_pct,1),inrL(x.pnl_abs,true)+' · '+f1(x.weight)+'% wt','pf-neg']; })});
   /* 13 Upcoming Results */
   var up=d.upcoming||[];
-  C.push({web:'Upcoming Results', title:'Upcoming results', head:up.length+'<small> scheduled</small>', verdict:(up.length?'Next: <b>'+esc(up[0].symbol)+'</b> on '+esc(dm(up[0].date))+(up[0].days_to!=null?' ('+up[0].days_to+' days)':'')+'.':'No results scheduled for these holdings.'),
+  C.push({key:'upcoming', web:'Upcoming Results', title:'Upcoming results', head:up.length+'<small> scheduled</small>', verdict:(up.length?'Next: <b>'+esc(up[0].symbol)+'</b> on '+esc(dm(up[0].date))+(up[0].days_to!=null?' ('+up[0].days_to+' days)':'')+'.':'No results scheduled for these holdings.'),
     body:(up.length?nameRows(up,function(x){ return [esc(dm(x.date)),(x.days_to!=null?'in '+x.days_to+' days':''),'']; },function(x){ return x.event||'Results'; }):'')});
   /* 14 Red Flags */
   var rf=d.red_flags||[];
-  C.push({web:'Red Flags', title:'Red flags', head:rf.length+'<small> flag'+(rf.length===1?'':'s')+'</small>', verdict:(rf.length?'Pledge, FII selling and drawdown screens.':'Nothing on the pledge, FII and drawdown screens.'),
+  C.push({key:'redflags', web:'Red Flags', title:'Red flags', head:rf.length+'<small> flag'+(rf.length===1?'':'s')+'</small>', verdict:(rf.length?'Pledge, FII selling and drawdown screens.':'Nothing on the pledge, FII and drawdown screens.'),
     body:(rf.length?'<div class="pf-rows">'+rf.map(function(x){ return '<a class="pf-row" href="/m/check?sym='+encodeURIComponent(x.symbol)+'"><div><div class="pf-nm">'+esc(x.symbol)+'<span class="pf-tag pf-s">'+esc(x.flag)+'</span></div><div class="pf-sub">'+esc(x.detail||'')+'</div></div><div class="pf-rv"></div></a>'; }).join('')+'</div>':'')});
   /* 15 Replacement Idea */
   var rp=d.replacements||[];
-  C.push({web:'Replacement Idea', title:'Replacement ideas', head:rp.length+'<small> to review</small>', verdict:(rp.length?'Holdings rated Weak, with higher-rated peers in the same segment.':'No holding rates Weak — nothing to replace.'),
+  C.push({key:'replacements', web:'Replacement Idea', title:'Replacement ideas', head:rp.length+'<small> to review</small>', verdict:(rp.length?'Holdings rated Weak, with higher-rated peers in the same segment.':'No holding rates Weak — nothing to replace.'),
     body:(rp.length?'<div class="pf-rows">'+rp.map(function(x){ return '<div class="pf-row"><div><div class="pf-nm">'+esc(x.holding)+'<span class="pf-tag pf-s">'+esc(x.action||'review')+'</span></div><div class="pf-sub">'+esc(x.segment||'')+' · peers: '+esc((x.peers||[]).map(function(pp){ return pp.symbol||pp; }).join(', '))+'</div></div><div class="pf-rv"></div></div>'; }).join('')+'</div>':'')+'<div class="pf-ins">'+esc(d.replacement_note||'')+'</div>'});
   /* 16 Holdings — Full Detail */
   var hs=(d.holdings||[]).slice().sort(function(a,b){ return (b.weight||0)-(a.weight||0); });
-  C.push({web:'Holdings — Full Detail', title:'Holdings', head:hs.length+'<small> names</small>', verdict:'Weight by market value · P&amp;L on cost · rating out of 10.',
+  C.push({key:'holdings', web:'Holdings — Full Detail', title:'Holdings', head:hs.length+'<small> names</small>', verdict:'Weight by market value · P&amp;L on cost · rating out of 10.',
     body:'<div class="pf-scroll"><table class="pf-tb"><thead><tr><th>Stock</th><th>Wt</th><th>CMP</th><th>P&amp;L</th><th>Rating</th><th>Size</th></tr></thead><tbody>'+hs.map(function(x){ return '<tr><td><a href="/m/check?sym='+encodeURIComponent(x.symbol)+'">'+esc(x.symbol)+'<small>'+esc(x.segment||'')+'</small></a></td><td>'+f1(x.weight)+'%</td><td>'+f2(x.cmp)+'</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct,1)+'</td><td class="'+((x.gvm||0)>=7?'pf-gd':'')+'">'+f1(x.gvm)+(x.verdict?'<small>'+esc(x.verdict)+'</small>':'')+'</td><td>'+esc(x.cap||'—')+'</td></tr>'; }).join('')+'</tbody></table></div><div class="pf-foot">Tap a name for its check page.</div>'});
   /* 17 Latest Result Analysis / Results this quarter */
   var rq=d.results_this_quarter||[], ra=d.result_analysis||[];
-  C.push({web:'Latest Result Analysis', title:'Results this quarter', head:rq.filter(function(x){ return !x.pending; }).length+'<small> reported · '+(d.results_yet_to_report||0)+' yet to</small>', verdict:(rq.length?'Sales and profit growth for the holdings that announced this quarter.':'No holding has reported this quarter yet.'),
+  C.push({key:'results', web:'Latest Result Analysis', title:'Results this quarter', head:rq.filter(function(x){ return !x.pending; }).length+'<small> reported · '+(d.results_yet_to_report||0)+' yet to</small>', verdict:(rq.length?'Sales and profit growth for the holdings that announced this quarter.':'No holding has reported this quarter yet.'),
     body:(rq.length?'<table class="pf-tb"><thead><tr><th>Name</th><th>Sales</th><th>Profit</th><th>FY27 est</th></tr></thead><tbody>'+rq.map(function(x){ return '<tr><td>'+esc(x.symbol)+(x.pending?'<small>numbers awaited</small>':'')+'</td><td class="'+cls(x.sales_growth)+'">'+pct(x.sales_growth,1)+'</td><td class="'+cls(x.profit_growth)+'">'+pct(x.profit_growth,1)+'</td><td>'+pct(x.fy27_est,1)+'</td></tr>'; }).join('')+'</tbody></table>':'')+(ra.length?'<div class="pf-rows">'+ra.map(function(x){ return '<div class="pf-row"><div><div class="pf-nm">'+esc(x.symbol)+(x.chip?'<span class="pf-tag '+(x.chip==='Strong'?'pf-g':(x.chip==='Weak'?'pf-s':''))+'">'+esc(x.chip)+'</span>':'')+'</div><div class="pf-sub" style="white-space:normal">'+esc(x.analysis||'')+'</div></div></div>'; }).join('')+'</div>':'')});
   /* 18 Key Highlights */
-  C.push({web:'Key Highlights', title:'What stands out', head:(d.highlights||[]).length+'<small> points</small>', verdict:'The section insights, in one place.', body:'<ul class="pf-ul">'+(d.highlights||[]).map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('')+'</ul>'});
+  C.push({key:'highlights', web:'Key Highlights', title:'What stands out', head:(d.highlights||[]).length+'<small> points</small>', verdict:'The section insights, in one place.', body:'<ul class="pf-ul">'+(d.highlights||[]).map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('')+'</ul>'});
   /* 19 Expert take */
-  C.push({web:'Expert take', title:'Expert take', head:'<small>Rule-generated · research, not advice</small>', verdict:'', body:'<div class="pf-take">'+esc(d.expert_take||'')+'</div>'});
+  C.push({key:'expert', web:'Expert take', title:'Expert take', head:'<small>Rule-generated · research, not advice</small>', verdict:'', body:'<div class="pf-take">'+esc(d.expert_take||'')+'</div>'});
   /* 20 Breakup tab — rating breakup */
   var rb=d.rating_breakup||[]; var params=[]; rb.forEach(function(r){ if(!params.length&&r.rated&&r.params) params=Object.keys(r.params); });
   var restN=Math.max(0,(d.holdings||[]).length-rb.length), restW=restN?(d.holdings||[]).slice().sort(function(a,b){ return (b.weight||0)-(a.weight||0); }).slice(rb.length).reduce(function(t,x){ return t+(x.weight||0); },0):0;
-  C.push({web:'Breakup tab (rating breakup)', title:'Rating breakup', head:params.length+'<small> parameters × '+rb.length+' holdings</small>', verdict:'Each rating parameter per holding, out of 10. Scroll sideways.'+(restN?' +'+restN+' more holdings ('+f1(restW)+'% weight) not shown, as on the web.':''),
+  C.push({key:'breakup', web:'Breakup tab (rating breakup)', title:'Rating breakup', head:params.length+'<small> parameters × '+rb.length+' holdings</small>', verdict:'Each rating parameter per holding, out of 10. Scroll sideways.'+(restN?' +'+restN+' more holdings ('+f1(restW)+'% weight) not shown, as on the web.':''),
     body:(rb.length&&params.length?'<div class="pf-scroll"><table class="pf-tb"><thead><tr><th>Stock</th>'+params.map(function(k){ return '<th>'+esc(k)+'</th>'; }).join('')+'</tr></thead><tbody>'+rb.map(function(r){ return '<tr><td>'+esc(r.symbol)+'<small>'+f1(r.weight)+'% wt'+(r.rated?'':' · not rated')+'</small></td>'+params.map(function(k){ var v=r.rated?(r.params||{})[k]:null; return '<td>'+(v==null?'—':f1(v))+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div>':'<div class="pf-emp">No rating breakup rows.</div>')});
   return C;
 }
-var RAILN=0, RAILI=0;
+/* cc#2209: the 20 cards live in SEVEN vertical categories; a horizontal swipe stays inside one category, the page scrolls
+   down to the next. CATEGORIES is data -- re-grouping later is a change to this array, not a rewrite. A card whose key
+   is not listed here falls into a trailing 'More' group, so a new card can never vanish. */
+var CATEGORIES=[
+  {title:'Performance',     keys:['snapshot','alpha','oneyear','valuation','risk']},
+  {title:'Rating',          keys:['rating','quality']},
+  {title:'Composition',     keys:['sectors','size']},
+  {title:'Movers',          keys:['winners','gainers','losers']},
+  {title:'Watch list',      keys:['upcoming','redflags','replacements','results']},
+  {title:'Holdings detail', keys:['holdings','breakup']},
+  {title:'Takeaways',       keys:['highlights','expert']}];
+function groupCards(C){ var by={}, used={}; C.forEach(function(c){ by[c.key]=c; });
+  var out=CATEGORIES.map(function(g){ return {title:g.title, cards:g.keys.map(function(k){ used[k]=true; return by[k]; }).filter(Boolean)}; });
+  var rest=C.filter(function(c){ return !used[c.key]; }); if(rest.length) out.push({title:'More', cards:rest});
+  return out.filter(function(g){ return g.cards.length; }); }
+function bindRail(gi, n){
+  var rail=document.getElementById('pf-rail-'+gi), cnt=document.getElementById('pf-rcount-'+gi), dots=document.getElementById('pf-dots-'+gi), cur=0;
+  function step(){ var c=rail.querySelector('.pf-rc'); return c?c.getBoundingClientRect().width+12:1; }
+  function set(i){ if(i===cur) return; cur=i; cnt.textContent=(i+1)+' / '+n; var ds=dots.querySelectorAll('i'); for(var k=0;k<ds.length;k++) ds[k].classList.toggle('pf-on',k===i); }
+  var tick=false; rail.addEventListener('scroll', function(){ if(tick) return; tick=true; requestAnimationFrame(function(){ tick=false; set(Math.max(0,Math.min(n-1,Math.round(rail.scrollLeft/step())))); }); });
+  dots.addEventListener('click', function(e){ var ds=Array.prototype.slice.call(dots.querySelectorAll('i')); var i=ds.indexOf(e.target); if(i<0) return; rail.scrollTo({left:i*step(),behavior:'smooth'}); set(i); });
+}
 function renderReport(){
   hdr('report');
   if(!REP){ document.getElementById('pf-body').innerHTML='<div class="pf-err">Building the report from live prices…</div>'; return; }
-  var C=buildCards(REP), p=REP.portfolio||{}; RAILN=C.length; RAILI=0;
-  document.getElementById('pf-asof').innerHTML='<b>'+esc(shortName(p.name||NAME))+'</b> · '+C.length+' sections · swipe sideways, or tap a section';
-  var h='<div class="pf-rhead"><span class="pf-rcount" id="pf-rcount">1 / '+C.length+'</span><div class="pf-idx" id="pf-idx">'+C.map(function(c,i){ return '<span class="pf-ic'+(i===0?' pf-on':'')+'" data-i="'+i+'">'+esc(c.title)+'</span>'; }).join('')+'</div></div>';
-  h+='<div class="pf-dots" id="pf-dots">'+C.map(function(c,i){ return '<i'+(i===0?' class="pf-on"':'')+'></i>'; }).join('')+'</div>';
-  h+='<div class="pf-rail" id="pf-rail">'+C.map(function(c,i){ return '<div class="pf-rc" data-i="'+i+'"><div class="pf-eye">'+(i+1)+' of '+C.length+'<span>web: '+esc(c.web)+'</span></div><div class="pf-ct">'+esc(c.title)+'</div><div class="pf-hd">'+c.head+'</div>'+(c.verdict?'<div class="pf-vd">'+c.verdict+'</div>':'')+'<div class="pf-bd">'+c.body+'</div></div>'; }).join('')+'</div>';
+  var C=buildCards(REP), p=REP.portfolio||{}, G=groupCards(C);
+  document.getElementById('pf-asof').innerHTML='<b>'+esc(shortName(p.name||NAME))+'</b> · '+C.length+' sections in '+G.length+' groups · swipe within a group, scroll down for the next';
+  var h='';
+  G.forEach(function(g,gi){
+    h+='<div class="pf-cat" data-g="'+gi+'"><div class="pf-cath"><h2>'+esc(g.title)+'</h2><span class="pf-rcount" id="pf-rcount-'+gi+'">1 / '+g.cards.length+'</span></div>';
+    h+='<div class="pf-dots" id="pf-dots-'+gi+'">'+g.cards.map(function(c,i){ return '<i'+(i===0?' class="pf-on"':'')+'></i>'; }).join('')+'</div>';
+    h+='<div class="pf-rail" id="pf-rail-'+gi+'" data-g="'+gi+'">'+g.cards.map(function(c,i){ return '<div class="pf-rc" data-i="'+i+'" data-key="'+esc(c.key)+'"><div class="pf-eye">'+(i+1)+' of '+g.cards.length+' · '+esc(g.title)+'<span>web: '+esc(c.web)+'</span></div><div class="pf-ct">'+esc(c.title)+'</div><div class="pf-hd">'+c.head+'</div>'+(c.verdict?'<div class="pf-vd">'+c.verdict+'</div>':'')+'<div class="pf-bd">'+c.body+'</div></div>'; }).join('')+'</div></div>';
+  });
   h+='<div class="pf-hint">Every card is a section of the web Portfolio Health report. Research, not advice.</div>';
   h+='<div class="pf-act" style="margin-top:14px"><a class="pf-btn2" id="pf-pdf" href="#"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>Download PDF</a><div class="pf-msg" id="pf-pdf-msg"></div></div>';
   document.getElementById('pf-body').innerHTML=h;
-  var rail=document.getElementById('pf-rail'), idx=document.getElementById('pf-idx'), dots=document.getElementById('pf-dots');
-  function step(){ var c=rail.querySelector('.pf-rc'); return c?c.getBoundingClientRect().width+12:1; }
-  function setIdx(i){ if(i===RAILI) return; RAILI=i; document.getElementById('pf-rcount').textContent=(i+1)+' / '+RAILN; var ics=idx.querySelectorAll('.pf-ic'), ds=dots.querySelectorAll('i'); for(var k=0;k<ics.length;k++){ ics[k].classList.toggle('pf-on',k===i); ds[k].classList.toggle('pf-on',k===i); } var on=ics[i]; if(on&&on.scrollIntoView) on.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'}); }
-  var tick=false; rail.addEventListener('scroll', function(){ if(tick) return; tick=true; requestAnimationFrame(function(){ tick=false; setIdx(Math.max(0,Math.min(RAILN-1,Math.round(rail.scrollLeft/step())))); }); });
-  idx.addEventListener('click', function(e){ var t=e.target.closest('.pf-ic'); if(!t) return; var i=Number(t.getAttribute('data-i')); rail.scrollTo({left:i*step(),behavior:'smooth'}); setIdx(i); });
+  G.forEach(function(g,gi){ bindRail(gi, g.cards.length); });
   document.getElementById('pf-pdf').addEventListener('click', function(e){ e.preventDefault(); downloadPdf(); });
-  window.pfGo=function(i){ rail.scrollTo({left:i*step()}); setIdx(i); };
+  window.pfGo=function(i){ var n=0; for(var gi=0;gi<G.length;gi++){ if(i<n+G[gi].cards.length){ var rail=document.getElementById('pf-rail-'+gi), c=rail.querySelector('.pf-rc'), st=c?c.getBoundingClientRect().width+12:1; rail.scrollTo({left:(i-n)*st}); rail.closest('.pf-cat').scrollIntoView({block:'start'}); return; } n+=G[gi].cards.length; } };
 }
 /* ═══ CLIENT PICKER (founder 15:15: filter icon -> full page, search on top, every name below) ═══ */
 function renderPick(){
