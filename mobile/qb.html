@@ -32,11 +32,17 @@
 .pos{color:var(--win)}.neg{color:var(--loss)}
 /* EXPLORE · spine card */
 .sp{display:grid;grid-template-columns:4px 1fr 96px;gap:0 var(--space-12);margin:0 var(--space-16) var(--space-10);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-12) var(--space-12) 0;text-decoration:none;color:inherit;overflow:hidden}
-.sp .rail{background:var(--brand);border-radius:0 var(--radius-3) var(--radius-3) 0}
+.sp .rail{background:var(--brand);border-radius:0 var(--radius-3) var(--radius-3) 0;grid-row:span 2}
 .sp .nm{font-size:var(--type-15);font-weight:800;letter-spacing:var(--track-em3)}
 .sp .why{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3);line-height:1.45}
-.sp .row{display:flex;gap:var(--space-14);margin-top:var(--space-8);align-items:baseline}
-.sp .row .v{font-size:var(--type-13);font-weight:800}.sp .row .k{font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em9);display:block}
+/* cc#2189: the card footer is its own qb- prefixed set. The old .row / .k / .v names are also mobile_app.css
+   bare selectors (a boxed value pill with a ::before left bar, its own heights) -- that was the clipped
+   caption, the stray bar on the date pill and the pills crossing the divider. Two labelled stats, caption
+   above value, one hairline with a 12px gap on both sides. */
+.sp .qb-foot{grid-column:2/-1;display:grid;grid-template-columns:1fr 1fr;gap:var(--space-12);margin-top:var(--space-12);padding-top:var(--space-12);border-top:var(--bw-1) solid var(--edge);min-width:0}
+.sp .qb-foot>div{min-width:0}
+.sp .qb-k{display:block;font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em9);line-height:1.3}
+.sp .qb-v{display:block;font-size:var(--type-13);font-weight:800;color:var(--ink);margin-top:var(--space-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
 .sp .spark{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between}
 .sp .spark svg{width:96px;height:38px}
 .sp .spark .ret{font-size:var(--type-17);font-weight:800;line-height:1}.sp .spark .vs{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);text-align:right}
@@ -153,9 +159,13 @@ function spine(c){
     : '<div class="ret '+cls(c.return_pct)+'">'+pct(c.return_pct)+'</div><div class="vs">since '+esc(dm(c.since))+(c.bench_pct!=null?' · Nifty '+pct(c.bench_pct):'')+'</div>';
   return '<a class="sp" href="/m/qb?basket='+encodeURIComponent(c.basket)+'"><div class="rail"></div>'
     + '<div><div class="nm">'+esc(c.label)+'</div><div class="why">'+esc(c.why)+'</div>'
-    + '<div class="row"><div><span class="k">Min · one share each</span><span class="v">'+inr(c.min_one_share)+'</span></div>'
-    + '<div><span class="k">Rebalance</span><span class="v">'+esc(c.rebalance)+(c.next_rebalance?' · next '+esc(dm(c.next_rebalance)):'')+'</span></div></div></div>'
-    + '<div class="spark">'+spark(c.spark)+'<div>'+ret+'</div></div></a>';
+    + '</div>'
+    + '<div class="spark">'+spark(c.spark)+'<div>'+ret+'</div></div>'
+    /* cc#2189: the footer is its own grid row under BOTH columns (name column + spark column), so the two
+       captions get the card's full width; the rail spans both rows. */
+    + '<div class="qb-foot"><div><span class="qb-k">Min · one share each</span><span class="qb-v">'+inr(c.min_one_share)+'</span></div>'
+    + (c.next_rebalance ? '<div><span class="qb-k">Next rebalance</span><span class="qb-v">'+esc(dm(c.next_rebalance))+' · '+esc(c.rebalance)+'</span></div>'
+                        : '<div><span class="qb-k">Rebalance</span><span class="qb-v">'+esc(c.rebalance||'—')+'</span></div>')+'</div></a>';
 }
 function renderList(d){
   document.getElementById('asof').innerHTML='Marked <b>'+esc(dmt(d.as_of))+'</b> · '+d.count+' baskets · live paper books, nothing backtested';
