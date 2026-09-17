@@ -5137,8 +5137,11 @@ function renderV10(){
   var view = (V10.leg === 'OPT') ? 'OPT' : 'FUT';
   var lst = v10LegStats(d, view);
   var lrows = (d.trades || []).filter(function(t){ return t.leg === view && !t.open; });
-  var lw = lrows.filter(function(t){ return Number(t.net_pnl) > 0; }).length;
-  var ll = lrows.filter(function(t){ return Number(t.net_pnl) < 0; }).length;
+  /* cc#2200: the per-leg trades[] dicts carry pnl and win (server-computed for every closed trade) --
+     net_pnl is a field of the PAIRED list only, so the old Number(t.net_pnl) was NaN here and the line
+     always read 0W/0L. Count on the leg's own pnl: a closed leg with pnl > 0 is a win, < 0 a loss. */
+  var lw = lrows.filter(function(t){ return Number(t.pnl) > 0; }).length;
+  var ll = lrows.filter(function(t){ return Number(t.pnl) < 0; }).length;
   bd.innerHTML = v10Toggle()
     + '<div class="v10st">'
     + '<span>' + lrows.length + ' closed · ' + lw + 'W/' + ll + 'L'
