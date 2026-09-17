@@ -169,6 +169,18 @@ def _written_set(cur, quarter):
     return {r[0] for r in cur.fetchall()}
 
 
+def sector_size(avg_mcap):
+    """cc#2162: Large / Mid / Small from the sector's average market cap (Rs Cr), on the platform's own cuts --
+    investment_check.CAP_LARGE_MIN / CAP_MID_MIN, imported, never retyped (the same rule /m/sector's size toggle
+    and /api/mobile/sector/caps read). No average -> None: such a row is counted in sectors_unsized and never
+    matches a size filter."""
+    from investment_check import CAP_LARGE_MIN, CAP_MID_MIN
+    v = _fl(avg_mcap)
+    if v is None:
+        return None
+    return "Large" if v >= CAP_LARGE_MIN else ("Mid" if v >= CAP_MID_MIN else "Small")
+
+
 def _co_row(c, written):
     return {"symbol": c.get("symbol"), "company": c.get("company"), "segment": c.get("segment"), "tier": c.get("tier"),
             "gvm": _fl(c.get("gvm")), "verdict": c.get("verdict"), "reported": c.get("reported_date"),
@@ -206,7 +218,9 @@ def mobile_results_season(request: Request):
         sectors.append({"sector": s.get("sector"), "reported": s.get("reported"), "total": s.get("total"),
                         "sales_yoy": _fl(s.get("sales_yoy")), "pat_yoy": _fl(s.get("pat_yoy")),
                         "pct_positive": s.get("pct_positive"), "gvm": _fl(s.get("gvm")), "verdict": s.get("gvm_verdict"),
-                        "tiny": bool(s.get("tiny_base")), "avg_mcap": _fl(s.get("avg_mcap")), "n_used": s.get("n_used")})
+                        "tiny": bool(s.get("tiny_base")), "avg_mcap": _fl(s.get("avg_mcap")), "n_used": s.get("n_used"),
+                        # cc#2162: size band on the platform cuts + the profit-reading count the median was struck on
+                        "size": sector_size(s.get("avg_mcap")), "pat_n": s.get("pat_n_detailed")})
     wl = result_analysis_v2_list(limit=12, quarter=_qkey(quarter))   # cc#2167: stored spelling, never the display label
     written_rows = [{"symbol": r.get("symbol"), "company": r.get("company"), "quarter": r.get("quarter"),
                      "polished_at": r.get("polished_at"), "teaser": r.get("teaser"), "result_date": r.get("result_date")}
@@ -219,6 +233,7 @@ def mobile_results_season(request: Request):
                         "pat_n": summ.get("pat_n_detailed"), "tiers": summ.get("tiers"), "basis": summ.get("basis_split")},
             "movers": {"up": movers_up, "down": movers_dn},
             "sectors": sectors,
+            "sectors_unsized": sum(1 for x in sectors if x.get("size") is None),   # cc#2162: rows with no avg_mcap
             "written": {"rows": written_rows, "total": (wl.get("total_polished") if isinstance(wl, dict) else None),
                         "last": last_written.isoformat() if last_written else None},
             "upcoming": upcoming,

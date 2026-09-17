@@ -5,6 +5,8 @@
                                    sector ladder, written-up analyses, next 10 days
        /m/results?view=companies → every reporter this season, sortable
        /m/results?sym=<symbol>   → one company's numbers + the written analysis
+     cc#2161 (17-Sep): hero = two tappable median cells + Leading sectors strip. cc#2162: 'Sectors this season' (Top / Under toggle,
+     size chips with counts, five rows, View more sheet, ?perf=&size= URL state) replaces the Sector by sector ladder.
      Data: /api/mobile/results_app/season · /companies · /analysis?symbol= (results_app_mobile.py V2), which read
      the web Result Corner's own result_corner_v2 and the Results page's own analysis feed. Contract tokens only. -->
 <html lang="en">
@@ -56,14 +58,35 @@
 .mc .p{font-size:var(--type-17);font-weight:800;margin-top:var(--space-6);line-height:1}.mc .pl{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2)}
 .mc .g{display:flex;justify-content:space-between;font-size:var(--type-95);color:var(--muted);margin-top:var(--space-7);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi)}.mc .g b{color:var(--ink)}
 .mc .rd{color:var(--brand);font-weight:800}
-/* sector ladder */
-.lad{margin:0 var(--space-16);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
-.lr{display:grid;grid-template-columns:1fr 62px 62px;gap:var(--space-8);align-items:center;padding:var(--space-9) var(--space-12);border-bottom:var(--bw-1) solid var(--hi)}
-.lr:last-child{border-bottom:none}
-.lr .nm{font-size:var(--type-12);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lr .sub{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2)}
-.lr .v{text-align:right;font-size:var(--type-125);font-weight:800}.lr .v small{display:block;font-size:var(--type-8);color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:var(--track-em8)}
-.lr.h{background:var(--hi)}.lr.h .v{font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}
-.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
+/* cc#2162: Sectors this season -- toggle, size chips, five rows, View more sheet */
+.st-basis{padding:0 var(--space-16) var(--space-8);font-size:var(--type-10);color:var(--muted);line-height:1.45;margin-top:var(--space-n4)}
+.st-tog{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
+.st-tog button{flex:1;min-height:40px;border:none;border-radius:var(--radius-16);background:none;color:var(--muted);font-family:inherit;font-size:var(--type-115);font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.st-tog button[aria-pressed="true"]{background:var(--brand);color:var(--field)}
+.st-chips{display:flex;gap:var(--space-6);margin:var(--space-8) var(--space-16) 0;overflow-x:auto;scrollbar-width:none}.st-chips::-webkit-scrollbar{display:none}
+.st-chip{flex:1 1 0;min-width:0;min-height:40px;display:flex;align-items:center;justify-content:center;gap:var(--space-4);padding:0 var(--space-6);border-radius:var(--radius-12);background:var(--panel);border:var(--bw-1) solid var(--edge);color:var(--ink);font-family:inherit;font-size:var(--type-11);font-weight:800;cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.st-chip small{font-size:var(--type-9);font-weight:700;color:var(--muted)}
+.st-chip[aria-pressed="true"]{background:color-mix(in srgb, var(--brand) 16%, var(--panel));border-color:var(--brand);color:var(--brand)}.st-chip[aria-pressed="true"] small{color:var(--brand)}
+.st-tbl{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.st-h{display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:var(--space-8);padding:var(--space-7) var(--space-12);background:var(--hi);font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.st-h span:not(:first-child){text-align:right}
+.st-r{display:grid;grid-template-columns:minmax(0,1fr) 70px 70px;gap:var(--space-8);align-items:center;min-height:52px;padding:var(--space-8) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit}.st-r:last-child{border-bottom:none}.st-r>div{min-width:0}   /* a long name ellipsises; the number columns never move */
+.st-nm{font-size:var(--type-12);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-sub{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-sub i{font-style:normal;margin-left:var(--space-4);padding:var(--space-1) var(--space-4);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-6);font-weight:800;text-transform:uppercase;letter-spacing:var(--track-em8);font-size:var(--type-8)}
+.st-p{text-align:right;font-size:var(--type-125);font-weight:800;font-variant-numeric:tabular-nums}
+.st-s{text-align:right;font-size:var(--type-115);font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.st-emp{padding:var(--space-10) var(--space-12);font-size:var(--type-105);color:var(--muted);line-height:1.5;border-top:var(--bw-1) solid var(--hi)}.st-emp:first-child{border-top:none}
+.st-more{display:block;margin:var(--space-8) var(--space-16) 0;font-size:var(--type-11);color:var(--muted);text-decoration:none}.st-more b{color:var(--brand);font-weight:800}.st-more[hidden]{display:none}
+.st-bd{position:fixed;inset:0;background:var(--field);opacity:.72;z-index:59}
+.st-sheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;background:var(--panel);border:var(--bw-1) solid var(--edge);border-bottom:none;border-radius:var(--radius-16) var(--radius-16) 0 0;z-index:60;padding-bottom:env(safe-area-inset-bottom);font-family:Sora,-apple-system,sans-serif;color:var(--ink)}
+.st-bd[hidden],.st-sheet[hidden]{display:none}
+.st-handle{display:block;width:36px;height:4px;border-radius:var(--radius-3);background:var(--edge);margin:var(--space-8) auto 0;cursor:pointer}
+.st-sheet-h{flex:none;padding:var(--space-6) var(--space-16) var(--space-10);border-bottom:var(--bw-1) solid var(--hi)}
+.st-sheet-t{font-size:var(--type-16);font-weight:800;margin-top:var(--space-8)}.st-sheet-m{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3)}
+.st-sheet-b{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.st-sheet-b .st-r{padding-left:var(--space-16);padding-right:var(--space-16)}
+body.st-lock{position:fixed;left:0;right:0;width:100%;overflow:hidden}
 /* written list */
 .wl{margin:0 var(--space-16);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
 .wr{display:block;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit}
@@ -144,11 +167,7 @@ function renderSeason(d){
   h+= (mv.up||[]).length ? '<div class="rl">'+mv.up.map(function(c){return mover(c,false);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing yet</b>No filing this season shows profit growth on record.</div></div>';
   h+='<div class="sec"><h2>Biggest profit falls</h2><span class="hint">vs last year · swipe →</span></div>';
   h+= (mv.down||[]).length ? '<div class="rl">'+mv.down.map(function(c){return mover(c,true);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing yet</b>No filing this season shows a profit fall on record.</div></div>';
-  var sec=(d.sectors||[]).filter(function(x){return x.reported;});
-  h+='<div class="sec"><h2>Sector by sector</h2><span class="hint">heaviest first · median moves</span></div>';
-  h+='<div class="lad"><div class="lr h"><div class="nm" style="font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)">Sector · filed</div><div class="v">Sales</div><div class="v">Profit</div></div>'
-    + sec.slice(0,10).map(function(x){ return '<div class="lr"><div><div class="nm">'+esc(x.sector)+'</div><div class="sub">'+x.reported+' of '+x.total+' filed'+(x.pct_positive!=null?' · '+x.pct_positive+'% up':'')+(x.tiny?' · thin base':'')+(x.gvm!=null?' · GVM '+f1(x.gvm):'')+'</div></div><div class="v '+cls(x.sales_yoy)+'">'+pct(x.sales_yoy)+'</div><div class="v '+cls(x.pat_yoy)+'">'+pct(x.pat_yoy)+'</div></div>'; }).join('')+'</div>';
-  h+='<div class="more">'+(sec.length>10?'+'+(sec.length-10)+' more sectors · ':'')+'<a href="/m/results?view=companies">Every company that filed, sortable ›</a></div>';
+  h+='<div class="sec"><h2>Sectors this season</h2><span class="hint">five per view</span></div><div class="st-basis">ranked by median profit growth vs last year · sectors with 3+ filings</div><div id="st"></div>';   // cc#2162
   var w=d.written||{}, wr=w.rows||[];
   h+='<div class="sec"><h2>Written up</h2><span class="hint">'+(w.total||0)+' analyses · last '+esc(dm(w.last))+'</span></div>';
   h+= wr.length ? '<div class="wl">'+wr.slice(0,8).map(function(r){ return '<a class="wr" href="/m/results?sym='+encodeURIComponent(r.symbol)+'"><div class="t"><span class="s">'+esc(r.symbol)+'</span><span class="d">'+esc(dm(r.result_date||r.polished_at))+'</span></div><div class="co">'+esc(r.company||'')+'</div><div class="tz">'+esc(r.teaser||'')+'</div></a>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Nothing written yet</b>No result analysis on record for this quarter.</div></div>';
@@ -157,7 +176,8 @@ function renderSeason(d){
   h+= up.length ? '<div class="cal">'+up.slice(0,12).map(function(u){ return '<div class="cd"><div class="d">'+esc(dm(u.date))+'</div><div class="s">'+esc(u.symbol)+'</div></div>'; }).join('')+'</div>' : '<div class="card"><div class="emp"><b>Quiet calendar</b>No result dates in the next ten days.</div></div>';
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Write-ups are Scorr editorial from filings and calls, never a recommendation.</div>';
   document.getElementById('body').innerHTML=h;
-  LEAD.sectors=d.sectors||[]; LEAD.metric='sales'; drawLead();   // cc#2161: sales strip open on load (the founder's own example)
+  LEAD.sectors=d.sectors||[]; LEAD.metric='sales'; drawLead();
+  stInit(d.sectors||[]);   // cc#2162: the sector table   // cc#2161: sales strip open on load (the founder's own example)
   ['sales','pat'].forEach(function(m){ var b=document.getElementById('kc-'+m); if(b) b.addEventListener('click', function(){ LEAD.metric=(LEAD.metric===m)?null:m; drawLead(); }); });
 }
 /* cc#2161: the hero's two cells + the leading-sectors strip. Source = d.sectors (result_corner_v2's own rows, no
@@ -178,6 +198,65 @@ function drawLead(){
      : '<div class="lead-e">No sector has three or more profit readings yet, so there is no sector median to rank.</div>';
   el.innerHTML=h; el.hidden=false;
 }
+/* cc#2162: Sectors this season. Eligible = pat_n >= 3 (the payload's own thin-base rule). Top = pat_yoy desc, Under = asc.
+   Size = the payload's `size` (platform cap cuts, set server-side); rows with no size never match a size chip.
+   State mirrored to ?perf=top|under&size=large|mid|small; default top + all. */
+var ST={perf:'top', size:'all', rows:[]}, ST_SIZES=[['all','All'],['large','Large'],['mid','Mid'],['small','Small']];
+function stElig(){ return ST.rows.filter(function(x){ var n=Number(x.pat_n!=null?x.pat_n:x.n_used); return n>=3 && x.pat_yoy!=null && !isNaN(Number(x.pat_yoy)); }); }
+function stInSize(list,size){ return size==='all'?list:list.filter(function(x){ return String(x.size||'').toLowerCase()===size; }); }
+function stSorted(list,perf){ return list.slice().sort(function(a,b){ return perf==='under'?Number(a.pat_yoy)-Number(b.pat_yoy):Number(b.pat_yoy)-Number(a.pat_yoy); }); }
+function stView(){ return stSorted(stInSize(stElig(),ST.size),ST.perf); }
+function stSizeWord(){ var s=ST_SIZES.filter(function(x){ return x[0]===ST.size; })[0]; return ST.size==='all'?'':s[1]; }
+function stRow(x){ var n=Number(x.pat_n!=null?x.pat_n:x.n_used); return '<a class="st-r" href="/m/results?view=companies&segment='+encodeURIComponent(x.sector||'')+'"><div><div class="st-nm">'+esc(x.sector)+'</div><div class="st-sub">'+n+' filings · GVM '+esc(x.verdict||'—')+(n<5?'<i>thin</i>':'')+'</div></div><span class="st-p '+cls(x.pat_yoy)+'">'+pct(x.pat_yoy)+'</span><span class="st-s">'+pct(x.sales_yoy)+'</span></a>'; }
+function stEmpty(n){ var w=stSizeWord(); return n===0?('No '+(w?w+' ':'')+'sector has 3+ filings this season.'):('Only '+n+' '+(w?w+' ':'')+'sector'+(n===1?' has':'s have')+' 3+ filings this season.'); }
+function stSyncUrl(){ try{ var q=[]; if(ST.perf!=='top') q.push('perf='+ST.perf); if(ST.size!=='all') q.push('size='+ST.size); history.replaceState(history.state,'','/m/results'+(q.length?'?'+q.join('&'):'')); }catch(e){} }
+function stDraw(){
+  var el=document.getElementById('st'); if(!el) return;
+  var elig=stElig(), view=stView(), five=view.slice(0,5), k=view.length-five.length;
+  var h='<div class="st-tog" role="group"><button type="button" data-perf="top" aria-pressed="'+(ST.perf==='top')+'">Top performers</button><button type="button" data-perf="under" aria-pressed="'+(ST.perf==='under')+'">Underperformers</button></div>';
+  h+='<div class="st-chips">'+ST_SIZES.map(function(s){ return '<button type="button" class="st-chip" data-size="'+s[0]+'" aria-pressed="'+(ST.size===s[0])+'">'+s[1]+'<small>'+stInSize(elig,s[0]).length+'</small></button>'; }).join('')+'</div>';
+  h+='<div class="st-tbl">'+(five.length?'<div class="st-h"><span>Sector · filings</span><span>Profit YoY</span><span>Sales YoY</span></div>'+five.map(stRow).join(''):'')+(view.length<5?'<div class="st-emp">'+stEmpty(view.length)+'</div>':'')+'</div>';
+  h+='<a class="st-more" href="#" id="st-more"'+(k>0?'':' hidden')+'>'+k+' more sector'+(k===1?'':'s')+(ST.size==='all'?'':' in '+stSizeWord())+' · <b>View all ›</b></a>';
+  el.innerHTML=h;
+  el.querySelectorAll('.st-tog button').forEach(function(b){ b.addEventListener('click', function(){ ST.perf=b.getAttribute('data-perf'); stSyncUrl(); stDraw(); }); });
+  el.querySelectorAll('.st-chip').forEach(function(b){ b.addEventListener('click', function(){ ST.size=b.getAttribute('data-size'); stSyncUrl(); stDraw(); }); });
+  var more=document.getElementById('st-more'); if(more) more.addEventListener('click', function(e){ e.preventDefault(); stOpenSheet(); });
+}
+function stInit(rows){
+  ST.rows=rows||[];
+  try{ var u=new URLSearchParams(location.search); var p=u.get('perf'), s=u.get('size'); ST.perf=(p==='under')?'under':'top'; ST.size=(['large','mid','small'].indexOf(String(s||'').toLowerCase())>=0)?String(s).toLowerCase():'all'; }catch(e){}
+  stDraw();
+}
+/* the View more sheet: same pattern as the Screeners names sheet (cc#2157) -- fixed, 78vh, drag handle, backdrop, back button closes */
+var ST_SHEET=null, ST_SCROLL=0, ST_RESTORE='auto';
+function stSheet(){
+  if(ST_SHEET) return ST_SHEET;
+  var bd=document.createElement('div'); bd.className='st-bd'; bd.id='st-bd'; bd.hidden=true;
+  var sh=document.createElement('div'); sh.className='st-sheet'; sh.id='st-sheet'; sh.setAttribute('role','dialog'); sh.setAttribute('aria-modal','true'); sh.hidden=true;
+  sh.innerHTML='<div class="st-sheet-h"><i class="st-handle" id="st-handle" role="button" aria-label="Close"></i><div class="st-sheet-t" id="st-sheet-t"></div><div class="st-sheet-m" id="st-sheet-m"></div></div><div class="st-sheet-b" id="st-sheet-b"></div>';
+  document.body.appendChild(bd); document.body.appendChild(sh);
+  bd.addEventListener('click', stCloseSheet); document.getElementById('st-handle').addEventListener('click', stCloseSheet);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape' && !sh.hidden) stCloseSheet(); });
+  window.addEventListener('popstate', function(){ if(!sh.hidden) stHideSheet(); });
+  ST_SHEET={bd:bd, sh:sh}; return ST_SHEET;
+}
+function stOpenSheet(){
+  var s=stSheet(), view=stView();
+  document.getElementById('st-sheet-t').textContent=(ST.perf==='under'?'Underperformers':'Top performers')+' · '+(ST.size==='all'?'All sizes':stSizeWord())+' · '+view.length+' sector'+(view.length===1?'':'s');
+  document.getElementById('st-sheet-m').textContent='ranked by median profit growth vs last year · sectors with 3+ filings · tap a sector for its companies';
+  document.getElementById('st-sheet-b').innerHTML=view.length?('<div class="st-h"><span>Sector · filings</span><span>Profit YoY</span><span>Sales YoY</span></div>'+view.map(stRow).join('')):'<div class="st-emp">'+stEmpty(0)+'</div>';
+  if(!s.sh.hidden) return;
+  ST_SCROLL=window.scrollY||0;
+  try{ ST_RESTORE=history.scrollRestoration||'auto'; history.scrollRestoration='manual'; history.pushState({stSheet:1},'',location.href); }catch(e){}   // history entry first, then the lock (cc#2159 lesson)
+  document.body.classList.add('st-lock'); document.body.style.top=(-ST_SCROLL)+'px';
+  s.bd.hidden=false; s.sh.hidden=false; document.getElementById('st-sheet-b').scrollTop=0;
+}
+function stHideSheet(){
+  var s=stSheet(); if(s.sh.hidden) return;
+  s.sh.hidden=true; s.bd.hidden=true; document.body.classList.remove('st-lock'); document.body.style.top=''; window.scrollTo(0,ST_SCROLL);
+  try{ history.scrollRestoration=ST_RESTORE; }catch(e){}
+}
+function stCloseSheet(){ var s=stSheet(); if(s.sh.hidden) return; if(history.state&&history.state.stSheet){ history.back(); } else stHideSheet(); }
 var ROWS=[], KEY='pat_yoy', ASC=false, COLS=[];
 function tbl(){
   var rows=ROWS.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
