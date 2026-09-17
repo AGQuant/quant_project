@@ -366,7 +366,7 @@ function tbl(){
   var rows=ROWS.slice().sort(cmpBy(KEY,ASC));
   var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
   var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c){ var v=r[c[0]]; return '<td>'+(c[2]?c[2](v,r):esc(v==null?'—':v))+'</td>'; }).join('')+'</tr>'; }).join('');
-  document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' companies · tap a header to sort · dash = not filed yet</div>';
+  document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+' companies · tap a header to sort · dash = not filed or CSV-basic</div>';
   document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='symbol'); } tbl(); });
 }
 function renderCompanies(d){
