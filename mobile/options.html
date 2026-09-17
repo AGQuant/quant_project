@@ -47,24 +47,36 @@ body{margin:0;background:var(--field);color:var(--ink);font-family:Sora,-apple-s
 .seg span{flex:1;text-align:center;font-size:var(--type-115,var(--type-12));font-weight:700;color:var(--muted);padding:var(--space-8);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
 
 .legs{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
-.lh,.leg{display:grid;grid-template-columns:40px 40px 1fr 62px 98px 18px;gap:var(--space-4);align-items:center;padding:var(--space-8) var(--space-8)}
+/* cc#2188: each leg is two lines so every control is a 44 px tap target at 375 px --
+   line 1: side chip · type chip · strike picker · remove ×; line 2: premium · the lots stepper (cc#2187).
+   The shared script renders the six children in that order; the grid areas place them by position. */
+.lh{display:grid;grid-template-columns:54px 54px minmax(0,1fr) 22px;gap:var(--space-6);align-items:center;padding:var(--space-8) var(--space-8)}
+.leg{display:grid;grid-template-columns:54px 54px minmax(0,1fr) 22px;grid-template-areas:"side kind strike x" "prem prem lots lots";gap:var(--space-6);align-items:center;padding:var(--space-10) var(--space-8)}
+.leg>:nth-child(1){grid-area:side}.leg>:nth-child(2){grid-area:kind}.leg>:nth-child(3){grid-area:strike}.leg>:nth-child(4){grid-area:prem}.leg>:nth-child(5){grid-area:lots}.leg>:nth-child(6){grid-area:x}
+.opt-addbar{margin:var(--space-10) var(--space-16) 0}
+.opt-add{display:block;width:100%;min-height:48px;border-radius:var(--radius-12);border:var(--bw-1) solid var(--brand);background:var(--brand-bg-14);color:var(--brand);font:inherit;font-size:var(--type-13);font-weight:800;cursor:pointer}
+.opt-add:disabled{color:var(--muted);border-color:var(--edge);background:var(--hi);cursor:default}
+.opt-cap{display:block;font-style:normal;font-size:var(--type-9);font-weight:700;color:var(--muted);margin-bottom:var(--space-2)}
+.opt-pw{display:block;min-width:0}.opt-pw .in{width:100%}
+.leg .x{min-height:44px;display:inline-flex;align-items:center;justify-content:center}
 /* cc#2187: [-] value [+] stepper around the shared script's own lots input (option_strategy.js renders the
    input; this page wraps it after every render, so the web page keeps its plain number field). */
-.opt-stp{display:inline-flex;align-items:center;gap:var(--space-2);width:100%}
-.opt-stp-b{flex:none;width:30px;height:32px;border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--brand);font:inherit;font-size:var(--type-15,16px);font-weight:800;padding:0;line-height:1;cursor:pointer}
+.opt-stp{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:var(--space-2);width:100%}
+.opt-stp .opt-cap{grid-column:1/-1}
+.opt-stp-b{width:44px;height:44px;border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--brand);font:inherit;font-size:var(--type-15,16px);font-weight:800;padding:0;line-height:1;cursor:pointer}
 .opt-stp-b:disabled{color:var(--muted);cursor:default}
-.opt-stp .in.lots{flex:1;min-width:0;width:auto;padding-left:var(--space-2);padding-right:var(--space-2);text-align:center;-moz-appearance:textfield}
+.opt-stp .in.lots{min-width:0;width:100%;padding-left:var(--space-2);padding-right:var(--space-2);text-align:center;-moz-appearance:textfield}
 .opt-stp .in.lots::-webkit-outer-spin-button,.opt-stp .in.lots::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.lh .opt-lot-hint{display:block;font-weight:600;color:var(--muted)}
+
 .lh{font-size:var(--type-8,9px);color:var(--muted);font-weight:700;border-bottom:var(--bw-1) solid var(--hi)}
 .leg{border-bottom:var(--bw-1) solid var(--hi);position:relative;font-size:var(--type-11)}
 .leg::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--edge)}
 .leg.b::before{background:var(--win)}.leg.s::before{background:var(--loss)}
-.pill{display:inline-block;font-size:var(--type-9);font-weight:800;padding:var(--space-3) var(--space-4);border-radius:var(--radius-7,8px);
-  background:var(--hi);border:var(--bw-1) solid var(--edge);text-align:center}
+.pill{display:inline-flex;align-items:center;justify-content:center;min-height:44px;width:100%;font-size:var(--type-11);font-weight:800;padding:var(--space-3) var(--space-4);border-radius:var(--radius-8);
+  background:var(--hi);border:var(--bw-1) solid var(--edge);text-align:center;cursor:pointer}
 .pill.b{color:var(--win)}.pill.s{color:var(--loss)}.pill.k{color:var(--ink)}
-.in{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-8);padding:var(--space-4) var(--space-6);
-  color:var(--ink);font:inherit;font-size:var(--type-11);font-weight:700;text-align:right;width:100%}
+.in{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-8);padding:var(--space-4) var(--space-8);min-height:44px;
+  color:var(--ink);font:inherit;font-size:var(--type-13);font-weight:700;text-align:right;width:100%;box-sizing:border-box}
 .in.pf{color:var(--brand)}
 button.in.strike-btn{cursor:pointer}
 .leg .x{color:var(--muted);text-align:center}
@@ -138,10 +150,13 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <div class="seg" id="optTabs"><span class="on" data-tab="build">Build your own</span><span data-tab="ready">Readymade</span></div>
 
   <div id="optBuildPane">
+    <!-- cc#2188: the Add leg control is a proper button ABOVE the table (the shared script keeps writing its
+         counter "+ Add leg (N of 10)" and its disabled state into #optAddLeg wherever it sits). -->
+    <div class="opt-addbar"><button class="opt-add" id="optAddLeg" type="button">+ Add leg (0 of 10)</button></div>
     <div class="legs">
-      <div class="lh"><span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span>Lots<small class="opt-lot-hint" id="optLotHint"></small></span><span></span></div>
+      <div class="lh"><span>Side</span><span>Type</span><span>Strike</span><span></span></div>
       <div id="optLegs"></div>
-      <div class="add"><span class="tiny">Gold premium = from chain. Blank = no chain row.</span><button id="optAddLeg" type="button">+ Add leg (0 of 10)</button></div>
+      <div class="add"><span class="tiny">Gold premium = from chain. Blank = no chain row. <span id="optLotHint"></span></span></div>
     </div>
     <button class="go" id="optGo" type="button">Calculate payoff</button>
   </div>
@@ -207,9 +222,10 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   function wrap(inp){
     if(inp.parentNode && inp.parentNode.classList && inp.parentNode.classList.contains('opt-stp')) return;
     var box=document.createElement('span'); box.className='opt-stp';
+    var cap=document.createElement('i'); cap.className='opt-cap'; cap.textContent='Lots';
     var minus=document.createElement('button'); minus.type='button'; minus.className='opt-stp-b'; minus.setAttribute('aria-label','one lot less'); minus.textContent='\u2212';
     var plus=document.createElement('button'); plus.type='button'; plus.className='opt-stp-b'; plus.setAttribute('aria-label','one lot more'); plus.textContent='+';
-    inp.parentNode.insertBefore(box, inp); box.appendChild(minus); box.appendChild(inp); box.appendChild(plus);
+    inp.parentNode.insertBefore(box, inp); box.appendChild(cap); box.appendChild(minus); box.appendChild(inp); box.appendChild(plus);
     var step=function(d){ var v=clamp((Number(inp.value)||MIN)+d); inp.value=String(v); inp.dispatchEvent(new Event('input',{bubbles:true})); inp.dispatchEvent(new Event('change',{bubbles:true})); sync(); };
     var sync=function(){ var v=clamp(inp.value); minus.disabled=v<=MIN; plus.disabled=v>=MAX; };
     var settle=function(){ var v=clamp(inp.value); if(String(v)!==inp.value){ inp.value=String(v); } sync(); };   // a typed value outside 1..50 shows the clamped number the shared rule keeps
@@ -217,10 +233,17 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
     plus.addEventListener('click', function(e){ e.preventDefault(); step(1); });
     inp.addEventListener('input', sync); inp.addEventListener('change', settle); sync();
   }
+  /* cc#2188: the premium field gets its own caption on line 2 (the header row only labels line 1) */
+  function wrapPrem(el){
+    if(el.parentNode && el.parentNode.classList && el.parentNode.classList.contains('opt-pw')) return;
+    var box=document.createElement('span'); box.className='opt-pw'; var cap=document.createElement('i'); cap.className='opt-cap'; cap.textContent='Premium';
+    el.parentNode.insertBefore(box, el); box.appendChild(cap); box.appendChild(el);
+  }
+  function decorate(){ legs.querySelectorAll('.leg > :nth-child(4):not(.opt-pw)').forEach(wrapPrem); legs.querySelectorAll('input.lots').forEach(wrap); }
   var legs=document.getElementById('optLegs');
-  if(legs){ new MutationObserver(function(){ legs.querySelectorAll('input.lots').forEach(wrap); }).observe(legs,{childList:true,subtree:true}); legs.querySelectorAll('input.lots').forEach(wrap); }
+  if(legs){ new MutationObserver(decorate).observe(legs,{childList:true,subtree:true}); decorate(); }
   var lot=document.getElementById('optLot'), hint=document.getElementById('optLotHint');
-  if(lot&&hint){ var put=function(){ var t=lot.textContent.trim(); hint.textContent=(t&&t!=='\u2014')?('1 lot = '+t):''; }; new MutationObserver(put).observe(lot,{childList:true,characterData:true,subtree:true}); put(); }
+  if(lot&&hint){ var put=function(){ var t=lot.textContent.trim(); hint.textContent=(t&&t!=='\u2014')?('1 lot = '+t+' units.'):''; }; new MutationObserver(put).observe(lot,{childList:true,characterData:true,subtree:true}); put(); }
 })();
 </script>
 </body>
