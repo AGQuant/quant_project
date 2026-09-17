@@ -156,6 +156,14 @@ def persist_chan_ticks(conn, fits: Dict[str, Any], purge_now: Optional[bool] = N
             sell = fit.get("sell_trigger")
             buy = fit.get("buy_trigger")
             latest_ts = fit.get("latest_ts") or ts
+            # cc#1978 item 2, the TIMESTAMP TRAP (cc#1924): fit["latest_ts"] is the last 5-min bar's
+            # ts straight out of intraday_prices, which is NAIVE IST. Passed through naked into this
+            # TIMESTAMPTZ column it lands as UTC, 5h30 in the future (17-Sep first-run evidence: every
+            # chan row stamped 09:15:00+00 for the 09:15 IST bar). Localise the way
+            # v8_channel_5m.compute_channels() does for its own table -- IST.localize(), never
+            # .replace(tzinfo=IST) (pytz would attach the +05:53 LMT offset).
+            if getattr(latest_ts, "tzinfo", None) is None:
+                latest_ts = IST.localize(latest_ts)
             for family, trig, colour in (("chan_sell", sell, "GREEN"), ("chan_buy", buy, "GREEN")):
                 fired = bool(trig)
                 detail = {
