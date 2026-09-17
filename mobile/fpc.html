@@ -63,7 +63,9 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:var(--r
 .btn{background:var(--brand);color:var(--field);border:none}.btn2{background:var(--hi);color:var(--brand);border:var(--bw-1) solid var(--edge)}
 .navrow{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin:var(--space-4) var(--space-16) 0}.navrow .btn,.navrow .btn2{margin-top:var(--space-6)}
 .sub2{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-7);line-height:1.5}
-.qq{padding:var(--space-10) 0 var(--space-4);border-bottom:var(--bw-1) solid var(--hi)}.qq:last-of-type{border-bottom:none}.qt{font-size:var(--type-125);font-weight:700;line-height:1.4}
+.qq{padding:var(--space-12) 0 var(--space-6)}.qt{font-size:var(--type-125);font-weight:700;line-height:1.4}
+.qt .qn{color:var(--brand);font-weight:800;margin-right:var(--space-2)}
+.fpc-derived{font-size:var(--type-105);color:var(--muted);line-height:1.5;margin-top:var(--space-6);padding-bottom:var(--space-4);border-bottom:var(--bw-1) solid var(--edge)}
 .qo{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6);margin-top:var(--space-8)}.qo span{font-size:var(--type-105);font-weight:700;color:var(--muted);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-9);text-align:center;line-height:1.3}.qo span.on{color:var(--brand);border-color:var(--brand)}
 .auto{margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) dashed var(--edge)}.ar{display:flex;justify-content:space-between;font-size:var(--type-105);color:var(--muted);padding:var(--space-4) 0}.ar b{color:var(--ink)}
 .pil{margin-top:var(--space-10)}.pil .r{display:grid;grid-template-columns:70px 1fr 34px;gap:var(--space-10);align-items:center;padding:var(--space-5) 0}
@@ -169,16 +171,20 @@ function bindSliders(){
 }
 var QA=[['a1','When will you need this money?',['In under 3 years','3 to 7 years','7 to 15 years','After 15 years']],['a4','How steady is your income?',['Changes a lot','Some months vary','Mostly steady','Fixed salary']]];
 var QB=[['b1','Where is your money kept today?',['All in FD and savings','Mostly FD, some funds','Mostly funds','Mostly shares']],['b2','How long have you invested in shares or funds?',['Never','Under 2 years','2 to 5 years','More than 5 years']],['b3','The last time the market fell badly, you…',['Was not invested','Sold','Did nothing','Bought more']],['b4','Your ₹1,00,000 becomes ₹85,000 in a month. You…',['Sell everything','Sell some','Wait it out','Invest more']],['b5','Which would you pick?',['7%, never falls','10%, small falls','12%, can fall 15%','16%, can fall 40%']]];
-function q(kq){ var k=kq[0]; return '<div class="qq"><div class="qt">'+kq[1]+'</div><div class="qo" id="q-'+k+'">'+kq[2].map(function(o,i){return '<span data-v="'+(i+1)+'"'+(R[k]===i+1?' class="on"':'')+'>'+o+'</span>';}).join('')+'</div></div>'; }
+/* cc#2191: plain numbered questions, numbering continuous across the two sections, nothing between them */
+function q(kq,n){ var k=kq[0]; return '<div class="qq"><div class="qt"><span class="qn">'+n+'.</span> '+kq[1]+'</div><div class="qo" id="q-'+k+'">'+kq[2].map(function(o,i){return '<span data-v="'+(i+1)+'"'+(R[k]===i+1?' class="on"':'')+'>'+o+'</span>';}).join('')+'</div></div>'; }
 function s2(){
   var burn=I.spending+I.emis, months=burn>0?I.cash/burn:12, emi=I.take_home>0?I.emis/I.take_home:0;
-  var auto=[['Months you could manage if income stopped', months<=0?'None':(months<3?'Under 3':(months<=6?'3 to 6':'More than 6'))],['Share of pay going to EMIs', emi>0.5?'More than half':(emi>=0.3?'30 to 50%':(emi>=0.1?'10 to 30%':'Almost nothing'))],['People depending on you', I.dependants>=3?'3 or more':String(I.dependants)]];
-  var h='<div class="card"><div class="ch"><span class="t">Your situation</span><span class="n">what you can afford to risk</span></div>'+QA.map(q).join('')+'<div class="auto">'+auto.map(function(a){return '<div class="ar"><span>'+a[0]+'</span><b>'+a[1]+'</b></div>';}).join('')+'<div class="sub2">These three come from your sliders — no need to answer twice.</div></div></div>';
-  h+='<div class="card"><div class="ch"><span class="t">Your comfort</span><span class="n">what you are happy to risk</span></div>'+QB.map(q).join('')+'</div>';
+  /* the three slider-derived answers: one compact read-only line under the section header, no explanation */
+  var runway=months<=0?'no runway':(months<3?'under 3 months runway':(months<=6?'3 to 6 months runway':'6+ months runway'));
+  var emis=emi>0.5?'EMIs over half of pay':(emi>=0.3?'EMIs 30 to 50% of pay':(emi>=0.1?'EMIs 10 to 30% of pay':'almost no EMIs'));
+  var deps=(I.dependants>=3?'3 or more':String(I.dependants))+' depending on you';
+  var n=0;
+  var h='<div class="card"><div class="ch"><span class="t">Your situation</span></div><div class="fpc-derived">From your sliders: '+runway+' · '+emis+' · '+deps+'</div>'+QA.map(function(kq){ n+=1; return q(kq,n); }).join('')+'</div>';
+  h+='<div class="card"><div class="ch"><span class="t">Your comfort</span></div>'+QB.map(function(kq){ n+=1; return q(kq,n); }).join('')+'</div>';
   h+='<div class="navrow"><button class="btn2" id="b-back">‹ Back</button><button class="btn" id="b-go">See my plan ›</button></div>';
-  h+='<div class="more" style="text-align:center"><a href="#" id="b-skip">Skip the comfort questions — use my situation only ›</a></div>';
-  h+='<div class="note"><b>Why two parts.</b> Comfort can never lift you above what your situation can carry. The final profile is the lower of the two.</div>';
-  document.getElementById('body').innerHTML=h; document.getElementById('asof').innerHTML='Step <b>2 of 3</b> · seven taps, or skip';
+  h+='<div class="more" style="text-align:center"><a href="#" id="b-skip">Skip the comfort questions ›</a></div>';
+  document.getElementById('body').innerHTML=h; document.getElementById('asof').innerHTML='Step <b>2 of 3</b>';
   document.querySelectorAll('.qo').forEach(function(el){ el.addEventListener('click', function(e){ var s=e.target.closest('[data-v]'); if(!s) return; R[el.id.slice(2)]=Number(s.getAttribute('data-v')); el.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); }); });
   document.getElementById('b-back').addEventListener('click', function(){ SCREEN=1; s1(); });
   document.getElementById('b-go').addEventListener('click', function(){ SKIPPED=false; calc(); });
