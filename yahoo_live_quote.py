@@ -69,6 +69,13 @@ log = logging.getLogger("scorr.yahoo_live_quote")
 IST = timezone(timedelta(hours=5, minutes=30))
 MARKET_OPEN = dt_time(9, 15)
 MARKET_CLOSE = dt_time(15, 30)
+# cc#2203: continuous cash trading ends at 15:15 (SEBI CAS since 03-Aug-2026 -- 15:15-15:30 is order
+# collection plus one auction print; scheduler._is_cash_continuous() is 09:15-15:15 for the same
+# reason). The feed worker writes the cash leg as source fyers_eq_auction in that window and fyers_eq
+# stops, so measuring the fyers_eq age against STALE_MIN after 15:15 declares an outage on EVERY
+# trading day from ~15:20 (16-Sep and 17-Sep: fyers_eq 0 rows after 15:15, fyers_eq_auction 211 rows
+# per slot). That false outage is what ran the Yahoo sweep inside home2 on 17-Sep (cc#2198).
+CASH_CONTINUOUS_END = dt_time(15, 15)
 
 # cc#2096: v8/chart, not v7/quote -- see the module doc's ENDPOINT CORRECTION section for why.
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
@@ -98,6 +105,10 @@ def fyers_eq_outage(cur, now=None):
         return False, None
     ages = _leg_ages(cur, now)
     age = ages.get("fyers_eq")
+    if now.time() > CASH_CONTINUOUS_END:
+        # cc#2203: the auction window -- the cash leg is alive under fyers_eq_auction, the fyers_eq
+        # source is idle by design. Never an outage; the age is still returned for logging.
+        return False, age
     return (age is not None and age > STALE_MIN), age
 
 
