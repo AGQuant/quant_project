@@ -1428,12 +1428,16 @@ def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
         elif cat:
             where.append("(m.category ILIKE %s OR m.name ILIKE %s)")   # free-text fallback
             params += [f"%{cat}%", f"%{cat}%"]
+        # cc#2180 (P0): every ORDER BY column carries its table alias. cc#777 (ded7769, 01-Aug-2026) added the
+        # mf_derived_metrics join with d.ret_1y / d.ret_3y in the SELECT list, so the output column name
+        # ret_1y became ambiguous and Postgres rejected EVERY sort path (mqs and aum both tiebreak on
+        # ret_1y). m.ret_1y is the official return the row displays, so the sort matches what is shown.
         if sort == "1y":
-            order = "ret_1y DESC NULLS LAST, aum_cr DESC NULLS LAST, name"
+            order = "m.ret_1y DESC NULLS LAST, m.aum_cr DESC NULLS LAST, m.name"
         elif sort == "aum":
-            order = "aum_cr DESC NULLS LAST, ret_1y DESC NULLS LAST, name"
+            order = "m.aum_cr DESC NULLS LAST, m.ret_1y DESC NULLS LAST, m.name"
         else:
-            order = "mqs DESC NULLS LAST, ret_1y DESC NULLS LAST, name"
+            order = "s.mqs DESC NULLS LAST, m.ret_1y DESC NULLS LAST, m.name"
         # cc#777: LEFT JOIN the holdings-derived metrics so a fund with no OFFICIAL return can still
         # show a labelled derived figure. Order of preference is deliberate: ACTUAL returns
         # (mf_master, sourced from mfapi/MC) are strictly better and always win; derived only FILLS

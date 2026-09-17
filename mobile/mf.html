@@ -1,6 +1,7 @@
 <!doctype html>
 <!-- ══ mobile/mf.html — Mutual Funds app page. Fable single-mode build 10-Sep-2026. Data: /api/mobile/mf_app/list and /fund?code= (mf_app_mobile.py V2),
-     which read the web V15 page's own functions. Contract tokens only. -->
+     which read the web V15 page's own functions. Contract tokens only.
+     cc#2180 (17-Sep-2026): body min-height 100dvh with the field token, so a short page never shows the html fallback colour. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -14,6 +15,11 @@
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <style>
+/* cc#2180 item 5: the theme tokens live on body[data-theme], so mobile_app.css's html,body background rule (the field token
+   with a dark hex fallback)
+   paints <html> with the dark FALLBACK while <body> gets the theme's field. A short page (an error state, a thin list) left
+   the body shorter than the viewport and the html navy showed beneath it. The body now always covers the viewport. */
+body{min-height:100vh;min-height:100dvh;background:var(--field)}
 .pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
 .asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
 .pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
