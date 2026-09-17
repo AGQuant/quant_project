@@ -27,7 +27,11 @@
   --brand-bg-8:rgba(212,175,55,.08);--loss-bg-8:rgba(255,92,108,.08)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--field);color:var(--ink);font-family:Sora,-apple-system,sans-serif}
-.pg{padding-bottom:var(--space-80)}
+.pg{padding-bottom:var(--space-80);color:var(--ink)}
+/* cc#2187: the three summary tiles and the payoff table's price column inherited `color` from the document,
+   and main.py's injected legacy /static/mobile.css (loaded after this block) paints the document with --txt --
+   a token only the dark sets define, so on the light themes it fell through to the dark sets' chalk on a pale cell.
+   The page root and every result element now name --ink themselves; no literal anywhere. */
 .asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted)}.asof b{color:var(--ink);font-weight:600}
 .stale{margin:var(--space-8) var(--space-16) 0;padding:var(--space-6) var(--space-10);border:var(--bw-1) solid var(--edge);
   border-radius:var(--radius-8);font-size:var(--type-10);color:var(--loss);background:var(--loss-bg-8)}
@@ -37,13 +41,21 @@ body{margin:0;background:var(--field);color:var(--ink);font-family:Sora,-apple-s
 .sel .k{font-size:var(--type-9);color:var(--muted);font-weight:700}
 .sel select{width:100%;background:transparent;border:0;color:var(--ink);font:inherit;font-size:var(--type-14);font-weight:800;margin-top:var(--space-2);padding:0;appearance:none}
 .spot{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline}
-.spot .optv{font-size:var(--type-22);font-weight:800}.spot .lot{font-size:var(--type-11);color:var(--muted)}.spot .lot b{color:var(--ink)}
+.spot .optv{font-size:var(--type-22);font-weight:800;color:var(--ink)}.spot .lot{font-size:var(--type-11);color:var(--muted)}.spot .lot b{color:var(--ink)}
 
 .seg{display:flex;gap:var(--space-4);margin:var(--space-12) var(--space-16) 0;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
 .seg span{flex:1;text-align:center;font-size:var(--type-115,var(--type-12));font-weight:700;color:var(--muted);padding:var(--space-8);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
 
 .legs{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
-.lh,.leg{display:grid;grid-template-columns:44px 44px 1fr 74px 40px 20px;gap:var(--space-4);align-items:center;padding:var(--space-8) var(--space-8)}
+.lh,.leg{display:grid;grid-template-columns:40px 40px 1fr 62px 98px 18px;gap:var(--space-4);align-items:center;padding:var(--space-8) var(--space-8)}
+/* cc#2187: [-] value [+] stepper around the shared script's own lots input (option_strategy.js renders the
+   input; this page wraps it after every render, so the web page keeps its plain number field). */
+.opt-stp{display:inline-flex;align-items:center;gap:var(--space-2);width:100%}
+.opt-stp-b{flex:none;width:30px;height:32px;border-radius:var(--radius-8);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--brand);font:inherit;font-size:var(--type-15,16px);font-weight:800;padding:0;line-height:1;cursor:pointer}
+.opt-stp-b:disabled{color:var(--muted);cursor:default}
+.opt-stp .in.lots{flex:1;min-width:0;width:auto;padding-left:var(--space-2);padding-right:var(--space-2);text-align:center;-moz-appearance:textfield}
+.opt-stp .in.lots::-webkit-outer-spin-button,.opt-stp .in.lots::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.lh .opt-lot-hint{display:block;font-weight:600;color:var(--muted)}
 .lh{font-size:var(--type-8,9px);color:var(--muted);font-weight:700;border-bottom:var(--bw-1) solid var(--hi)}
 .leg{border-bottom:var(--bw-1) solid var(--hi);position:relative;font-size:var(--type-11)}
 .leg::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--edge)}
@@ -74,18 +86,18 @@ button.in.strike-btn{cursor:pointer}
 .tpl .rp{display:flex;gap:var(--space-4);margin-top:var(--space-8);flex-wrap:wrap}
 .tpl .rp i{font-style:normal;font-size:var(--type-9);font-weight:800;padding:var(--space-2) var(--space-6);border-radius:var(--radius-8);background:var(--hi);color:var(--muted)}
 
-.res{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
+.res{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden;color:var(--ink)}
 .res::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
 .kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8)}
 .cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-10)}
-.cell .k{font-size:var(--type-9);color:var(--muted);font-weight:700}.cell .optv{font-size:var(--type-13,14px);font-weight:800;margin-top:var(--space-3)}
+.cell .k{font-size:var(--type-9);color:var(--muted);font-weight:700}.cell .optv{font-size:var(--type-13,14px);font-weight:800;margin-top:var(--space-3);color:var(--ink)}
 .cell .v small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600;margin-top:var(--space-2)}
 .subst{color:var(--brand)}
 .chart{margin-top:var(--space-12);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);padding:var(--space-8)}
 .chart svg{width:100%;height:150px;display:block}
 .tbl{margin-top:var(--space-10);font-size:var(--type-10);overflow-x:auto}
 .tr{display:grid;grid-template-columns:1fr repeat(auto-fit,minmax(46px,1fr));padding:var(--space-6) 0;border-bottom:var(--bw-1) solid var(--hi);text-align:right;gap:var(--space-4)}
-.tr:first-child{color:var(--muted);font-size:var(--type-8,9px);font-weight:700}.tr span:first-child{text-align:left;font-weight:700}
+.tr{color:var(--ink)}.tr:first-child{color:var(--muted);font-size:var(--type-8,9px);font-weight:700}.tr span:first-child{text-align:left;font-weight:700;color:var(--ink)}.tr:first-child span:first-child{color:var(--muted)}
 .tr .w{color:var(--win)}.tr .l{color:var(--loss)}.tr.be{background:var(--brand-bg-8)}
 .note{margin:var(--space-20) var(--space-16) 0;padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);
   border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
@@ -127,7 +139,7 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
 
   <div id="optBuildPane">
     <div class="legs">
-      <div class="lh"><span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span>Lots</span><span></span></div>
+      <div class="lh"><span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span>Lots<small class="opt-lot-hint" id="optLotHint"></small></span><span></span></div>
       <div id="optLegs"></div>
       <div class="add"><span class="tiny">Gold premium = from chain. Blank = no chain row.</span><button id="optAddLeg" type="button">+ Add leg (0 of 10)</button></div>
     </div>
@@ -184,5 +196,32 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <a class="bn" href="/m/alerts"><span class="i">◬</span>Alerts</a>
 </nav>
 <script src="/static/option_strategy.js"></script>
+<script>
+/* cc#2187: per-leg [-] value [+] stepper. option_strategy.js owns the legs and re-renders #optLegs on every edit,
+   so this wraps each fresh <input class="in lots"> after each render (MutationObserver) and drives it through the
+   same input event the shared script already listens to -- one implementation of the lots rule (1..50), no fork.
+   Calculate payoff stays the trigger; the value stays typeable. */
+(function(){
+  var MIN=1, MAX=50;
+  function clamp(v){ v=Math.round(Number(v)||MIN); return Math.max(MIN, Math.min(MAX, v)); }
+  function wrap(inp){
+    if(inp.parentNode && inp.parentNode.classList && inp.parentNode.classList.contains('opt-stp')) return;
+    var box=document.createElement('span'); box.className='opt-stp';
+    var minus=document.createElement('button'); minus.type='button'; minus.className='opt-stp-b'; minus.setAttribute('aria-label','one lot less'); minus.textContent='\u2212';
+    var plus=document.createElement('button'); plus.type='button'; plus.className='opt-stp-b'; plus.setAttribute('aria-label','one lot more'); plus.textContent='+';
+    inp.parentNode.insertBefore(box, inp); box.appendChild(minus); box.appendChild(inp); box.appendChild(plus);
+    var step=function(d){ var v=clamp((Number(inp.value)||MIN)+d); inp.value=String(v); inp.dispatchEvent(new Event('input',{bubbles:true})); inp.dispatchEvent(new Event('change',{bubbles:true})); sync(); };
+    var sync=function(){ var v=clamp(inp.value); minus.disabled=v<=MIN; plus.disabled=v>=MAX; };
+    var settle=function(){ var v=clamp(inp.value); if(String(v)!==inp.value){ inp.value=String(v); } sync(); };   // a typed value outside 1..50 shows the clamped number the shared rule keeps
+    minus.addEventListener('click', function(e){ e.preventDefault(); step(-1); });
+    plus.addEventListener('click', function(e){ e.preventDefault(); step(1); });
+    inp.addEventListener('input', sync); inp.addEventListener('change', settle); sync();
+  }
+  var legs=document.getElementById('optLegs');
+  if(legs){ new MutationObserver(function(){ legs.querySelectorAll('input.lots').forEach(wrap); }).observe(legs,{childList:true,subtree:true}); legs.querySelectorAll('input.lots').forEach(wrap); }
+  var lot=document.getElementById('optLot'), hint=document.getElementById('optLotHint');
+  if(lot&&hint){ var put=function(){ var t=lot.textContent.trim(); hint.textContent=(t&&t!=='\u2014')?('1 lot = '+t):''; }; new MutationObserver(put).observe(lot,{childList:true,characterData:true,subtree:true}); put(); }
+})();
+</script>
 </body>
 </html>
