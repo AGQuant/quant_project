@@ -1,6 +1,8 @@
 <!doctype html>
-<!-- ══ mobile/aicio.html — AI CIO app page. Fable single-mode build 10-Sep-2026. Data: /api/max/ivr/tree, /api/max/card/{intent}, /api/max/ivr/tap, POST /api/scorr/chat — the web /cio (scorr_cockpit.html) endpoints called directly, same dispatch order: glossary → native card → C·A·R·D → native chat,
-     so a tap here and a tap on the web give the same bytes. Contract tokens only. -->
+<!-- ══ mobile/aicio.html — AICIO V1 (cc#2171, Fable sprint AICIO_V1, 17-Sep-2026). A full-screen chat-like shell: the top three
+     quarters hold ONE assistant bubble (no fake history), the bottom quarter is a swipeable rail of live cards + a composer.
+     Data: GET /api/mobile/aicio_app/cards (registry AICIO_CARDS in aicio_app_mobile.py; each card calls the web's own function
+     in-process). Chat / typing is VERSION 2 -- the Type button only focuses the field and shows a toast. Contract tokens only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -14,56 +16,45 @@
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <style>
-.pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
-.asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}.asof b{color:var(--ink);font-weight:600}
-.pos{color:var(--win)}.neg{color:var(--loss)}.gd{color:var(--brand)}
-.sec{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
-.sec h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}.sec .hint{font-size:var(--type-10);color:var(--muted)}
-.hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
-.hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
-.hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-6)}
-.hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted);line-height:1.4}.hero .big .n b{color:var(--ink)}
-.kg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-8);margin-top:var(--space-12)}
-.cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-8) var(--space-10)}
-.cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}.cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
-.seg{display:flex;gap:var(--space-4);margin:0 var(--space-16);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3)}
-.seg span{flex:1;text-align:center;font-size:var(--type-11);font-weight:700;color:var(--muted);padding:var(--space-6);border-radius:var(--radius-16)}.seg span.on{background:var(--panel);color:var(--brand)}
-.lst{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
-.row{display:grid;grid-template-columns:1fr 70px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);position:relative;text-decoration:none;color:inherit}
-.row:last-child{border-bottom:none}
-.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:var(--brand)}
-.row.up::before{background:var(--win)}.row.dn::before{background:var(--loss)}.row.mu::before{background:var(--edge)}
-.row .nm{font-size:var(--type-125);font-weight:800}.row .nm .tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
-.row .nm .tag.b{color:var(--win)}.row .nm .tag.s{color:var(--loss)}.row .nm .tag.g{color:var(--brand)}
-.row .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);line-height:1.45}.row .sub b{color:var(--ink);font-weight:700}
-.row .v{text-align:right}.row .v .n{font-size:var(--type-15);font-weight:800;line-height:1}.row .v .c{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-2);font-weight:700}
-.emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);font-size:var(--type-115);color:var(--muted);line-height:1.6}.emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
-.card{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
-.ch{display:flex;align-items:baseline;justify-content:space-between}.ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}.ch .n{font-size:var(--type-11);color:var(--muted)}
-.rule{font-size:var(--type-125);line-height:1.6;margin-top:var(--space-8)}.rule b{color:var(--brand)}.rule.mu{color:var(--muted);font-size:var(--type-115)}
-.more{font-size:var(--type-11);color:var(--muted);padding:var(--space-8) var(--space-16) 0}.more a{color:var(--brand);font-weight:700;text-decoration:none}
-.chips{display:flex;gap:var(--space-6);overflow-x:auto;padding:var(--space-4) var(--space-16) 0;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
-.chip{flex:none;font-size:var(--type-10);font-weight:700;color:var(--muted);padding:var(--space-4) var(--space-9);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel)}.chip.on{color:var(--brand);background:color-mix(in srgb, var(--brand) 14%, var(--panel));border-color:color-mix(in srgb, var(--brand) 55%, transparent)}
-.gates{display:inline-flex;gap:var(--space-2);vertical-align:middle;margin-left:var(--space-4)}.gates i{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--edge)}.gates i.ok{background:var(--win)}
-.note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.note b{color:var(--ink)}
-.err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
-.menu{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
-.mi{display:grid;grid-template-columns:34px 1fr 16px;align-items:center;gap:var(--space-8);padding:var(--space-11) var(--space-12);border-bottom:var(--bw-1) solid var(--hi);text-decoration:none;color:inherit}.mi:last-child{border-bottom:none}
-.mi .ic{font-size:var(--type-17);color:var(--brand);text-align:center}.mi .lb{font-size:var(--type-125);font-weight:800}.mi .lb small{display:block;font-size:var(--type-95);color:var(--muted);font-weight:600;margin-top:var(--space-2)}.mi .ar{color:var(--muted);font-weight:800}
-.crumb{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-105);color:var(--muted)}.crumb a{color:var(--brand);text-decoration:none;font-weight:700}
-.ctx{margin:var(--space-8) var(--space-16) 0;font-size:var(--type-105);color:var(--muted)}.ctx b{color:var(--ink)}.ctx a{color:var(--brand);font-weight:700;text-decoration:none;margin-left:var(--space-6)}
-.qin{display:block;width:100%;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);color:var(--ink);font:inherit;font-size:var(--type-14);font-weight:600;padding:var(--space-9) var(--space-10);box-sizing:border-box}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8)}
-.btn{display:block;width:100%;text-align:center;margin-top:var(--space-10);padding:var(--space-9);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:800;cursor:pointer;box-sizing:border-box;background:var(--brand);color:var(--field);border:none}
-.askbar{position:fixed;left:0;right:0;bottom:calc(var(--space-60) + env(safe-area-inset-bottom,0px));background:var(--panel);border-top:var(--bw-1) solid var(--edge);padding:var(--space-8) var(--space-12);display:grid;grid-template-columns:1fr 64px 60px;gap:var(--space-6);align-items:center;z-index:5}
-.askbar .qin{padding:var(--space-8) var(--space-10)}.askbar .btn{margin:0;padding:var(--space-8) 0}
-.pill{font-size:var(--type-10);font-weight:800;color:var(--muted);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-6) 0;text-align:center;background:var(--hi);cursor:pointer}.pill.on{color:var(--brand);background:color-mix(in srgb, var(--brand) 14%, var(--panel));border-color:color-mix(in srgb, var(--brand) 55%, transparent)}
-.aihint{position:fixed;left:0;right:0;bottom:calc(var(--space-60) + var(--space-40) + env(safe-area-inset-bottom,0px));font-size:var(--type-9);color:var(--muted);text-align:center;padding:var(--space-3) var(--space-12);background:var(--field);z-index:5}
-.pg{padding-bottom:calc(var(--space-80) + var(--space-80))}
-.mdb{font-size:var(--type-115);line-height:1.6;margin-top:var(--space-8)}.mdb p{margin:0 0 var(--space-8)}.mdb ul{margin:0 0 var(--space-8);padding-left:var(--space-18)}.mdb code{background:var(--hi);border-radius:var(--radius-4);padding:0 var(--space-4);font-size:var(--type-105)}.mdb .mh{font-weight:800;color:var(--brand);margin:var(--space-8) 0 var(--space-4)}
-.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:var(--space-6) 0 var(--space-8)}.mdb table{border-collapse:collapse;min-width:100%;font-size:var(--type-105)}.mdb th{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);text-align:left;padding:var(--space-6) var(--space-8);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap}.mdb td{padding:var(--space-6) var(--space-8);border-bottom:var(--bw-1) solid var(--hi);white-space:nowrap;font-weight:600}.mdb td a{color:var(--brand);text-decoration:none;font-weight:800}
-.foot2{font-size:var(--type-9);color:var(--muted);margin-top:var(--space-6)}
+/* ai-* prefix throughout: mobile_app.css carries bare .c .v .row .chip .more .rail rules that restyle short names (cc#2155). */
+body{margin:0;min-height:100vh;min-height:100dvh;background:var(--field);overflow-x:hidden}
+.ai{font-family:Sora,-apple-system,sans-serif;color:var(--ink);display:flex;flex-direction:column;height:70vh;overflow:hidden}
+.ai-chat{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:var(--space-12) var(--space-16) var(--space-8)}
+.ai-bub{max-width:88%;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);border-top-left-radius:var(--radius-4);padding:var(--space-12) var(--space-14);position:relative;overflow:hidden}
+.ai-bub::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.ai-who{font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em12);margin-bottom:var(--space-5)}
+.ai-msg{font-size:var(--type-135);font-weight:600;line-height:1.5}
+.ai-asof{margin-top:var(--space-8);font-size:var(--type-10);color:var(--muted);line-height:1.5;letter-spacing:var(--track-em5)}
+.ai-asof b{color:var(--ink);font-weight:700}
+.ai-fd{display:inline-block;width:7px;height:7px;border-radius:var(--radius-4);background:var(--edge);vertical-align:middle;margin-right:var(--space-4)}
+.ai-fd.ok{background:var(--win)}.ai-fd.bad{background:var(--loss)}
+.ai-miss{margin-top:var(--space-6);font-size:var(--type-105);color:var(--muted);line-height:1.5}
+.ai-miss b{color:var(--ink)}
+.ai-retry{color:var(--brand);font-weight:800;text-decoration:none;margin-left:var(--space-6)}
+.ai-dock{flex:none;padding-top:var(--space-6);background:var(--field);border-top:var(--bw-1) solid var(--hi)}
+.ai-rail{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scroll-padding-left:var(--space-16);scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ai-rail::-webkit-scrollbar{display:none}
+.ai-card{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-10) var(--space-12);text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:var(--space-3);position:relative;overflow:hidden;min-width:0}
+.ai-card::after{content:"›";position:absolute;right:var(--space-10);top:var(--space-8);font-size:var(--type-15);font-weight:800;color:var(--muted);line-height:1}
+.ai-eye{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
+.ai-head{font-size:var(--type-22);font-weight:800;line-height:1.1;margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-head.pos{color:var(--win)}.ai-head.neg{color:var(--loss)}
+.ai-line{font-size:var(--type-105);font-weight:600;line-height:1.4;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-src{font-size:var(--type-9);color:var(--muted);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-src.f{margin-top:var(--space-3)}
+.ai-card.ph{border-style:dashed;justify-content:center;align-items:center;min-height:96px;color:var(--muted);font-size:var(--type-11);font-weight:600}
+.ai-card.ph::after{content:none}
+.ai-pager{display:flex;justify-content:center;gap:var(--space-5);padding:var(--space-6) var(--space-16) 0;min-height:var(--space-12)}
+.ai-pager i{display:block;width:6px;height:6px;border-radius:var(--radius-3);background:var(--edge)}
+.ai-pager i.on{background:var(--brand)}
+.ai-comp{display:grid;grid-template-columns:1fr auto;gap:var(--space-8);align-items:center;padding:var(--space-8) var(--space-16) var(--space-10)}
+.ai-in{display:block;width:100%;min-height:44px;background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);color:var(--muted);font:inherit;font-size:var(--type-125);font-weight:600;padding:var(--space-9) var(--space-12);box-sizing:border-box;outline:none}
+.ai-in::placeholder{color:var(--muted);opacity:1}
+.ai-in:focus{border-color:color-mix(in srgb, var(--brand) 55%, transparent)}
+.ai-type{min-height:44px;min-width:44px;padding:0 var(--space-16);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:800;cursor:pointer;background:var(--brand);color:var(--field);border:none}
+.ai-toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--space-70) + env(safe-area-inset-bottom,0px));max-width:88vw;background:var(--ink);color:var(--field);font-family:Sora,-apple-system,sans-serif;font-size:var(--type-115);font-weight:700;padding:var(--space-9) var(--space-14);border-radius:var(--radius-20);z-index:60;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .18s;pointer-events:none}
+.ai-toast.on{opacity:1}
+.ai-toast[hidden]{display:none}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -72,11 +63,17 @@ if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
 try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;var cs=document.querySelector('meta[name="color-scheme"]'),csm=fc&&/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(fc);if(cs&&csm){var csch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},cslum=0.2126*csch(csm[1])+0.7152*csch(csm[2])+0.0722*csch(csm[3]);cs.content=cslum>0.5?'light':'dark';}}catch(e){}})();</script>
 <div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">AI CIO</span></div><div class="as-slot"></div></div>
-<div class="pg">
-<div class="asof" id="asof">Loading…</div>
-<div id="ans"></div><div id="menu"><div class="err">Loading…</div></div>
+<div class="ai" id="ai">
+  <div class="ai-chat" id="ai-chat">
+    <div class="ai-bub" id="ai-bub"><div class="ai-who">AICIO</div><div class="ai-msg" id="ai-msg">Reading the market…</div><div class="ai-asof" id="ai-asof"></div></div>
+  </div>
+  <div class="ai-dock" id="ai-dock">
+    <div class="ai-rail" id="ai-rail" aria-label="Market cards"><div class="ai-card ph">Loading cards…</div></div>
+    <div class="ai-pager" id="ai-pager"></div>
+    <div class="ai-comp"><input class="ai-in" id="ai-in" type="text" readonly aria-disabled="true" inputmode="none" placeholder="Ask AICIO — chat lands in version 2" aria-label="Ask AICIO (version 2)"><button class="ai-type" id="ai-type" type="button">Type</button></div>
+  </div>
 </div>
-<div class="aihint" id="aihint">Free-text answers read the database only. Turn AI on for reasoning.</div><div class="askbar"><input id="q" class="qin" placeholder="Ask Max anything…"><button class="btn" id="send">Ask</button><span class="pill" id="ai">AI off</span></div>
+<div class="ai-toast" id="ai-toast" role="status" hidden></div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
@@ -85,108 +82,62 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <a class="bn on" href="/m/dash"><span class="i">◍</span>Dash</a>
 </nav>
 <script>
-function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
-function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16); }
-function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
-function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
-function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
-function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
-function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
-/* ── light markdown: headings, bold, italic, code, bullets, pipe tables, paragraphs ── */
-function md(s){
-  s=String(s||''); var lines=s.split(/\r?\n/), out=[], i=0;
-  function inl(t){ t=esc(t); t=t.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/(^|[^\w])_([^_]+)_(?!\w)/g,'$1<i>$2</i>').replace(/\*(?!\s)([^*]+?)\*/g,'<i>$1</i>'); return t; }
-  while(i<lines.length){
-    var l=lines[i];
-    if(/^\s*\|/.test(l)){ var rows=[]; while(i<lines.length && /^\s*\|/.test(lines[i])){ rows.push(lines[i]); i++; }
-      var cells=rows.map(function(r){ return r.trim().replace(/^\||\|$/g,'').split('|').map(function(c){return c.trim();}); }).filter(function(c){ return !c.every(function(x){return /^:?-{2,}:?$/.test(x)||x==='';}); });
-      if(cells.length){ out.push('<div class="tw"><table><thead><tr>'+cells[0].map(function(c){return '<th>'+inl(c)+'</th>';}).join('')+'</tr></thead><tbody>'+cells.slice(1).map(function(r){return '<tr>'+r.map(function(c){ var sym=/^[A-Z][A-Z0-9&-]{1,14}$/.test(c); return '<td>'+(sym?'<a href="/m/check?sym='+encodeURIComponent(c)+'">'+esc(c)+'</a>':inl(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>'); }
-      continue; }
-    if(/^\s*[-*] /.test(l)){ var li=[]; while(i<lines.length && /^\s*[-*] /.test(lines[i])){ li.push('<li>'+inl(lines[i].replace(/^\s*[-*] /,''))+'</li>'); i++; } out.push('<ul>'+li.join('')+'</ul>'); continue; }
-    var h=l.match(/^(#{1,4})\s+(.*)/); if(h){ out.push('<div class="mh">'+inl(h[2])+'</div>'); i++; continue; }
-    if(l.trim()===''){ i++; continue; }
-    var para=[l]; i++; while(i<lines.length && lines[i].trim()!=='' && !/^\s*[|#]|^\s*[-*] /.test(lines[i])){ para.push(lines[i]); i++; }
-    out.push('<p>'+para.map(inl).join('<br>')+'</p>');
+(function(){
+  var API='/api/mobile/aicio_app/cards', CARDS=[], TOAST_T=null;
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function $(id){ return document.getElementById(id); }
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function asofText(s){ var m=/^(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})/.exec(String(s||'')); return m?(Number(m[3])+' '+MON[Number(m[2])-1]+' '+m[1]+' · '+m[4]+' IST'):(s||'—'); }
+  /* the column between the sticky header and the fixed bottom nav is the canvas; nothing else scrolls */
+  function fit(){
+    var hdr=document.querySelector('.as-hdr'), nav=document.querySelector('.bnav'), vh=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+    var top=hdr?hdr.getBoundingClientRect().bottom:0, nh=nav?nav.getBoundingClientRect().height:0;
+    $('ai').style.height=Math.max(320,Math.round(vh-top-nh))+'px';
   }
-  return out.join('');
-}
-var TREE=[], BY={}, PATH=[], CTX={sym:'',sym2:'',seg:''}, ANS=[], AI=false, SID='app-'+Date.now().toString(36);
-function kids(pid){ return TREE.filter(function(n){ return (n.parent_id||null)===(pid||null); }); }
-function crumbs(){ return PATH.map(function(id){ return BY[id]?BY[id].label:id; }); }
-function renderMenu(){
-  var cur=PATH.length?PATH[PATH.length-1]:null, list=kids(cur), n=cur?BY[cur]:null, needs=(n&&n.action_params&&n.action_params.needs)||'';
-  var h='';
-  if(needs==='symbol' && !CTX.sym) h+=symBox('Which stock?','sym');
-  else if(needs==='symbol2' && !CTX.sym2) h+=symBox('Compare '+esc(CTX.sym)+' with?','sym2');
-  if(CTX.sym) h+='<div class="ctx">Stock: <b>'+esc(CTX.sym)+'</b>'+(CTX.sym2?' vs <b>'+esc(CTX.sym2)+'</b>':'')+' <a href="#" id="ctx-clr">change</a></div>';
-  if(!cur){ h+='<div class="hero"><div class="eye">AI CIO · Max</div><div class="big"><div class="n" style="font-size:var(--type-125);color:var(--ink)">Tap a question. Every answer here is read from the Scorr database — no model, no cost. Ask anything else at the bottom.</div></div></div>'; }
-  if(list.length) h+='<div class="menu">'+list.map(function(k){ return '<a href="#" class="mi" data-n="'+esc(k.node_id)+'"><span class="ic">'+(k.icon||'›')+'</span><span class="lb">'+esc(k.label)+(k.sublabel?'<small>'+esc(k.sublabel)+'</small>':'')+'</span><span class="ar">›</span></a>'; }).join('')+'</div>';
-  if(PATH.length) h='<div class="crumb"><a href="#" id="c-home">Max</a>'+crumbs().map(function(c,i){ return ' › <a href="#" data-c="'+i+'">'+esc(c)+'</a>'; }).join('')+'</div>'+h;
-  document.getElementById('menu').innerHTML=h;
-  document.querySelectorAll('.mi').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); tap(a.getAttribute('data-n')); }); });
-  var ch=document.getElementById('c-home'); if(ch) ch.addEventListener('click', function(e){ e.preventDefault(); PATH=[]; renderMenu(); });
-  document.querySelectorAll('.crumb [data-c]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); PATH=PATH.slice(0,Number(a.getAttribute('data-c'))+1); renderMenu(); }); });
-  var clr=document.getElementById('ctx-clr'); if(clr) clr.addEventListener('click', function(e){ e.preventDefault(); CTX.sym=''; CTX.sym2=''; renderMenu(); });
-  var sb=document.getElementById('symin'); if(sb){ sb.focus(); sb.addEventListener('keydown', function(e){ if(e.key==='Enter'){ var v=sb.value.trim().toUpperCase(); if(!v) return; CTX[sb.getAttribute('data-k')]=v; renderMenu(); } }); var go=document.getElementById('symgo'); if(go) go.addEventListener('click', function(){ var v=sb.value.trim().toUpperCase(); if(!v) return; CTX[sb.getAttribute('data-k')]=v; renderMenu(); }); }
-}
-function symBox(label,k){ return '<div class="card"><div class="ch"><span class="t">'+label+'</span></div><div class="two" style="grid-template-columns:1fr 84px"><input id="symin" data-k="'+k+'" class="qin" placeholder="NSE symbol, e.g. TCS" autocapitalize="characters"><button class="btn" id="symgo" style="margin-top:8px">Go</button></div></div>'; }
-function tap(id){
-  var n=BY[id]; if(!n) return;
-  try{ fetch('/api/max/ivr/tap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node_id:id,session_id:SID}),credentials:'same-origin'}); }catch(e){}
-  var p=n.action_params||{}, ks=kids(id);
-  if(n.action_intent==='freetext'){ document.getElementById('q').focus(); return; }
-  if(p.needs && !have(p.needs)){ PATH.push(id); renderMenu(); return; }
-  if(ks.length){ PATH.push(id); renderMenu(); return; }
-  run(n);
-}
-function have(need){ return need==='symbol'?!!CTX.sym:(need==='symbol2'?!!CTX.sym2:(need==='segment'?!!CTX.seg:true)); }
-function run(n){
-  var p=n.action_params||{};
-  if(p.href){ location.href=p.href; return; }
-  if(p.needs_sym && !CTX.sym){ PATH.push('analyze'); renderMenu(); return; }
-  if(n.action_intent==='learn_glossary'){ answer(n.label, p.body||'', 'Native · ₹0'); return; }
-  if(n.has_card){ runCard(n); return; }
-  if(p.card && CTX.sym){ location.href='/m/check?sym='+encodeURIComponent(CTX.sym)+(p.card==='D'?'#deriv':''); return; }
-  var q=(p.q||n.label).replace(/\{sym\}/g,CTX.sym||'').replace(/\{sym2\}/g,CTX.sym2||'').replace(/\{seg\}/g,CTX.seg||'');
-  ask(q.trim(), n.label);
-}
-function runCard(n){
-  var p=n.action_params||{}, qs=new URLSearchParams(); if(CTX.sym) qs.set('sym',CTX.sym); if(CTX.seg) qs.set('seg',CTX.seg); if(p.screen_id) qs.set('screen_id',p.screen_id); if(p.cat) qs.set('cat',p.cat); qs.set('node',n.node_id);
-  var id=answer(n.label,'_Reading…_','Native · ₹0');
-  fetch('/api/max/card/'+encodeURIComponent(n.action_intent)+'?'+qs.toString(),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-    replace(id, d.title||n.label, d.error&&!d.body?('**'+d.error+'**'):(d.body||''), 'Native · ₹0'+(d.as_of?' · as of '+esc(d.as_of):''));
-  }).catch(function(){ replace(id, n.label, '**This card could not be built right now.**', ''); });
-}
-function ask(q, title){
-  if(!q) return;
-  var id=answer(title||q, '_Thinking…_', AI?'AI':'Native · ₹0');
-  fetch('/api/scorr/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:q}], mode: AI?null:'native', claude_on: AI, use_tools: AI}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-    var rep=(d.reply==null?'':(typeof d.reply==='string'?d.reply:JSON.stringify(d.reply)));
-    var u=d.usage||{}; replace(id, title||q, rep||('**'+(d.error||'No answer.')+'**'), (d.model?esc(d.model)+' · $'+Number(u.cost_usd||0).toFixed(4):'Native · ₹0')+(d.duration_ms?' · '+Math.round(d.duration_ms)+' ms':''));
-  }).catch(function(){ replace(id, title||q, '**Could not reach Max.**', ''); });
-}
-var AID=0;
-function answer(title, body, foot){ var id='a'+(++AID); ANS.unshift({id:id,title:title,body:body,foot:foot}); drawAns(); return id; }
-function replace(id,title,body,foot){ for(var i=0;i<ANS.length;i++) if(ANS[i].id===id){ ANS[i]={id:id,title:title,body:body,foot:foot}; } drawAns(); }
-function drawAns(){
-  var el=document.getElementById('ans'); if(!ANS.length){ el.innerHTML=''; return; }
-  el.innerHTML='<div class="sec"><h2>Answers</h2><span class="hint" id="a-clr" style="color:var(--brand);font-weight:800">clear</span></div>'+ANS.map(function(a){ return '<div class="card ansc" id="'+a.id+'"><div class="ch"><span class="t">'+esc(a.title)+'</span></div><div class="mdb">'+md(a.body)+'</div>'+(a.foot?'<div class="foot2">'+a.foot+'</div>':'')+'</div>'; }).join('');
-  document.getElementById('a-clr').addEventListener('click', function(){ ANS=[]; drawAns(); });
-  window.scrollTo(0, document.getElementById('ans').getBoundingClientRect().top+window.scrollY-70);
-}
-function boot(){
-  fetch('/api/max/ivr/tree',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-    TREE=d.nodes||[]; TREE.forEach(function(n){ BY[n.node_id]=n; });
-    document.getElementById('asof').innerHTML='<b>'+TREE.length+'</b> questions on tap · '+(d.cards_available||[]).length+' native cards · answers cost nothing unless you turn AI on';
-    renderMenu();
-  }).catch(function(){ document.getElementById('menu').innerHTML='<div class="err">Could not load Max.</div>'; });
-  var q=document.getElementById('q');
-  document.getElementById('send').addEventListener('click', function(){ var v=q.value.trim(); if(!v) return; q.value=''; ask(v); });
-  q.addEventListener('keydown', function(e){ if(e.key==='Enter'){ var v=q.value.trim(); if(!v) return; q.value=''; ask(v); } });
-  document.getElementById('ai').addEventListener('click', function(){ AI=!AI; this.classList.toggle('on',AI); this.textContent=AI?'AI on':'AI off'; document.getElementById('aihint').textContent=AI?'Answers now use the model — costs a few cents each.':'Free-text answers read the database only. Turn AI on for reasoning.'; });
-}
-boot();
+  function toast(msg){
+    var t=$('ai-toast'); t.textContent=msg; t.hidden=false; void t.offsetWidth; t.classList.add('on');
+    if(TOAST_T) clearTimeout(TOAST_T);
+    TOAST_T=setTimeout(function(){ t.classList.remove('on'); setTimeout(function(){ if(!t.classList.contains('on')) t.hidden=true; },220); },2200);
+  }
+  function headCls(c){ var v=c.raw&&c.raw.unrealised; if(c.key!=='v8_book'||v==null) return ''; return Number(v)>0?'pos':(Number(v)<0?'neg':''); }
+  function card(c){
+    return '<a class="ai-card" href="'+esc(c.href)+'" data-key="'+esc(c.key)+'"><div class="ai-eye">'+esc(c.title)+'</div><div class="ai-head '+headCls(c)+'">'+esc(c.headline||'—')+'</div>'+
+      (c.lines||[]).slice(0,2).map(function(l){ return '<div class="ai-line">'+esc(l)+'</div>'; }).join('')+
+      '<div class="ai-src f">'+esc(c.source||'')+'</div>'+(c.as_of?'<div class="ai-src">as of '+esc(c.as_of)+'</div>':'')+'</a>';
+  }
+  function pager(){
+    var rail=$('ai-rail'), cs=rail.querySelectorAll('.ai-card'), p=$('ai-pager'); if(cs.length<2){ p.innerHTML=''; return; }
+    var left=rail.getBoundingClientRect().left, best=0, bd=1e9;
+    for(var i=0;i<cs.length;i++){ var d=Math.abs(cs[i].getBoundingClientRect().left-left); if(d<bd){ bd=d; best=i; } }
+    var h=''; for(var j=0;j<cs.length;j++) h+='<i'+(j===best?' class="on"':'')+'></i>'; p.innerHTML=h;
+  }
+  function draw(d){
+    var cards=(d.cards||[]).filter(function(c){ return c.available; }), missing=(d.cards||[]).filter(function(c){ return !c.available; });
+    CARDS=cards;
+    $('ai-msg').textContent='I am your AI CIO. Here is what the market looks like right now.';
+    var f=d.feed||{}, st=String(f.state||'—'), fc=st==='LIVE'?'ok':(st==='CLOSED'||st==='OFF'?'':'bad');
+    $('ai-asof').innerHTML='<b>'+esc(asofText(d.as_of))+'</b><br><span class="ai-fd '+fc+'"></span>Feed '+esc(st.toLowerCase())+(f.why?' · '+esc(f.why):'');
+    var miss=$('ai-miss'); if(miss) miss.parentNode.removeChild(miss);
+    if(missing.length){ var el=document.createElement('div'); el.className='ai-miss'; el.id='ai-miss';
+      el.innerHTML='<b>'+cards.length+' of '+(d.total||(d.cards||[]).length)+' cards available.</b> '+missing.map(function(c){ return esc(c.title)+': '+esc(String(c.reason||'not available').replace(/^[A-Za-z_]*(Error|Exception): /,'')); }).join(' · ');
+      $('ai-bub').appendChild(el); }
+    $('ai-rail').innerHTML=cards.length?cards.map(card).join(''):'<div class="ai-card ph">No cards right now.</div>';
+    pager();
+  }
+  function fail(){
+    $('ai-msg').textContent='I could not reach the market data right now.';
+    $('ai-asof').innerHTML='<a class="ai-retry" href="#" id="ai-retry">Try again</a>';
+    $('ai-rail').innerHTML='<div class="ai-card ph">Cards unavailable.</div>'; $('ai-pager').innerHTML='';
+    var r=$('ai-retry'); if(r) r.addEventListener('click',function(e){ e.preventDefault(); load(); });
+  }
+  function load(){
+    fetch(API,{credentials:'same-origin'}).then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.json(); }).then(function(d){ if(!d||!d.cards) throw new Error('no cards'); draw(d); }).catch(fail);
+  }
+  $('ai-rail').addEventListener('scroll',function(){ window.requestAnimationFrame(pager); },{passive:true});
+  $('ai-type').addEventListener('click',function(){ try{ $('ai-in').focus({preventScroll:true}); }catch(e){ $('ai-in').focus(); } toast('Chat is version 2. The cards are live.'); });
+  $('ai-in').addEventListener('click',function(){ toast('Chat is version 2. The cards are live.'); });
+  window.addEventListener('resize',fit); if(window.visualViewport) window.visualViewport.addEventListener('resize',fit);
+  fit(); load();
+})();
 </script>
 </body></html>
