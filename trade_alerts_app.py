@@ -1,74 +1,167 @@
 """
-trade_alerts_app.py — cc#1896 APP BUILD: My Alerts section page backend
-(design_refs/scorr_app_myalerts_R3.html, APP_CARD_LAYOUT_LAW_V1 session_log 42536).
+trade_alerts_app.py — /m/myalerts, the ONE My Alerts page (cc#2195, founder 17-Sep-2026 15:13 IST), and its
+endpoint GET /api/mobile/myalerts.
 
-THE WHOLE POINT OF THIS CARD: trade_alerts holds TWO different kinds of record, and the web page
-(trade_alerts_web.html, cc#1885) renders both through one price-alert template — which is why it
-once showed WELCORP "crossing ₹4,57,174" when the stock trades near ₹2,600 (WELCORP is a
-kind='rebalance_due' row; trigger_price on that kind is a basket-level rupee figure, never a price
-level — cc#1885's own finding, confirmed again here against the live table: ids 16-20 range
-24,317 to 5,84,565 against stocks trading in the low thousands). cc#1885 fixed the WEB render.
-THIS file makes the split structural on the APP side, one endpoint ahead of render time, so no
-future app screen can make the same mistake by reaching for trigger_price on the wrong kind.
+HISTORY. cc#1896 built this file as the Dashboard "My Alerts" section (three rails + a key-metrics card,
+design_refs/scorr_app_myalerts_R3.html); Fable's 10-Sep rewrite kept the payload and showed custom alerts
+only. cc#2195 replaces the page and the payload: the Home bell popover (SET ALERT / VIEW ALERTS / CUSTOM
+ALERT) and the counter-card page are gone, and both entry points — the bell on /m/home and the My Alerts
+grid tile — open this page. Three sections: TRIGGERED (every fired alert, newest first), PENDING (set and
+not yet fired, edit / delete), CREATE (the cc#2095 multi-condition builder, full-screen).
 
-ONE endpoint, GET /api/mobile/myalerts. Reuses trade_alerts_endpoints.list_alerts() directly for
-the raw rows (same live-cmp attachment, same schema-ensure) — nothing here re-queries trade_alerts
-with a second, possibly-drifting SQL text.
+WHAT COUNTS AS "MY ALERT" — the bell's own isolation rule (scorr_bell.js, founder correction): only
+alerts the founder set himself. That is (a) every custom_alerts row (cc#2095) and (b) trade_alerts rows
+with source_engine IS NULL — the one verified discriminator (kind does not distinguish manual from engine;
+an approve_signal row and a manual alert both use kind='entry'). Engine-raised rows (V8 approvals) and QB
+rebalance notices (source_engine 'qb') are NOT alerts the user set and stay off this page, exactly as the
+bell already excluded them.
 
-THE SPLIT, exactly:
-  - Price alerts (Futures / Equity rails): every kind IN ('entry','exit') row, ANY source_engine —
-    "what price triggers currently exist", the operational view. Futures vs Equity is DERIVED
-    (never a hardcoded symbol list, per item 6): a symbol with any native fyers_fut row, ever,
-    is Futures; everything else is Equity — the same fut_ever_existed existence check
-    scorr_endpoints.smartgain_m2m() already uses for cc#161's structurally-fut-less distinction.
-  - Basket notices (Rebalance due rail): every kind='rebalance_due' row. trigger_price NEVER
-    appears anywhere in this section's output (item 5) — candidate count is parsed from
-    trigger_condition's own "N candidate(s)" prose (the same regex trade_alerts_web.html's
-    rowHtml() already uses, cc#1885), basket label from notes via the SAME REBAL_BASKET_LABEL
-    map that file defines (duplicated here, not imported — a page-local JS/py pair, same
-    per-page-owns-its-own-small-helpers convention every other mobile page in this codebase
-    follows; the FIVE-basket map itself is copied verbatim so the label never reads differently
-    on the two surfaces).
-  - Your own alerts (Custom / History rails): kind IN ('entry','exit') AND source_engine IS NULL
-    ONLY — alerts the founder set himself through the Custom Alert grid tile, as distinct from
-    engine-raised ones (the live TATAELXSI row is source_engine='V8' and correctly stays OUT of
-    both these cards, appearing only in Price Alerts — this is what keeps the split from
-    double-counting the one alert that currently exists). Custom = status='pending' (still
-    waiting); History = status IN ('triggered','approved','dismissed') (already resolved) — the
-    ref's own wording ("alerts that trigger or get dismissed land here") is what fixes this
-    boundary. NOT FOUNDER-CONFIRMED ON THE CARD — stated here per house doctrine (a spec gap is
-    implemented with a default and the default is named), consistent with every real row today.
+NOTHING RE-QUERIED. trade_alerts rows come from trade_alerts_endpoints.list_alerts() (same live cmp
+attachment, same seen flags, same schema-ensure); custom alerts from custom_alerts.list_custom_alerts()
+and their metric labels from custom_alerts.get_registry() — the same functions the web and the bell read.
+The shaping below (shape / cond_text / price_text / ist) is pure and unit-tested.
+
+TRIGGERED sort key = triggered_at (the bell's own reasoning, cc#2030): a dismissal carries no timestamp
+of its own, so triggered_at is the one honest key across every outcome; a manual price alert approved
+straight from pending never triggered and is not "fired".
 """
-
 import logging
-import re
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from mobile_endpoints import _conn, _guard, _json_safe, _page
+from mobile_endpoints import _guard, _json_safe, _page
 
 log = logging.getLogger("scorr.mobile.myalerts")
 router = APIRouter()
 
-LIST_ROW_CAP = 6
-
-# cc#1885's own map, copied verbatim (trade_alerts_web.html REBAL_BASKET_LABEL) so the label
-# cannot read differently between the web fix and this app page.
-REBAL_BASKET_LABEL = {"mid_cap": "Mid cap", "large_cap": "Large cap", "contra_value": "Contra value",
-                       "breakout_52w": "Breakout 52w", "alpha_multicap": "Alpha multicap"}
-
-_CAND_RE = re.compile(r"(\d+)\s*candidate", re.IGNORECASE)
+IST = timezone(timedelta(hours=5, minutes=30))
+MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+MAX_CONDITIONS = 5   # the builder's cap (spec item 3: up to 5 condition rows)
 
 
-def _basket_label(notes, source_ref):
-    key = notes or (source_ref or "").split(":")[0]
-    return REBAL_BASKET_LABEL.get(key, str(key or "").replace("_", " ").title() or "Basket")
+def _dt(ts):
+    """A DB timestamp (datetime or its str()) → aware datetime, or None. Naive values are UTC (the
+    tables are timestamptz; str() carries +00:00)."""
+    if ts is None or ts == "":
+        return None
+    if isinstance(ts, datetime):
+        d = ts
+    else:
+        s = str(ts).replace("T", " ")
+        try:
+            d = datetime.fromisoformat(s)
+        except ValueError:
+            return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d
 
 
-def _candidate_count(trigger_condition):
-    m = _CAND_RE.search(trigger_condition or "")
-    return int(m.group(1)) if m else None
+def ist(ts):
+    """("15 Sep · 19:30", "2026-09-15", iso) for the page; (None, None, None) when absent."""
+    d = _dt(ts)
+    if d is None:
+        return None, None, None
+    i = d.astimezone(IST)
+    return f"{i.day} {MON[i.month - 1]} · {i:%H:%M}", i.strftime("%Y-%m-%d"), i.isoformat()
+
+
+def _num(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return int(x) if x == int(x) and abs(x) < 1e12 else round(x, 2)
+
+
+def _fmt(v):
+    n = _num(v)
+    if n is None:
+        return "—"
+    return f"{n:,}" if isinstance(n, int) else f"{n:,.2f}".rstrip("0").rstrip(".")
+
+
+def cond_text(c, registry):
+    """'Daily RSI below 50' — the same phrasing custom_alerts.triggered_for_bell() prints in the bell."""
+    r = (registry or {}).get(c.get("metric_key")) or {}
+    label = r.get("label") or c.get("metric_key") or "metric"
+    unit = "%" if r.get("unit") == "%" else ""
+    return f"{label} {c.get('operator') or ''} {_fmt(c.get('threshold'))}{unit}".strip()
+
+
+def price_text(a, fired=False):
+    """'crosses ≥ ₹1,500' / 'crossed ≥ ₹1,500' — trade_alerts_web.html's own ≥/≤ phrasing."""
+    cond = "≥" if str(a.get("trigger_condition") or "").upper() == "ABOVE" else "≤"
+    return f"{'crossed' if fired else 'crosses'} {cond} ₹{_fmt(a.get('trigger_price'))}"
+
+
+def _outcome(a):
+    if a.get("status") == "approved":
+        px = a.get("approved_price")
+        when = ist(a.get("approved_at"))[0]
+        return "approved" + (f" @ ₹{_fmt(px)}" if px is not None else "") + (f" · {when}" if when else "")
+    if a.get("status") == "dismissed":
+        return "dismissed"
+    return "awaiting a decision"
+
+
+def shape(trade_rows, custom_rows, registry, today_ist=None):
+    """The page payload from the three sources. Pure."""
+    today = today_ist or datetime.now(IST).strftime("%Y-%m-%d")
+    triggered, pending = [], []
+    for a in custom_rows or []:
+        conds = []
+        for c in a.get("conditions") or []:
+            conds.append({"text": cond_text(c, registry), "join": c.get("join_operator") if c.get("position", 1) > 1 else None,
+                          "metric_key": c.get("metric_key"), "operator": c.get("operator"), "threshold": _num(c.get("threshold")),
+                          "last_value": _num(c.get("last_value")), "last_seen": ist(c.get("last_evaluated_at"))[0]})
+        text = " ".join(((cc["join"] + " ") if cc["join"] else "") + cc["text"] for cc in conds)
+        base = {"type": "custom", "id": a.get("id"), "key": f"c{a.get('id')}", "symbol": a.get("symbol"), "label": a.get("label"),
+                "text": text, "conditions": conds, "status": a.get("status")}
+        set_ist, set_day, set_iso = ist(a.get("created_at"))
+        base.update({"set_ist": set_ist, "set_at": set_iso})
+        if a.get("status") == "triggered" and a.get("triggered_at"):
+            f_ist, f_day, f_iso = ist(a.get("triggered_at"))
+            triggered.append({**base, "fired_ist": f_ist, "day": f_day, "fired_at": f_iso, "today": f_day == today,
+                              "outcome": None, "seen": None})
+        elif a.get("status") == "active":
+            pending.append(base)
+    for a in trade_rows or []:
+        if a.get("source_engine") or a.get("alert_type") == "custom" or a.get("kind") not in (None, "entry", "exit"):
+            continue   # engine rows, QB notices and the bell's own merged custom rows are not this list's
+        d = str(a.get("direction") or "").upper()
+        base = {"type": "price", "id": a.get("id"), "key": f"p{a.get('id')}", "symbol": a.get("symbol"), "direction": d,
+                "trigger_price": _num(a.get("trigger_price")), "status": a.get("status"), "seen": bool(a.get("seen"))}
+        set_ist, set_day, set_iso = ist(a.get("created_at"))
+        base.update({"set_ist": set_ist, "set_at": set_iso})
+        if a.get("triggered_at"):
+            f_ist, f_day, f_iso = ist(a.get("triggered_at"))
+            triggered.append({**base, "text": price_text(a, fired=True), "fired_ist": f_ist, "day": f_day, "fired_at": f_iso,
+                              "today": f_day == today, "outcome": _outcome(a)})
+        elif a.get("status") == "pending":
+            cmp_ = _num(a.get("cmp"))
+            pending.append({**base, "text": price_text(a), "cmp": cmp_, "cmp_live": a.get("cmp_live"),
+                            "live_text": (f"live ₹{_fmt(cmp_)}" + ("" if a.get("cmp_live") else ", last close") if cmp_ is not None else "no live price right now")})
+    triggered.sort(key=lambda r: r.get("fired_at") or "", reverse=True)
+    pending.sort(key=lambda r: r.get("set_at") or "", reverse=True)
+    return {
+        "triggered": triggered, "pending": pending,
+        "counts": {"triggered": len(triggered), "pending": len(pending),
+                   "triggered_today": sum(1 for r in triggered if r.get("today")),
+                   "unseen_price": sum(1 for r in triggered + pending if r["type"] == "price" and not r.get("seen"))},
+        "today": today, "max_conditions": MAX_CONDITIONS,
+    }
+
+
+def _registry_map(reg):
+    out = {}
+    for cat in (reg or {}).get("categories") or []:
+        for m in cat.get("metrics") or []:
+            out[m.get("metric_key")] = {"label": m.get("label"), "unit": m.get("unit"), "cadence": m.get("cadence"),
+                                        "category": cat.get("category")}
+    return out
 
 
 @router.get("/api/mobile/myalerts")
@@ -78,72 +171,21 @@ def mobile_myalerts(request: Request):
     if g:
         return g
     from trade_alerts_endpoints import list_alerts
+    import custom_alerts
 
     listing = list_alerts(status="all", limit=500)
-    rows = listing.get("alerts") or []
-
-    rebal_rows = [a for a in rows if a.get("kind") == "rebalance_due"]
-    price_rows = [a for a in rows if a.get("kind") in ("entry", "exit")]
-
-    # Futures vs Equity — DERIVED (item 6), never a hardcoded list.
-    price_syms = sorted({a["symbol"] for a in price_rows if a.get("symbol")})
-    fut_syms = set()
-    if price_syms:
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT symbol FROM intraday_prices WHERE source='fyers_fut' AND symbol = ANY(%s)",
-                        (price_syms,))
-            fut_syms = {r[0] for r in cur.fetchall()}
-
-    futures_out, equity_out = [], []
-    for a in price_rows:
-        dest = futures_out if a["symbol"] in fut_syms else equity_out
-        dest.append({
-            "symbol": a["symbol"], "direction": a.get("direction"), "status": a.get("status"),
-            "trigger_price": a.get("trigger_price"), "created_at": a.get("created_at"),
-            "source_engine": a.get("source_engine"),
-        })
-
-    rebal_out = []
-    for a in sorted(rebal_rows, key=lambda r: r.get("notes") or ""):
-        rebal_out.append({
-            "basket": _basket_label(a.get("notes"), a.get("source_ref")),
-            "candidate_count": _candidate_count(a.get("trigger_condition")),
-            "raised_at": a.get("created_at"),
-        })
-
-    own_rows = [a for a in price_rows if not a.get("source_engine")]
-    custom_out = [a for a in own_rows if a.get("status") == "pending"]
-    history_out = [a for a in own_rows if a.get("status") in ("triggered", "approved", "dismissed")]
-
-    triggered_count = sum(1 for a in price_rows if a.get("status") == "triggered")
-
-    return {
-        "as_of_source": "/api/alerts/list",
-        "key_metrics": {
-            "total": len(rows), "futures": len(futures_out), "equity": len(equity_out),
-            "rebalance_due": len(rebal_out), "triggered": triggered_count,
-        },
-        "price_alerts": {
-            "futures": futures_out[:LIST_ROW_CAP], "futures_count": len(futures_out),
-            "equity": equity_out[:LIST_ROW_CAP], "equity_count": len(equity_out),
-        },
-        "basket_notices": {"rows": rebal_out[:LIST_ROW_CAP], "count": len(rebal_out)},
-        "own_alerts": {
-            "custom": [{"symbol": a["symbol"], "direction": a.get("direction"),
-                        "trigger_price": a.get("trigger_price"), "created_at": a.get("created_at")}
-                       for a in custom_out[:LIST_ROW_CAP]], "custom_count": len(custom_out),
-            "history": [{"symbol": a["symbol"], "direction": a.get("direction"), "status": a.get("status"),
-                         "trigger_price": a.get("trigger_price"), "created_at": a.get("created_at")}
-                        for a in history_out[:LIST_ROW_CAP]], "history_count": len(history_out),
-        },
-        "row_cap": LIST_ROW_CAP,
-    }
+    trade_rows = (listing.get("alerts") or []) if isinstance(listing, dict) else []
+    customs = custom_alerts.list_custom_alerts(status="active,triggered", limit=500)
+    custom_rows = (customs.get("alerts") or []) if isinstance(customs, dict) else []
+    registry = _registry_map(custom_alerts.get_registry())
+    out = shape(trade_rows, custom_rows, registry)
+    out["registry"] = registry
+    out["sources"] = {"price": "/api/alerts/list (trade_alerts, source_engine IS NULL)", "custom": "/api/custom_alerts/list",
+                      "delete_custom": "/api/custom_alerts/delete", "dismiss_price": "/api/alerts/dismiss", "seen": "/api/alerts/seen"}
+    return out
 
 
 @router.get("/m/myalerts", response_class=HTMLResponse)
 def m_myalerts():
-    """cc#1896: My Alerts section page, reached from the Home Dashboard section — a grid-tile
-    destination, same discovery pattern as /m/myportfolio (cc#1895). Distinct from /m/alerts
-    (trade_alerts_endpoints.m_alerts, the existing Approve/Dismiss feed), which is UNCHANGED and
-    still the fuller operational surface this page does not duplicate."""
+    """cc#2195: the one My Alerts page — the Home bell and the My Alerts grid tile both open it."""
     return _page("myalerts")

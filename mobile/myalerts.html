@@ -1,15 +1,11 @@
 <!doctype html>
-<!-- ══ mobile/myalerts.html — My Alerts section page. Fable single-mode rewrite 10-Sep-2026
-     (APP_BUILD_FIDELITY_V1, session_log 42756). Supersedes the cc#1896 build @ d2b8888, which
-     drifted from the ref: brand gold via --blu (unbridged -> navy), headline 24px mono, one card
-     width. DESIGN AUTHORITY: design_refs/scorr_app_myalerts_R3.html @ 9622eaa (APP_CARD_LAYOUT_LAW_V1,
-     42536). Geometry from the ref; colours = contract tokens on body[data-theme]; lengths = :root
-     scale. Ref 29px headline -> --type-30 (nearest larger). Data: /api/mobile/myalerts
-     (trade_alerts_app.py), unchanged. FOUNDER 10-Sep 07:1x: this page shows CUSTOM ALERTS ONLY for now — the alerts you set
-     yourself and their history. Price alerts (futures/equity) and QB basket notices are OFF this
-     page until built; the endpoint still returns them, the page just does not render them.
-     TOKEN_MAP  #d4af37 -> --brand · #2fd48b -> --win · #ff5c6c -> --loss · #141416 -> --panel ·
-     #1c1c1f -> --hi · #2a2a2e -> --edge · #f4f4f2 -> --ink · #8b8b90/#6a6a70 -> --muted -->
+<!-- ══ mobile/myalerts.html — MY ALERTS, the ONE alerts page (cc#2195, founder 17-Sep-2026 15:13 IST). The Home bell and the
+     My Alerts grid tile both open it. Three sections behind a sticky tab bar: TRIGGERED (every fired alert, newest first,
+     grouped by day) · PENDING (set, not yet fired; ⋯ or long-press → edit / delete) · CREATE (the cc#2095 full-screen builder,
+     up to 5 conditions, AND/OR, plus the simple price alert). Data: /api/mobile/myalerts (trade_alerts_app.py) — the founder's
+     own alerts only (custom_alerts + trade_alerts with source_engine IS NULL), the bell's own rule. Card grammar = the TC
+     Scanner card (left accent, big symbol, muted sub line, accent row). Contract tokens only; every class al- prefixed.
+     Supersedes the cc#1896 / 10-Sep section page (counter card + three rails). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -17,133 +13,173 @@
 <meta name="theme-color" content="#0A0A0C">
 <meta name="color-scheme" content="dark">
 <title>My Alerts · Scorr</title>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/mobile_app.css">
 <link rel="stylesheet" href="/static/scorr_themes.css">
 <link rel="stylesheet" href="/static/scorr_appshell.css">
 <script src="/static/scorr_appshell.js" defer></script>
 <style>
-/* page-local ma-* rules — geometry from the R3 ref, colours from the contract, lengths from the scale */
-.ma{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
-.ma-asof{padding:var(--space-10) var(--space-16) 0;font-size:var(--type-10);color:var(--muted);letter-spacing:var(--track-em7)}
-.ma-asof b{color:var(--ink);font-weight:600}
-/* KEY METRICS: one TALL card, never a rail */
-.ma-km{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-left:var(--bw-3) solid var(--brand);
- border-radius:0 var(--radius-16) var(--radius-16) 0;padding:var(--space-15) var(--space-16)}
-.ma-km.up{border-left-color:var(--win)} .ma-km.dn{border-left-color:var(--loss)}
-.ma-km .k{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
-.ma-km .v{font-size:var(--type-30);font-weight:800;line-height:1.03;margin-top:var(--space-5)}
-.ma-kg{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-9);margin-top:var(--space-13)}
-.ma-cell{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);padding:var(--space-9) var(--space-11)}
-.ma-cell .k{font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em10)}
-.ma-cell .v{font-size:var(--type-135);font-weight:700;margin-top:var(--space-3)}
-/* SECTION = label + ONE sideways rail */
-.ma-slab{display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-20) var(--space-16) var(--space-8)}
-.ma-slab h2{font-size:var(--type-115);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em14);margin:0}
-.ma-slab .hint{font-size:var(--type-10);color:var(--muted)}
-.ma-rail{display:flex;gap:var(--space-11);overflow-x:auto;scroll-snap-type:x mandatory;padding:var(--space-2) var(--space-16) var(--space-4);scrollbar-width:none;-webkit-overflow-scrolling:touch}
-.ma-rail::-webkit-scrollbar{display:none}
-/* three card widths, as the ref: default 62vw/250, .w 78vw/320 (list cards), .n 46vw/172 */
-.ma-c{flex:0 0 62vw;max-width:250px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13);position:relative}
-.ma-c.w{flex:0 0 78vw;max-width:320px}
-.ma-c.n{flex:0 0 46vw;max-width:172px}
-.ma-c.up{border-left:var(--bw-3) solid var(--win);border-radius:0 var(--radius-14) var(--radius-14) 0}
-.ma-c.dn{border-left:var(--bw-3) solid var(--loss);border-radius:0 var(--radius-14) var(--radius-14) 0}
-.ma-c.gap{border-style:dashed}
-.ma-ch{display:flex;align-items:baseline;justify-content:space-between}
-.ma-ch .t{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em11)}
-.ma-ch .n{font-size:var(--type-11);color:var(--muted)}
-.ma-lst{margin-top:var(--space-9)}
-.ma-lr{display:flex;align-items:center;justify-content:space-between;padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--hi)}
-.ma-lr:last-child{border-bottom:none}
-.ma-lr .s{font-size:var(--type-125);font-weight:800}
-.ma-lr .r{display:flex;gap:var(--space-11);align-items:baseline}
-.ma-lr .a{font-size:var(--type-115);color:var(--muted)}
-.ma-lr .b{font-size:var(--type-125);font-weight:700;min-width:52px;text-align:right}
-.pos{color:var(--win)}.neg{color:var(--loss)}
-.ma-more{font-size:var(--type-11);color:var(--muted);padding:var(--space-7) 0 0}
-.ma-link{display:block;margin-top:var(--space-9);padding-top:var(--space-9);border-top:var(--bw-1) solid var(--edge);font-size:var(--type-115);font-weight:700;color:var(--brand);text-decoration:none}
-.ma-sb{margin-top:var(--space-9)}
-.ma-sb .row{display:flex;justify-content:space-between;font-size:var(--type-115);margin-bottom:var(--space-3)}
-.ma-sb .row span:last-child{color:var(--muted)}
-.ma-bar{height:5px;border-radius:var(--radius-3);background:var(--hi);margin-top:var(--space-8)}
-.ma-bar i{display:block;height:5px;border-radius:var(--radius-3);background:var(--brand)}
-.ma-emp{font-size:var(--type-115);color:var(--muted);line-height:1.6;margin-top:var(--space-7)}
-.ma-emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-5)}
-.ma-note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}
-.ma-note b{color:var(--ink)}
-.ma-err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center}
+body{min-height:100dvh;background:var(--field)}
+.al-pg{font-family:Sora,-apple-system,sans-serif;color:var(--ink);padding-bottom:var(--space-80)}
+.al-pos{color:var(--win)}.al-neg{color:var(--loss)}.al-gd{color:var(--brand)}.al-mu{color:var(--muted)}
+/* sticky tab bar, three sections, counts in the labels */
+.al-tabs{position:sticky;top:var(--al-hdr,60px);z-index:9;display:flex;gap:var(--space-6);padding:var(--space-8) var(--space-16) var(--space-10);background:var(--field)}
+.al-tab{flex:1;min-height:40px;display:flex;align-items:center;justify-content:center;gap:var(--space-6);border:var(--bw-1) solid var(--edge);background:var(--panel);color:var(--muted);border-radius:var(--radius-12);font:inherit;font-size:var(--type-115);font-weight:800;cursor:pointer;padding:0 var(--space-8)}
+.al-tab b{font-size:var(--type-10);font-weight:800;padding:var(--space-1) var(--space-6);border-radius:var(--radius-8);background:var(--hi);color:var(--muted)}
+.al-tab.al-on{background:var(--brand);color:var(--al-on-fg,var(--field));border-color:var(--brand)}.al-tab.al-on b{background:color-mix(in srgb, var(--field) 22%, transparent);color:inherit}
+.al-sec{display:none}.al-sec.al-on{display:block}
+.al-day{padding:var(--space-14) var(--space-16) var(--space-6);font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}.al-day:first-child{padding-top:var(--space-4)}
+/* the card — TC Scanner grammar */
+.al-card{margin:0 var(--space-16) var(--space-10);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-13) var(--space-14);position:relative;overflow:hidden;-webkit-user-select:none;user-select:none}
+.al-card::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
+.al-card.al-buy::after{background:linear-gradient(180deg,var(--win),transparent)}.al-card.al-sell::after{background:linear-gradient(180deg,var(--loss),transparent)}
+.al-card.al-done{opacity:.72}
+.al-ceye{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);font-size:var(--type-10);font-weight:600;color:var(--muted);letter-spacing:var(--track-em3)}
+.al-tag{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-2) var(--space-6);border-radius:var(--radius-8);border:var(--bw-1) solid currentColor;color:var(--brand)}
+.al-tag.al-buy{color:var(--win)}.al-tag.al-sell{color:var(--loss)}.al-tag.al-mu{color:var(--muted)}
+.al-big{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8);margin-top:var(--space-6)}
+.al-sym{font-size:var(--type-22);font-weight:800;line-height:1;letter-spacing:-.01em;text-decoration:none;color:inherit}
+.al-when{font-size:var(--type-11);color:var(--muted);white-space:nowrap}.al-when b{color:var(--ink);font-weight:700}
+.al-sub{font-size:var(--type-115);color:var(--ink);line-height:1.5;margin-top:var(--space-6)}.al-sub.al-mu{color:var(--muted);font-size:var(--type-105)}
+.al-chips{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-top:var(--space-8);align-items:center}
+.al-chip{font-size:var(--type-105);font-weight:700;color:var(--ink);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-4) var(--space-9);line-height:1.3}
+.al-chip small{display:block;font-size:var(--type-9);color:var(--muted);font-weight:600}
+.al-join{font-size:var(--type-9);font-weight:800;letter-spacing:var(--track-em8);color:var(--brand);padding:0 var(--space-2)}
+.al-acc{margin-top:var(--space-10);padding-top:var(--space-8);border-top:var(--bw-1) solid var(--hi);display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);font-size:var(--type-11);color:var(--muted)}.al-acc b{color:var(--ink);font-weight:700}
+.al-more{flex:none;width:36px;height:36px;border-radius:var(--radius-10);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--ink);font-size:var(--type-17);font-weight:800;line-height:1;cursor:pointer;padding:0}
+.al-emp{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-14);padding:var(--space-14);font-size:var(--type-115);color:var(--muted);line-height:1.6}.al-emp b{display:block;color:var(--ink);font-size:var(--type-125);font-weight:700;margin-bottom:var(--space-4)}
+.al-err{margin:var(--space-16);color:var(--muted);font-size:var(--type-12);text-align:center;line-height:1.6}
+/* create */
+.al-cre{margin:var(--space-6) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--brand);border-radius:var(--radius-16);padding:var(--space-14)}
+.al-cre .al-t{font-size:var(--type-15);font-weight:800}.al-cre .al-p{font-size:var(--type-115);color:var(--muted);line-height:1.55;margin-top:var(--space-6)}
+.al-btn,.al-btn2{display:flex;align-items:center;justify-content:center;gap:var(--space-8);width:100%;margin-top:var(--space-10);padding:var(--space-12);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:800;cursor:pointer;box-sizing:border-box;min-height:48px}
+.al-btn{background:var(--brand);color:var(--al-on-fg,var(--field));border:none}.al-btn2{background:var(--hi);color:var(--brand);border:var(--bw-1) solid var(--edge);font-size:var(--type-115)}
+.al-cats{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-top:var(--space-10)}
+.al-cat{font-size:var(--type-10);font-weight:700;color:var(--muted);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20);padding:var(--space-3) var(--space-8)}.al-cat b{color:var(--ink)}
+.al-note{margin:var(--space-22) var(--space-16) var(--space-8);padding:var(--space-12) var(--space-14);border:var(--bw-1) dashed var(--edge);border-radius:var(--radius-12);font-size:var(--type-11);color:var(--muted);line-height:1.65}.al-note b{color:var(--ink)}
+/* action sheet (⋯ / long-press) */
+.al-ov{position:fixed;inset:0;z-index:9500;background:color-mix(in srgb, var(--field) 70%, transparent);display:flex;align-items:flex-end;justify-content:center}
+.al-sheet{width:100%;max-width:480px;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-20) var(--radius-20) 0 0;padding:var(--space-12) var(--space-16) calc(var(--space-16) + env(safe-area-inset-bottom,0px))}
+.al-sheet .al-sh{font-size:var(--type-11);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12);padding:var(--space-4) 0 var(--space-8)}.al-sheet .al-sh b{color:var(--ink);text-transform:none;letter-spacing:0;font-size:var(--type-125)}
+.al-act{display:block;width:100%;text-align:left;padding:var(--space-13) var(--space-12);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--ink);border-radius:var(--radius-12);font:inherit;font-size:var(--type-125);font-weight:700;margin-top:var(--space-8);cursor:pointer;min-height:48px}
+.al-act.al-danger{color:var(--loss)}.al-act.al-cancel{text-align:center;color:var(--muted);background:transparent}
+.al-msg{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-8);line-height:1.5;text-align:center}
+.al-toast{position:fixed;left:50%;bottom:calc(var(--space-80) + var(--space-8));transform:translateX(-50%);background:var(--ink);color:var(--field);font-size:var(--type-115);font-weight:700;padding:var(--space-10) var(--space-14);border-radius:var(--radius-12);z-index:9600;max-width:calc(100vw - var(--space-16) - var(--space-16));text-align:center}
 </style>
 </head>
 <body data-theme="goldnight">
 <script>(function(){try{var t=localStorage.getItem('scorr_theme');
 if(t){}}catch(e){}
 var __r1644=({goldday:'aquawhite',rosenight:'blush',rosewall:'blush',winepurple:'electricviolet',duskviolet:'electricviolet'})[t];if(__r1644){t=__r1644;try{localStorage.setItem('scorr_theme',t);}catch(e){}}document.body.setAttribute('data-theme',(window.SCORR_THEME&&window.SCORR_THEME.resolve)?window.SCORR_THEME.resolve():((t==='goldnight'||t==='dark'||t==='aquawhite'||t==='blush'||t==='ainight'||t==='silvergold'||t==='electricviolet'||t==='indigoash')?t:'goldnight'));
-try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;var cs=document.querySelector('meta[name="color-scheme"]'),csm=fc&&/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(fc);if(cs&&csm){var csch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},cslum=0.2126*csch(csm[1])+0.7152*csch(csm[2])+0.0722*csch(csm[3]);cs.content=cslum>0.5?'light':'dark';}}catch(e){}})();</script>
-<div class="as-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t">My alerts</span></div><div class="as-slot"></div></div>
-<div class="ma">
-<div class="ma-asof" id="ma-asof">Loading…</div>
-<div id="ma-body"><div class="ma-err">Loading alerts…</div></div>
+try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyle(document.body).getPropertyValue('--field').trim();if(mc&&fc)mc.content=fc;var cs=document.querySelector('meta[name="color-scheme"]'),csm=fc&&/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(fc);if(cs&&csm){var csch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},cslum=0.2126*csch(csm[1])+0.7152*csch(csm[2])+0.0722*csch(csm[3]);cs.content=cslum>0.5?'light':'dark';}
+var bs=getComputedStyle(document.body),bc=bs.getPropertyValue('--brand').trim(),bm=/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bc);if(bm){var ch=function(h){var c=parseInt(h,16)/255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);},bl=0.2126*ch(bm[1])+0.7152*ch(bm[2])+0.0722*ch(bm[3]);document.body.style.setProperty('--al-on-fg',bl>0.5?'var(--ink)':'var(--field)');}}catch(e){}})();</script>
+<div class="as-hdr" id="al-hdr"><a class="as-wm" href="/m/home" aria-label="Scorr home">SC<i>O</i>RR</a><div class="as-pg"><span class="t" id="pg-title">My Alerts</span><div class="s" id="al-sub">&nbsp;</div></div><div class="as-slot"></div></div>
+<div class="al-tabs" role="tablist"><button class="al-tab al-on" data-tab="triggered" role="tab" aria-selected="true">Triggered <b id="al-n-triggered">–</b></button><button class="al-tab" data-tab="pending" role="tab" aria-selected="false">Pending <b id="al-n-pending">–</b></button><button class="al-tab" data-tab="create" role="tab" aria-selected="false">Create</button></div>
+<div class="al-pg">
+<div class="al-sec al-on" id="al-triggered"><div class="al-err">Loading…</div></div>
+<div class="al-sec" id="al-pending"></div>
+<div class="al-sec" id="al-create"></div>
 </div>
 <nav class="bnav">
   <a class="bn" href="/m/home"><span class="i">◧</span>Home</a>
   <a class="bn" href="/m/gvm"><span class="i">◈</span>GVM</a>
   <a class="bn" href="/m/aicio"><span class="i">⊙</span>AICIO</a>
   <a class="bn" href="/m/check"><span class="i">◎</span>Check</a>
-  <a class="bn" href="/m/alerts"><span class="i">◬</span>Alerts</a>
+  <a class="bn on" href="/m/alerts"><span class="i">◬</span>Alerts</a>
 </nav>
 <script>
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-function inr(v){ if (v==null||isNaN(Number(v))) return '—'; return '₹'+Number(v).toLocaleString('en-IN', {maximumFractionDigits:2}); }
 var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-function dmt(ts){ if(!ts) return '—'; var d=new Date(String(ts).replace(' ','T'));
-  if(isNaN(d)) return String(ts).slice(0,16);
-  var i=new Date(d.getTime()+(330+d.getTimezoneOffset())*60000);
-  return i.getDate()+' '+MON[i.getMonth()]+' '+('0'+i.getHours()).slice(-2)+':'+('0'+i.getMinutes()).slice(-2); }
-function dmy(ts){ if(!ts) return ''; var p=String(ts).slice(0,10).split('-'); return p.length===3 ? (p[2]+' '+MON[Number(p[1])-1]+' '+p[0]) : ''; }
-function card(cls, title, count, inner, link, href){
-  return '<div class="ma-c '+cls+'"><div class="ma-ch"><span class="t">'+esc(title)+'</span><span class="n">'+esc(count)+'</span></div>'
-    + inner + (link ? '<a class="ma-link" href="'+href+'">'+link+' ›</a>' : '') + '</div>';
+function dayLabel(day, today){ if(!day) return 'Earlier'; if(day===today) return 'Today'; var p=day.split('-'); var d=new Date(Date.UTC(Number(p[0]),Number(p[1])-1,Number(p[2]))); var t=today?today.split('-'):null; if(t){ var td=new Date(Date.UTC(Number(t[0]),Number(t[1])-1,Number(t[2]))); if((td-d)/86400000===1) return 'Yesterday'; } return p[2].replace(/^0/,'')+' '+MON[Number(p[1])-1]+' '+p[0]; }
+var SEEN_KEY='scorr_alerts_seen_custom', D=null, TAB='triggered', SHEET=null;
+function tabFromHash(){ var h=(location.hash||'').replace('#',''); if(h==='new') return 'create'; return (h==='pending'||h==='create'||h==='triggered')?h:'triggered'; }
+function setTab(t, push){ TAB=t; document.querySelectorAll('.al-tab').forEach(function(b){ var on=b.getAttribute('data-tab')===t; b.classList.toggle('al-on',on); b.setAttribute('aria-selected',on?'true':'false'); }); document.querySelectorAll('.al-sec').forEach(function(s){ s.classList.toggle('al-on', s.id==='al-'+t); }); if(push!==false){ try{ history.replaceState(null,'',location.pathname+location.search+'#'+t); }catch(e){} } window.scrollTo(0,0); }
+document.querySelectorAll('.al-tab').forEach(function(b){ b.addEventListener('click', function(){ setTab(b.getAttribute('data-tab')); }); });
+window.addEventListener('hashchange', function(){ if(location.hash==='#new'){ setTab('create'); openBuilder(); return; } setTab(tabFromHash(), false); });
+function hdrH(){ try{ var h=document.getElementById('al-hdr').getBoundingClientRect().height; document.documentElement.style.setProperty('--al-hdr', Math.round(h)+'px'); }catch(e){} }
+window.addEventListener('load', hdrH); window.addEventListener('resize', hdrH); hdrH();
+/* ═══ cards ═══ */
+function chips(r){ return '<div class="al-chips">'+(r.conditions||[]).map(function(c){ return (c.join?'<span class="al-join">'+esc(c.join)+'</span>':'')+'<span class="al-chip">'+esc(c.text)+(c.last_value!=null?'<small>now '+esc(String(c.last_value))+(c.last_seen?' · '+esc(c.last_seen):'')+'</small>':'')+'</span>'; }).join('')+'</div>'; }
+function tag(r){ if(r.type==='custom') return '<span class="al-tag">Custom · '+(r.conditions||[]).length+' condition'+((r.conditions||[]).length===1?'':'s')+'</span>'; var d=(r.direction||'').toUpperCase(); return '<span class="al-tag '+(d==='SELL'||d==='SHORT'?'al-sell':'al-buy')+'">'+esc(d||'price')+' · price alert</span>'; }
+function accent(r){ if(r.type!=='price') return ''; var d=(r.direction||'').toUpperCase(); return (d==='SELL'||d==='SHORT')?' al-sell':' al-buy'; }
+function firedCard(r){
+  var done=r.type==='price'&&(r.status==='approved'||r.status==='dismissed');
+  return '<div class="al-card'+accent(r)+(done?' al-done':'')+'" data-key="'+esc(r.key)+'"><div class="al-ceye"><span>Fired '+esc(r.fired_ist||'—')+'</span>'+tag(r)+'</div>'
+   +'<div class="al-big"><a class="al-sym" href="/m/check?sym='+encodeURIComponent(r.symbol)+'">'+esc(r.symbol)+'</a><span class="al-when">set '+esc(r.set_ist||'—')+'</span></div>'
+   +(r.type==='custom'?chips(r)+(r.label?'<div class="al-sub al-mu">'+esc(r.label)+'</div>':''):'<div class="al-sub"><b>'+esc(r.text)+'</b></div>')
+   +(r.outcome?'<div class="al-acc"><span>Then: <b>'+esc(r.outcome)+'</b></span></div>':'')+'</div>';
 }
-function emp(t, b){ return '<div class="ma-emp"><b>'+esc(t)+'</b>'+esc(b)+'</div>'; }
-function more(n, shown){ return n>shown ? '<div class="ma-more">+'+(n-shown)+' more</div>' : ''; }
-function nz(v){ return v==null?'—':v; }
-
-function kmHtml(o){
-  var set=o.custom_count||0, fired=o.history_count||0;
-  return '<div class="ma-km"><div class="k">Your alerts</div><div class="v">'+set+'</div>'
-    + '<div class="ma-kg">'
-    + '<div class="ma-cell"><div class="k">Set by you</div><div class="v">'+set+'</div></div>'
-    + '<div class="ma-cell"><div class="k">Fired or dismissed</div><div class="v">'+fired+'</div></div>'
-    + '</div></div>';
+function pendingCard(r){
+  return '<div class="al-card'+accent(r)+'" data-key="'+esc(r.key)+'" data-pend="1"><div class="al-ceye"><span>Set '+esc(r.set_ist||'—')+'</span>'+tag(r)+'</div>'
+   +'<div class="al-big"><a class="al-sym" href="/m/check?sym='+encodeURIComponent(r.symbol)+'">'+esc(r.symbol)+'</a></div>'
+   +(r.type==='custom'?chips(r)+(r.label?'<div class="al-sub al-mu">'+esc(r.label)+'</div>':''):'<div class="al-sub"><b>'+esc(r.text)+'</b> <span class="al-mu">· '+esc(r.live_text||'')+'</span></div>')
+   +'<div class="al-acc"><span>'+(r.type==='custom'?'Checked every 5 min in market hours and after the daily close':'Checked every 5 min in market hours')+'</span><button class="al-more" type="button" data-more="'+esc(r.key)+'" aria-label="Edit or delete this alert">⋯</button></div></div>';
 }
-function customCard(d){
-  var o=d.own_alerts||{}, n=o.custom_count||0, list=o.custom||[];
-  if(!n) return card('w gap', 'Custom', 0, emp('You have not set any', 'Price triggers you set yourself. The Custom alert tile on the grid writes into this card.'), 'Set an alert', '/m/alerts#new');
-  var rows = '<div class="ma-lst">'+list.map(function(a){
-    return '<div class="ma-lr"><span class="s">'+esc(a.symbol)+'</span><div class="r"><span class="a">'+esc(a.direction||'')+'</span><span class="b">'+inr(a.trigger_price)+'</span></div></div>';
-  }).join('')+'</div>';
-  return card('w', 'Custom', n, rows+more(n, list.length), 'Set an alert', '/m/alerts#new');
+function renderTriggered(){
+  var host=document.getElementById('al-triggered'), rows=D.triggered||[];
+  if(!rows.length){ host.innerHTML='<div class="al-emp"><b>Nothing has fired yet</b>When an alert you set triggers, it lands here with the time it fired.</div>'; return; }
+  var h='', day=null;
+  rows.forEach(function(r){ if(r.day!==day){ day=r.day; h+='<div class="al-day">'+esc(dayLabel(day, D.today))+'</div>'; } h+=firedCard(r); });
+  host.innerHTML=h;
 }
-function historyCard(d){
-  var o=d.own_alerts||{}, n=o.history_count||0, list=o.history||[];
-  if(!n) return card('w gap', 'History', 0, emp('Nothing has fired', 'Alerts that trigger or get dismissed land here with the date and the price at that moment.'), '', '');
-  var rows = '<div class="ma-lst">'+list.map(function(a){
-    return '<div class="ma-lr"><span class="s">'+esc(a.symbol)+'</span><div class="r"><span class="a">'+esc(a.status||'')+' '+dmt(a.created_at)+'</span><span class="b">'+inr(a.trigger_price)+'</span></div></div>';
-  }).join('')+'</div>';
-  return card('w', 'History', n, rows+more(n, list.length), '', '');
+function renderPending(){
+  var host=document.getElementById('al-pending'), rows=D.pending||[];
+  host.innerHTML= rows.length ? '<div class="al-day">'+rows.length+' waiting</div>'+rows.map(pendingCard).join('') : '<div class="al-emp"><b>No alert is waiting</b>Create one — up to 5 conditions on a stock, or a simple price level.</div>';
+  host.querySelectorAll('[data-more]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); openSheet(b.getAttribute('data-more')); }); });
+  host.querySelectorAll('.al-card[data-pend]').forEach(function(c){ var t=null; var start=function(){ clearTimeout(t); t=setTimeout(function(){ openSheet(c.getAttribute('data-key')); }, 550); }; var stop=function(){ clearTimeout(t); }; c.addEventListener('touchstart', start, {passive:true}); c.addEventListener('touchend', stop); c.addEventListener('touchmove', stop); c.addEventListener('touchcancel', stop); c.addEventListener('mousedown', start); c.addEventListener('mouseup', stop); c.addEventListener('mouseleave', stop); c.addEventListener('contextmenu', function(e){ e.preventDefault(); }); });
 }
-function slab(h2, hint){ return '<div class="ma-slab"><h2>'+h2+'</h2><span class="hint">'+hint+' · swipe →</span></div>'; }
-function render(d){
-  var o=d.own_alerts||{}, on=(o.custom_count||0);
-  document.getElementById('ma-asof').innerHTML = 'Read from <b>'+esc(d.as_of_source||'/api/mobile/myalerts')+'</b>'+(d.as_of?' · '+esc(dmy(d.as_of)):'');
-  document.getElementById('ma-body').innerHTML = kmHtml(o)
-    + slab('Your own alerts', on ? on+' set' : 'none set') + '<div class="ma-rail">'+customCard(d)+historyCard(d)+'</div>'
-    + '<div class="ma-note"><b>Custom alerts only, for now.</b> This page shows the price triggers you set yourself and what happened to them. Engine price alerts and basket rebalance notices are not shown here yet.</div>';
+function renderCreate(){
+  var reg=D.registry||{}, cats={}; Object.keys(reg).forEach(function(k){ var c=reg[k].category||'Other'; cats[c]=(cats[c]||0)+1; });
+  document.getElementById('al-create').innerHTML='<div class="al-cre"><div class="al-t">Create an alert</div><div class="al-p">Pick a stock, then up to <b>'+(D.max_conditions||5)+'</b> conditions joined with AND / OR — RSI, day move, GVM score, 50-DMA and more. The server checks the whole chain every 5 minutes in market hours and after the daily close.</div>'
+   +'<div class="al-cats">'+Object.keys(cats).map(function(c){ return '<span class="al-cat"><b>'+esc(c)+'</b> · '+cats[c]+'</span>'; }).join('')+'</div>'
+   +'<button class="al-btn" type="button" id="al-new">＋ Create custom alert</button><button class="al-btn2" type="button" id="al-price">Set a simple price alert</button><div class="al-msg" id="al-cmsg"></div></div>'
+   +'<div class="al-note"><b>Where alerts land.</b> A fired alert shows under Triggered with its time; one still waiting shows under Pending, where you can edit or delete it. The bell on Home counts what is new.</div>';
+  document.getElementById('al-new').addEventListener('click', function(){ openBuilder(); });
+  document.getElementById('al-price').addEventListener('click', function(){ if(window.ScorrAlertCreate){ window.ScorrAlertCreate.open(function(){ afterCreate('Price alert set.'); }); } else { document.getElementById('al-cmsg').textContent='The price alert form is not loaded on this page.'; } });
 }
-fetch('/api/mobile/myalerts', {credentials:'same-origin'})
-  .then(function(r){ return r.json(); })
-  .then(function(d){ if(d.error){ document.getElementById('ma-body').innerHTML='<div class="ma-err">Could not load: '+esc(d.error)+'</div>'; return; } render(d); })
-  .catch(function(){ document.getElementById('ma-body').innerHTML='<div class="ma-err">Could not load alerts.</div>'; });
+function openBuilder(prefill){
+  if(!window.ScorrCustomAlertCreate){ var m=document.getElementById('al-cmsg'); if(m) m.textContent='The alert builder is not loaded on this page.'; return; }
+  window.ScorrCustomAlertCreate.open(function(){ afterCreate(prefill?'Alert updated.':'Custom alert created.'); }, prefill||null);
+}
+function afterCreate(msg){ toast(msg); load().then(function(){ setTab('pending'); }); }
+function toast(m){ var t=document.createElement('div'); t.className='al-toast'; t.textContent=m; document.body.appendChild(t); setTimeout(function(){ t.remove(); }, 2200); }
+/* ═══ edit / delete sheet ═══ */
+function rowByKey(k){ return (D.pending||[]).concat(D.triggered||[]).filter(function(r){ return r.key===k; })[0]; }
+function closeSheet(){ if(SHEET){ SHEET.remove(); SHEET=null; } }
+function openSheet(key){
+  var r=rowByKey(key); if(!r) return; closeSheet();
+  SHEET=document.createElement('div'); SHEET.className='al-ov';
+  SHEET.innerHTML='<div class="al-sheet" role="dialog" aria-modal="true"><div class="al-sh"><b>'+esc(r.symbol)+'</b> · '+(r.type==='custom'?'custom alert':'price alert')+'</div>'
+   +(r.type==='custom'?'<button class="al-act" type="button" data-act="edit">Edit — change the conditions</button>':'')
+   +'<button class="al-act al-danger" type="button" data-act="delete">Delete this alert</button><div class="al-msg" id="al-smsg"></div><button class="al-act al-cancel" type="button" data-act="cancel">Cancel</button></div>';
+  SHEET.addEventListener('click', function(e){ if(e.target===SHEET) closeSheet(); });
+  SHEET.querySelector('[data-act="cancel"]').addEventListener('click', closeSheet);
+  var ed=SHEET.querySelector('[data-act="edit"]'); if(ed) ed.addEventListener('click', function(){ closeSheet(); openBuilder({symbol:r.symbol, label:r.label, replace_id:r.id, conditions:(r.conditions||[]).map(function(c){ return {metric_key:c.metric_key, operator:c.operator, threshold:c.threshold, join_operator:c.join}; })}); });
+  var del=SHEET.querySelector('[data-act="delete"]'); del.addEventListener('click', function(){
+    if(del.getAttribute('data-armed')!=='1'){ del.setAttribute('data-armed','1'); del.textContent='Tap again to delete '+r.symbol; return; }
+    del.disabled=true; var msg=document.getElementById('al-smsg'); msg.textContent='Deleting…';
+    var url=r.type==='custom'?'/api/custom_alerts/delete':'/api/alerts/dismiss';
+    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({id:r.id})}).then(function(x){ return x.json().then(function(d){ return {ok:x.ok, d:d}; }); }).then(function(x){ if(!x.ok) throw new Error((x.d&&(x.d.detail||x.d.error))||'delete failed'); closeSheet(); toast('Deleted '+r.symbol+'.'); return load(); }).catch(function(e){ del.disabled=false; msg.textContent='Could not delete: '+e.message; });
+  });
+  document.body.appendChild(SHEET);
+}
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSheet(); });
+/* ═══ seen: the bell's badge clears for what this page has shown ═══ */
+function markSeen(){
+  var ids=(D.triggered||[]).concat(D.pending||[]).filter(function(r){ return r.type==='price'&&r.seen===false; }).map(function(r){ return r.id; });
+  if(ids.length){ fetch('/api/alerts/seen',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({ids:ids})}).catch(function(){}); }
+  try{ var seen=JSON.parse(localStorage.getItem(SEEN_KEY)||'[]')||[]; (D.triggered||[]).forEach(function(r){ if(r.type==='custom'&&seen.indexOf(String(r.key))===-1) seen.push(String(r.key)); }); localStorage.setItem(SEEN_KEY, JSON.stringify(seen.slice(-200))); }catch(e){}
+}
+function render(){
+  document.getElementById('al-n-triggered').textContent=(D.counts||{}).triggered||0; document.getElementById('al-n-pending').textContent=(D.counts||{}).pending||0;
+  var ct=(D.counts||{}).triggered_today||0;
+  document.getElementById('al-sub').textContent=(ct?ct+' fired today · ':'')+((D.counts||{}).pending||0)+' waiting';
+  renderTriggered(); renderPending(); renderCreate(); markSeen();
+}
+function load(){
+  return fetch('/api/mobile/myalerts',{credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){ if(!d||d.error) throw new Error((d&&d.error)||'no data'); D=d; render(); }).catch(function(e){ document.getElementById('al-triggered').innerHTML='<div class="al-err">Could not load your alerts: '+esc(e.message)+'</div>'; });
+}
+setTab(tabFromHash(), false);
+load().then(function(){ if(location.hash==='#new') openBuilder(); });
 </script>
 </body></html>

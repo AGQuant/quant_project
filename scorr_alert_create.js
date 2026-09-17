@@ -204,6 +204,7 @@
     _injectStyle();
     _ov = document.createElement('div');
     _ov.id = 'scorrAlertOv';
+    _ov.setAttribute('data-scorr-skip', '1');   /* cc#2195: same opt-out as scorr_custom_alert_create.js -- the /m/ symbol-card tap handler must not eat the search result tap */
     _ov.innerHTML = HTML;
     _ov.addEventListener('click', function (e) { if (e.target === _ov) close(); });
     document.body.appendChild(_ov);

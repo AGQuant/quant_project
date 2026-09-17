@@ -27,7 +27,13 @@
    layout the founder asked to change. Same file ships to /m/* and the web nav — no fork. */
 (function(){
   'use strict';
-  var URL = '/api/alerts/list?status=all&limit=200', SEEN_URL = '/api/alerts/seen', ALERTS = '/m/alerts', WEB_ALERTS = '/alerts', REFRESH_MS = 300000;
+  var URL = '/api/alerts/list?status=all&limit=200', SEEN_URL = '/api/alerts/seen', ALERTS = '/m/myalerts', WEB_ALERTS = '/alerts', REFRESH_MS = 300000;
+  /* cc#2195 (founder 17-Sep 15:13): on the APP (/m/*) the bell is a plain link to the ONE My Alerts page --
+     no popover. The web nav keeps the popover. ALERTS (the app landing for a row) is /m/myalerts now.
+     Badge on the app = the server's unseen count for the founder's own price alerts (trade_alert_seen,
+     unchanged) + custom alerts triggered TODAY (IST) that the My Alerts page has not been opened on yet
+     (custom rows carry no server seen flag -- cc#2095 v1 -- so the page remembers opened ids locally). */
+  var APP = /^\/m\//.test(location.pathname), SEEN_CUSTOM_KEY = 'scorr_alerts_seen_custom';
   var FEED_SHOWN = 5;   // founder: "top rows (4-5)" -- 5 chosen, "View more" reveals the rest
   var state = { alerts: null, timer: null, open: false, view: 'feed', feedExpanded: false };
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -75,7 +81,15 @@
       .sort(function(a, b){ return String(b.triggered_at).localeCompare(String(a.triggered_at)); });
   }
   // cc#1717: badge = UNSEEN waiting alerts (a row the sheet has already been opened on is not news).
-  function badgeCount(){ var m = manualAlerts(); return m.pending.concat(m.triggered).filter(function(a){ return !a.seen; }).length; }
+  function badgeCount(){ var m = manualAlerts(); var n = m.pending.concat(m.triggered).filter(function(a){ return !a.seen; }).length; return APP ? n + customUnseenToday() : n; }
+  // cc#2195: custom alerts that fired today (IST) and were not yet opened on the My Alerts page.
+  function istDay(ts){ var d = new Date(String(ts || '').replace(' ', 'T')); if(isNaN(d)) return ''; var i = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000); return i.getFullYear() + '-' + ('0' + (i.getMonth() + 1)).slice(-2) + '-' + ('0' + i.getDate()).slice(-2); }
+  function customUnseenToday(){
+    var seen = []; try { seen = JSON.parse(localStorage.getItem(SEEN_CUSTOM_KEY) || '[]') || []; } catch(e){ seen = []; }
+    var today = istDay(new Date().toISOString());
+    return (state.alerts || []).filter(function(a){ return a.alert_type === 'custom' && a.triggered_at && istDay(a.triggered_at) === today && seen.indexOf(String(a.id)) === -1; }).length;
+  }
+  function goApp(e){ if(e) e.preventDefault(); location.href = ALERTS; }
   // cc#1717: one POST per sheet open with every waiting id rendered; local rows flip to seen at
   // once so the badge clears now, then the next load() re-reads the server's own flags.
   function markSeen(){
@@ -90,9 +104,9 @@
     var n = state.alerts ? badgeCount() : 0;
     mounts().forEach(function(m){
       if(!m.querySelector('button')){
-        m.innerHTML = '<button type="button" aria-label="Custom alerts" style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid var(--line,var(--edge,#2A2A31));background:var(--well,transparent);color:var(--chalk,var(--muted,#F5F2EA));cursor:pointer;padding:0">'
+        m.innerHTML = '<button type="button" aria-label="Custom alerts"' + (APP ? ' data-bell-link="' + ALERTS + '"' : '') + ' style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid var(--line,var(--edge,#2A2A31));background:var(--well,transparent);color:var(--chalk,var(--muted,#F5F2EA));cursor:pointer;padding:0">'
           + BELL + '<span data-bell-badge style="display:none;position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--gold,var(--pulse,#D4AF37));color:var(--well,#131316);font:800 10px/17px ui-monospace,monospace;text-align:center"></span></button>';
-        m.querySelector('button').addEventListener('click', toggle);
+        m.querySelector('button').addEventListener('click', APP ? goApp : toggle);   // cc#2195: app -> the page, web -> the popover
       }
       var b = m.querySelector('[data-bell-badge]');
       if(b){ b.textContent = n > 99 ? '99+' : String(n); b.style.display = n > 0 ? 'block' : 'none'; }

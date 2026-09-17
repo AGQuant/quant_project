@@ -72,7 +72,12 @@
     + '#scorrCacOv .cac-go[disabled]{opacity:.5;cursor:default}'
     + '#scorrCacOv .cac-cancel{margin-top:10px;width:100%;padding:8px 16px;border-radius:9px;'
     + 'border:1px solid var(--line,#2a2a31);background:var(--panel,#0e1016);color:var(--cac-txt,var(--txt,#e9e9ee));'
-    + 'font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}';
+    + 'font-size:12.5px;font-weight:700;cursor:pointer;min-height:38px}'
+    /* cc#2195: FULL-SCREEN on phone widths (the app's Create Alert is a full-screen builder, not a
+       centred modal); the add button reads disabled at the 5-condition cap. Geometry only, no colours. */
+    + '#scorrCacOv .cac-add[disabled]{opacity:.45;cursor:default}'
+    + '@media (max-width:480px){#scorrCacOv{padding:0;align-items:stretch;justify-content:stretch}'
+    + '#scorrCacOv .cac-box{max-width:none;width:100%;border-radius:0;border-left:0;border-right:0;max-height:none;min-height:100%;padding:18px 16px calc(24px + env(safe-area-inset-bottom,0px))}}';
 
   function _injectStyle() {
     if (document.getElementById('scorr-cac-style')) return;
@@ -98,7 +103,8 @@
 
   var REGISTRY = null;   // [{category, metrics:[{metric_key,label,unit,cadence}]}], loaded once per open()
   var COND_ID = 0;
-  var STATE = { sym: null, conds: [], busy: false, pickerFor: null };
+  var MAX_CONDS = 5;     // cc#2195: up to 5 condition rows (spec item 3) -- the server takes any count, the app caps the form
+  var STATE = { sym: null, conds: [], busy: false, pickerFor: null, replaceId: null };
   var _ov = null, _onCreated = null;
 
   function _loadRegistry() {
@@ -149,6 +155,8 @@
     var host = document.getElementById('cacConds');
     if (!host) return;
     host.innerHTML = STATE.conds.map(_condHtml).join('');
+    var addBtn = document.getElementById('cacAdd');
+    if (addBtn) { var full = STATE.conds.length >= MAX_CONDS; addBtn.disabled = full; addBtn.textContent = full ? (MAX_CONDS + ' of ' + MAX_CONDS + ' conditions -- the most one alert can carry') : ('+ add condition (' + STATE.conds.length + ' of ' + MAX_CONDS + ')'); }
     STATE.conds.forEach(function (c, idx) {
       var box = document.querySelector('.cac-cond[data-cid="' + c.id + '"]');
       if (!box) return;
@@ -258,7 +266,7 @@
       conds.push({ metric_key: c.metric_key, operator: c.operator, threshold: th,
                    join_operator: i === 0 ? null : c.join_operator });
     }
-    STATE.busy = true; go.disabled = true; go.textContent = 'Creating…';
+    STATE.busy = true; go.disabled = true; go.textContent = STATE.replaceId ? 'Saving…' : 'Creating…';
     _ft()('/api/custom_alerts/create', { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: sym, label: (document.getElementById('cacLabel').value || '').trim() || null,
@@ -266,11 +274,17 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (x) {
         if (!x.ok) throw new Error((x.d && x.d.detail) || 'create failed');
-        close();
-        if (typeof _onCreated === 'function') { try { _onCreated(); } catch (e) {} }
+        /* cc#2195 EDIT = replace: the new alert is saved above; only now is the old one deleted, so a
+           failed create can never lose the alert. No update endpoint exists (cc#2095 backend untouched). */
+        var rid = STATE.replaceId;
+        var done = rid ? _ft()('/api/custom_alerts/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: rid }) }).catch(function () {}) : Promise.resolve();
+        return done.then(function () {
+          close();
+          if (typeof _onCreated === 'function') { try { _onCreated(x.d); } catch (e) {} }
+        });
       })
       .catch(function (e) {
-        STATE.busy = false; go.disabled = false; go.textContent = 'Create custom alert';
+        STATE.busy = false; go.disabled = false; go.textContent = STATE.replaceId ? 'Save changes' : 'Create custom alert';
         fail(e.message);
       });
   }
@@ -282,12 +296,18 @@
     _injectStyle();
     _ov = document.createElement('div');
     _ov.id = 'scorrCacOv';
+    /* cc#2195 finding: scorr_card_common.js's capture-phase [data-sym] tap handler (every /m/ page) was
+       opening the symbol card sheet over this form when a search result was tapped, and its
+       stopPropagation meant the result's own click never set the symbol. [data-scorr-skip] is that
+       handler's own opt-out (cc#911 precedent), applied to the whole overlay. */
+    _ov.setAttribute('data-scorr-skip', '1');
     _ov.innerHTML = HTML;
     _ov.addEventListener('click', function (e) { if (e.target === _ov) close(); });
     document.body.appendChild(_ov);
     document.getElementById('cacGo').addEventListener('click', _submit);
     document.getElementById('cacCancel').addEventListener('click', close);
     document.getElementById('cacAdd').addEventListener('click', function () {
+      if (STATE.conds.length >= MAX_CONDS) return;   // cc#2195 cap
       STATE.conds.push(_newCond());
       _renderConds();
     });
@@ -335,20 +355,30 @@
     } catch (e) {}
   }
 
-  function open(onCreated) {
+  /* cc#2195: open(onCreated, prefill) -- prefill = {symbol, label, conditions:[{metric_key, operator,
+     threshold, join_operator}], replace_id} opens the SAME form filled in as an EDIT of that alert;
+     saving creates the new alert and then deletes replace_id (see _submit). Additive: open(cb) is unchanged. */
+  function open(onCreated, prefill) {
     _build();
     _paintTokens();
     _onCreated = (typeof onCreated === 'function') ? onCreated : null;
-    STATE = { sym: null, conds: [_newCond()], busy: false, pickerFor: null };
-    document.getElementById('cacQ').value = '';
-    document.getElementById('cacLabel').value = '';
+    var pf = prefill && typeof prefill === 'object' ? prefill : null;
+    STATE = { sym: pf && pf.symbol ? String(pf.symbol).toUpperCase() : null, conds: [], busy: false, pickerFor: null, replaceId: pf && pf.replace_id ? pf.replace_id : null };
+    (pf && pf.conditions && pf.conditions.length ? pf.conditions.slice(0, MAX_CONDS) : [null]).forEach(function (c) {
+      var n = _newCond();
+      if (c) { n.metric_key = c.metric_key || null; n.operator = c.operator === 'below' ? 'below' : 'above'; n.threshold = (c.threshold == null ? '' : String(c.threshold)); n.join_operator = c.join_operator === 'OR' ? 'OR' : 'AND'; }
+      STATE.conds.push(n);
+    });
+    document.getElementById('cacQ').value = STATE.sym || '';
+    document.getElementById('cacLabel').value = (pf && pf.label) ? String(pf.label) : '';
     document.getElementById('cacSymRes').innerHTML = '';
+    var h2 = _ov.querySelector('h2'); if (h2) h2.textContent = STATE.replaceId ? 'Edit custom alert' : 'New custom alert';
     var err = document.getElementById('cacErr'); err.style.display = 'none';
-    var go = document.getElementById('cacGo'); go.disabled = false; go.textContent = 'Create custom alert';
+    var go = document.getElementById('cacGo'); go.disabled = false; go.textContent = STATE.replaceId ? 'Save changes' : 'Create custom alert';
+    _loadRegistry().then(function () { _renderConds(); });
     _renderConds();
-    _loadRegistry();
     _ov.classList.add('open');
-    document.getElementById('cacQ').focus();
+    if (!STATE.sym) document.getElementById('cacQ').focus();
   }
 
   function close() {

@@ -1587,7 +1587,7 @@ NAV_REGISTRY = {
     # flag too (mobile More sheet), so the tier is corrected to "nav-mobile" to match reality —
     # the registry says which bar an entry appears on, and it now actually appears on this one.
     "/m/myportfolio": ("My Portfolio (mobile, SmartGain data) — HIDDEN 17-Sep-2026 (cc#2197): duplicate of /m/holdings; route alive for old links, off the Home grid, never in the NAV array", "typed-url"),   # cc#1895, tier fixed cc#1907, hidden cc#2197
-    "/m/myalerts":    ("My Alerts (mobile, Dashboard section)",    "nav-mobile"),   # cc#1896, tier fixed cc#1907
+    "/m/myalerts":    ("My Alerts (mobile) — the ONE alerts page since cc#2195: Triggered · Pending · Create; the Home bell (scorr_bell.js on /m/*) and the My Scorr tile both open it", "nav-mobile"),   # cc#1896, tier fixed cc#1907, rebuilt cc#2195
     "/m/mywatchlist": ("My Watchlist (mobile, Dashboard section, no backing store)", "nav-mobile"),   # cc#1897, tier fixed cc#1907
     "/m/dash":        ("Dashboard hub (mobile) — My Portfolio / My Alerts / My Watchlist / My Trades; Home grid Dashboard tile", "nav-mobile"),   # cc#1916 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)
     "/m/qb/holdings": ("Quant Basket holdings table (mobile) — reached from /m/qb?basket= detail page", "grid-tile"),   # cc#1922: not in the NAV array by design (detail-page link only), so grid-tile is the right tier here
