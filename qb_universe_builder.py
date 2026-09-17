@@ -305,6 +305,17 @@ def qb_universe2_preview(
         for k in ordered:
             cur.execute(scored_count_sql + " AND " + fconds[k], params)
             per_filter[k] = cur.fetchone()[0]
+        # cc#2144: the FUNNEL -- for the k-th applied row, how many rows pass the expression built
+        # so far, ((f1 OP2 f2) ... OPk fk): the same _combine over the same prefix of the same
+        # page order, run against the same CTE as `count`. Real queries, one per applied row,
+        # never client arithmetic. The last step is the full expression, so it equals `count` by
+        # construction; under AND each step is <= the one before, under OR it can rise -- reported
+        # exactly as the query returns it, never clamped or reordered.
+        step_counts = {}
+        for i in range(1, len(ordered) + 1):
+            step_expr, _ = _combine(ordered[:i], fconds, op_map)
+            cur.execute(scored_count_sql + " AND " + step_expr, params)
+            step_counts[ordered[i - 1]] = cur.fetchone()[0]
 
         cur.execute(sql, params)
         cols = [d[0] for d in cur.description]
@@ -328,7 +339,7 @@ def qb_universe2_preview(
         "pool_count": pool_count,
         "count": pass_count, "filters_applied": applied, "filter_order": ordered,
         "ops": {k: op_map.get(k, "AND") for k in ordered}, "expression": expr_text,
-        "per_filter_counts": per_filter, "binding_filter": binding,
+        "per_filter_counts": per_filter, "step_counts": step_counts, "binding_filter": binding,
         "as_of_date": str(as_of) if as_of else None, "rows": rows,
     }
 

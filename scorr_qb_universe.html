@@ -67,6 +67,8 @@
   .passcount{margin-top:8px;font-size:11.5px;color:var(--grn);font-weight:800;display:none}
   .passcount.show{display:block}
   .passcount .of{color:var(--mut);font-weight:400}
+  .passcount .sep{margin:0 8px;color:var(--line2);font-weight:400}   /* cc#2144 */
+  .passcount .step{color:var(--blu)}
   .cat-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
   .cat-hd:last-child{border-bottom:none}
   .cat-title{font-size:13px;font-weight:800}
@@ -254,10 +256,20 @@ function filterRowHtml(f){
     + '</div><div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div></div>'
     + '</div>';
 }
+/* cc#2144: every applied row shows BOTH numbers -- ALONE (this filter by itself against the pool,
+   cc#2135) and STEP (rows remaining after this row, combined with the rows above it left-to-right,
+   the server's step_counts). Under AND the step can only fall; under OR it can rise -- whatever the
+   query returned is shown, never clamped or reordered. The last row's step is the universe count. */
 function passCountHtml(key){
   var d = STATE.last;
-  if (!d || !d.per_filter_counts || d.per_filter_counts[key] == null) return 'counting…';
-  return fmtN(d.per_filter_counts[key]) + ' <span class="of">of ' + fmtN(d.pool_count) + ' pass</span>';
+  if (!d || !d.per_filter_counts || d.per_filter_counts[key] == null) return 'counting\u2026';
+  var alone = '<span class="alone">' + fmtN(d.per_filter_counts[key]) + ' <span class="of">of ' + fmtN(d.pool_count) + ' pass on its own</span></span>';
+  var sc = d.step_counts ? d.step_counts[key] : null;
+  if (sc == null) return alone;
+  var order = d.filter_order || [];
+  var idx = order.indexOf(key);
+  var how = idx > 0 ? ' (' + esc((d.ops && d.ops[key]) || 'AND') + ' with the rows above)' : '';
+  return alone + '<span class="sep">|</span><span class="step">' + fmtN(sc) + ' <span class="of">remain after this step' + how + '</span></span>';
 }
 function appliedKeys(){ return CAT1_FILTERS.map(function(f){return f.key;}).filter(function(k){ return STATE.rows[k].applied; }); }
 function toggleRow(key){ STATE.rows[key].open = !STATE.rows[key].open; renderFilters(); }
