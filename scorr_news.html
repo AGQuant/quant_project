@@ -132,6 +132,26 @@
   .imp-low  .art-impact{background:rgba(90,103,129,.10);color:var(--mut)}
 
   .art-stand{font-size:15px;color:var(--mut);margin-top:14px;line-height:1.6;max-width:64ch;font-weight:500}
+  /* cc#2139: Stock Views chart card -- the cc#2140 attachment (chart image above a 5-cell setup
+     strip). Between the metarow and the standfirst, inside the reading measure. Web tokens only,
+     no literal fallbacks (cc#1998 ratchet). Below 560px the strip folds to 3 + 2 cells, as the
+     design ref does. */
+  .svc{margin:16px 0 0;max-width:860px;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .svc-head{display:flex;align-items:center;gap:10px;padding:12px 16px 6px;flex-wrap:wrap}
+  .svc-sym{font-size:15px;font-weight:800;color:var(--txt);letter-spacing:.01em}
+  .svc-side{font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:6px;letter-spacing:.4px}
+  .svc-side.sell{background:var(--red-d);color:var(--red)}
+  .svc-side.buy{background:var(--grn-d);color:var(--grn)}
+  .svc-asof{margin-left:auto;font-size:11px;color:var(--mut)}
+  .svc-img{display:block;width:100%;height:auto;padding:4px 10px 2px;box-sizing:border-box}
+  .svc-strip{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);margin-top:4px}
+  .svc-cell{padding:12px 10px;text-align:center;border-right:1px solid var(--line)}
+  .svc-cell:last-child{border-right:none}
+  .svc-cell .svc-l{font-size:9.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+  .svc-cell .svc-v{font-size:14px;font-weight:700;margin-top:4px;font-family:ui-monospace,Menlo,monospace;color:var(--txt)}
+  .svc-cell .svc-v.amber{color:var(--amber)} .svc-cell .svc-v.grn,.svc-cell .svc-v.pos{color:var(--grn)}
+  .svc-cell .svc-v.red,.svc-cell .svc-v.neg{color:var(--red)} .svc-cell .svc-v.cyan{color:var(--cyan)}
+  @media(max-width:560px){.svc-strip{grid-template-columns:repeat(3,1fr)}.svc-cell:nth-child(3){border-right:none}.svc-cell:nth-child(n+4){border-top:1px solid var(--line)}}
   /* cc#195: list rows go full frame-width, but the READING column stays a
      comfortable ~860px (left-aligned with the headings above it) so long lines
      don't hurt readability in the wider frame. */
@@ -625,6 +645,41 @@ function pillHTML(cat){
   return `<span class="cat-pill" style="background:${p.bg};color:${p.fg};border-color:${p.bd}" onclick="pick('${p.id}')">${esc(p.label)}</span>`;
 }
 
+// cc#2139: Stock Views chart card -- the attachment cc#2140 stores (chart image + the setup it
+// shows), rendered between the metarow and the standfirst, ONLY on a Stock Views article that has
+// one (a catalyst-only piece renders nothing extra). Nothing is computed here: levels, CMP and
+// Unrealised % arrive in a.chart from the endpoint (stock_view_chart.overlay), so web and app show
+// the same numbers from the same formula. Image = GET /api/images/{id}; width/height attributes
+// from the image row so the card does not jump when the picture arrives.
+function fmtLvl(v){ return (v==null||isNaN(v)) ? "--" : Number(v).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtAsOf(d){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||"")); if(!m) return String(d||""); const M=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return parseInt(m[3],10)+" "+M[parseInt(m[2],10)-1]+" "+m[1]; }
+function svChart(a){
+  const c = a && a.chart;
+  if(!c || !c.url || a.category !== "Stock Views") return "";
+  const sym = esc(c.symbol || (symStr(a).split(",")[0]||"").trim());
+  const isSell = c.side === "SELL";
+  const badge = c.has_levels
+    ? `<span class="svc-side ${isSell?'sell':'buy'}">${isSell?'SHORT':'LONG'}${c.setup_label?' · '+esc(c.setup_label):''}</span>` : "";
+  const asof = c.as_of ? `<span class="svc-asof">as of ${esc(fmtAsOf(c.as_of))}</span>` : "";
+  const dims = (c.width_px && c.height_px) ? ` width="${parseInt(c.width_px,10)}" height="${parseInt(c.height_px,10)}"` : "";
+  const img = `<img class="svc-img" src="${esc(c.url)}" alt="${sym} setup chart"${dims} loading="lazy" decoding="async">`;
+  let strip = "";
+  if(c.has_levels){
+    const u = c.unrealised_pct;
+    const uCls = (u==null) ? "" : (u >= 0 ? "pos" : "neg");
+    const uTxt = (u==null) ? "--" : (u >= 0 ? "+" : "") + Number(u).toFixed(2) + "%";
+    const cmpLbl = (c.cmp==null) ? "CMP" : (c.cmp_live ? "CMP · live" : "CMP · last close");
+    strip = `<div class="svc-strip">
+      <div class="svc-cell"><div class="svc-l">Entry</div><div class="svc-v amber">${fmtLvl(c.entry)}</div></div>
+      <div class="svc-cell"><div class="svc-l">Target</div><div class="svc-v grn">${fmtLvl(c.target)}</div></div>
+      <div class="svc-cell"><div class="svc-l">Stop Loss</div><div class="svc-v red">${fmtLvl(c.sl)}</div></div>
+      <div class="svc-cell"><div class="svc-l">${esc(cmpLbl)}</div><div class="svc-v cyan">${fmtLvl(c.cmp)}</div></div>
+      <div class="svc-cell"><div class="svc-l">Unrealised</div><div class="svc-v ${uCls}">${uTxt}</div></div>
+    </div>`;
+  }
+  return `<figure class="svc"><div class="svc-head"><span class="svc-sym">${sym}</span>${badge}${asof}</div>${img}${strip}</figure>`;
+}
+
 function artFull(a, isLead){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
@@ -657,6 +712,7 @@ function artFull(a, isLead){
     ${copyBtn(a, hasFull)}
     <div class="art-head">${esc(a.headline_clean)}</div>
     <div class="art-metarow">${svTag}${rt}${impact}</div>
+    ${svChart(a)}
     ${stand}
     <div class="art-body">${bodyHTML}</div>
     <div class="art-foot">

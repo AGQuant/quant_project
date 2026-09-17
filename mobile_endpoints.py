@@ -342,6 +342,15 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
             arts = _rows(cur)
             has_more = len(arts) > limit
             arts = arts[:limit]
+            # cc#2139: chart attachment (cc#2140) + live CMP for the setup strip, keyed by polished_id.
+            # Own try + rollback: a hosting problem must never turn the whole screen into the error
+            # payload below. shape() passes the dict through untouched -- same shape as the web.
+            try:
+                import stock_view_chart
+                stock_view_chart.overlay(cur, arts, "polished_id")
+            except Exception as e:
+                conn.rollback()
+                log.warning(f"mobile intel chart overlay: {e}")
     except Exception as e:
         log.exception("mobile intel failed")
         return {"error": f"{type(e).__name__}: {str(e)[:200]}", "articles": [], "count": 0}
@@ -357,6 +366,7 @@ def mobile_intel(request: Request, hours: int = 0, limit: int = 40, cursor: str 
             "impact": (a["impact"] or "").upper() or None,
             "symbols": a["mentioned_symbols"] or [],
             "source": a["source_name"],
+            "chart": a.get("chart"),   # cc#2139: None, or the stock_view_chart.overlay dict
             # cc#1860: display_time is a timestamptz, returned by the DB session in UTC -- strftime()
             # straight off it printed the raw UTC clock (a card polished at 20:17 IST/14:47 UTC read
             # "14:47", and when_full compounded it by labelling that UTC value " IST"). .astimezone(_IST)
@@ -1149,6 +1159,27 @@ html,body{background:var(--field, #0A0F1E);color:var(--chalk, #E9EEFB);font-fami
   text-align:center;padding:13px 0 3px}
 .mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
 .pos{color:var(--grn)}.neg{color:var(--red)}
+/* cc#2139 · Stock Views chart card (app). The cc#2140 attachment: chart image above a 5-cell setup
+   strip, between the headline and the summary, only on a Stock Views card that has one. Lives HERE
+   because intel.html has no <style> block (cc#982 note below). `svc-` prefix on EVERY class incl. the cells' label/value (this app collides on .v/.l, cc#964/967);
+   r5 tokens only, no literal fallbacks (cc#1998 ratchet). A figure, not a .c, so the shell's
+   corner-cut never applies to it. 3 + 2 cells at phone width, as the design ref folds. */
+figure.svc{margin:10px 0 0;background:var(--panel2);border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+.svc-head{display:flex;align-items:center;gap:8px;padding:9px 12px 5px;flex-wrap:wrap}
+.svc-sym{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;font-weight:800;color:var(--txt)}
+.svc-side{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;font-weight:800;letter-spacing:.08em;padding:3px 7px;border-radius:4px}
+.svc-side.sell{color:var(--red);background:var(--red-d)}
+.svc-side.buy{color:var(--grn);background:var(--grn-d)}
+.svc-asof{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim)}
+.svc-img{display:block;width:100%;height:auto;padding:2px 6px 0;box-sizing:border-box}
+.svc-strip{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line2);margin-top:4px}
+.svc-cell{padding:9px 6px;text-align:center;border-right:1px solid var(--line2)}
+.svc-cell:nth-child(3n),.svc-cell:last-child{border-right:none}
+.svc-cell:nth-child(n+4){border-top:1px solid var(--line2)}
+.svc-cell .svc-l{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+.svc-cell .svc-v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:800;margin-top:3px;color:var(--txt)}
+.svc-cell .svc-v.amber{color:var(--amber)}.svc-cell .svc-v.grn,.svc-cell .svc-v.pos{color:var(--grn)}
+.svc-cell .svc-v.red,.svc-cell .svc-v.neg{color:var(--red)}.svc-cell .svc-v.cyan{color:var(--cyan)}
 
 /* THE STATE RAIL — four states told apart by SHAPE, not by opacity (15913 rule 10). */
 .rail{display:inline-flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',ui-monospace,monospace;

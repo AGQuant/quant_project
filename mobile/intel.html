@@ -160,6 +160,40 @@ function ncCopyBtn(a){
    3px/7px padding, one bordered pill), all three sitting in the same .meta flex row. There is no
    oversized standalone banner here to shrink — logged as a QUESTION rather than guessed, since
    the founder screenshot that drove cc#1370/1371 may have been a different surface. */
+/* cc#2139: Stock Views chart card -- the attachment cc#2140 stores (chart image + the setup it
+   shows), rendered between the headline and the summary, ONLY on a Stock Views card that has one.
+   Nothing computed here: a.chart comes from /api/mobile/intel (stock_view_chart.overlay), the same
+   shape and formula the web page uses. CSS lives in MOBILE_CSS (mobile_endpoints.py) because this
+   template has no <style> block (cc#982). Image = GET /api/images/{id}. */
+function svFmt(v){ return (v == null || isNaN(v)) ? '--' : Number(v).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+function svAsOf(d){ var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); if (!m) return String(d || ''); var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return parseInt(m[3], 10) + ' ' + M[parseInt(m[2], 10) - 1] + ' ' + m[1]; }
+function svChartHtml(a){
+  var c = a && a.chart;
+  if (!c || !c.url || a.category !== 'Stock Views') return '';
+  var sym = esc(c.symbol || ((a.symbols || [])[0] || ''));
+  var isSell = c.side === 'SELL';
+  var badge = c.has_levels
+    ? '<span class="svc-side ' + (isSell ? 'sell' : 'buy') + '">' + (isSell ? 'SHORT' : 'LONG') + (c.setup_label ? ' · ' + esc(c.setup_label) : '') + '</span>' : '';
+  var asof = c.as_of ? '<span class="svc-asof">as of ' + esc(svAsOf(c.as_of)) + '</span>' : '';
+  var dims = (c.width_px && c.height_px) ? ' width="' + parseInt(c.width_px, 10) + '" height="' + parseInt(c.height_px, 10) + '"' : '';
+  var img = '<img class="svc-img" src="' + esc(c.url) + '" alt="' + sym + ' setup chart"' + dims + ' loading="lazy" decoding="async">';
+  var strip = '';
+  if (c.has_levels) {
+    var u = c.unrealised_pct;
+    var uCls = (u == null) ? '' : (u >= 0 ? 'pos' : 'neg');
+    var uTxt = (u == null) ? '--' : (u >= 0 ? '+' : '') + Number(u).toFixed(2) + '%';
+    var cmpLbl = (c.cmp == null) ? 'CMP' : (c.cmp_live ? 'CMP · live' : 'CMP · last close');
+    strip = '<div class="svc-strip">'
+      + '<div class="svc-cell"><div class="svc-l">Entry</div><div class="svc-v amber">' + svFmt(c.entry) + '</div></div>'
+      + '<div class="svc-cell"><div class="svc-l">Target</div><div class="svc-v grn">' + svFmt(c.target) + '</div></div>'
+      + '<div class="svc-cell"><div class="svc-l">Stop Loss</div><div class="svc-v red">' + svFmt(c.sl) + '</div></div>'
+      + '<div class="svc-cell"><div class="svc-l">' + esc(cmpLbl) + '</div><div class="svc-v cyan">' + svFmt(c.cmp) + '</div></div>'
+      + '<div class="svc-cell"><div class="svc-l">Unrealised</div><div class="svc-v ' + uCls + '">' + uTxt + '</div></div>'
+      + '</div>';
+  }
+  return '<figure class="svc"><div class="svc-head"><span class="svc-sym">' + sym + '</span>' + badge + asof + '</div>' + img + strip + '</figure>';
+}
+
 function card(a, mode){
   var edge = sentClass(a.sentiment);
   var isEd = (mode === 'open' || mode === 'folded');
@@ -213,6 +247,7 @@ function card(a, mode){
   return '<div class="c slab dense ' + (isEd ? 'ed ' : '') + edge + '">'
     + '<div class="meta">' + tags + '<span class="when">' + esc(a.when || '--') + '</span></div>'
     + '<div class="hl">' + esc(a.headline) + '</div>'
+    + svChartHtml(a)
     + bodyHtml + syms
     /* cc#1371: the raw third-party source/wire-agency name (a.source) is DROPPED \u2014 universal
        across every news-card surface (founder screenshot feedback 28-Aug, applied here as the

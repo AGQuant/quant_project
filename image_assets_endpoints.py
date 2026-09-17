@@ -156,22 +156,25 @@ def _num(v):
 def attachments(cur, news_ids):
     """{polished_news.id: attachment dict} for the given article ids -- THE reader for the attachment.
 
-    Each dict: image_id, url (/api/images/<id>), symbol, side, entry, target, sl, cmp_at_publish,
-    setup_label, as_of, attached_at, attached_by -- numbers as floats, dates as ISO strings, absent
-    fields None. A news endpoint calls this once per page of rows and sets row['chart'] from it
+    Each dict: image_id, url (/api/images/<id>), content_type, width_px, height_px (from the image
+    row, for the <img> attributes), symbol, side, entry, target, sl, cmp_at_publish, setup_label,
+    as_of, attached_at, attached_by -- numbers as floats, dates as ISO strings, absent fields None. A news endpoint calls this once per page of rows and sets row['chart'] from it
     (None when the article has no attachment). Raises on a DB error like any query: wrap it and
     rollback, as the news overlays already do, so a hosting problem never blanks the news page.
     """
     ids = sorted({int(i) for i in news_ids if i is not None})
     if not ids:
         return {}
-    cur.execute("SELECT " + ", ".join(ATTACHMENT_COLS) +
-                " FROM polished_news_images WHERE news_id = ANY(%s)", (ids,))
+    cur.execute("SELECT " + ", ".join("l." + c for c in ATTACHMENT_COLS) +
+                ", i.content_type, i.width_px, i.height_px"
+                " FROM polished_news_images l LEFT JOIN image_assets i ON i.id = l.image_id"
+                " WHERE l.news_id = ANY(%s)", (ids,))
     out = {}
     for r in cur.fetchall():
-        d = dict(zip(ATTACHMENT_COLS, r))
+        d = dict(zip(ATTACHMENT_COLS + ("content_type", "width_px", "height_px"), r))
         out[int(d["news_id"])] = {
             "image_id": int(d["image_id"]), "url": "/api/images/%d" % int(d["image_id"]),
+            "content_type": d["content_type"], "width_px": d["width_px"], "height_px": d["height_px"],
             "symbol": d["symbol"], "side": d["side"],
             "entry": _num(d["entry"]), "target": _num(d["target"]), "sl": _num(d["sl"]),
             "cmp_at_publish": _num(d["cmp_at_publish"]), "setup_label": d["setup_label"],

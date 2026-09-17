@@ -467,6 +467,14 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
         with _conn() as conn, conn.cursor() as cur:
             cur.execute(sql, exec_params)
             articles = _rows(cur)
+            # cc#2139: chart attachment (cc#2140) + live CMP for the setup strip -- last thing on the
+            # connection, own try, rollback on failure so the search result still ships.
+            try:
+                import stock_view_chart
+                stock_view_chart.overlay(cur, articles, "id")
+            except Exception as e:
+                conn.rollback()
+                log.warning(f"news_polished chart overlay (search): {e}")
         has_more = len(articles) > limit
         if has_more:
             articles = articles[:limit]
@@ -522,6 +530,15 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
         articles = _rows(cur)
         cur.execute("SELECT category, COUNT(*) FROM polished_news GROUP BY category")
         counts = {row[0]: row[1] for row in cur.fetchall()}
+        # cc#2139: chart attachment (cc#2140) + live CMP for the setup strip. One query for the page's
+        # ids + one batch CMP resolve; a row without an attachment gets chart=None. Own try and a
+        # rollback so a hosting problem never blanks the news page (same pattern as every overlay).
+        try:
+            import stock_view_chart
+            stock_view_chart.overlay(cur, articles, "id")
+        except Exception as e:
+            conn.rollback()
+            log.warning(f"news_polished chart overlay: {e}")
     has_more = len(articles) > limit
     if has_more:
         articles = articles[:limit]
