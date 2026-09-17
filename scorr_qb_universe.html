@@ -69,6 +69,25 @@
   .passcount .of{color:var(--mut);font-weight:400}
   .passcount .sep{margin:0 8px;color:var(--line2);font-weight:400}   /* cc#2144 */
   .passcount .step{color:var(--blu)}
+  /* cc#2145: data-backing badge (POINT-IN-TIME, green), the live category header, the Segments
+     multi-select box and the segment-size context line. Tokens only. */
+  .dbadge{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:2px 6px;border-radius:5px;margin-left:8px;vertical-align:middle;white-space:nowrap}
+  .dbadge.pit{color:var(--grn);border:1px solid var(--grn);background:var(--grn-d)}
+  .cat-hd.live{border-bottom:none;padding-top:16px}
+  .segpicked{display:flex;flex-wrap:wrap;gap:5px;width:100%;margin-bottom:6px}
+  .segchip{font-size:10.5px;font-weight:700;color:var(--blu);border:1px solid var(--blu);border-radius:999px;padding:2px 8px}
+  .segsearch{width:100%;max-width:340px;padding:6px 9px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
+  .segbox{width:100%;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:6px;background:var(--panel)}
+  .segopt{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--line);font-size:12px}
+  .segopt:last-child{border-bottom:none}
+  .segopt:hover{background:var(--card2)}
+  .segopt.on{background:var(--card2)}
+  .segopt input{margin:0;flex:0 0 auto;accent-color:var(--blu)}
+  .segname{flex:1;min-width:0;font-weight:700}
+  .segmeta{font-size:10.5px;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .segbox-empty{padding:10px;font-size:11.5px;color:var(--mut)}
+  .segctx{margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5}
+  .segctx b{color:var(--txt)}
   .cat-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
   .cat-hd:last-child{border-bottom:none}
   .cat-title{font-size:13px;font-weight:800}
@@ -96,8 +115,8 @@
   <div class="sub">
     Pick one or more pools (they combine, deduplicated), then narrow with filters. Every value here is the current EOD snapshot
     (gvm_scores as of its latest score_date) — this is a Quant Basket engine, not a screener.
-    <b>V1</b>: pool selection + GVM/component-score filters are live. The other six categories
-    (Sector, Price/Momentum, Change/Delta, Quarterly Results, Alpha/Risk, Quality/Valuation) are
+    <b>V1</b>: pool selection, GVM/component-score filters and Sector &amp; Segment filters are live. The other five categories
+    (Price/Momentum, Change/Delta, Quarterly Results, Alpha/Risk, Quality/Valuation) are
     shown below so you can see the full shape of the page — they are not wired to real filtering
     yet.
   </div>
@@ -108,7 +127,7 @@
   </div>
 
   <div class="card">
-    <h2>2 — GVM &amp; Component Filters <span class="hcount" id="activeCount">0 active of 6</span></h2>
+    <h2>2 — Filters <span class="hcount" id="activeCount">0 active of 11 live · 40 in the locked set</span></h2>
     <div class="filterlist" id="filterlist"></div>
     <div id="categories"></div>
   </div>
@@ -145,8 +164,20 @@ var CAT1_FILTERS = [
   {key:'verdict', label:'Verdict', kind:'list', col:'verdict', options:['Excellent','Good','Average','Weak']},
   {key:'seg_rank', label:'Rank within Segment', kind:'range', col:'seg_rank'},
 ];
+/* cc#2145: CAT_2 Sector & Segment -- the five locked rows, all columns of the same scored CTE the
+   CAT_1 rows read (universe-wide sector metrics joined by segment: the /sector numbers). They sit
+   AFTER the CAT_1 rows in the server's _FILTER_ORDER, so the funnel (cc#2144) runs top-to-bottom
+   through both blocks. `pit` marks the data backing: POINT-IN-TIME (the latest EOD snapshot). */
+var CAT2_FILTERS = [
+  {key:'sector_gvm', label:'Sector GVM (mcap-weighted)', kind:'range', col:'sector_gvm', cat:2},
+  {key:'sector_rank', label:'Sector Rank (by sector GVM)', kind:'range', col:'sector_rank', cat:2, step:1},
+  {key:'sector_gap', label:'Stock GVM minus Sector GVM', kind:'range', col:'gvm_minus_sector', cat:2},
+  {key:'sector_members', label:'Sector Member Count', kind:'range', col:'sector_member_count', cat:2, step:1, minOnly:true},
+  {key:'segments', label:'Segments', kind:'multi', col:'segment', cat:2},
+];
+var ALL_FILTERS = CAT1_FILTERS.concat(CAT2_FILTERS);
+var LOCKED_SET_TOTAL = 40;   /* the locked V1 set (cc#2123 spec); 11 of them are wired here today */
 var CATEGORIES_COMING = [
-  {name:'Sector & Segment', n:5},
   {name:'Price & Momentum', n:5},
   {name:'Change & Delta', n:7},
   {name:'Quarterly Results (YoY)', n:6},
@@ -155,8 +186,18 @@ var CATEGORIES_COMING = [
 ];
 
 var STATE = { pools:[], sel:[], rows:{}, last:null, seq:0 };   /* cc#2143: sel = selected pool keys, any number */
-CAT1_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[]}; });
+ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[]}; });
+STATE.segments = [];   /* cc#2145: the universe's segments for the multi-select, loaded once */
+STATE.segq = '';
 
+/* cc#2145: the segment list (universe-wide member count, mcap-weighted sector GVM and rank) for the
+   Segments multi-select -- the same CTE the preview joins on. */
+function loadSegments(){
+  fetchWithTimeout('/api/qb/universe2/segments').then(function(r){return r.json();}).then(function(d){
+    STATE.segments = d.segments || [];
+    renderFilters();
+  }).catch(function(){ STATE.segments = []; });
+}
 function loadPools(){
   fetchWithTimeout('/api/qb/universe2/pools').then(function(r){return r.json();}).then(function(d){
     STATE.pools = d.pools || [];
@@ -224,18 +265,48 @@ function togglePool(key){
 function renderFilters(){
   document.getElementById('filterlist').innerHTML = CAT1_FILTERS.map(filterRowHtml).join('');
   var n = appliedKeys().length;
-  document.getElementById('activeCount').textContent = n + ' active of ' + CAT1_FILTERS.length;
-  document.getElementById('categories').innerHTML = CATEGORIES_COMING.map(function(c){
-    return '<div class="cat-hd"><div><span class="cat-title">'+esc(c.name)+'</span><span class="cat-count">'+c.n+' filters</span></div><span class="cat-coming">Coming</span></div>';
-  }).join('');
+  document.getElementById('activeCount').textContent = n + ' active of ' + ALL_FILTERS.length + ' live \u00b7 ' + LOCKED_SET_TOTAL + ' in the locked set';
+  /* cc#2145: Sector & Segment is LIVE -- its rows render with the same row pattern as CAT_1,
+     each carrying the POINT-IN-TIME data-backing badge; the other five categories stay "Coming". */
+  document.getElementById('categories').innerHTML =
+    '<div class="cat-hd live"><div><span class="cat-title">Sector &amp; Segment</span><span class="cat-count">' + CAT2_FILTERS.length + ' filters</span></div><span class="dbadge pit" title="Read from the latest EOD gvm_scores snapshot: one score_date, computed in the query, no stored roll-up">POINT-IN-TIME</span></div>'
+    + '<div class="filterlist" id="filterlist2">' + CAT2_FILTERS.map(filterRowHtml).join('') + '</div>'
+    + CATEGORIES_COMING.map(function(c){
+        return '<div class="cat-hd"><div><span class="cat-title">'+esc(c.name)+'</span><span class="cat-count">'+c.n+' filters</span></div><span class="cat-coming">Coming</span></div>';
+      }).join('');
 }
+/* cc#2145 item 5 (FOUNDER_AMENDMENT_16SEP_RANK_IS_SEGMENT_ONLY): segment-size context beside the
+   Rank-within-Segment row -- the pool's segments and their member counts, from the server's
+   segment_stats. Shown, never auto-applied. */
+function segCtxHtml(){
+  var d = STATE.last; var st = d && d.segment_stats;
+  if (!st) return '<div class="segctx">Segment sizes in this pool: pick a pool to see them</div>';
+  return '<div class="segctx">Segments in this pool: <b>' + fmtN(st.segments) + '</b> \u00b7 members min <b>' + fmtN(st.min) + '</b> \u00b7 median <b>' + fmtN(st.median) + '</b> \u00b7 max <b>' + fmtN(st.max) + '</b> \u2014 a rank of 1 in a 5-member segment is not a rank of 1 in a 40-member one</div>';
+}
+function segOptionsHtml(st){
+  var q = (STATE.segq || '').toLowerCase();
+  var list = STATE.segments.filter(function(g){ return !q || g.segment.toLowerCase().indexOf(q) >= 0; });
+  if (!STATE.segments.length) return '<div class="segbox-empty">Segment list not loaded</div>';
+  var picked = st.list.length ? '<div class="segpicked">' + st.list.map(function(v){ return '<span class="segchip">' + esc(v) + '</span>'; }).join('') + '</div>' : '';
+  return picked + '<input type="search" class="segsearch" placeholder="Find a segment\u2026" value="' + esc(STATE.segq) + '" oninput="STATE.segq=this.value; refreshSegBox();">'
+    + '<div class="segbox" id="segbox">' + list.map(function(g){
+        var on = st.list.indexOf(g.segment) >= 0;
+        return '<label class="segopt' + (on ? ' on' : '') + '"><input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="toggleListVal(\'segments\',\'' + esc(g.segment).replace(/'/g, "\\'") + '\',this.checked); renderFilters();">'
+          + '<span class="segname">' + esc(g.segment) + '</span><span class="segmeta">' + fmtN(g.members) + ' \u00b7 GVM ' + num2(g.sector_gvm) + ' \u00b7 #' + fmtN(g.sector_rank) + '</span></label>';
+      }).join('') + (list.length ? '' : '<div class="segbox-empty">No segment matches</div>') + '</div>';
+}
+function refreshSegBox(){ var st = STATE.rows['segments']; var b = document.getElementById('segbox'); if (!b) return; var tmp = document.createElement('div'); tmp.innerHTML = segOptionsHtml(st); var nb = tmp.querySelector('#segbox'); if (nb) b.replaceWith(nb); }
 function filterRowHtml(f){
   var st = STATE.rows[f.key];
   var inputs;
   if (f.kind === 'range'){
-    inputs = '<input type="number" step="0.01" placeholder="min" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">'
-      + '<span class="to">to</span>'
-      + '<input type="number" step="0.01" placeholder="max" value="'+esc(st.max)+'" onchange="setVal(\''+f.key+'\',\'max\',this.value)">';
+    var stp = f.step ? String(f.step) : '0.01';   /* cc#2145: whole numbers for ranks and counts */
+    inputs = '<input type="number" step="'+stp+'" placeholder="min" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">'
+      + (f.minOnly ? '<span class="to">and above</span>'
+         : '<span class="to">to</span>'
+           + '<input type="number" step="'+stp+'" placeholder="max" value="'+esc(st.max)+'" onchange="setVal(\''+f.key+'\',\'max\',this.value)">');
+  } else if (f.kind === 'multi'){
+    inputs = segOptionsHtml(st);   /* cc#2145: the Segments multi-select */
   } else {
     inputs = (f.options||[]).map(function(o){
       var checked = st.list.indexOf(o) >= 0;
@@ -245,7 +316,7 @@ function filterRowHtml(f){
   var pc = passCountHtml(f.key);
   return '<div class="frow'+(st.open?' open':'')+'" id="frow-'+f.key+'">'
     + '<div class="fhead" onclick="toggleRow(\''+f.key+'\')">'
-    +   '<div class="plusbtn">+</div><div class="fname">'+esc(f.label)+'</div>'
+    +   '<div class="plusbtn">+</div><div class="fname">'+esc(f.label)+(f.cat === 2 ? '<span class="dbadge pit" title="POINT-IN-TIME: the latest EOD gvm_scores snapshot, computed in the query">POINT-IN-TIME</span>' : '')+'</div>'
     +   '<div class="rowcomb" onclick="event.stopPropagation()" title="How this row combines with the rows above it (left-to-right, top-to-bottom)">'
     +     '<button type="button" class="'+(st.op==='AND'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'AND\')">AND</button>'
     +     '<button type="button" class="'+(st.op==='OR'?'sel':'')+'" onclick="setOp(\''+f.key+'\',\'OR\')">OR</button></div>'
@@ -253,7 +324,7 @@ function filterRowHtml(f){
     + '</div>'
     + '<div class="fbody"><div class="finputs">' + inputs
     +   '<button type="button" class="applywrap" onclick="toggleApply(\''+f.key+'\')"><span class="tick'+(st.applied?' on':'')+'">✓</span><span class="applylabel">Apply</span></button>'
-    + '</div><div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div></div>'
+    + '</div><div class="passcount'+(st.applied?' show':'')+'" id="pc-'+f.key+'">'+pc+'</div>'+(f.key === 'seg_rank' ? segCtxHtml() : '')+'</div>'
     + '</div>';
 }
 /* cc#2144: every applied row shows BOTH numbers -- ALONE (this filter by itself against the pool,
@@ -271,7 +342,7 @@ function passCountHtml(key){
   var how = idx > 0 ? ' (' + esc((d.ops && d.ops[key]) || 'AND') + ' with the rows above)' : '';
   return alone + '<span class="sep">|</span><span class="step">' + fmtN(sc) + ' <span class="of">remain after this step' + how + '</span></span>';
 }
-function appliedKeys(){ return CAT1_FILTERS.map(function(f){return f.key;}).filter(function(k){ return STATE.rows[k].applied; }); }
+function appliedKeys(){ return ALL_FILTERS.map(function(f){return f.key;}).filter(function(k){ return STATE.rows[k].applied; }); }
 function toggleRow(key){ STATE.rows[key].open = !STATE.rows[key].open; renderFilters(); }
 function setOp(key, op){ STATE.rows[key].op = op; renderFilters(); if (STATE.rows[key].applied) refresh(); }
 function toggleApply(key){
@@ -297,11 +368,13 @@ function buildQuery(){
   var q = STATE.sel.map(function(k){ return 'pools=' + encodeURIComponent(k); });   /* cc#2143: repeated pools= */
   var ops = [];
   appliedKeys().forEach(function(key){
-    var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0];
+    var f = ALL_FILTERS.filter(function(x){return x.key===key;})[0];
     var st = STATE.rows[key];
     if (f.kind === 'range'){
       if (st.min !== '') q.push(key + '_min=' + encodeURIComponent(st.min));
-      if (st.max !== '') q.push(key + '_max=' + encodeURIComponent(st.max));
+      if (st.max !== '' && !f.minOnly) q.push(key + '_max=' + encodeURIComponent(st.max));
+    } else if (f.kind === 'multi'){
+      st.list.forEach(function(v){ q.push('segments=' + encodeURIComponent(v)); });   /* cc#2145 */
     } else {
       st.list.forEach(function(v){ q.push('verdict=' + encodeURIComponent(v)); });
     }
@@ -341,7 +414,7 @@ function refresh(){
       document.getElementById('resultVal').innerHTML = '<span class="of">Could not count — '+esc(e.message)+'</span>';
     });
 }
-function labelOf(key){ var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0]; return f ? f.label : key; }
+function labelOf(key){ var f = ALL_FILTERS.filter(function(x){return x.key===key;})[0]; return f ? f.label : key; }
 function toggleResults(){
   var w = document.getElementById('resultsWrap');
   w.style.display = (w.style.display === 'none') ? '' : 'none';
@@ -350,9 +423,9 @@ function renderResults(d){
   var keys = appliedKeys();
   var cols = [{h:'Symbol', k:'symbol'}, {h:'Company', k:'company_name'}, {h:'Segment', k:'segment'}];
   keys.forEach(function(key){
-    var f = CAT1_FILTERS.filter(function(x){return x.key===key;})[0];
-    if (f.col === 'verdict') { if (!cols.some(function(c){return c.k==='verdict';})) cols.push({h:'Verdict', k:'verdict'}); }
-    else cols.push({h:f.label, k:f.col});
+    var f = ALL_FILTERS.filter(function(x){return x.key===key;})[0];
+    if (cols.some(function(c){return c.k===f.col;})) return;   /* cc#2145: segment / verdict already a column */
+    cols.push({h:f.label, k:f.col});
   });
   if (!keys.length) cols.push({h:'GVM', k:'gvm_score'}, {h:'Segment Rank', k:'seg_rank'});
   document.getElementById('resultsHead').innerHTML = '<tr>' + cols.map(function(c){return '<th>'+esc(c.h)+'</th>';}).join('') + '</tr>';
@@ -363,7 +436,7 @@ function renderResults(d){
           var v = r[c.k];
           if (c.k === 'symbol') return '<td><strong>'+esc(v)+'</strong></td>';
           if (c.k === 'company_name' || c.k === 'segment' || c.k === 'verdict') return '<td>'+esc(v||'—')+'</td>';
-          if (c.k === 'seg_rank') return '<td>'+(v!=null?v:'—')+'</td>';
+          if (c.k === 'seg_rank' || c.k === 'sector_rank' || c.k === 'sector_member_count') return '<td>'+(v!=null?v:'—')+'</td>';
           return '<td>'+num2(v)+'</td>';
         }).join('') + '</tr>';
       }).join('')
@@ -382,6 +455,7 @@ document.getElementById('resultVal').addEventListener('click', toggleResults);
 })();
 
 loadPools();
+loadSegments();   /* cc#2145 */
 renderFilters();
 </script>
 </body>

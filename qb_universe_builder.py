@@ -194,19 +194,61 @@ def qb_universe2_pools():
 # segment ORDER BY gvm_score DESC). seg_size and gap_vs_sector ride along in the same pass since
 # the founder's own amendment (FOUNDER_AMENDMENT_16SEP_RANK_IS_SEGMENT_ONLY) requires the segment
 # size to be visible beside the rank filter, not auto-applied as a second filter.
-_CAT1_SQL = """
+# cc#2145: the SECTOR metrics are computed over the WHOLE scored universe at the latest score_date --
+# NOT over the pool -- so the number on this page is the number /sector shows and the one
+# N5_SEGMENT_GATE_V1 gates on, whatever pool is picked. Basis mirrors compute_sector_ratings
+# (gvm_nightly.py) exactly: gvm_score NOT NULL rows only; segment '', 'Unknown' and NULL skipped;
+# mcap-weighted mean over members WITH a market cap (cc#1104: a missing market cap is an exclusion
+# from the weight, never a fake weight); a segment where nobody has a market cap falls back to the
+# simple mean; rounded to 3 dp like sector_ratings.mcap_weighted_gvm. sector_rank is DENSE_RANK over
+# segments by the unrounded weighted mean. Window functions in-query, no table, no job (ruling 2).
+_UNI_SECT_SQL = """
+latest AS (SELECT MAX(score_date) AS d FROM gvm_scores),
+uni AS (
+    SELECT g.segment,
+           SUM(CASE WHEN g.market_cap IS NOT NULL THEN g.gvm_score * g.market_cap END) AS w_num,
+           SUM(CASE WHEN g.market_cap IS NOT NULL THEN g.market_cap END)               AS w_den,
+           AVG(g.gvm_score) AS simple_avg,
+           COUNT(*) AS members
+      FROM gvm_scores g, latest
+     WHERE g.score_date = latest.d AND g.gvm_score IS NOT NULL
+       AND g.segment IS NOT NULL AND g.segment NOT IN ('', 'Unknown')
+     GROUP BY g.segment
+),
+sect AS (
+    SELECT segment, members AS sector_member_count,
+           CASE WHEN w_den > 0 THEN w_num / w_den ELSE simple_avg END AS sector_gvm_raw
+      FROM uni
+),
+sect_ranked AS (
+    SELECT segment, sector_member_count,
+           ROUND(sector_gvm_raw::numeric, 3) AS sector_gvm,
+           DENSE_RANK() OVER (ORDER BY sector_gvm_raw DESC NULLS LAST) AS sector_rank
+      FROM sect
+)"""
+
+# The ONE scored CTE both the preview rows and every count (alone / step / total) read from: the
+# CAT_1 columns exactly as cc#2123 wrote them (seg_rank, seg_size, gap_vs_sector are POOL-scoped,
+# the founder's own rank-within-segment), plus the cc#2145 universe-wide sector columns joined by
+# segment. One query shape, one set of rows, so a count and a row can never disagree.
+_SCORED_CTE = """
 WITH pool AS ({pool_sql}),
+""" + _UNI_SECT_SQL + """,
 scored AS (
     SELECT g.symbol, g.company_name, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score,
            g.verdict, g.market_cap, g.price,
            RANK() OVER (PARTITION BY g.segment ORDER BY g.gvm_score DESC) AS seg_rank,
            COUNT(*) OVER (PARTITION BY g.segment) AS seg_size,
-           ROUND((g.gvm_score - AVG(g.gvm_score) OVER (PARTITION BY g.segment))::numeric, 2) AS gap_vs_sector
+           ROUND((g.gvm_score - AVG(g.gvm_score) OVER (PARTITION BY g.segment))::numeric, 2) AS gap_vs_sector,
+           s.sector_gvm, s.sector_rank, s.sector_member_count,
+           ROUND((g.gvm_score - s.sector_gvm)::numeric, 2) AS gvm_minus_sector
       FROM gvm_scores g
       JOIN pool p ON p.symbol = g.symbol
-     WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+      LEFT JOIN sect_ranked s ON s.segment = g.segment
+     WHERE g.score_date = (SELECT d FROM latest)
 )
-SELECT * FROM scored WHERE 1=1{where}
+"""
+_CAT1_SQL = _SCORED_CTE + """SELECT * FROM scored WHERE 1=1{where}
  ORDER BY gvm_score DESC NULLS LAST
  LIMIT %(limit)s
 """
@@ -222,6 +264,11 @@ def qb_universe2_preview(
     m_min: Optional[float] = None, m_max: Optional[float] = None,
     verdict: Optional[List[str]] = Query(None),
     seg_rank_min: Optional[int] = None, seg_rank_max: Optional[int] = None,
+    sector_gvm_min: Optional[float] = None, sector_gvm_max: Optional[float] = None,
+    sector_rank_min: Optional[int] = None, sector_rank_max: Optional[int] = None,
+    sector_gap_min: Optional[float] = None, sector_gap_max: Optional[float] = None,
+    sector_members_min: Optional[int] = None, sector_members_max: Optional[int] = None,
+    segments: Optional[List[str]] = Query(None),
     ops: Optional[str] = None,
     limit: int = 500,
 ):
@@ -270,6 +317,16 @@ def qb_universe2_preview(
         params["verdict"] = [v.upper() for v in verdict]
         applied.append("verdict")
     rng("seg_rank", seg_rank_min, seg_rank_max, "seg_rank")
+    # cc#2145: CAT_2 Sector & Segment -- five locked rows, all columns of the same scored CTE.
+    rng("sector_gvm", sector_gvm_min, sector_gvm_max, "sector_gvm")
+    rng("sector_rank", sector_rank_min, sector_rank_max, "sector_rank")
+    rng("gvm_minus_sector", sector_gap_min, sector_gap_max, "sector_gap")
+    rng("sector_member_count", sector_members_min, sector_members_max, "sector_members")
+    seg_list = [x.strip() for x in (segments or []) if x and x.strip()]
+    if seg_list:
+        fconds["segments"] = "(segment = ANY(%(segments)s))"
+        params["segments"] = seg_list
+        applied.append("segments")
 
     op_map = _parse_ops(ops)
     ordered = [k for k in _FILTER_ORDER if k in fconds]
@@ -284,13 +341,8 @@ def qb_universe2_preview(
     # -- they can legitimately differ (e.g. F&O's 3 index futures carry no GVM score at all), and
     # using the raw count here would make a zero-filter preview look like it silently dropped
     # members that were never scoreable to begin with.
-    scored_count_sql = (
-        "WITH pool AS (" + pool_sql + "), scored AS ("
-        "SELECT g.symbol, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, "
-        "RANK() OVER (PARTITION BY g.segment ORDER BY g.gvm_score DESC) AS seg_rank "
-        "FROM gvm_scores g JOIN pool p ON p.symbol = g.symbol "
-        "WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)) "
-        "SELECT COUNT(*) FROM scored WHERE 1=1")
+    # cc#2145: every count (total, alone, step) reads the SAME scored CTE the rows come from.
+    scored_count_sql = _SCORED_CTE.format(pool_sql=pool_sql) + "SELECT COUNT(*) FROM scored WHERE 1=1"
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) FROM (" + pool_sql + ") p WHERE EXISTS "
@@ -322,6 +374,14 @@ def qb_universe2_preview(
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("SELECT MAX(score_date) FROM gvm_scores")
         as_of = cur.fetchone()[0]
+        # cc#2145 item 5 (FOUNDER_AMENDMENT_16SEP_RANK_IS_SEGMENT_ONLY): segment-size context for the
+        # Rank-within-Segment row -- the POOL's segments and their member counts, min / median / max.
+        # Shown beside the rank filter, never auto-applied as a filter.
+        cur.execute(_SCORED_CTE.format(pool_sql=pool_sql)
+                    + "SELECT COUNT(*), MIN(n), percentile_cont(0.5) WITHIN GROUP (ORDER BY n), MAX(n) "
+                      "FROM (SELECT segment, COUNT(*) AS n FROM scored GROUP BY segment) z")
+        _ss = cur.fetchone()
+        segment_stats = {"segments": int(_ss[0] or 0), "min": _ss[1], "median": float(_ss[2]) if _ss[2] is not None else None, "max": _ss[3]}
 
     # cc#2123: which single filter cut the most -- the smallest of the per-filter counts, so the
     # founder sees the binding gate immediately rather than guessing from the combined result.
@@ -341,12 +401,14 @@ def qb_universe2_preview(
         "ops": {k: op_map.get(k, "AND") for k in ordered}, "expression": expr_text,
         "per_filter_counts": per_filter, "step_counts": step_counts, "binding_filter": binding,
         "as_of_date": str(as_of) if as_of else None, "rows": rows,
+        "segment_stats": segment_stats,   # cc#2145 item 5
     }
 
 
 # cc#2135: the page's fixed row order -- "left-to-right" in the combine below means top-to-bottom
 # on the page. Kept in ONE place so the page and the endpoint cannot disagree about it.
-_FILTER_ORDER = ("gvm", "g", "v", "m", "verdict", "seg_rank")
+_FILTER_ORDER = ("gvm", "g", "v", "m", "verdict", "seg_rank",
+                 "sector_gvm", "sector_rank", "sector_gap", "sector_members", "segments")   # cc#2145: CAT_2 after CAT_1
 
 
 def _parse_ops(ops: Optional[str]) -> dict:
@@ -373,6 +435,22 @@ def _combine(ordered, fconds, op_map):
         expr = f"({expr} {op} {fconds[k]})"
         text = f"({text} {op} {k})"
     return expr, text
+
+
+@router.get("/api/qb/universe2/segments")
+def qb_universe2_segments():
+    """cc#2145: every segment of the scored universe at the latest score_date with its member count,
+    mcap-weighted sector GVM (3 dp, the /sector number) and dense rank -- the list the Segments
+    multi-select and the sector rows are read against. Universe-wide by design (not pool-scoped),
+    same CTE the preview joins on, so the two can never disagree."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("WITH " + _UNI_SECT_SQL + " SELECT segment, sector_member_count, sector_gvm, sector_rank "
+                    "FROM sect_ranked ORDER BY segment")
+        segs = [{"segment": r[0], "members": int(r[1]), "sector_gvm": float(r[2]) if r[2] is not None else None,
+                 "sector_rank": int(r[3])} for r in cur.fetchall()]
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        as_of = cur.fetchone()[0]
+    return {"segments": segs, "count": len(segs), "as_of_date": str(as_of) if as_of else None}
 
 
 @router.get("/qb/universe2", response_class=HTMLResponse)
