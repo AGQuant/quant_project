@@ -1635,7 +1635,7 @@ NAV_REGISTRY = {
     # /check route stays live, injected + PROTECTED, for bookmarks and deep links.
     "/check":        ("Check · V8 tab row (slot 7); page kept for the tab's iframe embed + typed URL", "v8-tab"),
     "/dashboard#check": ("Check (V8 tab)", "tab"),   # cc#1747 rule id=2987
-    "/screeners":    ("Screeners",            "nav"),   # cc#824
+    "/screeners":    ("Screeners — V8 sub-nav entry (removed from top nav)", "tab"),   # cc#824; cc#2137: folded under the V8 row, same treatment as /intel (cc#2136)
     "/options":      ("Option Strategy Builder", "nav"),   # cc#2038: OPT sprint 3/5, web renderer
     "/intraday":     ("(-> /dashboard#tcscan · TC Scanner tab; page kept for the tab's iframe embed)", "typed-url"),   # cc#740
     "/dashboard#tcscan": ("TC Scanner · V8 tab — reachable via the V8 tab bar / deep link", "typed-url"),   # cc#740; cc#822 removed from nav

@@ -410,7 +410,11 @@ PWA_JS = """
     // ONE entry, added ONCE. This array renders in two form factors (desktop top bar and the mobile
     // "More" sheet), so a single entry appears in both automatically — a second entry would double
     // it, not extend it. Rebased on cc#822's trim: Digest / TC Scanner / Holdings stay removed.
-    ['/screeners', '\\u2637', 'Screeners'],
+    // cc#2137 (founder 16-Sep-2026, "just like intel"): Screeners is OUT of this top-level array --
+    // it now sits in the V8 Dashboard's own sub-nav row (v8_dashboard.html #v8toptabs, right before
+    // Model Portfolio), the cc#2136 treatment. /screeners, scorr_screeners.html, PROTECTED and
+    // _PWA_INJECT_PATHS are unchanged (gated; still receives this canonical nav). NAV_REGISTRY: tab.
+    // (was: ['/screeners', '\\u2637', 'Screeners'])
     // cc#2038 (OPT sprint 3/5): Option Strategy Builder, a new standing research surface —
     // grouped here next to Screeners/Invest Scan (the card's own "Tools/research" grouping);
     // app_route_map.route_group='research' to match (checked live: Wall of Trades' OWN row is

@@ -1343,6 +1343,14 @@ body #scorr-lo a, body #scorr-th button{backdrop-filter:none}
          buttons opening read-only table views of the registry baskets / stored screeners — nothing
          renders until a button is pressed. The /quant-basket and /screeners nav entries stay;
          neither page is retired, only this tab's folded copy of one of them. -->
+    <!-- cc#2137 (founder 16-Sep-2026, "shift screeners from main nav to V8 nav just like intel"):
+         Screeners moves OUT of the main top navbar and INTO this row, the cc#2136 pattern exactly --
+         a real <a> to the unchanged /screeners page (scorr_screeners.html, the EOD predefined
+         screens), styled by the same .v8toptab rule, no data-pane so it never takes the active
+         state. Placed right before Model Portfolio, whose launcher opens the stored screeners as a
+         table view -- the two list-of-lists entries sit together. Route, gate and injected nav
+         unchanged. -->
+    <a class="v8toptab" href="/screeners" style="text-decoration:none;display:inline-block">Screeners</a>
     <button class="v8toptab" data-pane="model" onclick="showV8Pane('model')">Model Portfolio</button>
 
     <!-- cc#1528: the cc#1149 tabs-row theme pill (#iiThemeBtn) is REMOVED — the canonical top-nav
