@@ -75,6 +75,29 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:var(--r
 .alt{font-size:var(--type-115);padding:var(--space-8) var(--space-10);margin-top:var(--space-6);background:var(--hi);border-radius:var(--radius-10);border-left:var(--bw-3) solid var(--brand)}
 .hl{margin:var(--space-8) 0 0;padding-left:var(--space-18);font-size:var(--type-11);line-height:1.6;color:var(--muted)}.hl li{margin-bottom:var(--space-3)}
 .cell .v small{font-size:var(--type-9);color:var(--muted);font-weight:700}
+/* cc#2190: the OUTPUT sheet, fpc- prefixed (the bare .row/.v/.n names are also mobile_app.css selectors) */
+.fpc-score{display:flex;align-items:baseline;gap:var(--space-6);margin-top:var(--space-8);flex-wrap:wrap}
+.fpc-score b{font-size:var(--type-34);font-weight:800;line-height:1;color:var(--ink)}.fpc-score b.pos{color:var(--win)}.fpc-score b.neg{color:var(--loss)}
+.fpc-score span{font-size:var(--type-11);color:var(--muted);font-weight:700}
+.fpc-bar{flex-basis:100%;height:8px;border-radius:var(--radius-4);background:var(--hi);overflow:hidden;margin-top:var(--space-6)}.fpc-bar i{display:block;height:8px;border-radius:var(--radius-4);background:var(--brand)}
+.fpc-pil{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin-top:var(--space-10)}
+.fpc-pc{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-10);min-width:0}
+.fpc-pc .k{display:block;font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.fpc-pc b{display:block;font-size:var(--type-17);font-weight:800;margin-top:var(--space-2);color:var(--ink)}.fpc-pc b small{font-size:var(--type-9);color:var(--muted);font-weight:700}
+.fpc-pc.ok b{color:var(--win)}.fpc-pc.low b{color:var(--loss)}
+.fpc-pc .tg{display:block;font-size:var(--type-95);color:var(--muted);margin-top:var(--space-3);line-height:1.4}
+.fpc-line{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-8);font-size:var(--type-115);color:var(--muted);padding:var(--space-7) 0;border-bottom:var(--bw-1) solid var(--edge)}.fpc-line:last-of-type{border-bottom:none}
+.fpc-line b{color:var(--ink);font-size:var(--type-14);font-weight:800;text-align:right}.fpc-line b.pos{color:var(--win)}.fpc-line b.neg{color:var(--loss)}
+.fpc-alts{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);margin-top:var(--space-10)}
+.fpc-alt{background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);padding:var(--space-8) var(--space-10);min-width:0}
+.fpc-alt .k{display:block;font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em8)}
+.fpc-alt b{display:block;font-size:var(--type-15);font-weight:800;margin-top:var(--space-2);color:var(--ink)}
+.fpc-alt span{display:block;font-size:var(--type-95);color:var(--muted);margin-top:var(--space-3);line-height:1.4}
+.fpc-bks{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}
+.fpc-bk{display:grid;grid-template-columns:minmax(0,1fr) 24px;gap:var(--space-8);align-items:center;padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--edge);text-decoration:none;color:var(--ink);min-height:44px;box-sizing:border-box}
+.fpc-bk:last-child{border-bottom:none}.fpc-bk .nm{font-size:var(--type-125);font-weight:800}.fpc-bk .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2)}.fpc-bk .go{color:var(--brand);font-size:var(--type-18);font-weight:800;text-align:right}
+.fpc-asm{display:none;margin:var(--space-8) 0 0;padding-left:var(--space-18);font-size:var(--type-11);line-height:1.6;color:var(--muted)}.fpc-asm li{margin-bottom:var(--space-3)}.fpc-asm.open{display:block}
+.fpc-tog{color:var(--brand);font-weight:800;cursor:pointer;min-height:44px;display:inline-flex;align-items:center}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -169,25 +192,40 @@ function calc(){
 function s3(d){
   var p=d.profile||{}, f=d.fitness||{}, pl=f.pillars||{}, r=d.retirement||{}, s=d.sip||{}, bk=d.baskets||{};
   var ok=d.lasts_to>=d.plan_to;
+  /* 1. headline */
   var h='<div class="hero"><div class="eye">Your plan · checked to '+d.plan_to+'</div><div class="big"><div class="r '+(ok?'pos':'neg')+'">'+d.lasts_to+(ok?'+':'')+'</div><div class="n" style="font-size:var(--type-125);color:var(--ink)">'+esc(d.headline)+'</div></div>'
    +'<div class="kg"><div class="cell"><div class="k">Fitness</div><div class="v">'+f.score+'<small>/100</small></div></div><div class="cell"><div class="k">You need</div><div class="v">'+inrL(r.required)+'</div></div><div class="cell"><div class="k">On track for</div><div class="v">'+inrL(r.projected)+'</div></div></div></div>';
-  var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+v+'%;background:'+(v>=80?tok('--win'):(v>=50?tok('--brand'):tok('--loss')))+'"></i></div><span class="v">'+v+'</span></div>'; };
-  h+='<div class="card"><div class="ch"><span class="t">Financial fitness</span><span class="n">four pillars, 25 each</span></div><div class="pil">'+bar('Emergency',pl.emergency)+bar('Debt',pl.debt)+bar('Savings',pl.savings)+bar('Cover',pl.protection)+'</div><div class="sub2">Emergency target '+inrL(f.emergency_target)+' · saving '+f.save_rate_pct+'% of take-home · life cover target '+inrL(f.cover_target)+'.</div></div>';
-  h+='<div class="card"><div class="ch"><span class="t">Retirement</span><span class="n">'+r.years_to+' yrs to go · '+r.years_in+' yrs after</span></div><div class="kv"><div><span>Spending then</span><b>'+inrL(r.spend_at_ret_monthly)+' /mo</b></div><div><span>Corpus needed</span><b>'+inrL(r.required)+'</b></div><div><span>What you will have</span><b>'+inrL(r.projected)+'</b></div><div><span>'+(r.gap>0?'Gap':'Surplus')+'</span><b class="'+(r.gap>0?'neg':'pos')+'">'+inrL(Math.abs(r.gap))+'</b></div></div><div class="sub2">From what you hold '+inrL(r.from_assets)+' · from your SIP '+inrL(r.from_sip)+'. Only cash above the emergency buffer ('+inrL(r.cash_counted)+') is counted.</div></div>';
-  h+='<div class="card '+(s.affordable?'ok':'warn')+'"><div class="ch"><span class="t">What it takes</span><span class="n">with the same 10% step-up</span></div>'
-   +'<div class="line"><span>Invest more each month</span><b>'+(s.extra>0?inrL(s.extra):'nothing')+'</b></div><div class="line"><span>Spare after spending, EMIs, your SIP'+(s.goal_sip?', goal':'')+'</span><b>'+inrL(s.spare)+'</b></div>'
-   +'<div class="verdict '+(s.affordable?'pos':'neg')+'">'+(s.extra<=0?'You are already there.':(s.affordable?'You can do this.':'Short by '+inrL(s.short_by)+' a month.'))+'</div>'
-   +((s.alternatives||[]).length?'<div class="sub2" style="margin-top:8px">Two ways that fit:</div>'+s.alternatives.map(function(a){return '<div class="alt">'+esc(a.text)+'</div>';}).join(''):'')+'</div>';
+  /* 2. financial fitness: the score /100 with a bar, four pillars /100 each with its target line (cc#2190) */
+  var fs=Number(f.score)||0;
+  var pill=function(name,v,target){ v=(v==null?null:Number(v)); return '<div class="fpc-pc '+(v==null?'':(v>=80?'ok':(v>=50?'mid':'low')))+'"><span class="k">'+name+'</span><b>'+(v==null?'—':v)+'<small>/100</small></b><span class="tg">'+esc(target)+'</span></div>'; };
+  h+='<div class="card"><div class="ch"><span class="t">Financial fitness</span><span class="n">out of 100</span></div>'
+   +'<div class="fpc-score"><b class="'+(fs>=80?'pos':(fs>=50?'':'neg'))+'">'+(f.score!=null?f.score:'—')+'</b><span>/100</span><div class="fpc-bar"><i style="width:'+Math.max(0,Math.min(100,fs))+'%"></i></div></div>'
+   +'<div class="fpc-pil">'+pill('Emergency',pl.emergency,'Target '+inrL(f.emergency_target)+' set aside')+pill('Debt',pl.debt,'EMIs against take-home')+pill('Savings',pl.savings,'Saving '+(f.save_rate_pct!=null?f.save_rate_pct:'—')+'% of take-home')+pill('Protection',pl.protection,'Cover target '+inrL(f.cover_target))+'</div></div>';
+  /* 3. retirement: required / projected / gap or surplus, never a zero gap */
+  var gap=Number(r.gap)||0;
+  h+='<div class="card"><div class="ch"><span class="t">Retirement</span><span class="n">'+r.years_to+' yrs to go · '+r.years_in+' yrs after</span></div><div class="kv"><div><span>Spending then</span><b>'+inrL(r.spend_at_ret_monthly)+' /mo</b></div><div><span>Corpus needed</span><b>'+inrL(r.required)+'</b></div><div><span>What you will have</span><b>'+inrL(r.projected)+'</b></div><div><span>'+(gap>0?'Gap':'Surplus')+'</span><b class="'+(gap>0?'neg':'pos')+'">'+(gap===0?'On track':inrL(Math.abs(gap)))+'</b></div></div><div class="sub2">From what you hold '+inrL(r.from_assets)+' · from your SIP '+inrL(r.from_sip)+'. Only cash above the emergency buffer ('+inrL(r.cash_counted)+') is counted.</div></div>';
+  /* 4. SIP: three lines exactly, then the alternatives as two small cards when present */
+  var verdict=(s.extra<=0?'Already there':(s.affordable?'You can do this':'Short by '+inrL(s.short_by)+' a month'));
+  h+='<div class="card '+(s.affordable?'ok':'warn')+'"><div class="ch"><span class="t">Your SIP</span><span class="n">with the same 10% step-up</span></div>'
+   +'<div class="fpc-line"><span>What it takes</span><b>'+(s.extra>0?inrL(s.extra)+' more a month':'nothing more')+'</b></div>'
+   +'<div class="fpc-line"><span>What you have</span><b>'+inrL(s.spare)+' spare a month</b></div>'
+   +'<div class="fpc-line"><span>Verdict</span><b class="'+(s.affordable||s.extra<=0?'pos':'neg')+'">'+verdict+'</b></div>'
+   +((s.alternatives||[]).length?'<div class="fpc-alts">'+s.alternatives.slice(0,2).map(function(a){ var k=(a.kind==='retire_later'?'Retire later':(a.kind==='spend_less'?'Spend less':'Another way')); var v=(a.retire_at!=null?'Age '+a.retire_at:(a.amount!=null?inrL(a.amount)+' /mo':'')); return '<div class="fpc-alt"><span class="k">'+k+'</span>'+(v?'<b>'+v+'</b>':'')+'<span>'+esc(a.text)+'</span></div>'; }).join('')+'</div>':'')+'</div>';
+  /* 5. goal, only when present */
   if(d.goal){ h+='<div class="card"><div class="ch"><span class="t">Your goal · '+esc(d.goal.name)+'</span><span class="n">'+d.goal.years+' yrs</span></div><div class="kv"><div><span>Costs today</span><b>'+inrL(d.goal.cost_today)+'</b></div><div><span>Will cost then</span><b>'+inrL(d.goal.cost_then)+'</b></div><div><span>Monthly SIP for it</span><b>'+inrL(d.goal.sip)+'</b></div></div></div>'; }
   if(SKIPPED) h+='<div class="sub2" style="padding:0 16px">Comfort questions skipped — comfort assumed Medium, so the profile is your situation or Balanced, whichever is lower.</div>';
+  /* 6. profile, with the why line */
   h+='<div class="card"><div class="ch"><span class="t">Your profile</span><span class="n">'+esc(p.name)+' · '+Math.round(p.return_pre*100)+'% assumed</span></div><div class="kv"><div><span>Situation</span><b>'+p.part_a+' / 20 · '+esc(p.band_a)+'</b></div><div><span>Comfort</span><b>'+p.part_b+' / 20 · '+esc(p.band_b)+'</b></div></div><div class="sub2">'+esc(p.why)+'</div></div>';
-  h+='<div class="sec"><h2>Where to put it</h2><span class="hint">'+esc(bk.profile)+' baskets</span></div>';
-  h+= (bk.rows||[]).length ? '<div class="lst">'+bk.rows.map(function(b){return '<a class="row '+(b.live?'up':'mu')+'" href="/m/qb?basket='+encodeURIComponent(b.basket)+'"><div><div class="nm">'+esc(b.label)+'</div><div class="sub">'+(b.holdings!=null?b.holdings+' holdings':'')+(b.rebalance?' · '+esc(b.rebalance):'')+(b.live?'':' · not live')+'</div></div><div class="v"><div class="n gd">›</div></div></a>';}).join('')+'</div><div class="more">'+esc(bk.note||'')+'</div>' : '<div class="emp">No basket is mapped to this profile yet.</div>';
-  h+='<div class="card"><div class="ch"><span class="t">What we assumed</span></div><ul class="hl">'+(d.assumptions||[]).map(function(a){return '<li>'+esc(a)+'</li>';}).join('')+'</ul></div>';
+  /* 7. where to put it: the Scorr baskets for the profile, each a tap into its basket page */
+  h+='<div class="sec"><h2>Where to put it</h2><span class="hint">'+esc(bk.profile)+' · Scorr baskets</span></div>';
+  h+= (bk.rows||[]).length ? '<div class="fpc-bks">'+bk.rows.map(function(b){return '<a class="fpc-bk" href="/m/qb?basket='+encodeURIComponent(b.basket)+'"><div><div class="nm">'+esc(b.label)+'</div><div class="sub">'+(b.holdings!=null?b.holdings+' holdings':'')+(b.rebalance?' · '+esc(b.rebalance)+' rebalance':'')+(b.live?'':' · not live')+'</div></div><div class="go">›</div></a>';}).join('')+'</div>'+(bk.note?'<div class="more">'+esc(bk.note)+'</div>':'') : '<div class="emp">No basket is mapped to this profile yet.</div>';
+  /* 8. assumptions behind one tap */
+  h+='<div class="card"><div class="ch"><span class="t">What we assumed</span><span class="n fpc-tog" id="asm-tog">Show ›</span></div><ul class="fpc-asm" id="asm">'+(d.assumptions||[]).map(function(a){return '<li>'+esc(a)+'</li>';}).join('')+'</ul></div>';
   h+='<div class="navrow"><button class="btn2" id="b-edit">‹ Change inputs</button><button class="btn2" id="b-risk">Change risk answers</button></div>';
   h+='<div class="note"><b>Research, not advice.</b> A plan built on sliders and stated assumptions. Finkhoz Roboadvisory · SEBI RA INH000022297.</div>';
   document.getElementById('body').innerHTML=h; document.getElementById('asof').innerHTML='Step <b>3 of 3</b> · your plan';
   document.getElementById('b-edit').addEventListener('click', function(){ SCREEN=1; s1(); }); document.getElementById('b-risk').addEventListener('click', function(){ SCREEN=2; s2(); });
+  document.getElementById('asm-tog').addEventListener('click', function(){ var u=document.getElementById('asm'); var o=u.classList.toggle('open'); this.textContent=o?'Hide ‹':'Show ›'; });
   window.scrollTo(0,0);
 }
 s1();

@@ -36,14 +36,20 @@ ASSUMPTIONS = {
               "EMIs are assumed to end by retirement. Tax is not modelled."],
 }
 
-# basket recommendation — from the note's section 6; founder still to confirm the risk labels.
+# basket recommendation -- cc#2190 (founder 17-Sep-2026 15:02 IST): the Scorr quant baskets from the
+# live registry, never the partner baskets. Mapping per the card (Fable, founder-authorised):
+#   Conservative -> large_cap, model_portfolio, contra_value
+#   Balanced     -> alpha_multicap, large_cap, mid_cap
+#   Growth       -> mid_cap, small_cap, breakout_52w
+# The registry query below and everything else in this file are unchanged.
 BASKETS = {
-    "Conservative": ["finz_etf", "finz_stable", "finz_dividend"],
-    "Balanced": ["finz_stable", "finz_wcb", "finz_dividend"],
-    "Growth": ["finz_wcb", "finz_helios", "finz_defence"],
+    "Conservative": ["large_cap", "model_portfolio", "contra_value"],
+    "Balanced": ["alpha_multicap", "large_cap", "mid_cap"],
+    "Growth": ["mid_cap", "small_cap", "breakout_52w"],
 }
-BASKET_LABEL = {"finz_etf": "FINZ ETF", "finz_stable": "FINZ Stable", "finz_dividend": "FINZ Dividend",
-                "finz_wcb": "FINZ Wealth Compounder", "finz_helios": "FINZ Helios", "finz_defence": "FINZ Defence"}
+BASKET_LABEL = {"large_cap": "Large Cap", "model_portfolio": "Model Portfolio", "contra_value": "Contra Value",
+                "alpha_multicap": "Alpha Multicap", "mid_cap": "Mid Cap", "small_cap": "Small Cap",
+                "breakout_52w": "52-Week Breakout"}
 
 
 def _conn():
