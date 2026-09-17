@@ -1982,7 +1982,8 @@ var TREND = { open: null, card: 0 };   /* which chip popup is open: 'adr' | 'pcr
    this grid — nearest candidate is "V10 Desk · Web" (/v10), but that is a guess, not a match, and
    the card's own instruction is to STOP and report rather than guess which was meant. /v10 is
    therefore NOT in this list; flagged in the cc#1888 result and the Fable Room instead. */
-var HIDDEN_GRID_TILES = ['/dashboard#index', '/v9', '/intraday', '/v10'];   // cc#1917 (founder 10-Sep): /v10 hidden, route + page untouched. cc#1972 (founder 10-Sep 17:34): /m/digest and /m/v10 come OFF this list and back onto the grid under MARKET; the four web tiles stay hidden.
+var HIDDEN_GRID_TILES = ['/dashboard#index', '/v9', '/intraday', '/v10',
+  '/m/myportfolio'];   // cc#2197 (founder 17-Sep 15:20): the SmartGain My Portfolio page duplicates My Trades -- tile hidden, route alive; cc#2194 re-adds a My Portfolio tile pointing at the new /m/portfolio   // cc#1917 (founder 10-Sep): /v10 hidden, route + page untouched. cc#1972 (founder 10-Sep 17:34): /m/digest and /m/v10 come OFF this list and back onto the grid under MARKET; the four web tiles stay hidden.
 function gtile(href, glyph, label){
   if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
   return '<a class="tool slab dense" href="' + href + '"><span>' + glyph + '</span>' + esc(label) + '</a>';
