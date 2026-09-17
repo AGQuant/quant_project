@@ -1,6 +1,8 @@
 <!doctype html>
-<!-- ══ mobile/qbbuilder.html — Basket Builder app page. Fable single-mode build 10-Sep-2026. Data: the web V12 builder endpoints (/api/v12/presets, /universe/preview, /basket, /backtest) called directly,
-     the same functions the /v12 web wizard uses. Route /m/qbbuilder (mobile_scanners.py). Contract tokens only. -->
+<!-- ══ mobile/qbbuilder.html — Basket Builder app page. Fable single-mode build 10-Sep-2026; REBUILT cc#2186 17-Sep-2026 on the web Build-a-Basket
+     flow (cc#2132): step 1 = the pool Universe builder (/api/qb/universe2/*), steps 2-4 = the V12 definition (/api/v12/backtest, /api/v12/basket)
+     -- the SAME endpoints and the SAME basket-definition object as the web (buildDefinition() mirrors scorr_v12.html's). The step shell
+     (stepper, card, Back/Next, disclaimer) is the founder-approved one, kept. Route /m/qbbuilder (mobile_scanners.py). Contract tokens only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -61,6 +63,34 @@
 .lr{display:grid;grid-template-columns:1fr 80px;gap:var(--space-8);align-items:center;padding:var(--space-8) var(--space-12);border-bottom:var(--bw-1) solid var(--hi)}.lr:last-child{border-bottom:none}
 .lr .nm{font-size:var(--type-115);font-weight:800}.lr .v{text-align:right;font-size:var(--type-115);font-weight:800}
 .lr.h{background:var(--hi)}.lr.h .nm,.lr.h .v{font-size:var(--type-9);color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);font-weight:800}
+/* cc#2186 — the rebuilt steps' own rules (qbb-*), on top of the shell's classes above */
+.qbb-hint{font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted);margin-left:var(--space-6)}
+.qbb-pools{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-top:var(--space-6)}
+.qbb-pool{display:inline-flex;align-items:center;gap:var(--space-6);min-height:40px;padding:0 var(--space-11);border-radius:var(--radius-20);border:var(--bw-1) solid var(--edge);background:var(--panel);color:var(--ink);font:inherit;font-size:var(--type-11);font-weight:700;cursor:pointer}
+.qbb-pool b{font-size:var(--type-10);color:var(--muted);font-weight:700}.qbb-pool.on{border-color:var(--brand);color:var(--brand);background:color-mix(in srgb, var(--brand) 14%, var(--panel))}.qbb-pool.on b{color:var(--brand)}
+.qbb-f{min-width:0}
+.qbb-count{display:flex;align-items:baseline;gap:var(--space-8);margin-top:var(--space-12);padding:var(--space-10) var(--space-12);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12)}
+.qbb-count b{font-size:var(--type-22);font-weight:800;line-height:1}.qbb-count span{font-size:var(--type-105);color:var(--muted);line-height:1.4}.qbb-count.dim b{opacity:.5}
+.qbb-cat{margin-top:var(--space-8);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);overflow:hidden;background:var(--panel)}
+.qbb-cath{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);width:100%;min-height:44px;padding:var(--space-8) var(--space-12);border:none;background:var(--hi);color:var(--ink);font:inherit;font-size:var(--type-115);font-weight:800;text-align:left;cursor:pointer}
+.qbb-cath small{display:block;font-size:var(--type-9);font-weight:600;color:var(--muted);margin-top:var(--space-2);text-transform:none;letter-spacing:0}.qbb-cath i{font-style:normal;font-size:var(--type-17);color:var(--brand);flex:none;width:24px;text-align:center}
+.qbb-row{border-top:var(--bw-1) solid var(--hi)}.qbb-row.off{opacity:.55}
+.qbb-rowh{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);width:100%;min-height:44px;padding:var(--space-8) var(--space-12);border:none;background:transparent;color:var(--ink);font:inherit;font-size:var(--type-11);font-weight:700;text-align:left;cursor:pointer}
+.qbb-rowh>span{flex:1;min-width:0}.qbb-rowh em{font-style:normal;font-size:var(--type-9);font-weight:800;color:var(--brand);margin-left:var(--space-4)}.qbb-rowh i{font-style:normal;color:var(--muted);flex:none;width:20px;text-align:center}
+.qbb-row.applied .qbb-rowh{color:var(--brand)}.qbb-row.off .qbb-rowh{cursor:default}.qbb-row.off .qbb-rowh small{font-size:var(--type-9);color:var(--muted)}
+.qbb-rc{flex:none;font-size:var(--type-9);color:var(--muted);font-weight:600;white-space:nowrap}.qbb-rc b{color:var(--ink)}
+.qbb-rowb{padding:0 var(--space-12) var(--space-12)}.qbb-rowb .fl{margin-top:var(--space-8)}.qbb-rowact{margin-top:var(--space-8)}.qbb-rowact .btn2{margin-top:0;padding:var(--space-8)}
+.qbb-segs{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-top:var(--space-8)}.qbb-segs .chip{cursor:pointer;min-height:32px;display:inline-flex;align-items:center;gap:var(--space-4)}.qbb-segs .chip small{color:var(--muted)}
+.qbb-tg{display:flex;align-items:center;gap:var(--space-10);width:100%;min-height:48px;margin-top:var(--space-10);padding:var(--space-8) var(--space-10);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);background:var(--hi);color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.qbb-tgk{flex:none;width:40px;height:24px;border-radius:var(--radius-12);background:var(--edge);position:relative;transition:background .15s}.qbb-tgk i{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--panel);transition:left .15s}
+.qbb-tg.on .qbb-tgk{background:var(--brand)}.qbb-tg.on .qbb-tgk i{left:19px;background:var(--field)}
+.qbb-tgl{font-size:var(--type-125);font-weight:800;line-height:1.3}.qbb-tgl small{display:block;font-size:var(--type-10);font-weight:600;color:var(--muted);margin-top:var(--space-2)}
+.qbb-sub{margin:var(--space-6) 0 var(--space-4) var(--space-12);padding-left:var(--space-10);border-left:var(--bw-3) solid var(--brand)}
+.qbb-json{margin-top:var(--space-12)}.qbb-json summary{font-size:var(--type-105);font-weight:700;color:var(--brand);cursor:pointer}.qbb-json pre{margin:var(--space-8) 0 0;padding:var(--space-10);background:var(--hi);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-10);font-size:var(--type-10);line-height:1.5;color:var(--ink);white-space:pre-wrap;word-break:break-word}
+.wrap{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);overflow:hidden}.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.qbb-tb{border-collapse:collapse;min-width:100%;font-size:var(--type-105)}.qbb-tb th{background:var(--hi);font-size:var(--type-9);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em8);text-align:right;padding:var(--space-8);border-bottom:var(--bw-1) solid var(--edge);white-space:nowrap}
+.qbb-tb th:first-child,.qbb-tb td:first-child{text-align:left;padding-left:var(--space-12)}.qbb-tb td{padding:var(--space-7) var(--space-8);border-bottom:var(--bw-1) solid var(--hi);text-align:right;font-weight:600;white-space:nowrap}.qbb-tb td:first-child{font-weight:800}
+.lr{display:grid;grid-template-columns:1fr 62px 72px;gap:var(--space-8);align-items:center;padding:var(--space-8) var(--space-10);border-bottom:var(--bw-1) solid var(--hi)}
 </style>
 </head>
 <body data-theme="goldnight">
@@ -81,147 +111,297 @@ try{var mc=document.querySelector('meta[name="theme-color"]'),fc=getComputedStyl
   <a class="bn" href="/m/alerts"><span class="i">◬</span>Alerts</a>
 </nav>
 <script>
+/* ══ cc#2186 (founder 17-Sep-2026 14:48 IST): the Basket Builder rebuilt on the web Build-a-Basket flow (cc#2132) — the SAME
+   endpoints and the SAME basket-definition object as the web, in the founder's own 4-step shell (stepper, card, Back/Next, the
+   backtest disclaimer — untouched, do_not_touch).
+   STEP 1 UNIVERSE  = the pool Universe builder: /api/qb/universe2/pools · /segments · /coverage · /preview (one live count on top,
+                      per-applied-row ALONE and STEP counts from the same preview) · /defs + /load (saved universes) · /save on Save.
+   STEP 2 ENTRY     = the V12 definition's entry: ROC lookback · hold top X · min stocks · RSI gate · EMA gate.
+   STEP 3 EXIT+RISK = exit: hard stop · trailing peak fall · rank-fall · gate mirror · ATR stop; risk: basket cap (entry.max_stocks) ·
+                      sector cap % (risk.sector_cap_pct) · the residual split stated exactly as the web states it (no engine field yet).
+   STEP 4 TEST&SAVE = rebalance · benchmark · costs · name · the definition JSON · /api/v12/backtest (same result block as the web) ·
+                      Save = POST /api/v12/basket (draft) + POST /api/qb/universe2/save under the basket name (the web flow's two persists).
+   buildDefinition() below mirrors scorr_v12.html's buildDefinition() line for line (same keys, same insertion order, same parse
+   defaults) so JSON.stringify of the two is byte-identical for the same inputs. The filter catalogue is the Universe page's own
+   ALL_FILTERS (scorr_qb_universe.html, cc#2123..2148), copied verbatim: keys are the server's _FILTER_ORDER. ══ */
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function dm(iso){ if(!iso) return '—'; var p=String(iso).slice(0,10).split('-'); return p.length===3?(p[2]+' '+MON[Number(p[1])-1]):String(iso); }
-function dmt(ts){ if(!ts) return '—'; var s=String(ts); return dm(s)+' '+s.slice(11,16); }
 function pct(v,d){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(d==null?2:d)+'%'; }
 function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
-function ud(v){ return v==null?'mu':(Number(v)>0?'up':(Number(v)<0?'dn':'mu')); }
-function inr(v,s){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x<0?'−':(s&&x>0?'+':''))+'₹'+Math.abs(Math.round(x)).toLocaleString('en-IN'); }
-function f1(v){ return v==null?'—':Number(v).toFixed(1); } function f2(v){ return v==null?'—':Number(v).toFixed(2); }
+function f2(v){ return v==null||isNaN(Number(v))?'—':Number(v).toFixed(2); }
+function fmtN(v){ return v==null?'—':Number(v).toLocaleString('en-IN'); }
 function tok(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
-/* ── the basket definition, edited in place across the four steps ── */
-var DEF={ universe_ref:{filters:{mcap_rank:{max:500}, gvm:{min:7}}}, entry:{roc_lookback:'6M', top_x:12, min_stocks:1, max_stocks:12}, exit:{rank_fall_y:25, trailing_peak_pct:20}, rebalance:{freq:'monthly'}, costs:{txn_pct:0.1, slippage_pct:0.1} };
-var STEP=1, NAME='', PREVIEW=null, BT=null, POLL=null;
-function fl(v){ var x=Number(v); return isNaN(x)?null:x; }
-function chipRow(id, opts, cur){ return '<div class="seg" id="'+id+'">'+opts.map(function(o){ return '<span data-v="'+o[0]+'"'+(String(o[0])===String(cur)?' class="on"':'')+'>'+o[1]+'</span>'; }).join('')+'</div>'; }
-function field(label, id, val, hint, extra){ return '<label class="fl">'+label+'<input id="'+id+'" inputmode="decimal" value="'+(val==null?'':val)+'" '+(extra||'')+'></label>'+(hint?'<div class="sub2" style="margin-top:4px">'+hint+'</div>':''); }
-function steps(){ return '<div class="steps">'+[['1','Universe'],['2','Entry'],['3','Exit'],['4','Test & save']].map(function(s,i){ return '<span class="'+(i+1===STEP?'on':(i+1<STEP?'done':''))+'" data-step="'+(i+1)+'">'+s[0]+'<small>'+s[1]+'</small></span>'; }).join('')+'</div>'; }
-function draw(){
-  var f=DEF.universe_ref.filters, e=DEF.entry, x=DEF.exit;
-  var h=steps();
-  if(STEP===1){
-    h+='<div class="card"><div class="ch"><span class="t">Which stocks can enter</span><span class="n">step 1</span></div>'
-     +'<div class="fl" style="margin-top:12px">Size</div>'+chipRow('mcap',[[100,'Top 100'],[250,'Top 250'],[500,'Top 500'],[0,'All']], (f.mcap_rank||{}).max||0)
-     +'<div class="two">'+field('GVM at least','f-gvm',(f.gvm||{}).min)+field('Momentum at least','f-m',(f.m_score||{}).min)+'</div>'
-     +'<div class="two">'+field('Growth at least','f-g',(f.g_score||{}).min)+field('Value at least','f-v',(f.v_score||{}).min)+'</div>'
-     +'<div class="two">'+field('ROCE % at least','f-roce',(f.roce||{}).min)+field('Debt/equity at most','f-de',(f.de||{}).max,'sets this leaves out banks and NBFCs')+'</div>'
-     +'<button class="btn" id="b-prev">Preview the universe</button><div id="prev-out"></div></div>';
-  } else if(STEP===2){
-    h+='<div class="card"><div class="ch"><span class="t">How a stock gets picked</span><span class="n">step 2</span></div>'
-     +'<div class="fl" style="margin-top:12px">Rank by price momentum over</div>'+chipRow('roc',[['1M','1 month'],['3M','3 months'],['6M','6 months'],['12M','1 year']], e.roc_lookback)
-     +'<div class="two">'+field('Hold the top','e-top',e.top_x,'names, equal weight')+'</div>'
-     +'<div class="fl">Rebalance</div>'+chipRow('freq',[['weekly','Weekly'],['monthly','Monthly'],['quarterly','Quarterly']], DEF.rebalance.freq)
-     +'<div class="sub2">On each rebalance the universe is re-ranked and the top names are held. Nothing is bought between rebalances.</div></div>';
-  } else if(STEP===3){
-    h+='<div class="card"><div class="ch"><span class="t">When a stock leaves</span><span class="n">step 3</span></div>'
-     +'<div class="two">'+field('Sell if rank falls below','x-rank',x.rank_fall_y,'must be ≥ the top count')+field('Trailing stop %','x-trail',x.trailing_peak_pct,'from the peak since entry')+'</div>'
-     +'<div class="two">'+field('Cost per trade %','c-txn',DEF.costs.txn_pct)+field('Slippage %','c-slip',DEF.costs.slippage_pct)+'</div>'
-     +'<div class="sub2">The gap between the top count and the rank-fall line stops churn — a name is not sold the moment it slips one place.</div></div>';
-  } else {
-    h+='<div class="card"><div class="ch"><span class="t">Your rule</span><span class="n">step 4</span></div><div class="rule">'+ruleWords()+'</div>'
-     +'<label class="fl">Basket name<input id="nm" value="'+esc(NAME)+'" placeholder="e.g. My momentum 12"></label>'
-     +'<div class="two"><button class="btn2" id="b-bt">Run 5-year backtest</button><button class="btn" id="b-save">Save basket</button></div><div id="bt-out" class="sub2"></div></div>';
-    h+='<div id="bt-res">'+(BT?btHtml(BT):'')+'</div>';
-  }
-  h+='<div class="navrow">'+(STEP>1?'<button class="btn2" id="b-back">‹ Back</button>':'<span></span>')+(STEP<4?'<button class="btn" id="b-next">Next ›</button>':'')+'</div>';
-  h+='<div class="note"><b>What a backtest is.</b> A walk through the last five years applying this rule as written, on today\'s universe. Survivorship inflates the numbers; the ranking of rules is the finding, not the absolute return. Nothing here is a recommendation.</div>';
-  document.getElementById('body').innerHTML=h;
-  document.getElementById('asof').innerHTML='Step <b>'+STEP+' of 4</b>'+(PREVIEW?' · universe '+PREVIEW.total+' names':'');
-  bind();
+function num(v){ return (v===''||v==null)?null:parseFloat(v); }
+function api(url,opts){ opts=opts||{}; opts.credentials='same-origin'; if(opts.body&&typeof opts.body!=='string'){ opts.headers={'Content-Type':'application/json'}; opts.body=JSON.stringify(opts.body); } return fetch(url,opts).then(function(r){ return r.json(); }); }
+/* ── the Universe page's own catalogue (verbatim) ── */
+var CAT1_FILTERS=[{key:'gvm',label:'GVM Score',kind:'range',col:'gvm_score'},{key:'g',label:'G Score',kind:'range',col:'g_score'},{key:'v',label:'V Score',kind:'range',col:'v_score'},{key:'m',label:'M Score',kind:'range',col:'m_score'},{key:'verdict',label:'Verdict',kind:'list',col:'verdict',options:['Excellent','Good','Average','Weak']},{key:'seg_rank',label:'Rank within Segment',kind:'range',col:'seg_rank'}];
+var CAT2_FILTERS=[{key:'sector_gvm',label:'Sector GVM (mcap-weighted)',kind:'range',col:'sector_gvm',cat:2},{key:'sector_rank',label:'Sector Rank (by sector GVM)',kind:'range',col:'sector_rank',cat:2,step:1},{key:'sector_gap',label:'Stock GVM minus Sector GVM',kind:'range',col:'gvm_minus_sector',cat:2},{key:'sector_members',label:'Sector Member Count',kind:'range',col:'sector_member_count',cat:2,step:1,minOnly:true},{key:'segments',label:'Segments',kind:'multi',col:'segment',cat:2}];
+var CAT4_FILTERS=[{key:'gvm_change',label:'GVM change',kind:'range',cat:4,days:[30,90,180],colBase:'gvm_change_'},{key:'m_change',label:'M Score change',kind:'range',cat:4,days:[30,90],colBase:'m_change_'},{key:'g_change',label:'G Score change (90d)',kind:'range',cat:4,col:'g_change_90d',fixedDays:90},{key:'v_change',label:'V Score change (90d)',kind:'range',cat:4,col:'v_change_90d',fixedDays:90},{key:'sector_change',label:'Sector GVM change (90d)',kind:'range',cat:4,col:'sector_gvm_change_90d',fixedDays:90},{key:'verdict_migration',label:'Verdict migration',kind:'list',cat:4,col:'verdict_migration',options:['upgraded','unchanged','downgraded'],nInput:true},{key:'gvm_consistency',label:'GVM change consistency',kind:'kofn',cat:4,col:'gvm_pos_snapshots'}];
+var CAT3_FILTERS=[{key:'price_change',label:'Price change',kind:'range',cat:3,colBase:'ret_',windows:[{v:'1W',t:'1 week'},{v:'1M',t:'1 month'},{v:'3M',t:'3 months',derived:true},{v:'6M',t:'6 months',derived:true},{v:'1Y',t:'1 year'},{v:'3Y',t:'3 years'}]},{key:'w52_pos',label:'52-week range position (0 = at 52W low, 100 = at 52W high)',kind:'range',cat:3,col:'w52_position'},{key:'ret_vs_index',label:'Return vs index (52W)',kind:'range',cat:3,col:'ret_vs_index_52w'},{key:'cons_up',label:'Consecutive up months (min)',kind:'range',cat:3,col:'consecutive_up_months',minOnly:true,step:1,derived:true}];
+var CAT7_FILTERS=[{key:'mcap_rank',label:'Market-cap rank',kind:'range',cat:7,col:'mcap_rank',step:1},{key:'pe_mult',label:'PE vs 10Y avg PE (PE / historical PE)',kind:'range',cat:7,col:'pe_multiplier'},{key:'roce',label:'ROCE %',kind:'range',cat:7,col:'roce'},{key:'de',label:'Debt to equity (max)',kind:'range',cat:7,col:'de',maxOnly:true,bfsi:true},{key:'promoter',label:'Promoter holding % (min) and pledge % of total shares (max)',kind:'promoter',cat:7,col:'promoter_holding'},{key:'div_yield',label:'Dividend yield % (min)',kind:'range',cat:7,col:'dividend_yield',minOnly:true}];
+var CAT5_FILTERS=[{key:'yoy_sales',label:'Sales growth YoY %',kind:'range',cat:5,col:'yoy_sales_growth',derived:true},{key:'yoy_profit',label:'Net profit growth YoY %',kind:'range',cat:5,col:'yoy_profit_growth',derived:true},{key:'opm_q',label:'OPM % latest quarter',kind:'range',cat:5,col:'opm_latest_quarter',derived:true},{key:'opm_chg',label:'OPM change YoY (pp)',kind:'range',cat:5,col:'opm_change_yoy',derived:true},{key:'cons_pg',label:'Consecutive quarters of profit growth (min)',kind:'range',cat:5,col:'consecutive_quarters_profit_growth',minOnly:true,step:1,derived:true},{key:'qslr',label:'Quarters since last result (max)',kind:'range',cat:5,col:'quarters_since_last_result',maxOnly:true,step:1,derived:true}];
+var CAT6_FILTERS=[{key:'alpha_n500',label:'Alpha vs NIFTY500 (pp)',kind:'range',cat:6,colBase:'alpha_vs_nifty500_',windows:[{v:'1Y',t:'1 year'},{v:'3Y',t:'3 years'}],derived:true},{key:'alpha_sector',label:'Alpha vs own sector, 1Y (pp)',kind:'range',cat:6,col:'alpha_vs_sector_1y',derived:true},{key:'beta',label:'Beta vs NIFTY50 (1Y, accruing)',kind:'range',cat:6,col:'beta_1y',derived:true},{key:'mdd',label:'Max drawdown 1Y (%, negative)',kind:'range',cat:6,col:'max_drawdown_1y',derived:true},{key:'rs_pct',label:'RS percentile in universe (1Y, 0-100)',kind:'range',cat:6,col:'rs_percentile_1y',derived:true}];
+var CATS=[{id:'c1',n:'1',t:'Scores',rows:CAT1_FILTERS},{id:'c2',n:'2',t:'Sector & Segment',rows:CAT2_FILTERS},{id:'c4',n:'4',t:'Change & Delta',rows:CAT4_FILTERS},{id:'c3',n:'3',t:'Price & Momentum',rows:CAT3_FILTERS},{id:'c7',n:'7',t:'Quality · Valuation · Size · Ownership',rows:CAT7_FILTERS},{id:'c5',n:'5',t:'Quarterly Results YoY',rows:CAT5_FILTERS,derived:true},{id:'c6',n:'6',t:'Alpha & Risk',rows:CAT6_FILTERS,derived:true}];
+var ALL_FILTERS=CAT1_FILTERS.concat(CAT2_FILTERS,CAT4_FILTERS,CAT3_FILTERS,CAT7_FILTERS,CAT5_FILTERS,CAT6_FILTERS);
+function fdef(key){ return ALL_FILTERS.filter(function(x){ return x.key===key; })[0]; }
+function freshRow(f){ return {open:false, applied:false, op:'AND', min:'', max:'', list:[], days:(f.days?f.days[0]:null), win:(f.windows?(f.windows.filter(function(w){ return w.v==='1M'&&!w.dis; })[0]||f.windows.filter(function(w){ return !w.dis; })[0]).v:null), n:5, k:3, note:''}; }
+var U={pools:[], sel:[], rows:{}, last:null, seq:0, coverage:null, segments:[], open:{}, segq:'', loading:false};
+ALL_FILTERS.forEach(function(f){ U.rows[f.key]=freshRow(f); });
+function appliedKeys(){ return ALL_FILTERS.map(function(f){ return f.key; }).filter(function(k){ return U.rows[k].applied; }); }
+/* buildQuery — the Universe page's own, verbatim (repeated pools=, key_min/_max, _days, _window, promoter_min/pledge_max, _k/_n, segments=, ops=) */
+function buildQuery(){
+  var q=U.sel.map(function(k){ return 'pools='+encodeURIComponent(k); }); var ops=[];
+  appliedKeys().forEach(function(key){ var f=fdef(key), st=U.rows[key];
+    if(f.kind==='range'){ if(st.min!==''&&!f.maxOnly) q.push(key+'_min='+encodeURIComponent(st.min)); if(st.max!==''&&!f.minOnly) q.push(key+'_max='+encodeURIComponent(st.max)); if(f.days) q.push(key+'_days='+st.days); if(f.windows) q.push(key+'_window='+encodeURIComponent(st.win)); }
+    else if(f.kind==='promoter'){ if(st.min!=='') q.push('promoter_min='+encodeURIComponent(st.min)); if(st.max!=='') q.push('pledge_max='+encodeURIComponent(st.max)); }
+    else if(f.kind==='kofn'){ q.push(key+'_k='+st.k); q.push(key+'_n='+st.n); }
+    else if(f.kind==='multi'){ st.list.forEach(function(v){ q.push('segments='+encodeURIComponent(v)); }); }
+    else { st.list.forEach(function(v){ q.push(key+'='+encodeURIComponent(v)); }); if(f.nInput) q.push(key+'_n='+st.n); }
+    ops.push(key+':'+st.op); });
+  if(ops.length) q.push('ops='+encodeURIComponent(ops.join(',')));
+  return q.join('&');
 }
-function readStep(){
-  var f=DEF.universe_ref.filters;
-  if(STEP===1){
-    var set=function(k,id,side){ var v=fl(document.getElementById(id).value); if(v==null){ delete f[k]; } else { f[k]={}; f[k][side]=v; } };
-    set('gvm','f-gvm','min'); set('m_score','f-m','min'); set('g_score','f-g','min'); set('v_score','f-v','min'); set('roce','f-roce','min'); set('de','f-de','max');
-  } else if(STEP===2){
-    var t=fl(document.getElementById('e-top').value)||12; DEF.entry.top_x=Math.max(1,Math.round(t)); DEF.entry.max_stocks=DEF.entry.top_x; DEF.entry.min_stocks=1;
-  } else if(STEP===3){
-    DEF.exit.rank_fall_y=Math.max(DEF.entry.top_x, Math.round(fl(document.getElementById('x-rank').value)||DEF.entry.top_x));
-    var tr=fl(document.getElementById('x-trail').value); if(tr!=null) DEF.exit.trailing_peak_pct=tr; else delete DEF.exit.trailing_peak_pct;
-    DEF.costs.txn_pct=fl(document.getElementById('c-txn').value)||0; DEF.costs.slippage_pct=fl(document.getElementById('c-slip').value)||0;
-  } else { NAME=document.getElementById('nm').value.trim(); }
+function defRows(){ return appliedKeys().map(function(key){ var f=fdef(key), st=U.rows[key]; return {key:key, op:st.op, min:(st.min===''?null:st.min), max:(st.max===''?null:st.max), list:st.list.slice(), duration:(f.days?st.days:(f.windows?st.win:null)), n:((f.kind==='kofn'||f.nInput)?st.n:null), k:(f.kind==='kofn'?st.k:null), note:(st.note||'')}; }); }
+function rowHas(st,f){ if(f.kind==='range'||f.kind==='promoter') return st.min!==''||st.max!==''; if(f.kind==='kofn') return true; return st.list.length>0; }
+/* ── the V12 form (the web's defaults) and buildDefinition(), the web's own function line for line ── */
+var F={v12_filters:{}, universe_id:null, roc:'3M', topx:'10', min:'5', max:'20', rsi_on:false, rsi_tf:'D', rsi_p:'14', rsi_t:'50', rsi_dir:'above', ema_on:false, ema_tf:'D', ema1:'20', ema2:'50', ema3:'', x_trail:'', x_rank:'', x_gate:false, x_hard:'', atr_on:false, atr_mult:'2', atr_target:'', atr_trailing:false, freq:'monthly', bench:'NIFTY50', txn:'0.1', slip:'0.1', seccap:''};
+function buildDefinition(){
+  var filters=JSON.parse(JSON.stringify(F.v12_filters||{}));
+  var entry={roc_lookback:F.roc, top_x:parseInt(F.topx||'10'), min_stocks:parseInt(F.min||'5'), max_stocks:parseInt(F.max||'20')};
+  if(F.rsi_on) entry.rsi_gate={tf:F.rsi_tf, period:parseInt(F.rsi_p||'14'), threshold:parseFloat(F.rsi_t||'50'), dir:F.rsi_dir};
+  if(F.ema_on){ entry.ema_gate={tf:F.ema_tf, ema1:parseInt(F.ema1||'20'), ema2:parseInt(F.ema2||'50')}; var e3=num(F.ema3); if(e3!=null) entry.ema_gate.ema3=parseInt(e3); }
+  var exit={}; var tr=num(F.x_trail); if(tr!=null) exit.trailing_peak_pct=tr; var rf=num(F.x_rank); if(rf!=null) exit.rank_fall_y=parseInt(rf); if(F.x_gate) exit.gate_mirror=true;
+  var hs=num(F.x_hard); if(hs!=null) exit.hard_stop_pct=hs;
+  if(F.atr_on){ var am=num(F.atr_mult); if(am!=null){ var a={mult:am}; var at=num(F.atr_target); if(at!=null) a.target_mult=at; if(F.atr_trailing) a.trailing=true; exit.atr_stop=a; } }
+  var def={meta:{builder:'v12'}, universe_ref:(F.universe_id!=null?F.universe_id:{filters:filters}), entry:entry, exit:exit, rebalance:{freq:F.freq}, costs:{txn_pct:parseFloat(F.txn||'0'), slippage_pct:parseFloat(F.slip||'0')}};
+  var scap=num(F.seccap); if(scap!=null) def.risk={sector_cap_pct:scap};
+  return def;
 }
-function bind(){
-  document.querySelectorAll('.steps span').forEach(function(s){ s.addEventListener('click', function(){ readStep(); STEP=Number(s.getAttribute('data-step')); draw(); }); });
-  var seg=function(id, fn){ var el=document.getElementById(id); if(!el) return; el.addEventListener('click', function(e){ var s=e.target.closest('[data-v]'); if(!s) return; fn(s.getAttribute('data-v')); el.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); }); };
-  seg('mcap', function(v){ var f=DEF.universe_ref.filters; if(Number(v)>0) f.mcap_rank={max:Number(v)}; else delete f.mcap_rank; PREVIEW=null; });
-  seg('roc', function(v){ DEF.entry.roc_lookback=v; });
-  seg('freq', function(v){ DEF.rebalance.freq=v; });
+function loadDef(d){ d=d||{}; var e=d.entry||{}, x=d.exit||{}, rb=d.rebalance||{}, c=d.costs||{}, rk=d.risk||{};
+  F.universe_id=(typeof d.universe_ref==='number')?d.universe_ref:null; F.v12_filters=(d.universe_ref&&typeof d.universe_ref==='object'&&d.universe_ref.filters)?JSON.parse(JSON.stringify(d.universe_ref.filters)):{};
+  F.roc=(typeof e.roc_lookback==='string')?e.roc_lookback:'3M'; F.topx=e.top_x!=null?String(e.top_x):'10'; F.min=e.min_stocks!=null?String(e.min_stocks):'5'; F.max=e.max_stocks!=null?String(e.max_stocks):'20';
+  F.rsi_on=!!e.rsi_gate; if(e.rsi_gate){ F.rsi_tf=e.rsi_gate.tf||'D'; F.rsi_p=String(e.rsi_gate.period!=null?e.rsi_gate.period:14); F.rsi_t=String(e.rsi_gate.threshold!=null?e.rsi_gate.threshold:50); F.rsi_dir=e.rsi_gate.dir||'above'; }
+  F.ema_on=!!e.ema_gate; if(e.ema_gate){ F.ema_tf=e.ema_gate.tf||'D'; F.ema1=String(e.ema_gate.ema1!=null?e.ema_gate.ema1:20); F.ema2=String(e.ema_gate.ema2!=null?e.ema_gate.ema2:50); F.ema3=e.ema_gate.ema3!=null?String(e.ema_gate.ema3):''; }
+  F.x_trail=x.trailing_peak_pct!=null?String(x.trailing_peak_pct):''; F.x_rank=x.rank_fall_y!=null?String(x.rank_fall_y):''; F.x_gate=!!x.gate_mirror; F.x_hard=x.hard_stop_pct!=null?String(x.hard_stop_pct):'';
+  F.atr_on=!!x.atr_stop; if(x.atr_stop){ F.atr_mult=x.atr_stop.mult!=null?String(x.atr_stop.mult):'2'; F.atr_target=x.atr_stop.target_mult!=null?String(x.atr_stop.target_mult):''; F.atr_trailing=!!x.atr_stop.trailing; }
+  F.freq=rb.freq||'monthly'; F.txn=c.txn_pct!=null?String(c.txn_pct):'0.1'; F.slip=c.slippage_pct!=null?String(c.slippage_pct):'0.1'; F.seccap=rk.sector_cap_pct!=null?String(rk.sector_cap_pct):'';
+}
+var STEP=0, NAME='', BT=null, POLL=null, BTMSG='', SAVEMSG='', DEFMSG='';
+/* ── render helpers (the shell's own classes: .steps .card .ch .fl .two .btn .btn2 .navrow .seg .note) ── */
+function steps(){ return '<div class="steps">'+[['1','Universe'],['2','Entry'],['3','Exit & risk'],['4','Test & save']].map(function(s,i){ return '<span class="'+(i+1===STEP?'on':(i+1<STEP?'done':''))+'" data-step="'+(i+1)+'">'+s[0]+'<small>'+s[1]+'</small></span>'; }).join('')+'</div>'; }
+function chipRow(id, opts, cur){ return '<div class="seg" id="'+id+'">'+opts.map(function(o){ return '<span data-v="'+esc(o[0])+'"'+(String(o[0])===String(cur)?' class="on"':'')+'>'+o[1]+'</span>'; }).join('')+'</div>'; }
+function field(label, id, val, hint, extra){ return '<div class="qbb-f"><label class="fl">'+label+'<input id="'+id+'" inputmode="decimal" value="'+esc(val==null?'':val)+'" '+(extra||'')+'></label>'+(hint?'<div class="sub2" style="margin-top:4px">'+hint+'</div>':'')+'</div>'; }
+function toggle(id, on, label, sub){ return '<button type="button" class="qbb-tg'+(on?' on':'')+'" id="'+id+'" aria-pressed="'+(on?'true':'false')+'"><span class="qbb-tgk"><i></i></span><span class="qbb-tgl">'+label+(sub?'<small>'+sub+'</small>':'')+'</span></button>'; }
+/* ── STEP 1: pools + filter rows ── */
+function poolChips(){ if(!U.pools.length) return '<div class="sub2">Loading pools…</div>'; var ranked=U.pools.filter(function(p){ return p.ranked_as_of; })[0];
+  return '<div class="qbb-pools">'+U.pools.map(function(p){ var on=U.sel.indexOf(p.key)>=0; var i=String(p.label||'').indexOf(' ('); var nm=i>0?p.label.slice(0,i):p.label; return '<button type="button" class="qbb-pool'+(on?' on':'')+'" data-pool="'+esc(p.key)+'" aria-pressed="'+(on?'true':'false')+'">'+esc(nm)+'<b>'+fmtN(p.count)+'</b></button>'; }).join('')+'</div>'
+   +(ranked?'<div class="sub2">Cap bands and Nifty 500 ranked as of '+esc(ranked.ranked_as_of)+(ranked.stale?' · <span class="neg">stale — '+esc(ranked.stale_note||'')+'</span>':'')+'. Counts = names with a current GVM score.</div>':''); }
+function countLine(){
+  if(!U.sel.length) return '<div class="qbb-count"><b>—</b><span>select at least one pool</span></div>';
+  if(U.loading&&!U.last) return '<div class="qbb-count"><b>…</b><span>counting</span></div>';
+  var d=U.last; if(!d) return '<div class="qbb-count"><b>…</b><span>counting</span></div>';
+  if(d.error) return '<div class="qbb-count"><b>—</b><span class="neg">'+esc(d.error)+'</span></div>';
+  var b=d.binding_filter; return '<div class="qbb-count'+(U.loading?' dim':'')+'"><b>'+fmtN(d.count)+'</b><span>of '+fmtN(d.pool_count)+' in the pool pass'+(b?' · binding: '+esc((fdef(b.filter)||{}).label||b.filter)+' cuts to '+fmtN(b.cut_to):'')+(d.as_of_date?' · as of '+esc(dm(d.as_of_date)):'')+'</span></div>'; }
+function rowCounts(key){ var d=U.last; if(!d||!U.rows[key].applied) return ''; var a=(d.per_filter_counts||{})[key], s=(d.step_counts||{})[key]; return '<span class="qbb-rc">alone <b>'+fmtN(a)+'</b> · step <b>'+fmtN(s)+'</b></span>'; }
+function rowBody(f, st){
+  var h='';
+  if(f.kind==='range'||f.kind==='promoter'){ var lmin=f.kind==='promoter'?'Holding % at least':'At least', lmax=f.kind==='promoter'?'Pledge % at most':'At most';
+    h+='<div class="two">'+(f.maxOnly?'<span></span>':'<label class="fl">'+lmin+'<input data-rk="'+f.key+'" data-rf="min" inputmode="decimal" value="'+esc(st.min)+'"></label>')+(f.minOnly?'<span></span>':'<label class="fl">'+lmax+'<input data-rk="'+f.key+'" data-rf="max" inputmode="decimal" value="'+esc(st.max)+'"></label>')+'</div>';
+    if(f.days){ h+='<div class="fl">Window</div>'+chipRow('days-'+f.key, f.days.map(function(dd){ var w=U.coverage&&U.coverage.windows&&U.coverage.windows[String(dd)]; return [dd, dd+' days'+(w&&w.enabled===false?' (no data)':'')]; }), st.days); }
+    if(f.windows){ h+='<div class="fl">Window</div>'+chipRow('win-'+f.key, f.windows.map(function(w){ return [w.v, w.t]; }), st.win); }
+    if(f.bfsi) h+='<div class="sub2">Banks, NBFCs and insurers are left out when this is applied.</div>';
+  } else if(f.kind==='kofn'){ h+='<div class="two">'+field('Up in at least (k)','kofn-k-'+f.key,st.k)+field('of the last (n) snapshots','kofn-n-'+f.key,st.n)+'</div>'; }
+  else if(f.kind==='multi'){ h+='<label class="fl">Search segments<input id="segq" value="'+esc(U.segq)+'" placeholder="e.g. Private Banks"></label>';
+    var q=U.segq.toLowerCase(), segs=U.segments.filter(function(s){ return !q||String(s.segment).toLowerCase().indexOf(q)>-1; }).slice(0,12);
+    h+='<div class="qbb-segs">'+st.list.map(function(v){ return '<span class="chip on" data-seg="'+esc(v)+'">'+esc(v)+' ×</span>'; }).join('')+segs.filter(function(s){ return st.list.indexOf(s.segment)<0; }).map(function(s){ return '<span class="chip" data-seg="'+esc(s.segment)+'">'+esc(s.segment)+' <small>'+s.members+'</small></span>'; }).join('')+'</div>'+(U.segments.length?'':'<div class="sub2">Loading segments…</div>'); }
+  else { h+='<div class="qbb-segs">'+(f.options||[]).map(function(o){ var on=st.list.indexOf(o)>=0; return '<span class="chip'+(on?' on':'')+'" data-opt="'+esc(o)+'" data-optk="'+f.key+'">'+esc(o)+'</span>'; }).join('')+'</div>'; if(f.nInput) h+=field('Over the last (n) snapshots','n-'+f.key,st.n); }
+  var idx=appliedKeys().indexOf(f.key);
+  if(st.applied&&idx>0) h+='<div class="fl">Joined to the rows above with</div>'+chipRow('op-'+f.key,[['AND','AND — both'],['OR','OR — either']],st.op);
+  h+='<div class="qbb-rowact">'+(st.applied?'<button type="button" class="btn2" data-clear="'+f.key+'">Clear this filter</button>':'<span class="sub2">Type a value — the count updates as you go.</span>')+'</div>';
+  return h;
+}
+function catBlock(c){
+  var derivedOff=c.derived&&!(U.coverage&&U.coverage.derived&&U.coverage.derived.ready), open=!!U.open[c.id], applied=c.rows.filter(function(f){ return U.rows[f.key].applied; }).length;
+  var h='<div class="qbb-cat'+(open?' open':'')+'"><button type="button" class="qbb-cath" data-cat="'+c.id+'" aria-expanded="'+(open?'true':'false')+'"><span>'+esc(c.t)+'<small>'+c.rows.length+' filters'+(applied?' · '+applied+' applied':'')+(derivedOff?' · computes nightly':'')+'</small></span><i>'+(open?'−':'+')+'</i></button>';
+  if(open){ if(derivedOff){ h+='<div class="qbb-rows"><div class="sub2" style="padding:8px 12px">These rows read the 02:30 IST night precompute (qb_universe_derived). They fill in after its first run'+(U.coverage&&U.coverage.derived&&U.coverage.derived.floor?' (from '+esc(U.coverage.derived.floor)+')':'')+' — until then they are shown, not filterable.</div>'+c.rows.map(function(f){ return '<div class="qbb-row off"><div class="qbb-rowh"><span>'+esc(f.label)+'</span><small>computes nightly</small></div></div>'; }).join('')+'</div>'; }
+    else h+='<div class="qbb-rows">'+c.rows.map(function(f){ var st=U.rows[f.key]; return '<div class="qbb-row'+(st.applied?' applied':'')+(st.open?' open':'')+'"><button type="button" class="qbb-rowh" data-row="'+f.key+'"><span>'+esc(f.label)+(st.applied&&appliedKeys().indexOf(f.key)>0?' <em>'+esc(st.op)+'</em>':'')+'</span>'+rowCounts(f.key)+'<i>'+(st.open?'−':'+')+'</i></button>'+(st.open?'<div class="qbb-rowb">'+rowBody(f,st)+'</div>':'')+'</div>'; }).join('')+'</div>'; }
+  return h+'</div>';
+}
+function step1(){
+  var vf=Object.keys(F.v12_filters||{});
+  return '<div class="card"><div class="ch"><span class="t">Which stocks can enter</span><span class="n">step 1 · universe</span></div>'
+   +'<div class="fl" style="margin-top:12px">Pools <small class="qbb-hint">tap to combine</small></div>'+poolChips()+countLine()
+   +'<div class="fl">Filters <small class="qbb-hint">'+appliedKeys().length+' applied · funnel runs top to bottom</small></div>'+CATS.map(catBlock).join('')
+   +'<div class="two" style="margin-top:12px"><button class="btn2" id="b-loaddef">Load a saved universe</button><button class="btn2" id="b-cleardef">Clear all</button></div><div id="def-out" class="sub2">'+esc(DEFMSG)+'</div>'
+   +(vf.length?'<div class="sub2">This basket also carries V12 filters from where it was made: <b>'+esc(vf.map(function(k){ var r=F.v12_filters[k]; return k+(r&&r.min!=null?' ≥ '+r.min:'')+(r&&r.max!=null?' ≤ '+r.max:''); }).join(' · '))+'</b>. They stay in the definition unchanged.</div>':'')
+   +'</div>';
+}
+function bindStep1(){
+  document.querySelectorAll('[data-pool]').forEach(function(b){ b.addEventListener('click', function(){ var k=b.getAttribute('data-pool'); var i=U.sel.indexOf(k); if(i>=0) U.sel.splice(i,1); else U.sel.push(k); refresh(); draw(); }); });
+  document.querySelectorAll('[data-cat]').forEach(function(b){ b.addEventListener('click', function(){ var id=b.getAttribute('data-cat'); U.open[id]=!U.open[id]; draw(); }); });
+  document.querySelectorAll('[data-row]').forEach(function(b){ b.addEventListener('click', function(){ var k=b.getAttribute('data-row'); U.rows[k].open=!U.rows[k].open; draw(); }); });
+  document.querySelectorAll('[data-rk]').forEach(function(inp){ inp.addEventListener('input', function(){ var k=inp.getAttribute('data-rk'), f=inp.getAttribute('data-rf'), st=U.rows[k]; st[f]=inp.value.trim(); st.applied=rowHas(st,fdef(k)); refresh(); }); inp.addEventListener('change', function(){ draw(); }); });
+  document.querySelectorAll('[data-clear]').forEach(function(b){ b.addEventListener('click', function(){ var k=b.getAttribute('data-clear'); U.rows[k]=freshRow(fdef(k)); U.rows[k].open=true; refresh(); draw(); }); });
+  document.querySelectorAll('[data-opt]').forEach(function(s){ s.addEventListener('click', function(){ var k=s.getAttribute('data-optk'), v=s.getAttribute('data-opt'), st=U.rows[k]; var i=st.list.indexOf(v); if(i>=0) st.list.splice(i,1); else st.list.push(v); st.applied=st.list.length>0; refresh(); draw(); }); });
+  document.querySelectorAll('[data-seg]').forEach(function(s){ s.addEventListener('click', function(){ var v=s.getAttribute('data-seg'), st=U.rows.segments; var i=st.list.indexOf(v); if(i>=0) st.list.splice(i,1); else st.list.push(v); st.applied=st.list.length>0; refresh(); draw(); }); });
+  var sq=document.getElementById('segq'); if(sq){ sq.addEventListener('input', function(){ U.segq=sq.value; var st=U.rows.segments; draw(); var el=document.getElementById('segq'); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }); }
+  ALL_FILTERS.forEach(function(f){ var st=U.rows[f.key];
+    if(f.days) seg('days-'+f.key, function(v){ st.days=Number(v); if(st.applied) refresh(); });
+    if(f.windows) seg('win-'+f.key, function(v){ st.win=v; if(st.applied) refresh(); });
+    seg('op-'+f.key, function(v){ st.op=v; refresh(); draw(); });
+    var kk=document.getElementById('kofn-k-'+f.key), kn=document.getElementById('kofn-n-'+f.key), nn=document.getElementById('n-'+f.key);
+    if(kk) kk.addEventListener('input', function(){ st.k=Math.max(1,Math.round(num(kk.value)||1)); st.applied=true; refresh(); });
+    if(kn) kn.addEventListener('input', function(){ st.n=Math.max(1,Math.round(num(kn.value)||1)); st.applied=true; refresh(); });
+    if(nn) nn.addEventListener('input', function(){ st.n=Math.max(1,Math.round(num(nn.value)||1)); if(st.applied) refresh(); });
+  });
   var b=function(id,fn){ var el=document.getElementById(id); if(el) el.addEventListener('click', fn); };
-  b('b-next', function(){ readStep(); STEP++; draw(); }); b('b-back', function(){ readStep(); STEP--; draw(); });
-  b('b-prev', function(){ readStep(); preview(); }); b('b-bt', function(){ readStep(); backtest(); }); b('b-save', function(){ readStep(); save(); });
+  b('b-loaddef', openDefs); b('b-cleardef', function(){ U.sel=[]; ALL_FILTERS.forEach(function(f){ U.rows[f.key]=freshRow(f); }); U.last=null; DEFMSG=''; draw(); });
 }
-function preview(){
-  var out=document.getElementById('prev-out'); out.innerHTML='<div class="sub2">Counting…</div>';
-  fetch('/api/v12/universe/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filters:DEF.universe_ref.filters, limit:12}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-    if(d.error){ out.innerHTML='<div class="sub2 neg">'+esc(d.error)+'</div>'; return; }
-    PREVIEW=d;
-    out.innerHTML='<div class="sub2"><b style="color:var(--ink)">'+d.total+' names</b> pass'+(d.bfsi_excluded?' · banks and NBFCs left out':'')+'. Top by GVM:</div><div class="lst" style="margin:8px 0 0">'+(d.stocks||[]).slice(0,8).map(function(s){return '<div class="row up"><div><div class="nm">'+esc(s.symbol)+'</div><div class="sub">'+esc(s.segment||'')+' · G '+f1(s.g_score)+' · V '+f1(s.v_score)+' · M '+f1(s.m_score)+'</div></div><div class="v"><div class="n">'+f2(s.gvm_score)+'</div><div class="c">GVM</div></div></div>';}).join('')+'</div>';
-    document.getElementById('asof').innerHTML='Step <b>1 of 4</b> · universe '+d.total+' names';
-  }).catch(function(){ out.innerHTML='<div class="sub2 neg">Could not preview.</div>'; });
+var RT=null;
+function refresh(){
+  if(!U.sel.length){ U.last=null; U.loading=false; paintCount(); return; }
+  var seq=++U.seq; U.loading=true; paintCount(); clearTimeout(RT);
+  RT=setTimeout(function(){ api('/api/qb/universe2/preview?'+buildQuery()+'&limit=12').then(function(d){ if(seq!==U.seq) return; U.last=d; U.loading=false; paintCount(); paintRowCounts(); }).catch(function(){ if(seq!==U.seq) return; U.last={error:'Could not count'}; U.loading=false; paintCount(); }); }, 250);
 }
-function ruleWords(){
-  var f=DEF.universe_ref.filters, e=DEF.entry, x=DEF.exit, parts=[];
-  if(f.mcap_rank) parts.push('top '+f.mcap_rank.max+' by size'); if(f.gvm) parts.push('GVM ≥ '+f.gvm.min); if(f.g_score) parts.push('G ≥ '+f.g_score.min); if(f.v_score) parts.push('V ≥ '+f.v_score.min); if(f.m_score) parts.push('M ≥ '+f.m_score.min); if(f.roce) parts.push('ROCE ≥ '+f.roce.min+'%'); if(f.de) parts.push('D/E ≤ '+f.de.max);
-  return 'From <b>'+(parts.length?parts.join(' · '):'every scored stock')+'</b>, rank by <b>'+e.roc_lookback+' momentum</b> and hold the <b>top '+e.top_x+'</b>, equal weight, rebalanced <b>'+DEF.rebalance.freq+'</b>. Sell when rank falls below <b>'+x.rank_fall_y+'</b>'+(x.trailing_peak_pct!=null?' or on a <b>'+x.trailing_peak_pct+'%</b> fall from peak':'')+'. Costs '+DEF.costs.txn_pct+'% + '+DEF.costs.slippage_pct+'% slippage.';
+function paintCount(){ var el=document.querySelector('.qbb-count'); if(el) el.outerHTML=countLine(); var a=document.getElementById('asof'); if(a&&STEP===1) a.innerHTML='Step <b>1 of 4</b>'+(U.last&&U.last.count!=null&&U.sel.length?' · universe '+fmtN(U.last.count)+' names':''); }
+function paintRowCounts(){ document.querySelectorAll('[data-row]').forEach(function(b){ var k=b.getAttribute('data-row'); var rc=b.querySelector('.qbb-rc'); var html=rowCounts(k); if(rc) rc.outerHTML=html||'<span class="qbb-rc" style="display:none"></span>'; else if(html) b.querySelector('span').insertAdjacentHTML('afterend', html); }); }
+function openDefs(){
+  var out=document.getElementById('def-out'); out.textContent='Loading saved universes…';
+  api('/api/qb/universe2/defs').then(function(d){ var defs=d.defs||[]; if(!defs.length){ out.innerHTML='No saved universe yet — the pools and filters you set here are saved with the basket name.'; return; }
+    out.innerHTML='<div class="lst" style="margin:8px 0 0" id="def-list">'+defs.map(function(x){ return '<a class="row" href="#" data-def="'+esc(x.basket_name)+'" data-defn="'+esc(x.def_name||'default')+'"><div><div class="nm">'+esc(x.basket_name)+'<span class="tag">'+esc(x.def_name||'default')+'</span></div><div class="sub">'+(x.n_filters||0)+' filters · '+(x.n_pools||0)+' pools'+(x.preview_count!=null?' · '+fmtN(x.preview_count)+' names when saved':'')+'</div></div><div class="v"><div class="n gd">›</div></div></a>'; }).join('')+'</div>';
+    out.querySelectorAll('[data-def]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); out.textContent='Loading…'; api('/api/qb/universe2/load?basket_name='+encodeURIComponent(a.getAttribute('data-def'))+'&def_name='+encodeURIComponent(a.getAttribute('data-defn'))).then(function(x){ if(x.error||!x.found){ out.textContent='Not loaded — '+(x.error||'nothing saved under that name.'); return; } applyDef(x); NAME=NAME||x.basket_name||''; DEFMSG='Loaded '+x.basket_name+' / '+(x.def_name||'default')+(x.score_date_moved?' — scores have moved since it was saved; the count below is today\'s.':'.'); refresh(); draw(); }).catch(function(){ out.textContent='Could not load it.'; }); }); });
+  }).catch(function(){ out.textContent='Could not load the saved list.'; });
 }
-function backtest(){
-  var out=document.getElementById('bt-out'); out.textContent='Running… this takes about a minute.'; BT=null; document.getElementById('bt-res').innerHTML='';
-  fetch('/api/v12/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({definition:DEF, benchmark:'NIFTY50'}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-    if(d.error){ out.textContent=d.error+(d.errors?' — '+d.errors.join('; '):''); return; }
-    var id=d.backtest_id; if(POLL) clearInterval(POLL);
-    var tick=function(){ fetch('/api/v12/backtest/'+id,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(b){
-      if(b.status==='done'){ clearInterval(POLL); BT=b.result||{}; out.textContent=''; document.getElementById('bt-res').innerHTML=btHtml(BT); }
-      else if(b.status==='error'||b.error){ clearInterval(POLL); out.textContent='Backtest failed: '+(b.error||''); }
-      else out.textContent='Running… '+(b.status||'');
-    }); };
-    if(d.status==='done') tick(); else { POLL=setInterval(tick, 3000); tick(); }
-  }).catch(function(){ out.textContent='Could not start the backtest.'; });
+function applyDef(d){ var known=U.pools.map(function(p){ return p.key; }); U.sel=(d.pools||[]).filter(function(k){ return !known.length||known.indexOf(k)>=0; }); ALL_FILTERS.forEach(function(f){ U.rows[f.key]=freshRow(f); });
+  (d.filters||[]).forEach(function(r){ var f=fdef(r.key); if(!f) return; var st=U.rows[r.key]; st.applied=true; st.op=(r.op==='OR')?'OR':'AND'; if(r.min!=null) st.min=String(r.min); if(r.max!=null) st.max=String(r.max); if(Array.isArray(r.list)) st.list=r.list.slice(); if(f.days&&r.duration!=null) st.days=Number(r.duration); if(f.windows&&r.duration) st.win=String(r.duration); if(r.n!=null) st.n=Number(r.n); if(r.k!=null) st.k=Number(r.k); st.note=r.note||''; }); }
+/* ── STEP 2: entry ── */
+function step2(){
+  return '<div class="card"><div class="ch"><span class="t">How a stock gets picked</span><span class="n">step 2 · entry</span></div>'
+   +'<div class="fl" style="margin-top:12px">Rank the universe by momentum over</div>'+chipRow('roc',[['1M','1 month'],['3M','3 months'],['6M','6 months'],['12M','1 year']],F.roc)
+   +'<div class="two">'+field('Hold the top','e-top',F.topx,'names, equal weight')+field('At least','e-min',F.min,'names, or the basket sits in cash')+'</div>'
+   +'<div class="fl">Gates <small class="qbb-hint">optional — a name must also pass these</small></div>'
+   +toggle('t-rsi',F.rsi_on,'RSI gate',F.rsi_on?('RSI('+F.rsi_p+') '+F.rsi_dir+' '+F.rsi_t+' on '+({D:'daily',W:'weekly',M:'monthly'}[F.rsi_tf]||F.rsi_tf)):'off')
+   +(F.rsi_on?'<div class="qbb-sub">'+'<div class="fl">Timeframe</div>'+chipRow('rsi-tf',[['D','Daily'],['W','Weekly'],['M','Monthly']],F.rsi_tf)+'<div class="two">'+field('Period','rsi-p',F.rsi_p)+field('Threshold','rsi-t',F.rsi_t)+'</div><div class="fl">Enter when RSI is</div>'+chipRow('rsi-dir',[['above','Above'],['below','Below']],F.rsi_dir)+'</div>':'')
+   +toggle('t-ema',F.ema_on,'EMA gate',F.ema_on?('EMA '+F.ema1+' > '+F.ema2+(F.ema3?' > '+F.ema3:'')+' on '+({D:'daily',W:'weekly',M:'monthly'}[F.ema_tf]||F.ema_tf)):'off')
+   +(F.ema_on?'<div class="qbb-sub"><div class="fl">Timeframe</div>'+chipRow('ema-tf',[['D','Daily'],['W','Weekly'],['M','Monthly']],F.ema_tf)+'<div class="two">'+field('EMA 1','ema1',F.ema1)+field('EMA 2','ema2',F.ema2)+'</div>'+field('EMA 3 (optional)','ema3',F.ema3,'ema1 > ema2 > ema3 must hold')+'</div>':'')
+   +'<div class="sub2">On each rebalance the universe is re-ranked and the top names that pass the gates are held. Nothing is bought between rebalances.</div></div>';
 }
+function readStep2(){ var g=function(id){ var el=document.getElementById(id); return el?el.value.trim():null; }; var v; v=g('e-top'); if(v!=null) F.topx=v; v=g('e-min'); if(v!=null) F.min=v; v=g('rsi-p'); if(v!=null) F.rsi_p=v; v=g('rsi-t'); if(v!=null) F.rsi_t=v; v=g('ema1'); if(v!=null) F.ema1=v; v=g('ema2'); if(v!=null) F.ema2=v; v=g('ema3'); if(v!=null) F.ema3=v; }
+function bindStep2(){ seg('roc', function(v){ F.roc=v; }); seg('rsi-tf', function(v){ F.rsi_tf=v; }); seg('rsi-dir', function(v){ F.rsi_dir=v; }); seg('ema-tf', function(v){ F.ema_tf=v; });
+  tg('t-rsi', function(){ readStep2(); F.rsi_on=!F.rsi_on; draw(); }); tg('t-ema', function(){ readStep2(); F.ema_on=!F.ema_on; draw(); }); }
+/* ── STEP 3: exit + risk ── */
+function step3(){
+  return '<div class="card"><div class="ch"><span class="t">When a stock leaves</span><span class="n">step 3 · exit</span></div>'
+   +'<div class="two" style="margin-top:4px">'+field('Hard stop % below entry','x-hard',F.x_hard,'e.g. 10 — sells on a 10% loss')+field('Trailing fall % from peak','x-trail',F.x_trail,'e.g. 15')+'</div>'
+   +field('Sell if rank falls below','x-rank',F.x_rank,'≥ the top count, so a name is not sold the moment it slips one place')
+   +toggle('t-gate',F.x_gate,'Gate mirror','exit when the RSI / EMA entry gate flips')
+   +toggle('t-atr',F.atr_on,'ATR stop (weekly ATR-14)',F.atr_on?('stop at '+F.atr_mult+'× ATR'+(F.atr_target?' · target '+F.atr_target+'×':'')+(F.atr_trailing?' · trailing':'')):'an alternative to the flat percent above')
+   +(F.atr_on?'<div class="qbb-sub"><div class="two">'+field('Stop — ATR multiple','atr-mult',F.atr_mult)+field('Target — ATR multiple','atr-target',F.atr_target,'optional')+'</div>'+toggle('t-atrtrail',F.atr_trailing,'Trailing','the stop follows the peak price, not just entry')+'</div>':'')
+   +'<div class="sub2">Exits are checked at each rebalance, on end-of-day prices.</div></div>'
+   +'<div class="card"><div class="ch"><span class="t">Risk — how positions are sized</span><span class="n">step 3 · risk</span></div>'
+   +'<div class="two" style="margin-top:4px">'+field('Basket cap (max stocks)','r-max',F.max,'fills to the cap in rank order')+field('Sector cap (max weight %)','r-seccap',F.seccap,'skips a name whose sector would breach it')+'</div>'
+   +'<div class="fl">Residual allocation</div><div class="sub2">The cash / GOLDBEES / SILVERBEES split exists in the engine (qb_risk_rules), but the backtest definition has no field for it yet — not shown as a control that would do nothing. Same as the web builder.</div></div>';
+}
+function readStep3(){ var g=function(id){ var el=document.getElementById(id); return el?el.value.trim():null; }; var v; v=g('x-hard'); if(v!=null) F.x_hard=v; v=g('x-trail'); if(v!=null) F.x_trail=v; v=g('x-rank'); if(v!=null) F.x_rank=v; v=g('atr-mult'); if(v!=null) F.atr_mult=v; v=g('atr-target'); if(v!=null) F.atr_target=v; v=g('r-max'); if(v!=null) F.max=v; v=g('r-seccap'); if(v!=null) F.seccap=v; }
+function bindStep3(){ tg('t-gate', function(){ readStep3(); F.x_gate=!F.x_gate; draw(); }); tg('t-atr', function(){ readStep3(); F.atr_on=!F.atr_on; draw(); }); tg('t-atrtrail', function(){ readStep3(); F.atr_trailing=!F.atr_trailing; draw(); }); }
+/* ── STEP 4: test & save ── */
+function ruleWords(){ var d=buildDefinition(), e=d.entry, x=d.exit, parts=[];
+  var uni=U.sel.length?(U.sel.map(function(k){ var p=U.pools.filter(function(q){ return q.key===k; })[0]; var l=p?p.label:k; var i=l.indexOf(' ('); return i>0?l.slice(0,i):l; }).join(' + ')+(appliedKeys().length?' with '+appliedKeys().length+' filter'+(appliedKeys().length===1?'':'s'):'')):'every scored stock';
+  var gates=[]; if(e.rsi_gate) gates.push('RSI('+e.rsi_gate.period+') '+e.rsi_gate.dir+' '+e.rsi_gate.threshold+' ('+e.rsi_gate.tf+')'); if(e.ema_gate) gates.push('EMA '+e.ema_gate.ema1+' > '+e.ema_gate.ema2+(e.ema_gate.ema3?' > '+e.ema_gate.ema3:'')+' ('+e.ema_gate.tf+')');
+  var exits=[]; if(x.hard_stop_pct!=null) exits.push('a '+x.hard_stop_pct+'% loss'); if(x.trailing_peak_pct!=null) exits.push('a '+x.trailing_peak_pct+'% fall from peak'); if(x.rank_fall_y!=null) exits.push('rank below '+x.rank_fall_y); if(x.gate_mirror) exits.push('the gate flipping'); if(x.atr_stop) exits.push(x.atr_stop.mult+'× ATR'+(x.atr_stop.trailing?' trailing':'')+(x.atr_stop.target_mult?' (target '+x.atr_stop.target_mult+'×)':''));
+  return 'From <b>'+esc(uni)+'</b>, rank by <b>'+esc(e.roc_lookback)+' momentum</b>'+(gates.length?' with gates <b>'+esc(gates.join(' · '))+'</b>':'')+', hold the <b>top '+e.top_x+'</b> (cap '+e.max_stocks+(d.risk?', sector cap '+d.risk.sector_cap_pct+'%':'')+'), equal weight, rebalanced <b>'+esc(d.rebalance.freq)+'</b>. '+(exits.length?'Sell on <b>'+esc(exits.join(' or '))+'</b>.':'No exit rule beyond the re-rank.')+' Costs '+d.costs.txn_pct+'% a trade, '+d.costs.slippage_pct+'% slippage.';
+}
+function step4(){ var def=buildDefinition();
+  var h='<div class="card"><div class="ch"><span class="t">Test and save</span><span class="n">step 4</span></div>'
+   +'<div class="fl" style="margin-top:12px">Rebalance</div>'+chipRow('freq',[['weekly','Weekly'],['monthly','Monthly'],['quarterly','Quarterly']],F.freq)
+   +'<div class="fl">Benchmark</div>'+chipRow('bench',[['NIFTY50','Nifty 50'],['NIFTY500','Nifty 500'],['BANKNIFTY','Bank Nifty']],F.bench)
+   +'<div class="two">'+field('Cost per trade %','c-txn',F.txn)+field('Slippage %','c-slip',F.slip)+'</div>'
+   +'<label class="fl">Basket name<input id="nm" value="'+esc(NAME)+'" placeholder="e.g. My momentum 12"></label>'
+   +'<div class="fl">Your rule</div><div class="rule">'+ruleWords()+'</div>'
+   +'<div class="two"><button class="btn2" id="b-bt">Run 5-year backtest</button><button class="btn" id="b-save">Save basket</button></div><div id="bt-out" class="sub2">'+esc(BTMSG)+'</div><div id="save-out" class="sub2">'+esc(SAVEMSG)+'</div>'
+   +'<details class="qbb-json"><summary>Definition JSON — the same object the web builder saves</summary><pre id="def-json">'+esc(JSON.stringify(def,null,2))+'</pre></details></div>';
+  h+='<div id="bt-res">'+(BT?btHtml(BT):'')+'</div>'; return h;
+}
+function readStep4(){ var g=function(id){ var el=document.getElementById(id); return el?el.value.trim():null; }; var v; v=g('c-txn'); if(v!=null) F.txn=v; v=g('c-slip'); if(v!=null) F.slip=v; v=g('nm'); if(v!=null) NAME=v; }
+function bindStep4(){ seg('freq', function(v){ F.freq=v; paintJson(); }); seg('bench', function(v){ F.bench=v; }); var b=function(id,fn){ var el=document.getElementById(id); if(el) el.addEventListener('click', fn); }; b('b-bt', function(){ readStep4(); backtest(); }); b('b-save', function(){ readStep4(); save(); });
+  ['c-txn','c-slip'].forEach(function(id){ var el=document.getElementById(id); if(el) el.addEventListener('input', function(){ readStep4(); paintJson(); }); }); }
+function paintJson(){ var el=document.getElementById('def-json'); if(el) el.textContent=JSON.stringify(buildDefinition(),null,2); var r=document.querySelector('.rule'); if(r&&STEP===4) r.innerHTML=ruleWords(); }
+/* the web's result block (scorr_v12.html renderResults): pills, the tiles, the chart, the yearly split, the trade log, the honesty line */
+function sc(v,suf){ return v==null?'—':(Number(v)>0?'+':'')+v+(suf||''); }
+function tile(k,v,c){ return '<div class="cell"><div class="k">'+k+'</div><div class="v '+(c||'')+'">'+v+'</div></div>'; }
 function curve(eq, bm){
   if(!eq||eq.length<2) return '';
   var step=Math.max(1,Math.floor(eq.length/80)), e=eq.filter(function(_,i){return i%step===0;}), b=(bm||[]).filter(function(_,i){return i%step===0;});
   var all=e.map(function(p){return p.equity;}).concat(b.map(function(p){return p.equity;})); var lo=Math.min.apply(null,all), hi=Math.max.apply(null,all); if(hi===lo) hi=lo+1;
-  var line=function(arr){ var n=arr.length; return arr.map(function(p,k){ return ((6+k*(308/(n-1))).toFixed(1)+','+(108-(p.equity-lo)/(hi-lo)*96).toFixed(1)); }).join(' '); };
-  return '<svg viewBox="0 0 320 120" preserveAspectRatio="none" style="width:100%;height:120px;margin-top:8px"><polyline fill="none" stroke="'+tok('--wayfind')+'" stroke-width="1.2" opacity=".7" points="'+line(b)+'"/><polyline fill="none" stroke="'+tok('--brand')+'" stroke-width="2" points="'+line(e)+'"/><g fill="'+tok('--muted')+'" font-size="8" font-family="Sora"><text x="6" y="118">'+esc(dm(eq[0].date))+'</text><text x="270" y="118">'+esc(dm(eq[eq.length-1].date))+'</text></g></svg>';
+  var line=function(arr){ var n=arr.length; if(n<2) return ''; return arr.map(function(p,k){ return ((6+k*(308/(n-1))).toFixed(1)+','+(108-(p.equity-lo)/(hi-lo)*96).toFixed(1)); }).join(' '); };
+  return '<svg viewBox="0 0 320 120" preserveAspectRatio="none" style="width:100%;height:120px;margin-top:8px"><polyline fill="none" stroke="'+tok('--wayfind')+'" stroke-width="1.2" opacity=".7" points="'+line(b)+'"/><polyline fill="none" stroke="'+tok('--brand')+'" stroke-width="2" points="'+line(e)+'"/></svg><div class="sub2"><span class="gd">■</span> basket (rebased 100) · <span style="color:var(--wayfind)">■</span> benchmark</div>';
 }
-function btHtml(r){
-  var s=r.stats||{};
-  var h='<div class="hero" style="margin-top:12px"><div class="eye">Backtest · '+esc(r.start||'')+' → '+esc(r.end||'')+' · '+esc(r.years||'')+' yrs · '+esc(r.universe_size||'')+' names</div><div class="big"><div class="r '+cls(s.cagr_pct)+'">'+pct(s.cagr_pct,1)+'</div><div class="n">a year, compounded<br>Nifty <b>'+pct(s.benchmark_cagr_pct,1)+'</b> · alpha <b class="'+cls(s.alpha_pct)+'">'+pct(s.alpha_pct,1)+'</b></div></div>'+curve(r.equity_series, r.benchmark_series)
-   +'<div class="kg"><div class="cell"><div class="k">Worst fall</div><div class="v neg">'+pct(s.max_drawdown_pct,1)+'</div></div><div class="cell"><div class="k">Hit rate</div><div class="v">'+(s.accuracy_pct!=null?s.accuracy_pct+'%':'—')+'</div></div><div class="cell"><div class="k">Trades</div><div class="v">'+(s.total_trades||0)+'</div></div></div>'
-   +'<div class="kg"><div class="cell"><div class="k">Sharpe</div><div class="v">'+f2(s.sharpe)+'</div></div><div class="cell"><div class="k">Calmar</div><div class="v">'+f2(s.calmar)+'</div></div><div class="cell"><div class="k">Rebalances</div><div class="v">'+(r.rebalances||0)+'</div></div></div></div>';
-  var yr=r.yearly||[];
-  if(yr.length) h+='<div class="lst" style="margin-top:10px"><div class="lr h"><div class="nm">Year</div><div class="v">Return</div></div>'+yr.map(function(y){return '<div class="lr"><div class="nm">'+esc(y.year)+'</div><div class="v '+cls(y.return_pct)+'">'+pct(y.return_pct,1)+'</div></div>';}).join('')+'</div>';
-  var hon=r.honesty; if(hon){ var lines=Array.isArray(hon)?hon:(typeof hon==='object'?Object.keys(hon).map(function(k){return hon[k];}):[hon]); h+='<div class="emp" style="margin-top:10px"><b>Read this first</b>'+lines.map(function(l){return esc(typeof l==='string'?l:JSON.stringify(l));}).join('<br>')+'</div>'; }
+function btHtml(r){ if(!r) return ''; if(r.error) return '<div class="emp">'+esc(r.error)+'</div>'; var s=r.stats||{}, ss=r.sector_stats, pit=r.pit_flag==='point_in_time_gvm'?'PIT GVM'+(r.pit_universe_note&&r.pit_universe_note.candidate_pool_size!=null?' · pool '+r.pit_universe_note.candidate_pool_size:''):(r.pit_partial?'PIT partial':'PIT exact');
+  var h='<div class="hero" style="margin-top:12px"><div class="eye">Backtest · '+esc(dm(r.start))+' → '+esc(dm(r.end))+' · '+esc(r.years)+' yrs · '+esc(r.universe_size)+' names · '+esc(r.benchmark)+' · '+esc(r.rebalances)+' rebalances</div>'
+   +'<div class="big"><div class="r '+cls(s.cagr_pct)+'">'+pct(s.cagr_pct,1)+'</div><div class="n">a year, compounded<br>'+esc(r.benchmark)+' <b>'+pct(s.benchmark_cagr_pct,1)+'</b> a year · alpha <b class="'+cls(s.alpha_pct)+'">'+pct(s.alpha_pct,1)+'</b></div></div>'
+   +'<div class="chips" style="padding:8px 0 0"><span class="chip">'+esc(pit)+'</span>'+(r.honesty&&r.honesty.min_n_badge?'<span class="chip">min-n &lt; 50 trades</span>':'')+(r.atr_stop_active?'<span class="chip">ATR stop</span>':'')+'</div>'
+   +'<div class="kg">'+tile('Absolute',sc(s.absolute_return_pct,'%'),cls(s.absolute_return_pct))+tile('vs '+esc(r.benchmark),sc(s.benchmark_return_pct,'%'),cls(s.benchmark_return_pct))+tile('Alpha',sc(s.alpha_pct,'%'),cls(s.alpha_pct))+'</div>'
+   +(ss?'<div class="kg">'+tile('vs Sector',sc(ss.sector_return_pct,'%'),cls(ss.sector_return_pct))+tile('Sector alpha',sc(ss.vs_sector_alpha_pct,'%'),cls(ss.vs_sector_alpha_pct))+tile('Sector CAGR',sc(ss.sector_cagr_pct,'%'))+'</div>':'')
+   +'<div class="kg">'+tile('Beta',s.beta==null?'—':s.beta)+tile('Max DD',sc(s.max_drawdown_pct,'%'),'neg')+tile('Sharpe',s.sharpe==null?'—':s.sharpe)+'</div>'
+   +'<div class="kg">'+tile('Calmar',s.calmar==null?'—':s.calmar)+tile('XIRR',sc(s.xirr_pct,'%'))+tile('Accuracy',s.accuracy_pct==null?'—':s.accuracy_pct+'%')+'</div>'
+   +'<div class="kg">'+tile('Trades',s.total_trades!=null?s.total_trades:'—')+tile('Win / loss',(s.win_trades!=null?s.win_trades:'—')+' / '+(s.loss_trades!=null?s.loss_trades:'—'))+tile('Rebalances',r.rebalances!=null?r.rebalances:'—')+'</div>'
+   +(ss?'<div class="sub2">Sector layer: vs '+esc((ss.segments||[]).join(', '))+' ('+esc(ss.n_members)+' stocks). '+esc(ss.methodology||'')+'</div>':'<div class="sub2">Sector layer: not available — no held symbol carried a real segment for this run.</div>')
+   +curve(r.equity_series, r.benchmark_series)+'</div>';
+  var yr=r.yearly||[]; if(yr.length) h+='<div class="sec"><h2>Yearly split</h2><span class="hint">'+yr.length+' years</span></div><div class="lst">'+yr.map(function(y){ return '<div class="row '+(Number(y.return_pct)>=0?'up':'dn')+'"><div><div class="nm">'+esc(y.year)+'</div></div><div class="v"><div class="n '+cls(y.return_pct)+'">'+pct(y.return_pct,1)+'</div></div></div>'; }).join('')+'</div>';
+  var tr=(r.trades||[]).slice(-100).reverse(); h+='<div class="sec"><h2>Trade log</h2><span class="hint">'+(r.trades||[]).length+' trades · last '+tr.length+'</span></div>'+(tr.length?'<div class="wrap"><div class="scroll"><table class="qbb-tb"><thead><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry px</th><th>Exit px</th><th>Return</th><th>Why</th></tr></thead><tbody>'+tr.map(function(t){ return '<tr><td>'+esc(t.symbol)+'</td><td>'+esc(t.entry_date)+'</td><td>'+esc(t.exit_date)+'</td><td>'+esc(t.entry_px)+'</td><td>'+esc(t.exit_px)+'</td><td class="'+cls(t.return_pct)+'">'+sc(t.return_pct,'%')+'</td><td>'+esc(t.exit_reason||'')+'</td></tr>'; }).join('')+'</tbody></table></div></div>':'<div class="emp">No closed trades.</div>');
+  if(r.honesty&&r.honesty.geometry) h+='<div class="emp" style="margin-top:10px"><b>Read this first</b>'+esc(r.honesty.geometry)+'</div>';
   return h;
 }
-function save(){
-  var out=document.getElementById('bt-out');
-  if(!NAME){ out.textContent='Give the basket a name first.'; return; }
-  out.textContent='Saving…';
-  fetch('/api/v12/basket',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:NAME, definition:DEF, status:'draft'}),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-    if(d.error){ out.textContent=d.error+(d.errors?' — '+d.errors.join('; '):''); return; }
-    out.textContent='Saved as basket #'+d.id+'. It appears under My baskets.';
-  }).catch(function(){ out.textContent='Could not save.'; });
+function backtest(){ var out=document.getElementById('bt-out'); BTMSG='Running… this takes about a minute.'; out.textContent=BTMSG; BT=null; document.getElementById('bt-res').innerHTML='';
+  api('/api/v12/backtest',{method:'POST',body:{definition:buildDefinition(), benchmark:F.bench}}).then(function(d){
+    if(d.error){ BTMSG=d.error+(d.errors?' — '+d.errors.join('; '):''); out.textContent=BTMSG; return; }
+    var id=d.backtest_id; if(POLL) clearInterval(POLL);
+    var tick=function(){ api('/api/v12/backtest/'+id).then(function(b){ if(b.status==='done'){ clearInterval(POLL); BT=b.result||{}; BTMSG=''; out.textContent=''; document.getElementById('bt-res').innerHTML=btHtml(BT); } else if(b.status==='error'||b.error){ clearInterval(POLL); BTMSG='Backtest failed: '+(b.error||''); out.textContent=BTMSG; } else { BTMSG='Running… '+(b.status||''); out.textContent=BTMSG; } }); };
+    if(d.status==='done') tick(); else { POLL=setInterval(tick, 3000); tick(); }
+  }).catch(function(){ BTMSG='Could not start the backtest.'; out.textContent=BTMSG; });
 }
+function save(){ var out=document.getElementById('save-out'); if(!NAME){ SAVEMSG='Give the basket a name first.'; out.textContent=SAVEMSG; return; } SAVEMSG='Saving…'; out.textContent=SAVEMSG;
+  api('/api/v12/basket',{method:'POST',body:{name:NAME, definition:buildDefinition(), status:'draft'}}).then(function(d){
+    if(d.error){ SAVEMSG=d.error+(d.errors?' — '+d.errors.join('; '):''); out.textContent=SAVEMSG; return; }
+    var msg='Saved as basket #'+d.id+' (draft).';
+    if(U.sel.length){ return api('/api/qb/universe2/save',{method:'POST',body:{basket_name:NAME, def_name:'default', pools:U.sel.slice(), filters:defRows(), as_of_score_date:(U.last&&U.last.as_of_date)||null, preview_count:(U.last?U.last.count:null)}}).then(function(u){ SAVEMSG=msg+(u.error?' Universe not saved — '+u.error:' Universe saved under the same name ('+(u.pools||[]).join(' + ')+', '+(u.filters_saved!=null?u.filters_saved:defRows().length)+' filters).'); out.textContent=SAVEMSG; }); }
+    SAVEMSG=msg+' No pool was picked, so no universe definition was saved.'; out.textContent=SAVEMSG;
+  }).catch(function(){ SAVEMSG='Could not save.'; out.textContent=SAVEMSG; });
+}
+/* ── shell ── */
+function seg(id, fn){ var el=document.getElementById(id); if(!el) return; el.addEventListener('click', function(e){ var s=e.target.closest('[data-v]'); if(!s) return; fn(s.getAttribute('data-v')); el.querySelectorAll('span').forEach(function(x){ x.classList.toggle('on', x===s); }); }); }
+function tg(id, fn){ var el=document.getElementById(id); if(el) el.addEventListener('click', fn); }
+function readStep(){ if(STEP===2) readStep2(); else if(STEP===3) readStep3(); else if(STEP===4) readStep4(); }
+function draw(){
+  var h=steps();
+  if(STEP===1) h+=step1(); else if(STEP===2) h+=step2(); else if(STEP===3) h+=step3(); else h+=step4();
+  h+='<div class="navrow">'+(STEP>1?'<button class="btn2" id="b-back">‹ Back</button>':'<button class="btn2" id="b-home">‹ My baskets</button>')+(STEP<4?'<button class="btn" id="b-next">Next ›</button>':'')+'</div>';
+  h+='<div class="note"><b>What a backtest is.</b> A walk through the last five years applying this rule as written, on today\'s universe. Survivorship inflates the numbers; the ranking of rules is the finding, not the absolute return. Nothing here is a recommendation.</div>';
+  document.getElementById('body').innerHTML=h;
+  document.getElementById('asof').innerHTML='Step <b>'+STEP+' of 4</b>'+(U.last&&U.last.count!=null&&U.sel.length?' · universe '+fmtN(U.last.count)+' names':'');
+  document.querySelectorAll('.steps span').forEach(function(s){ s.addEventListener('click', function(){ readStep(); STEP=Number(s.getAttribute('data-step')); draw(); window.scrollTo(0,0); }); });
+  var b=function(id,fn){ var el=document.getElementById(id); if(el) el.addEventListener('click', fn); };
+  b('b-next', function(){ readStep(); STEP++; draw(); window.scrollTo(0,0); }); b('b-back', function(){ readStep(); STEP--; draw(); window.scrollTo(0,0); }); b('b-home', function(){ STEP=0; home(); });
+  if(STEP===1) bindStep1(); else if(STEP===2) bindStep2(); else if(STEP===3) bindStep3(); else bindStep4();
+}
+function loadUniverseData(){ if(U.pools.length) return; api('/api/qb/universe2/pools').then(function(d){ U.pools=d.pools||[]; if(STEP===1) draw(); }).catch(function(){}); api('/api/qb/universe2/coverage').then(function(d){ U.coverage=(d&&d.windows)?d:null; if(STEP===1) draw(); }).catch(function(){}); api('/api/qb/universe2/segments').then(function(d){ U.segments=d.segments||[]; }).catch(function(){}); }
 function home(){
-  Promise.all([fetch('/api/v12/basket',{credentials:'same-origin'}).then(function(r){return r.json();}), fetch('/api/v12/presets',{credentials:'same-origin'}).then(function(r){return r.json();})]).then(function(rs){
+  Promise.all([api('/api/v12/basket'), api('/api/v12/presets')]).then(function(rs){
     var bk=(rs[0].baskets||[]), pr=(rs[1].presets||rs[1]||[]);
-    document.getElementById('asof').innerHTML='<b>'+bk.length+'</b> saved baskets · build a rule, test it, save it';
-    var h='<a class="row up" href="#" id="b-new" style="margin:12px 16px 0;border:1px solid var(--edge);border-radius:14px;background:var(--panel)"><div><div class="nm">Build a new basket</div><div class="sub">Four steps: who can enter, how they are picked, when they leave, then test and save.</div></div><div class="v"><div class="n gd">+</div></div></a>';
-    if(Array.isArray(pr)&&pr.length){ h+='<div class="sec"><h2>Start from a Scorr rule</h2><span class="hint">locked presets</span></div><div class="lst">'+pr.map(function(p){ var pv=p.provenance||{}; return '<a class="row" href="#" data-preset="'+esc(p.id)+'"><div><div class="nm">'+esc(p.name)+'</div><div class="sub">'+esc(p.tagline||'')+(pv.cagr_pct!=null?' · backtested <b>'+pct(pv.cagr_pct,1)+'</b> a year vs Nifty '+pct(pv.benchmark_cagr_pct,1):'')+'</div></div><div class="v"><div class="n gd">›</div></div></a>'; }).join('')+'</div>'; }
+    document.getElementById('asof').innerHTML='<b>'+bk.length+'</b> saved basket'+(bk.length===1?'':'s')+' · build a rule, test it, save it';
+    var h='<a class="row up" href="#" id="b-new" style="margin:12px 16px 0;border:1px solid var(--edge);border-radius:14px;background:var(--panel)"><div><div class="nm">Build a new basket</div><div class="sub">Four steps: the universe (pools + filters), how names are picked, when they leave and how positions are sized, then test and save. The same rule object as the web builder.</div></div><div class="v"><div class="n gd">+</div></div></a>';
+    if(Array.isArray(pr)&&pr.length){ h+='<div class="sec"><h2>Start from a Scorr rule</h2><span class="hint">locked presets</span></div><div class="lst">'+pr.map(function(p){ var pv=p.provenance||{}; return '<a class="row" href="#" data-preset="'+esc(p.id)+'"><div><div class="nm">'+esc(p.name)+'</div><div class="sub">'+esc(p.tagline||'')+(pv.cagr_pct!=null?' · <b>'+pct(pv.cagr_pct,1)+'</b> a year backtested':'')+'</div></div><div class="v"><div class="n gd">›</div></div></a>'; }).join('')+'</div>'; }
     h+='<div class="sec"><h2>My baskets</h2><span class="hint">'+bk.length+'</span></div>';
-    h+= bk.length ? '<div class="lst">'+bk.map(function(b){ var d=b.definition||{}, e=d.entry||{}; return '<a class="row mu" href="#" data-open="'+b.id+'"><div><div class="nm">'+esc(b.name)+'<span class="tag">'+esc(b.status||'draft')+'</span></div><div class="sub">top '+esc(e.top_x||'—')+' by '+esc(e.roc_lookback||'—')+' momentum · '+esc((d.rebalance||{}).freq||'')+' · '+esc(dm(b.created_at))+'</div></div><div class="v"><div class="n">›</div></div></a>'; }).join('')+'</div>' : '<div class="emp"><b>No basket yet</b>Build one above. A saved basket keeps its rule and its last backtest.</div>';
+    h+= bk.length ? '<div class="lst">'+bk.map(function(b){ var d=b.definition||{}, e=d.entry||{}; return '<a class="row mu" href="#" data-open="'+b.id+'"><div><div class="nm">'+esc(b.name)+'<span class="tag">'+esc(b.status||'draft')+'</span></div><div class="sub">top '+esc(e.top_x||'—')+' by '+esc(e.roc_lookback||'—')+' momentum · '+esc((d.rebalance||{}).freq||'—')+(d.risk&&d.risk.sector_cap_pct!=null?' · sector cap '+d.risk.sector_cap_pct+'%':'')+'</div></div><div class="v"><div class="n gd">›</div></div></a>'; }).join('')+'</div>' : '<div class="emp"><b>No basket yet</b>Build one above. A saved basket is a rule and a test, not a live book.</div>';
     h+='<div class="note"><b>Paper only.</b> A saved basket is a rule and a test, not a live book. Turning it live is a founder step, not a button here.</div>';
     document.getElementById('body').innerHTML=h;
-    document.getElementById('b-new').addEventListener('click', function(e){ e.preventDefault(); STEP=1; draw(); });
-    document.querySelectorAll('[data-preset]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var p=pr.filter(function(x){return x.id===a.getAttribute('data-preset');})[0]; if(p&&p.definition){ DEF=JSON.parse(JSON.stringify(p.definition)); NAME=p.name+' (mine)'; } STEP=1; draw(); }); });
-    document.querySelectorAll('[data-open]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var b=bk.filter(function(x){return String(x.id)===a.getAttribute('data-open');})[0]; if(b){ DEF=JSON.parse(JSON.stringify(b.definition)); NAME=b.name; STEP=4; BT=null; draw(); } }); });
+    document.getElementById('b-new').addEventListener('click', function(e){ e.preventDefault(); loadDef({}); U.sel=[]; ALL_FILTERS.forEach(function(f){ U.rows[f.key]=freshRow(f); }); U.last=null; NAME=''; BT=null; BTMSG=''; SAVEMSG=''; DEFMSG=''; STEP=1; loadUniverseData(); draw(); });
+    document.querySelectorAll('[data-preset]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var p=pr.filter(function(x){return x.id===a.getAttribute('data-preset');})[0]; if(p&&p.definition){ loadDef(p.definition); NAME=p.name+' (mine)'; } BT=null; BTMSG=''; SAVEMSG=''; STEP=1; loadUniverseData(); draw(); }); });
+    document.querySelectorAll('[data-open]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); var b=bk.filter(function(x){return String(x.id)===a.getAttribute('data-open');})[0]; if(b){ loadDef(b.definition||{}); NAME=b.name; STEP=4; BT=null; BTMSG=''; SAVEMSG=''; loadUniverseData(); draw(); } }); });
   }).catch(function(){ document.getElementById('body').innerHTML='<div class="err">Could not load the builder.</div>'; });
 }
+window.qbb={def:buildDefinition, form:F, universe:U, query:buildQuery, rows:defRows, load:loadDef};
 home();
 </script>
 </body></html>
