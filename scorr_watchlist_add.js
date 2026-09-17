@@ -25,6 +25,11 @@
     + '.scorr-wl-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:1px solid var(--edge,var(--line2));'
     + 'background:var(--hi,var(--surface2));color:var(--brand,var(--blu));font:800 17px/1 Sora,system-ui,sans-serif;cursor:pointer;padding:0;flex:none;vertical-align:middle}'
     + '.scorr-wl-btn.scorr-wl-sm{width:26px;height:26px;border-radius:6px;font-size:14px}'
+    /* cc#2207: inside the APP card strip the + is the fifth pill and takes the C/A/R/D pill's own geometry exactly (scorr_card_strip.js's
+       `.scorr-card-strip.scorr-cs-app .scorr-cs-b`, cc#1956: 20px square, radius-6, type-10) -- the standalone 32px / 26px sizes above are
+       untouched for every non-strip surface (Investment Scanner, Screener rows, Results movers, My Watchlist). */
+    + '.scorr-card-strip.scorr-cs-app .scorr-wl-btn,.scorr-card-strip.scorr-cs-app.scorr-cs-sm .scorr-wl-btn{box-sizing:border-box;flex:0 0 auto;width:var(--space-20,20px);height:var(--space-20,20px);'
+    + 'min-width:0;max-width:none;min-height:0!important;padding:0;border-radius:var(--radius-6,6px);font-size:var(--type-10,10px);line-height:1}'
     + '#scorrWlOv{position:fixed;inset:0;z-index:100500;background:color-mix(in srgb, var(--field,var(--ink)) 70%, transparent);display:flex;align-items:flex-end;justify-content:center}'
     + '#scorrWlOv .wl-sh{width:100%;max-width:480px;background:var(--panel);border:1px solid var(--edge,var(--line2));border-radius:20px 20px 0 0;padding:12px 16px calc(16px + env(safe-area-inset-bottom,0px));'
     + 'font-family:Sora,system-ui,sans-serif;color:var(--ink,var(--txt));box-sizing:border-box;max-height:80vh;overflow-y:auto}'

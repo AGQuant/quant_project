@@ -1306,6 +1306,7 @@ body[data-theme="goldnight"] #bookDots i.on{background:linear-gradient(90deg,var
    here. Behaviour is the component's — same four popups. */
 .ap-card .cardstrip{margin-top:var(--space-8);padding-top:var(--space-6);border-top:var(--bw-1) solid var(--hi);display:flex}
 .ap-card .cardstrip .scorr-card-strip{display:flex;gap:var(--space-6);width:100%}   /* cc#1948: pills are content-sized and left-aligned by the single spec in scorr_card_strip.js; this row only spans the card */
+.ap-card .cardstrip .scorr-wl-btn{position:absolute;right:var(--space-12);bottom:var(--space-10)}   /* cc#2207: the watchlist + leaves the C·A·R·D row for the card's bottom-right corner (the card is position:relative; right/bottom = its own padding). CSS only -- the button stays inside .scorr-card-strip in the DOM, so scorr_watchlist_add.js's capture listener and apTrDeckTap's strip exclusion are unchanged */
 /* cc#1957: filter funnel right of the count chip; brand-coloured while a filter is active. The
    sheet is the same overlay/sheet shape the Derivatives card already uses (.deriv-sheet-ov /
    .deriv-sheet); only the option rows are this card's own. */
