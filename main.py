@@ -1602,6 +1602,7 @@ NAV_REGISTRY = {
     "/m/v8":         ("V8 (mobile) — off the bottom bar since cc#2170 (founder 17-Sep); Home grid Analytics tile + More sheet", "grid+more-sheet"),
     "/m/check":      ("Trade Check (mobile)", "nav-mobile"),
     "/m/home":       ("Home (mobile)",        "nav-mobile"),
+    "/m/home#index-trades": ("Index Trades (mobile) — Home grid Analytics tile; opens the V10 index trade log (options view, NIFTY 50 / BANK NIFTY) on /m/home, the same modal as the Index Positions card's VIEW LOGS; no page of its own", "grid-tile"),   # cc#2185
     "/m/digest":     ("Daily Digest (mobile)", "nav-mobile"),
     # APP_QA_R4 P11: mirrors the NAV array entry added in pwa_endpoints.py (rule 2987).
     "/m/v10":        ("Index Intel (mobile)",  "nav-mobile"),

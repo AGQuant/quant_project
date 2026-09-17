@@ -2055,7 +2055,13 @@ var G_GROUPS = [
     // Icon is two simple bars (one per index), the .f-fill + stroke double-layer pattern several
     // siblings already use (GVM, Trade Check) -- no existing tile's icon fit "two index positions,"
     // so this is new but stays in the same plain-geometry family, per the card's own item 4.
+    // cc#2185: the tile sits ON /m/home, so a tap only changed the hash -- no page load, and the
+    // cc#2066 deep link below runs once per load -- nothing opened. The tap now opens the log
+    // directly: the SAME openV10 call the Index Positions card's VIEW LOGS button makes (options
+    // log, NIFTY 50 first, leg switch hidden), reading the same /api/mobile/v10chart payload.
+    // The href stays for a fresh navigation from any other page (deep link + hashchange below).
     { href: '/m/home#index-trades', label: 'Index Trades', web: false,
+      onclick: "openV10(event,'NIFTY50','OPT',true)",
       svg: '<svg viewBox="0 0 24 24"><rect class="f" x="4" y="10" width="6" height="11" rx="1"/><rect x="4" y="10" width="6" height="11" rx="1"/><rect class="f" x="14" y="4" width="6" height="17" rx="1"/><rect x="14" y="4" width="6" height="17" rx="1"/></svg>' },
     { href: '/m/qbbuilder', label: 'QB Builder', web: false,
       svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>' },
@@ -2079,15 +2085,17 @@ var G_GROUPS = [
       svg: '<svg viewBox="0 0 24 24"><circle class="f" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>' },
   ] },
 ];
-function gtileR1(href, svg, label, web){
+function gtileR1(href, svg, label, web, onclick){
   if (HIDDEN_GRID_TILES.indexOf(href) > -1) return '';
-  return '<a class="gtile" href="' + href + '">' + (web ? '<span class="gtag web">web</span>' : '')
+  /* cc#2185: an optional tap handler for a tile whose target is ON this page (Index Trades). */
+  return '<a class="gtile" href="' + href + '"' + (onclick ? ' onclick="' + onclick + '"' : '') + '>'
+    + (web ? '<span class="gtag web">web</span>' : '')
     + '<div class="gic">' + svg + '</div><div class="glb">' + esc(label) + '</div></a>';
 }
 function homeGridR1Html(){
   return G_GROUPS.map(function(g){
     return '<div class="gsec">' + esc(g.name) + '</div><div class="ggrid">'
-      + g.tiles.map(function(t){ return gtileR1(t.href, t.svg, t.label, t.web); }).join('') + '</div>';
+      + g.tiles.map(function(t){ return gtileR1(t.href, t.svg, t.label, t.web, t.onclick); }).join('') + '</div>';
   }).join('');
 }
 
@@ -3814,6 +3822,10 @@ function closeV10(){
   document.body.style.overflow = '';
   V10.data = null; V10.sel = null;
   V10.legLock = false;   // cc#1480: the leg switch comes back for every other caller
+  /* cc#2185: drop the #index-trades hash on close (no history entry, no scroll) so a later link
+     to the same hash counts as a change and opens the log again. */
+  if (location.hash === '#index-trades' && window.history && history.replaceState)
+    history.replaceState(null, '', location.pathname + location.search);
 }
 function setV10(sym){
   if (V10.sym === sym) return;
@@ -6338,6 +6350,13 @@ Promise.all([
      -- the tile is a fresh navigation each time (mirroring /m/alerts#new's own one-shot pattern),
      never something that should re-open if the reader closes it and the hash is still in the URL. */
   if (location.hash === '#index-trades') openV10(null, 'NIFTY50', 'OPT', true);
+  /* cc#2185: the one-shot above covers a fresh navigation only. A link to the same hash from
+     within /m/home (the More sheet, any in-page anchor) only fires hashchange -- so that opens
+     the log too. Same call, third entry point, still one mechanism. closeV10() clears the hash
+     so the next such link is a change again; closing never re-opens anything. */
+  window.addEventListener('hashchange', function(){
+    if (location.hash === '#index-trades') openV10(null, 'NIFTY50', 'OPT', true);
+  });
 }).catch(function(e){
   document.getElementById('body').innerHTML =
     '<div class="empty"><b>Could not load</b>' + esc(e.message)
