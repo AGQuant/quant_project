@@ -127,6 +127,7 @@ from scanners_app_mobile import router as scanners_app_mobile_router   # cc#1923
 from fpc_app_mobile import router as fpc_app_mobile_router   # cc#1925: POST /api/mobile/fpc/calc (Fable 34a7089) — /m/fpc's Calculate 404s without this
 from qb_app_mobile import router as qb_app_mobile_router   # cc#1892: /api/mobile/qb_app — Quant Baskets app section
 from screeners_app_mobile import router as screeners_app_mobile_router   # cc#1899: /api/mobile/screeners_app — Screeners app section
+from custom_screener_app import router as custom_screener_router   # cc#2158: /api/mobile/custom_screener meta + run (EOD, button-only, own file)
 from sector_app_mobile import router as sector_app_mobile_router   # cc#1900: /api/mobile/sector_app — Sector Intel app section
 from results_app_mobile import router as results_app_mobile_router   # cc#1901: /api/mobile/results_app — Results app section
 from health_app_mobile import router as health_app_mobile_router   # cc#1902: /m/health + /api/mobile/health_app — Portfolio Health app section
@@ -999,6 +1000,7 @@ app.include_router(scanners_app_mobile_router)   # cc#1923: their data endpoints
 app.include_router(fpc_app_mobile_router)   # cc#1925: /api/mobile/fpc/calc for mobile/fpc.html
 app.include_router(qb_app_mobile_router)   # cc#1892: /api/mobile/qb_app (mobile/qb.html's new data source)
 app.include_router(screeners_app_mobile_router)   # cc#1899: /api/mobile/screeners_app (mobile/screeners.html's new data source)
+app.include_router(custom_screener_router)   # cc#2158: /api/mobile/custom_screener/{meta,run}
 app.include_router(sector_app_mobile_router)   # cc#1900: /api/mobile/sector_app (mobile/sector.html's new condensed summary, additive)
 app.include_router(results_app_mobile_router)   # cc#1901: /api/mobile/results_app (mobile/results.html's new condensed summary, additive)
 app.include_router(health_app_mobile_router)   # cc#1902: /m/health + /api/mobile/health_app (new page, typed-url only — see ARCHITECTURE FLAG in health_app_mobile.py)
