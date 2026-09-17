@@ -45,6 +45,11 @@ from fastapi.responses import HTMLResponse
 
 router = APIRouter()
 
+# cc#2147: the BFSI leverage rule is v12_endpoints' rule, imported -- a D/E filter auto-excludes the
+# financial segments (banks / NBFCs / insurance / AMCs / exchanges, matched by pattern on the live
+# segment names) exactly as /api/v12 does. One rule, one list, never a second copy.
+from v12_endpoints import _BFSI_PATTERNS, _UNI_LEVERAGE_KEYS   # noqa: E402
+
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 
@@ -299,11 +304,32 @@ scored AS (
                 WHEN (""" + _ORD.format(v="g.verdict") + """) > (""" + _ORD.format(v="hm.verdict") + """) THEN 'upgraded'
                 WHEN (""" + _ORD.format(v="g.verdict") + """) < (""" + _ORD.format(v="hm.verdict") + """) THEN 'downgraded'
                 ELSE 'unchanged' END AS verdict_migration,
-           CASE WHEN hc.n >= %(cons_n)s THEN hc.pos END AS gvm_pos_snapshots
+           CASE WHEN hc.n >= %(cons_n)s THEN hc.pos END AS gvm_pos_snapshots,
+           -- cc#2147 CAT_3: universe_technicals at its latest score_date (EOD, written the evening
+           -- before that date). A permitted EOD source; no tick or live-price table anywhere on this path.
+           ut.score_date AS technicals_date,
+           ROUND(ut.week_return::numeric, 2) AS ret_1w, ROUND(ut.month_return::numeric, 2) AS ret_1m,
+           ROUND(ut.year_return::numeric, 2) AS ret_1y, ROUND(ut.return_3y::numeric, 2) AS ret_3y,
+           ROUND(ut.week_index_52::numeric, 1) AS w52_position,
+           ROUND(ut.return_52w_vs_index::numeric, 2) AS ret_vs_index_52w,
+           -- cc#2147 CAT_7: CURRENT VALUES ONLY (screener_raw at its one loaded_at; mcap_rank_daily
+           -- at its latest rank_date, cc#2125 -- never input_raw). Not point-in-time.
+           mr.mcap_rank,
+           ROUND((sr.pe / NULLIF(sr.historical_pe, 0))::numeric, 2) AS pe_multiplier,
+           sr.roce, sr."Debt to equity" AS de,
+           sr."Promoter holding" AS promoter_holding,
+           ROUND(GREATEST(sr."Promoter holding" - sr."Unpledged promoter holding", 0)::numeric, 2) AS promoter_pledge,
+           sr.dividend_yield, sr.loaded_at AS screener_loaded_at
       FROM gvm_scores g
       JOIN pool p ON p.symbol = g.symbol
       LEFT JOIN sect_ranked s ON s.segment = g.segment
       LEFT JOIN sect90 s9 ON s9.segment = g.segment
+      LEFT JOIN universe_technicals ut ON ut.symbol = g.symbol
+           AND ut.score_date = (SELECT MAX(score_date) FROM universe_technicals)
+      LEFT JOIN screener_raw sr ON UPPER(sr.nse_code) = UPPER(g.symbol)
+           AND sr.loaded_at = (SELECT MAX(loaded_at) FROM screener_raw)
+      LEFT JOIN mcap_rank_daily mr ON mr.symbol = g.symbol
+           AND mr.rank_date = (SELECT MAX(rank_date) FROM mcap_rank_daily)
 """ + _asof_lateral("h30", 30) + _asof_lateral("h90", 90) + _asof_lateral("h180", 180) + """      LEFT JOIN LATERAL (SELECT h.verdict FROM gvm_history h
                           WHERE h.symbol = g.symbol AND h.score_date < (SELECT d FROM latest)
                           ORDER BY h.score_date DESC OFFSET %(migr_n)s - 1 LIMIT 1) hm ON true
@@ -343,6 +369,16 @@ def qb_universe2_preview(
     sector_change_min: Optional[float] = None, sector_change_max: Optional[float] = None,
     verdict_migration: Optional[List[str]] = Query(None), verdict_migration_n: int = 5,
     gvm_consistency_k: Optional[int] = None, gvm_consistency_n: int = 5,
+    price_change_min: Optional[float] = None, price_change_max: Optional[float] = None, price_change_window: str = "1M",
+    w52_pos_min: Optional[float] = None, w52_pos_max: Optional[float] = None,
+    ret_vs_index_min: Optional[float] = None, ret_vs_index_max: Optional[float] = None,
+    mcap_rank_min: Optional[int] = None, mcap_rank_max: Optional[int] = None,
+    pe_mult_min: Optional[float] = None, pe_mult_max: Optional[float] = None,
+    roce_min: Optional[float] = None, roce_max: Optional[float] = None,
+    de_max: Optional[float] = None,
+    promoter_min: Optional[float] = None, promoter_max: Optional[float] = None,
+    pledge_max: Optional[float] = None,
+    div_yield_min: Optional[float] = None, div_yield_max: Optional[float] = None,
     ops: Optional[str] = None,
     limit: int = 500,
 ):
@@ -419,6 +455,44 @@ def qb_universe2_preview(
         fconds["gvm_consistency"] = "(gvm_pos_snapshots >= %(cons_k)s)"
         params["cons_k"] = max(0, int(gvm_consistency_k))
         applied.append("gvm_consistency")
+    # cc#2147: CAT_3 Price & Momentum (universe_technicals) -- the window picks the column; 3M / 6M
+    # are not offered (V2, raw_prices derivation) and fall back to 1M if forced.
+    _PRICE_COLS = {"1W": "ret_1w", "1M": "ret_1m", "1Y": "ret_1y", "3Y": "ret_3y"}
+    price_change_window = price_change_window if price_change_window in _PRICE_COLS else "1M"
+    rng(_PRICE_COLS[price_change_window], price_change_min, price_change_max, "price_change")
+    rng("w52_position", w52_pos_min, w52_pos_max, "w52_pos")
+    rng("ret_vs_index_52w", ret_vs_index_min, ret_vs_index_max, "ret_vs_index")
+    # cc#2147: CAT_7 Quality / Valuation / Size / Ownership -- current values only.
+    rng("mcap_rank", mcap_rank_min, mcap_rank_max, "mcap_rank")
+    rng("pe_multiplier", pe_mult_min, pe_mult_max, "pe_mult")
+    rng("roce", roce_min, roce_max, "roce")
+    bfsi_excluded = False
+    if de_max is not None:
+        # v12's rule, verbatim in effect: a leverage filter auto-excludes the financial segments
+        # (their D/E is not a leverage read). The exclusion is PART of this row's condition, so the
+        # row's alone and step counts already carry it.
+        _bfsi = " OR ".join("segment ILIKE %%(bfsi_%d)s" % i for i in range(len(_BFSI_PATTERNS)))
+        for i, pat in enumerate(_BFSI_PATTERNS):
+            params["bfsi_%d" % i] = pat
+        fconds["de"] = "((de <= %(de_hi)s) AND NOT (" + _bfsi + "))"
+        params["de_hi"] = de_max
+        applied.append("de")
+        bfsi_excluded = "de" in _UNI_LEVERAGE_KEYS
+    # (e) ONE row: promoter holding (min) + promoter pledge as % of total shares (max). Pledge is
+    # derived as "Promoter holding" - "Unpledged promoter holding" -- both are % of TOTAL shares
+    # (checked on RELIANCE 50.48 / 50.48, JSWSTEEL 44.29 / 39.16, INDUSINDBK 15.82 / 9.05), the
+    # same derivation v12_endpoints' promoter_pledge uses; clamped at 0 for the 12 rows where the
+    # CSV has unpledged > holding.
+    _pr = []
+    if promoter_min is not None:
+        _pr.append("promoter_holding >= %(promoter_lo)s"); params["promoter_lo"] = promoter_min
+    if promoter_max is not None:
+        _pr.append("promoter_holding <= %(promoter_hi)s"); params["promoter_hi"] = promoter_max
+    if pledge_max is not None:
+        _pr.append("promoter_pledge <= %(pledge_hi)s"); params["pledge_hi"] = pledge_max
+    if _pr:
+        fconds["promoter"] = "(" + " AND ".join(_pr) + ")"; applied.append("promoter")
+    rng("dividend_yield", div_yield_min, div_yield_max, "div_yield")
     params["migr_n"] = max(1, min(int(verdict_migration_n), 400))
     params["cons_n"] = max(1, min(int(gvm_consistency_n), 400))
     params["asof_grace"] = ASOF_GRACE_DAYS
@@ -469,6 +543,20 @@ def qb_universe2_preview(
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("SELECT MAX(score_date) FROM gvm_scores")
         as_of = cur.fetchone()[0]
+        # cc#2147 item 3: the sources' dates and floors, for the "earliest date this universe can be
+        # honestly reconstructed" line. Measured, one cheap query.
+        cur.execute("""SELECT (SELECT MIN(score_date) FROM (SELECT score_date FROM gvm_history
+                                 WHERE score_date >= DATE '2026-01-01' GROUP BY 1 HAVING COUNT(*) >= 500) f),
+                              (SELECT MIN(score_date) FROM universe_technicals),
+                              (SELECT MAX(score_date) FROM universe_technicals),
+                              (SELECT MAX(loaded_at) FROM screener_raw),
+                              (SELECT MAX(rank_date) FROM mcap_rank_daily)""")
+        _fl = cur.fetchone()
+        sources = {"gvm_history_daily_floor": str(_fl[0]) if _fl[0] else None,
+                   "technicals_floor": str(_fl[1]) if _fl[1] else None,
+                   "technicals_date": str(_fl[2]) if _fl[2] else None,
+                   "screener_loaded_at": str(_fl[3]) if _fl[3] else None,
+                   "rank_date": str(_fl[4]) if _fl[4] else None}
         # cc#2145 item 5 (FOUNDER_AMENDMENT_16SEP_RANK_IS_SEGMENT_ONLY): segment-size context for the
         # Rank-within-Segment row -- the POOL's segments and their member counts, min / median / max.
         # Shown beside the rank filter, never auto-applied as a filter.
@@ -500,6 +588,10 @@ def qb_universe2_preview(
         "delta_windows": {"gvm_change_days": gvm_change_days, "m_change_days": m_change_days,
                           "verdict_migration_n": params["migr_n"], "gvm_consistency_n": params["cons_n"],
                           "asof_grace_days": ASOF_GRACE_DAYS},   # cc#2146
+        "price_change_window": price_change_window, "bfsi_excluded": bfsi_excluded,   # cc#2147
+        "sources": sources,
+        "reconstruct_from": _reconstruct_from(ordered, sources, gvm_change_days, m_change_days,
+                                              params["migr_n"], params["cons_n"]),
     }
 
 
@@ -508,7 +600,55 @@ def qb_universe2_preview(
 _FILTER_ORDER = ("gvm", "g", "v", "m", "verdict", "seg_rank",
                  "sector_gvm", "sector_rank", "sector_gap", "sector_members", "segments",   # cc#2145: CAT_2 after CAT_1
                  "gvm_change", "m_change", "g_change", "v_change", "sector_change",
-                 "verdict_migration", "gvm_consistency")   # cc#2146: CAT_4 after CAT_2
+                 "verdict_migration", "gvm_consistency",   # cc#2146: CAT_4 after CAT_2
+                 "price_change", "w52_pos", "ret_vs_index",   # cc#2147: CAT_3
+                 "mcap_rank", "pe_mult", "roce", "de", "promoter", "div_yield")   # cc#2147: CAT_7 (promoter = holding min + pledge max, one row)
+
+
+# cc#2147 item 3: which date this universe can be honestly rebuilt for, given the rows applied.
+# Each row has a floor (the first date its source can answer): CAT_1/CAT_2 = the gvm_history
+# daily era; CAT_4 = that era plus the row's window (a 30-day change needs 30 days of history);
+# CAT_3 = universe_technicals' first score_date; CAT_7 = NONE -- current values only, so any CAT_7
+# row makes the universe today-only. The answer is the LATEST floor, and it names the row that set
+# it. This is the line the Backtest step reads later.
+_CAT_OF = {"gvm": 1, "g": 1, "v": 1, "m": 1, "verdict": 1, "seg_rank": 1,
+           "sector_gvm": 2, "sector_rank": 2, "sector_gap": 2, "sector_members": 2, "segments": 2,
+           "gvm_change": 4, "m_change": 4, "g_change": 4, "v_change": 4, "sector_change": 4,
+           "verdict_migration": 4, "gvm_consistency": 4,
+           "price_change": 3, "w52_pos": 3, "ret_vs_index": 3,
+           "mcap_rank": 7, "pe_mult": 7, "roce": 7, "de": 7, "promoter": 7, "div_yield": 7}
+
+
+def _reconstruct_from(ordered, sources, gvm_days, m_days, migr_n, cons_n):
+    import datetime as _dt
+    def _d(v):
+        return _dt.date.fromisoformat(v) if v else None
+    gvm_floor, tech_floor = _d(sources.get("gvm_history_daily_floor")), _d(sources.get("technicals_floor"))
+    floors, today_only = [], []
+    for k in ordered:
+        c = _CAT_OF.get(k)
+        if c in (1, 2) and gvm_floor:
+            floors.append((gvm_floor, k))
+        elif c == 4 and gvm_floor:
+            extra = {"gvm_change": gvm_days, "m_change": m_days, "g_change": 90, "v_change": 90,
+                     "sector_change": 90, "verdict_migration": migr_n, "gvm_consistency": cons_n}.get(k, 0)
+            floors.append((gvm_floor + _dt.timedelta(days=int(extra)), k))
+        elif c == 3 and tech_floor:
+            floors.append((tech_floor, k))
+        elif c == 7:
+            today_only.append(k)
+    if not ordered:
+        return {"date": None, "today_only": False, "limited_by": None, "note": "no filters applied"}
+    if today_only:
+        return {"date": None, "today_only": True, "limited_by": today_only[0],
+                "note": "current values only -- a Quality/Valuation/Size/Ownership row is applied, so this "
+                        "universe cannot be rebuilt for any earlier date (screener CSV loaded "
+                        + str(sources.get("screener_loaded_at") or "?") + ")"}
+    if not floors:
+        return {"date": None, "today_only": False, "limited_by": None, "note": "floor unknown"}
+    d, k = max(floors)
+    return {"date": d.isoformat(), "today_only": False, "limited_by": k,
+            "note": "earliest date this universe can be honestly reconstructed"}
 
 
 def _parse_ops(ops: Optional[str]) -> dict:
@@ -558,6 +698,10 @@ def qb_universe2_coverage():
         cur.execute("SELECT COUNT(DISTINCT score_date) FROM gvm_history, (SELECT MAX(score_date) AS d FROM gvm_scores) l "
                     "WHERE score_date > l.d - 90 AND score_date <= l.d")
         snaps = cur.fetchone()[0]
+        cur.execute("SELECT MIN(score_date), MAX(score_date) FROM universe_technicals")   # cc#2147
+        _t = cur.fetchone()
+        cur.execute("SELECT MAX(loaded_at) FROM screener_raw")
+        _sl = cur.fetchone()[0]
     latest_d = r[10]
     era_days = (latest_d - floor).days if (latest_d and floor) else 0
     def win(n, c, lo, hi):
@@ -569,7 +713,9 @@ def qb_universe2_coverage():
                                        f"resolve from {(floor + __import__('datetime').timedelta(days=n)).isoformat()}")
         return {"days": n, "resolves": int(c or 0), "of": int(r[0] or 0), "asof_from": str(lo) if lo else None,
                 "asof_to": str(hi) if hi else None, "enabled": enabled, "reason": reason}
-    return {"as_of_date": str(r[10]) if r[10] else None, "symbols": int(r[0] or 0),
+    return {"technicals_floor": str(_t[0]) if _t and _t[0] else None, "technicals_date": str(_t[1]) if _t and _t[1] else None,
+            "screener_loaded_at": str(_sl) if _sl else None,   # cc#2147
+            "as_of_date": str(r[10]) if r[10] else None, "symbols": int(r[0] or 0),
             "windows": {"30": win(30, r[1], r[4], r[5]), "90": win(90, r[2], r[6], r[7]), "180": win(180, r[3], r[8], r[9])},
             "daily_history_floor": str(floor) if floor else None, "daily_era_days": era_days, "snapshots_last_90d": int(snaps or 0),
             "asof_grace_days": ASOF_GRACE_DAYS}

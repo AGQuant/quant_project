@@ -76,6 +76,14 @@
   .cat-hd.live{border-bottom:none;padding-top:16px}
   /* cc#2146: LIMITED HISTORY badge (amber), the window selector, the coverage line */
   .dbadge.lim{color:var(--amber);border:1px solid var(--amber);background:transparent}
+  .dbadge.cur{color:var(--amber);border:1px solid var(--amber);background:var(--card2);white-space:normal;line-height:1.4}   /* cc#2147 */
+  .cat-hd > span{min-width:0;text-align:right}   /* cc#2147: header badges may wrap on a phone, never overflow */
+  .cat-hd > span .dbadge{white-space:normal}
+  .bfsi-note{color:var(--amber)}
+  .coming-row .fhead{cursor:default;color:var(--dim)}
+  .recon b{color:var(--txt)}
+  .recon.warn{color:var(--amber)}
+  .recon.warn b{color:var(--amber)}
   .winsel{padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);font:inherit;font-size:12px}
   .covline{margin-top:6px;font-size:10.5px;color:var(--dim);line-height:1.5}
   .covline b{color:var(--txt)}
@@ -121,8 +129,7 @@
   <div class="sub">
     Pick one or more pools (they combine, deduplicated), then narrow with filters. Every value here is the current EOD snapshot
     (gvm_scores as of its latest score_date) — this is a Quant Basket engine, not a screener.
-    <b>V1</b>: pool selection, GVM/component-score, Sector &amp; Segment and Change &amp; Delta filters are live. The other four categories
-    (Price/Momentum, Quarterly Results, Alpha/Risk, Quality/Valuation) are
+    <b>V1</b>: pool selection and five filter categories are live (GVM/component scores, Sector &amp; Segment, Change &amp; Delta, Price &amp; Momentum, Quality/Valuation/Size/Ownership). Quarterly Results and Alpha &amp; Risk are
     shown below so you can see the full shape of the page — they are not wired to real filtering
     yet.
   </div>
@@ -133,7 +140,7 @@
   </div>
 
   <div class="card">
-    <h2>2 — Filters <span class="hcount" id="activeCount">0 active of 18 live · 40 in the locked set</span></h2>
+    <h2>2 — Filters <span class="hcount" id="activeCount">0 active of 27 live · 40 in the locked set</span></h2>
     <div class="filterlist" id="filterlist"></div>
     <div id="categories"></div>
   </div>
@@ -146,6 +153,7 @@
     <div class="expr" id="exprLine"></div>
     <div class="binding" id="bindingLine"></div>
     <div class="as-of" id="asOf"></div>
+    <div class="as-of" id="reconLine"></div>   <!-- cc#2147: earliest honest reconstruction date -->
     <div id="resultsWrap" style="display:none">
       <div class="scroll"><table id="resultsTbl"><thead id="resultsHead"></thead><tbody id="resultsBody"></tbody></table></div>
     </div>
@@ -194,17 +202,34 @@ var CAT4_FILTERS = [
   {key:'verdict_migration', label:'Verdict migration', kind:'list', cat:4, col:'verdict_migration', options:['upgraded','unchanged','downgraded'], nInput:true},
   {key:'gvm_consistency', label:'GVM change consistency', kind:'kofn', cat:4, col:'gvm_pos_snapshots'},
 ];
-var ALL_FILTERS = CAT1_FILTERS.concat(CAT2_FILTERS, CAT4_FILTERS);
-var LOCKED_SET_TOTAL = 40;   /* the locked V1 set (cc#2123 spec); 18 of them are wired here today (CAT_1 6, CAT_2 5, CAT_4 7) */
+/* cc#2147: CAT_3 Price & Momentum -- universe_technicals at its latest score_date (EOD, written the
+   evening before). 4 of 5 rows live; consecutive_up_months stays Coming (V2, raw_prices). The
+   price-change window offers 3M / 6M DISABLED with the reason (V2 -- needs raw_prices derivation). */
+var CAT3_FILTERS = [
+  {key:'price_change', label:'Price change', kind:'range', cat:3, colBase:'ret_', windows:[{v:'1W',t:'1 week'},{v:'1M',t:'1 month'},{v:'3M',t:'3 months',dis:'V2 -- needs raw_prices derivation'},{v:'6M',t:'6 months',dis:'V2 -- needs raw_prices derivation'},{v:'1Y',t:'1 year'},{v:'3Y',t:'3 years'}]},
+  {key:'w52_pos', label:'52-week range position (0 = at 52W low, 100 = at 52W high)', kind:'range', cat:3, col:'w52_position'},
+  {key:'ret_vs_index', label:'Return vs index (52W)', kind:'range', cat:3, col:'ret_vs_index_52w'},
+];
+/* cc#2147: CAT_7 Quality / Valuation / Size / Ownership -- CURRENT VALUES ONLY (screener_raw at its
+   one loaded_at; mcap_rank from mcap_rank_daily's latest rank_date, never input_raw). Any row here
+   makes the universe today-only, and the summary line under the result says so. */
+var CAT7_FILTERS = [
+  {key:'mcap_rank', label:'Market-cap rank', kind:'range', cat:7, col:'mcap_rank', step:1},
+  {key:'pe_mult', label:'PE vs 10Y avg PE (PE / historical PE)', kind:'range', cat:7, col:'pe_multiplier'},
+  {key:'roce', label:'ROCE %', kind:'range', cat:7, col:'roce'},
+  {key:'de', label:'Debt to equity (max)', kind:'range', cat:7, col:'de', maxOnly:true, bfsi:true},
+  {key:'promoter', label:'Promoter holding % (min) and pledge % of total shares (max)', kind:'promoter', cat:7, col:'promoter_holding'},
+  {key:'div_yield', label:'Dividend yield % (min)', kind:'range', cat:7, col:'dividend_yield', minOnly:true},
+];
+var ALL_FILTERS = CAT1_FILTERS.concat(CAT2_FILTERS, CAT4_FILTERS, CAT3_FILTERS, CAT7_FILTERS);
+var LOCKED_SET_TOTAL = 40;   /* the locked V1 set (cc#2123 spec); 27 wired today (CAT_1 6, CAT_2 5, CAT_4 7, CAT_3 3, CAT_7 6) */
 var CATEGORIES_COMING = [
-  {name:'Price & Momentum', n:5},
   {name:'Quarterly Results (YoY)', n:6},
   {name:'Alpha & Risk', n:5},
-  {name:'Quality, Valuation, Size & Ownership', n:6},
 ];
 
 var STATE = { pools:[], sel:[], rows:{}, last:null, seq:0 };   /* cc#2143: sel = selected pool keys, any number */
-ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[], days:(f.days ? f.days[0] : null), n:5, k:3}; });
+ALL_FILTERS.forEach(function(f){ STATE.rows[f.key] = {open:false, applied:false, op:'AND', min:'', max:'', list:[], days:(f.days ? f.days[0] : null), win:(f.windows ? (f.windows.filter(function(w){ return w.v === '1M' && !w.dis; })[0] || f.windows.filter(function(w){ return !w.dis; })[0]).v : null), n:5, k:3}; });
 STATE.coverage = null;   /* cc#2146: /api/qb/universe2/coverage, loaded once */
 STATE.segments = [];   /* cc#2145: the universe's segments for the multi-select, loaded once */
 STATE.segq = '';
@@ -303,6 +328,12 @@ function renderFilters(){
     /* cc#2146: Change & Delta is LIVE -- gvm_history at date offsets, in the same query. */
     + '<div class="cat-hd live"><div><span class="cat-title">Change &amp; Delta</span><span class="cat-count">' + CAT4_FILTERS.length + ' filters</span></div><span>' + covBadgeHtml(null) + '<span class="dbadge pit" title="Read from gvm_history, the point-in-time table: each symbol compared with its own row at the offset date (as-of lookup), computed in the query">POINT-IN-TIME</span></span></div>'
     + '<div class="filterlist" id="filterlist4">' + CAT4_FILTERS.map(filterRowHtml).join('') + '</div>'
+    /* cc#2147: Price & Momentum (universe_technicals, from 2026-07-03) and Quality/Valuation/Size/
+       Ownership (screener_raw current values -- amber, never point-in-time). */
+    + '<div class="cat-hd live"><div><span class="cat-title">Price &amp; Momentum</span><span class="cat-count">' + CAT3_FILTERS.length + ' of 5 filters</span></div><span>' + techBadgeHtml() + '<span class="dbadge pit" title="universe_technicals at its latest score_date, an EOD table written the evening before">POINT-IN-TIME</span></span></div>'
+    + '<div class="filterlist" id="filterlist3">' + CAT3_FILTERS.map(filterRowHtml).join('') + '<div class="frow coming-row"><div class="fhead"><div class="plusbtn" style="opacity:.4">+</div><div class="fname">Consecutive up months</div><div class="fstatus">Coming (V2)</div></div></div></div>'
+    + '<div class="cat-hd live"><div><span class="cat-title">Quality, Valuation, Size &amp; Ownership</span><span class="cat-count">' + CAT7_FILTERS.length + ' filters</span></div>' + curBadgeHtml() + '</div>'
+    + '<div class="filterlist" id="filterlist7">' + CAT7_FILTERS.map(filterRowHtml).join('') + '</div>'
     + CATEGORIES_COMING.map(function(c){
         return '<div class="cat-hd"><div><span class="cat-title">'+esc(c.name)+'</span><span class="cat-count">'+c.n+' filters</span></div><span class="cat-coming">Coming</span></div>';
       }).join('');
@@ -337,7 +368,23 @@ function daysSelectHtml(f, st){
 }
 function setDays(key, v){ STATE.rows[key].days = parseInt(v, 10); renderFilters(); if (STATE.rows[key].applied) refresh(); }
 function setN(key, field, v){ var x = parseInt(v, 10); if (!isNaN(x) && x >= 1) STATE.rows[key][field] = x; renderFilters(); if (STATE.rows[key].applied) refresh(); }
-function colOf(f, st){ return f.colBase ? (f.colBase + st.days + 'd') : f.col; }
+function colOf(f, st){ if (f.windows) return f.colBase + String(st.win || '').toLowerCase(); return f.colBase ? (f.colBase + st.days + 'd') : f.col; }
+/* cc#2147 helpers -- the technicals history badge, the CURRENT VALUE ONLY badge (amber, with the
+   screener load time), the price-change window selector, the reconstruct-from line. */
+function techBadgeHtml(){ var c = STATE.coverage; return (c && c.technicals_floor) ? '<span class="dbadge lim" title="universe_technicals has rows only from ' + esc(c.technicals_floor) + '">LIMITED HISTORY FROM ' + esc(c.technicals_floor) + '</span>' : ''; }
+function curBadgeHtml(){ var c = STATE.coverage; var when = c && c.screener_loaded_at ? String(c.screener_loaded_at).slice(0, 16) : '\u2014'; return '<span class="dbadge cur" title="screener_raw holds ONE load, replaced on every CSV upload; mcap_rank from mcap_rank_daily at its latest rank_date. Nothing here can be evaluated at an earlier date.">CURRENT VALUE ONLY \u2014 NOT POINT-IN-TIME \u00b7 loaded ' + esc(when) + '</span>'; }
+function winSelectHtml(f, st){
+  return '<select class="winsel" onchange="setWin(\'' + f.key + '\', this.value)">' + f.windows.map(function(w){
+    return '<option value="' + w.v + '"' + (st.win === w.v ? ' selected' : '') + (w.dis ? ' disabled title="' + esc(w.dis) + '"' : '') + '>' + esc(w.t) + (w.dis ? ' \u2014 ' + esc(w.dis) : '') + '</option>';
+  }).join('') + '</select>';
+}
+function setWin(key, v){ STATE.rows[key].win = v; renderFilters(); if (STATE.rows[key].applied) refresh(); }
+function reconLineHtml(d){
+  var r = d && d.reconstruct_from; if (!r) return '';
+  if (r.today_only) return '<span class="recon warn">Earliest date this universe can be honestly reconstructed: <b>today only</b> \u2014 ' + esc(r.note) + '</span>';
+  if (!r.date) return '<span class="recon">' + esc(r.note || '') + '</span>';
+  return '<span class="recon">Earliest date this universe can be honestly reconstructed: <b>' + esc(r.date) + '</b> (limited by ' + esc(labelOf(r.limited_by)) + ')</span>';
+}
 function segOptionsHtml(st){
   var q = (STATE.segq || '').toLowerCase();
   var list = STATE.segments.filter(function(g){ return !q || g.segment.toLowerCase().indexOf(q) >= 0; });
@@ -357,10 +404,17 @@ function filterRowHtml(f){
   if (f.kind === 'range'){
     var stp = f.step ? String(f.step) : '0.01';   /* cc#2145: whole numbers for ranks and counts */
     inputs = (f.days ? '<span class="to">over</span>' + daysSelectHtml(f, st) : '')
-      + '<input type="number" step="'+stp+'" placeholder="min" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">'
+      + (f.windows ? '<span class="to">over</span>' + winSelectHtml(f, st) : '')   /* cc#2147 */
+      + (f.maxOnly ? '<span class="to">at most</span>' : '<input type="number" step="'+stp+'" placeholder="min" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">')
       + (f.minOnly ? '<span class="to">and above</span>'
-         : '<span class="to">to</span>'
-           + '<input type="number" step="'+stp+'" placeholder="max" value="'+esc(st.max)+'" onchange="setVal(\''+f.key+'\',\'max\',this.value)">');
+         : (f.maxOnly ? '' : '<span class="to">to</span>')
+           + '<input type="number" step="'+stp+'" placeholder="max" value="'+esc(st.max)+'" onchange="setVal(\''+f.key+'\',\'max\',this.value)">')
+      + (f.bfsi ? '<span class="to bfsi-note" title="v12 rule, reused: a leverage filter auto-excludes banks, NBFCs, insurance, AMCs and exchanges -- their D/E is not a leverage read">banks / NBFCs / insurance auto-excluded</span>' : '');
+  } else if (f.kind === 'promoter'){
+    /* cc#2147: ONE row, two numbers -- holding at least X % of total shares, pledged at most Y % of total
+       shares (pledge = holding - unpledged holding, both % of TOTAL shares in the screener CSV) */
+    inputs = '<span class="to">holding at least</span><input type="number" step="0.01" min="0" max="100" placeholder="min %" value="'+esc(st.min)+'" onchange="setVal(\''+f.key+'\',\'min\',this.value)">'
+      + '<span class="to">% \u00b7 pledged at most</span><input type="number" step="0.01" min="0" max="100" placeholder="max %" value="'+esc(st.max)+'" onchange="setVal(\''+f.key+'\',\'max\',this.value)"><span class="to">% of total shares</span>';
   } else if (f.kind === 'kofn'){
     /* cc#2146: positive in K of the last N snapshots (consecutive score_dates, never days) */
     inputs = '<span class="to">GVM rose in at least</span><input type="number" step="1" min="0" value="'+esc(st.k)+'" onchange="setN(\''+f.key+'\',\'k\',this.value)">'
@@ -376,8 +430,10 @@ function filterRowHtml(f){
   }
   var cat4 = f.cat === 4;
   var winDays = f.days ? st.days : (f.fixedDays || null);
-  var badges = (f.cat === 2 || cat4) ? '<span class="dbadge pit" title="POINT-IN-TIME: the latest EOD snapshot, computed in the query">POINT-IN-TIME</span>' : '';
+  var badges = (f.cat === 2 || f.cat === 3 || cat4) ? '<span class="dbadge pit" title="POINT-IN-TIME: the latest EOD snapshot, computed in the query">POINT-IN-TIME</span>' : '';
   if (cat4 && winDays != null) badges += covBadgeHtml(winDays);
+  if (f.cat === 3) badges += techBadgeHtml();   /* cc#2147 */
+  if (f.cat === 7) badges += '<span class="dbadge cur" title="Current value from the latest screener CSV load -- not point-in-time">CURRENT VALUE ONLY</span>';
   var covline = (cat4 && winDays != null) ? covLineHtml(winDays) : (cat4 ? '<div class="covline">counts snapshots (distinct score_dates), never days \u2014 ' + (STATE.coverage ? fmtN(STATE.coverage.snapshots_last_90d) + ' snapshots in the last 90 days' : 'measuring\u2026') + '</div>' : '');
   var pc = passCountHtml(f.key);
   return '<div class="frow'+(st.open?' open':'')+'" id="frow-'+f.key+'">'
@@ -437,9 +493,13 @@ function buildQuery(){
     var f = ALL_FILTERS.filter(function(x){return x.key===key;})[0];
     var st = STATE.rows[key];
     if (f.kind === 'range'){
-      if (st.min !== '') q.push(key + '_min=' + encodeURIComponent(st.min));
+      if (st.min !== '' && !f.maxOnly) q.push(key + '_min=' + encodeURIComponent(st.min));
       if (st.max !== '' && !f.minOnly) q.push(key + '_max=' + encodeURIComponent(st.max));
       if (f.days) q.push(key + '_days=' + st.days);   /* cc#2146 */
+      if (f.windows) q.push(key + '_window=' + encodeURIComponent(st.win));   /* cc#2147 */
+    } else if (f.kind === 'promoter'){
+      if (st.min !== '') q.push('promoter_min=' + encodeURIComponent(st.min));   /* cc#2147 */
+      if (st.max !== '') q.push('pledge_max=' + encodeURIComponent(st.max));
     } else if (f.kind === 'kofn'){
       q.push(key + '_k=' + st.k); q.push(key + '_n=' + st.n);   /* cc#2146 */
     } else if (f.kind === 'multi'){
@@ -462,6 +522,7 @@ function refresh(){
     document.getElementById('exprLine').textContent = '';
     document.getElementById('bindingLine').textContent = '';
     document.getElementById('asOf').textContent = '';
+    document.getElementById('reconLine').textContent = '';
     document.getElementById('resultsWrap').style.display = 'none';
     return;
   }
@@ -476,6 +537,7 @@ function refresh(){
       document.getElementById('exprLine').textContent = d.expression ? ('evaluated: ' + d.expression) : '';
       document.getElementById('bindingLine').textContent = d.binding_filter ? ('binding filter: ' + labelOf(d.binding_filter.filter) + ' alone leaves ' + fmtN(d.binding_filter.cut_to)) : '';
       document.getElementById('asOf').textContent = 'as of ' + (d.as_of_date || '—') + ' (EOD gvm_scores snapshot)';
+      document.getElementById('reconLine').innerHTML = reconLineHtml(d);   /* cc#2147 */
       renderFilters();
       renderResults(d);
     })
@@ -496,7 +558,8 @@ function renderResults(d){
     var f = ALL_FILTERS.filter(function(x){return x.key===key;})[0];
     var col = colOf(f, STATE.rows[key]);   /* cc#2146: window rows resolve to gvm_change_30d etc. */
     if (cols.some(function(c){return c.k===col;})) return;   /* cc#2145: segment / verdict already a column */
-    cols.push({h:f.label + (f.days ? ' (' + STATE.rows[key].days + 'd)' : ''), k:col});
+    if (f.kind === 'promoter'){ cols.push({h:'Promoter holding %', k:'promoter_holding'}, {h:'Pledge % of total', k:'promoter_pledge'}); return; }   /* cc#2147 */
+    cols.push({h:f.label + (f.days ? ' (' + STATE.rows[key].days + 'd)' : (f.windows ? ' (' + STATE.rows[key].win + ')' : '')), k:col});
   });
   if (!keys.length) cols.push({h:'GVM', k:'gvm_score'}, {h:'Segment Rank', k:'seg_rank'});
   document.getElementById('resultsHead').innerHTML = '<tr>' + cols.map(function(c){return '<th>'+esc(c.h)+'</th>';}).join('') + '</tr>';
