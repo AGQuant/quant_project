@@ -33,10 +33,12 @@ strict-intersection survivors.
     founder, so sector_week is a score band only. Exits fixed +/-3.0%, standard slot pool,
     entry window 09:30-15:15 (cc#1138 rule 1 moved the open from 09:15; cc#855 moved the cut
     from 15:20. The 14:00 cutoff was proposed and founder-REJECTED).
-  BUY_REVERSAL V6.1 (_write_buy_reversal_v6_qualified, cc#606 -> cc#754, supersedes V5): 9
-    CHEAP conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d [-0.5, 2.5]
-    (cc#754 upper cap), week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return<5,
-    day_1d>0 strict, gvm_score>=6.5 strict (cc#754 quality gate).
+  BUY_REVERSAL V6.2 (_write_buy_reversal_v6_qualified, cc#606 -> cc#754 -> cc#2217, supersedes V5):
+    still 9 CHEAP conditions (cc#2217 is a bound on an existing gate, not a new one) -- S1-touch
+    (prior-4-day low OR today's live day_low <= S1), mom_2d [-0.5, 2.5] (cc#754 upper cap),
+    week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return in (0, 5] strict floor
+    (cc#2217: >0, not >=0 -- measured on 68 closed trades, 59.1% win / +13.1% vs 51.5% / -6.9%
+    unfiltered), day_1d>0 strict, gvm_score>=6.5 strict (cc#754 quality gate).
     V5's heavy true_weekly_rsi>=70 stage REMOVED from this basket only. Entry all-day live CMP,
     no CMP>PP/room/hourly gate. Exits fixed +3%/-3% frozen, max hold 15 trading days, standard pool.
   SELL_REVERSAL V6.1 (_write_sell_reversal_v61_qualified, replaces V5-D): 10 conditions --
@@ -1669,7 +1671,9 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
       (3) week_return >= -2
       (4) rsi_month in [60, 90]
       (5) sector_week > 0 strict
-      (6) month_return < 5
+      (6) month_return in (0, 5] — cc#2217 adds the >0 STRICT floor (NULL fails) to the existing
+          <5 ceiling (unchanged, still evaluated via _passes so still inclusive at 5.0). A stock
+          still down over the trailing month is not reverting, it is falling.
       (7) day_1d > 0 STRICT (NULL fails) — replaces V5's true_weekly_rsi>=70, which was structurally
           empty with the S1-dip in this regime (V5 live 4 sessions -> 1 qual) and unvalidated
           (V5 356tr/62.9% may have scored on synthetic rsi_weekly, cc#353).
@@ -1724,7 +1728,15 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
         v = s.get("gvm_score")
         return v is not None and float(v) >= 6.5
 
-    # cc#606/#754 BUY_REVERSAL_V6.1: all 9 conditions are CHEAP (no heavy true_weekly_rsi stage).
+    def _mr_gt0(s):     # cc#2217 (6a): month_return > 0 (STRICT, NULL fails) -- the new floor.
+        # The existing <5 ceiling is untouched: still checked via _passes(v, None, 5.0) below,
+        # still inclusive at exactly 5.0. Two calls, not one _passes(v, 0.0, 5.0), because _passes
+        # is inclusive-only on both bounds and this gate needs an EXCLUSIVE floor -- same pattern
+        # already used for sector_week/day_1d above, which is why they are separate helpers too.
+        v = s.get("month_return")
+        return v is not None and float(v) > 0.0
+
+    # cc#606/#754/#2217 BUY_REVERSAL_V6.2: all 9 conditions are CHEAP (no heavy true_weekly_rsi stage).
     # cc#364-style INDEPENDENT per-filter pass counts across `base` — each gate counted ALONE over
     # the whole base, NOT cumulative survivors. _score_qualified = strict 9-way intersection.
     funnel = {"_universe": len(base)}
@@ -1733,7 +1745,8 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
     funnel["week_return"]  = sum(1 for s in base if _passes(s.get("week_return"), -2.0, None))  # (3)
     funnel["rsi_month"]    = sum(1 for s in base if _passes(s.get("rsi_month"), 60.0, 90.0))    # (4)
     funnel["sector_week"]  = sum(1 for s in base if _sw_gt0(s))                                 # (5)
-    funnel["month_return"] = sum(1 for s in base if _passes(s.get("month_return"), None, 5.0))  # (6)
+    funnel["month_return"] = sum(1 for s in base
+                                  if _mr_gt0(s) and _passes(s.get("month_return"), None, 5.0))  # (6) cc#2217: >0 floor + <5 ceiling
     funnel["day_1d"]       = sum(1 for s in base if _d1_gt0(s))                                 # (7) cc#606
     funnel["gvm_score"]    = sum(1 for s in base if _gvm_ok(s))                                 # (8) cc#754
     # _stage6_survivors kept: the 6 pre-day_1d cheap gates intersected (mom_2d now capped at 2.5, cc#754).
@@ -1743,7 +1756,8 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
             and _passes(s.get("week_return"), -2.0, None)
             and _passes(s.get("rsi_month"), 60.0, 90.0)
             and _sw_gt0(s)
-            and _passes(s.get("month_return"), None, 5.0)]
+            and _mr_gt0(s)                                    # cc#2217 (6a): >0 STRICT floor
+            and _passes(s.get("month_return"), None, 5.0)]    # (6b): <5 ceiling, unchanged
     funnel["_stage6_survivors"] = len(surv)
 
     qualified = [s for s in surv if _d1_gt0(s) and _gvm_ok(s)]   # (7) day_1d>0 + (8) gvm>=6.5 — cheap, no per-symbol query
@@ -1764,7 +1778,7 @@ def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date:
             "gvm_score":       s.get("gvm_score"),   # cc#754 (8)
             "s1_touch":        s.get("_s1_touch"),
             "filter_score": 9, "filter_total": 9,
-            "spec": "BUY_REVERSAL_V6.1 cc#754",
+            "spec": "BUY_REVERSAL_V6.2 cc#2217",
         }
         try:
             with conn.cursor() as cur:
@@ -2390,15 +2404,25 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
 # consume min/max FROM this registry so bounds are literal-single-source too. Keys/order/bounds here
 # MUST mirror the handler exactly — funnel counts are byte-identical pre/post (metadata-only change).
 BASKET_FILTERS = {
-    # BUY_REVERSAL_V6.1 (cc#606 -> cc#754) — 9 CHEAP gates (V6.1 adds gvm_score>=6.5 + mom_2d upper cap
-    # 2.5), no heavy true_weekly_rsi stage (day_1d>0 replaced it).
+    # BUY_REVERSAL_V6.2 (cc#606 -> cc#754 -> cc#2217) — 9 CHEAP gates (V6.1/cc#754 added
+    # gvm_score>=6.5 + mom_2d upper cap 2.5; V6.2/cc#2217 added the month_return>0 floor), no
+    # heavy true_weekly_rsi stage (day_1d>0 replaced it).
     "buy_reversal": [
         {"key": "s1_touch",     "label": "S1 touch (prior-4d low or today's low)", "cond_min": "<= S1",   "cond_max": "",     "min": None,  "max": None,  "type": "custom"},
         {"key": "mom_2d",       "label": "mom 2d",       "cond_min": ">= -0.5", "cond_max": "<= 2.5","min": -0.5,  "max": 2.5,   "type": "band"},
         {"key": "week_return",  "label": "week return",  "cond_min": ">= -2",   "cond_max": "",     "min": -2.0,  "max": None,  "type": "band"},
         {"key": "rsi_month",    "label": "monthly RSI",  "cond_min": ">= 60",   "cond_max": "<= 90","min": 60.0,  "max": 90.0,  "type": "band"},
         {"key": "sector_week",  "label": "sector week",  "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
-        {"key": "month_return", "label": "month return", "cond_min": "",        "cond_max": "< 5",  "min": None,  "max": 5.0,   "type": "band"},
+        # cc#2217: floor added (> 0, STRICT -- the true engine gate is _mr_gt0 + _passes in
+        # _write_buy_reversal_v6_qualified, NOT this dict; this row drives the i-button/
+        # br_stock_passcount/br_stock_detail display only, per cc#607/cc#1107's single-registry
+        # rule). _reg_cond prints "0 to 5" for any two-bound band regardless of `strict`, matching
+        # the engine's own ceiling exactly. _passes_registry_band DOES read `strict` on both
+        # bounds when both are set, so it evaluates this row as (0,5) fully exclusive -- a
+        # one-symbol-in-history edge (month_return == exactly 5.0) would show FAIL here against
+        # the real engine's PASS (ceiling stays inclusive by design, "no other change"). Registry
+        # has no strict_min/strict_max split to say otherwise; flagged on cc#2217's own card.
+        {"key": "month_return", "label": "month return", "cond_min": "> 0",     "cond_max": "< 5",  "min": 0.0,   "max": 5.0,   "type": "band", "strict": True},
         {"key": "day_1d",       "label": "day 1d",       "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
         # cc#1179: `strict: True` REMOVED from this row, and only from this row. It made the three
         # DISPLAY readers of the flag evaluate this gate as > 6.5 while the engine's own _gvm_ok is
@@ -2482,7 +2506,7 @@ BASKET_FILTERS = {
 
 # Header-pill spec label per basket (dashboard reads this via /api/v8/filters).
 BASKET_SPEC = {
-    "buy_reversal":  {"version": "V6.1", "cc": "cc#754", "label": "Buy Reversal V6.1"},
+    "buy_reversal":  {"version": "V6.2", "cc": "cc#2217", "label": "Buy Reversal V6.2"},
     "sell_reversal": {"version": "V7-C", "cc": "cc#1206", "label": "Sell Reversal V7-C"},
     "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
     "buy_momentum":  {"version": "V5",   "cc": "cc#1051", "label": "Buy Momentum V5"},
