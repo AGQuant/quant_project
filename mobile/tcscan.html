@@ -253,9 +253,9 @@ function sortOpen(rows){
   else if(OSORT==='old') r.sort(function(a,b){return String(a.entry_ts||'').localeCompare(String(b.entry_ts||''));});
   return r;
 }
-/* cc#2176: the hero rail. Three cards, every figure from the payload: open.by_side.BUY / .SELL
+/* cc#2176: the hero rail. Four cards since cc#2213, every figure from the payload: open.by_side.BUY / .SELL
    (unrealised at one lot -- the endpoint sums the SAME per-row pnl_rs the rows below print, per
-   side) and record.ALL (realised since start -- the same _record query with the sides rolled up).
+   side) and record.BUY / .SELL (realised since start per side -- the same _record ROLLUP query; its ALL row is no longer drawn).
    A missing figure is a dash with its reason, never 0. */
 function pts(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'+':(x<0?'−':''))+Math.abs(x).toFixed(1)+' pts'; }
 function tkAcc(rec, barCls){
@@ -271,12 +271,17 @@ function tkSideCard(name, sideCls, bs, rec){
   else { big='<div class="tk-big '+cls(s.unrealised_rs)+'">'+inr(s.unrealised_rs,true)+'</div>'; sub='<div class="tk-sub"><b>'+n+'</b> open · '+(s.priced||0)+' of '+n+' priced · '+pts(s.unrealised_pts_pct)+'</div>'; }
   return '<div class="tk-card '+sideCls+'" data-tk="'+sideCls+'"><div class="tk-ceye">'+name+' · unrealised</div>'+big+sub+tkAcc(rec, sideCls)+'</div>';
 }
-function tkNetCard(ra){
-  var r=ra||{}, big, sub;
+/* cc#2213: the realised card is per SIDE now (was one Net card over rec.ALL, cc#2176). Same body as
+   before -- big rupee figure at one lot, the pts/count/since line, the shared tkAcc() record bar --
+   with the eyebrow, data-tk and accent class parameterised; the ::after accent follows the existing
+   .tk-card.tk-long / .tk-card.tk-short rules, no new colour. rec is record.BUY or record.SELL from
+   the same ROLLUP query the two unrealised cards' record bars already read. */
+function tkRealisedSideCard(name, sideCls, rec){
+  var r=rec||{}, big, sub;
   if(!r.closed){ big='<div class="tk-big">—</div>'; sub='<div class="tk-sub">Nothing closed yet</div>'; }
   else if(r.net_rs_one_lot==null){ big='<div class="tk-big">—</div>'; sub='<div class="tk-sub">'+pts(r.net_pts_pct)+' · <b>'+r.closed+'</b> signal'+(r.closed===1?'':'s')+' · no lot size on record</div>'; }
   else { big='<div class="tk-big '+cls(r.net_rs_one_lot)+'">'+inr(r.net_rs_one_lot,true)+'</div>'; sub='<div class="tk-sub">'+pts(r.net_pts_pct)+' · <b>'+r.closed+'</b> signal'+(r.closed===1?'':'s')+' · since '+esc(dm(r.since))+'</div>'; }
-  return '<div class="tk-card tk-net" data-tk="net"><div class="tk-ceye">Net · 1 lot · realised</div>'+big+sub+tkAcc(r,'tk-net')+'</div>';
+  return '<div class="tk-card '+sideCls+'" data-tk="'+sideCls+'"><div class="tk-ceye">'+name+' · 1 lot · realised</div>'+big+sub+tkAcc(r,sideCls)+'</div>';
 }
 /* dots follow the rail: index = scrollLeft over one card pitch (card width + gap), the same
    scroll-position math as home.html's heroDots() / v8's posDots. A tap on a dot scrolls to that card. */
@@ -289,11 +294,12 @@ function tkDots(){
 function draw(){
   var d=D, o=d.open||{}, c=d.closed||{}, ob=o.book||{}, cb=c.book||{}, rec=d.record||{}, rb=rec.BUY||{}, rs=rec.SELL||{}, sp=d.spec||{};
   var openRows=sortOpen(pick(o)), closedRows=pick(c);
-  var bs=o.by_side||{}, ra=rec.ALL||{};
+  var bs=o.by_side||{};   // cc#2213: rec.ALL is no longer drawn -- the realised card is per side
   var tkPrev=document.getElementById('tk-rail'), tkLeft=tkPrev?tkPrev.scrollLeft:0;   // keep the rail where it was across a redraw
   var h='<div class="tk-head"><div class="tk-eye">TC scanner · paper book · one lot per signal</div><div class="tk-tot"><b>'+(o.count||0)+'</b> open now · unrealised <b class="'+(ob.priced?cls(ob.unrealised_rs_one_lot):'')+'">'+(ob.priced?inr(ob.unrealised_rs_one_lot,true):'—')+'</b> · '+(ob.priced||0)+' of '+(ob.n||0)+' priced'+(ob.rows_without_cmp?' · '+ob.rows_without_cmp+' without a price':'')+'</div></div>';
-  h+='<div class="tk-rail" id="tk-rail">'+tkSideCard('Long','tk-long',bs.BUY,rb)+tkSideCard('Short','tk-short',bs.SELL,rs)+tkNetCard(ra)+'</div>'
-    +'<div class="tk-dots" id="tk-dots"><i class="on"></i><i></i><i></i></div>';
+  var tkCards=[tkSideCard('Long','tk-long',bs.BUY,rb), tkSideCard('Short','tk-short',bs.SELL,rs), tkRealisedSideCard('Long','tk-long',rb), tkRealisedSideCard('Short','tk-short',rs)];   // cc#2213: Long unreal, Short unreal, Long realised, Short realised
+  h+='<div class="tk-rail" id="tk-rail">'+tkCards.join('')+'</div>'
+    +'<div class="tk-dots" id="tk-dots">'+tkCards.map(function(_,i){ return '<i'+(i?'':' class="on"')+'></i>'; }).join('')+'</div>';   // one dot per card, never a hardcoded count
   h+='<div class="sec"><h2>Book</h2><span class="hint">since '+esc(dm(rb.since||rs.since))+'</span></div>';
   h+='<div class="seg" id="side">'+['ALL','LONG','SHORT'].map(function(s){return '<span data-s="'+s+'"'+(s===SIDE?' class="on"':'')+'>'+s.charAt(0)+s.slice(1).toLowerCase()+'</span>';}).join('')+'</div>';
   h+='<div class="sec"><h2>Open</h2><span class="hint">'+openRows.length+'</span></div>';
