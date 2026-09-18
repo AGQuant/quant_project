@@ -442,7 +442,7 @@ var URLS = {
   n50:    '/api/v8/nifty50_sectors',
   daylog: '/api/v8/daylog',
   daylogSeries: '/api/v8/daylog/series',   /* cc#1873: cumulative net/gross P&L, folded server-side from daylog (v8_daylog_extras.py) */
-  unrealSeries: '/api/v8/unrealised_daily/series',   /* cc#2097: the NEW unrealised-P&L history, same point/date shape (v8_unrealised_daily.py) */
+  unreal5m: '/api/v8/unrealised_5m/series',   /* cc#2212: the 5-min unrealised series {points:[{ts,value}]}, last 100 bars capped server-side (v8_unrealised_daily.py); the daily table is never read here */
   funnel: '/api/mobile/v8funnel',
   pass:   '/api/v8/stock_passcount/',
   paper:  '/api/paper/status',
@@ -1317,12 +1317,13 @@ function daylogRetry(){
    a full sheet (every var() carries its own hex fallback, so DOM position never matters), not the
    small-popover class of component that needed the #v8p-child fix (cc#1866/1867/1870). */
 /* cc#2097: DL_SERIES is now one cache per KIND ('realised' | 'unreal') per SLICE (all/long/
-   short) -- the Unrealised pane's three boxes load a genuinely different series (v8_unrealised_
-   daily.py) than Realised/Net Total's (v8_daylog_extras.py, unchanged). DL_KIND defaults
+   short) -- the Unrealised pane's three boxes load a genuinely different series than Realised/Net
+   Total's (v8_daylog_extras.py, unchanged). cc#2212: for kind='unreal' that series is the 5-MINUTE
+   one, /api/v8/unrealised_5m/series -> {points:[{ts, value}]} (last 100 bars), drawn as a plain
+   level line in tick order with no windows and no rebase; the daily table is never read here. DL_KIND defaults
    'realised' so every pre-cc#2097 caller (dlChartOpen with no 3rd arg) is byte-identical to
    before. DL_WINDOW is the new 1W/1M/3M/Since-start toggle (item 5/6) -- 'all' means "Since
-   start", unchanged existing behaviour; cc#2211 adds '100b' (the last 100 bars) as the
-   unrealised sheet's widest window in place of 'all'. DL_INFO_KEY is the kwInfoLines() key for whichever
+   start", unchanged existing behaviour; the unrealised sheet has no windows at all since cc#2212. DL_INFO_KEY is the kwInfoLines() key for whichever
    leading box opened this sheet (item 2's folded-in breakdown); null for a box that never had
    one (Long/Short sub-wells), same as opts.info was never set for them before. */
 var DL_SERIES = {realised:{all:null, long:null, short:null}, unreal:{all:null, long:null, short:null}};
@@ -1332,8 +1333,8 @@ function dlSeriesLoad(slice, kind){
   slice = slice || 'all'; kind = kind === 'unreal' ? 'unreal' : 'realised';
   var cache = DL_SERIES[kind];
   if(cache[slice]) return Promise.resolve(cache[slice]);
-  var base = kind === 'unreal' ? URLS.unrealSeries : URLS.daylogSeries;
-  var url = base + (slice === 'all' ? '' : '?side=' + slice.toUpperCase());
+  var url = kind === 'unreal' ? URLS.unreal5m + '?slice=' + slice + '&n=100'   /* cc#2212: 5-min bars, capped at 100 by the server */
+                              : URLS.daylogSeries + (slice === 'all' ? '' : '?side=' + slice.toUpperCase());
   return getJ(url).then(function(d){ cache[slice] = d; return d; });
 }
 /* cc#2097 items 5-6: client-side window slice, no new fetch -- the SAME points already loaded,
@@ -1345,15 +1346,10 @@ function dlSeriesLoad(slice, kind){
    rebase amounts (net/gross) so the caller can pick the one matching the active DL_FOCUS. */
 function dlWindowSlice(pts, win){
   if(win === 'all' || !pts.length) return {points: pts, rebaseNet: 0, rebaseGross: 0};
-  var sliced;
-  if(win === '100b'){
-    sliced = pts.slice(-100);   /* cc#2211: the last 100 bars (one point = one trading day); fewer than 100 -> all of them, nothing padded */
-  } else {
-    var days = DL_WINDOW_DAYS[win] || 0;
-    var cutoff = new Date(pts[pts.length - 1].date + 'T00:00:00'); cutoff.setDate(cutoff.getDate() - days + 1);
-    var cutoffStr = cutoff.toISOString().slice(0, 10);
-    sliced = pts.filter(function(p){ return p.date >= cutoffStr; });
-  }
+  var days = DL_WINDOW_DAYS[win] || 0;
+  var cutoff = new Date(pts[pts.length - 1].date + 'T00:00:00'); cutoff.setDate(cutoff.getDate() - days + 1);
+  var cutoffStr = cutoff.toISOString().slice(0, 10);
+  var sliced = pts.filter(function(p){ return p.date >= cutoffStr; });
   if(!sliced.length) return {points: [], rebaseNet: 0, rebaseGross: 0};
   var baseNet = sliced[0].net_cum, baseGross = sliced[0].gross_cum;
   return {
@@ -1428,6 +1424,25 @@ function dlWindowPill(k, label){
   var on = DL_WINDOW === k;
   return '<button type="button" data-dl-window="' + k + '" style="border:1px solid var(--line,#22293A);border-radius:999px;padding:3px 12px;font-family:var(--mono);font-size:11px;cursor:pointer;' + (on ? 'background:var(--gold,#D4AF37);color:var(--well,#131316);border-color:var(--gold,#D4AF37);font-weight:800' : 'background:none;color:var(--dim,#5E6B8F)') + '">' + label + '</button>';
 }
+/* cc#2212: 5-min bar helpers for the unrealised sheet. A bar ts is the endpoint's IST ISO string
+   ('2026-09-18T09:15:00+05:30'); the label is 'HH:MM D Mon'. */
+function dlBarLabel(ts){ var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(String(ts||'')); return m ? m[4] + ' ' + (+m[3]) + ' ' + MON[+m[2]-1] : String(ts||''); }
+function dlBarKey(ts){ var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(String(ts||'')); return m ? m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] : ''; }
+/* The latest book tick = the newest CMP mark across the open positions (cmp_at 'D Mon HH:MM' from
+   /api/mobile/v8book). The live hollow end-point is drawn only when that mark is NEWER than the last
+   stored 5-min bar -- otherwise the live figure IS the last bar and a second point would be a fake
+   one. No positions or no mark -> no live point. Marks carry no year; a 100-bar window never spans one. */
+function dlLiveNewerThan(lastTs){
+  var bk = STATE.book; if(!bk || !lastTs) return false;
+  var yr = String(lastTs).slice(0, 4), best = '';
+  (bk.positions || []).forEach(function(p){
+    var m = /^(\d{1,2}) (\w{3}) (\d{2}:\d{2})$/.exec(String(p.cmp_at || '')); if(!m) return;
+    var mi = MON.indexOf(m[2]); if(mi < 0) return;
+    var k = yr + '-' + ('0' + (mi + 1)).slice(-2) + '-' + ('0' + m[1]).slice(-2) + ' ' + m[3];
+    if(k > best) best = k;
+  });
+  return !!best && best > dlBarKey(lastTs);
+}
 function dlChartSheetHtml(d){
   var isUnreal = DL_KIND === 'unreal';
   var sliceWord = {all:'', long:' \u2014 LONG', short:' \u2014 SHORT'}[DL_SLICE] || '';
@@ -1439,31 +1454,42 @@ function dlChartSheetHtml(d){
   }
   var pts = d.points || [];
   var liveU = dlLiveUnreal(DL_SLICE);
+  /* cc#2212: the UNREALISED sheet is a plain level line of the last 100 five-minute bars from
+     /api/v8/unrealised_5m/series -- no window pills, no rebase, x by tick order. Honest empty
+     state before the first stored bar; never a fallback to the daily table and never the daily
+     series resampled to look intraday. The live hollow end-point appears only when the book's
+     newest CMP mark is newer than the last bar (dlLiveNewerThan). */
+  if(isUnreal && !pts.length){
+    return head + '<div class="empty" style="margin:14px">No 5-min history yet \u2014 it starts accumulating from the next market tick.</div>';
+  }
   if(!pts.length && liveU == null){
-    var emptyMsg = isUnreal ? 'No unrealised history yet. It starts accumulating from today\u2019s close.'
-                            : 'No closed trades in this era yet. The line starts with the first exit.';
-    return head + '<div class="empty" style="margin:14px">' + emptyMsg + '</div>';
+    return head + '<div class="empty" style="margin:14px">No closed trades in this era yet. The line starts with the first exit.</div>';
   }
   if(!pts.length){
     // cc#2005/cc#2097: no stored history yet, but a live unrealised figure exists for this slice
     // \u2014 show that fact plainly rather than an empty state that would hide a real, honest number.
-    var noHistMsg = isUnreal ? 'History starts accumulating from today\u2019s close. Live unrealised: '
-                              : 'No closed trades in this era yet. Live unrealised: ';
-    return head + '<div class="empty" style="margin:14px">' + noHistMsg + '<b class="' + sgn(liveU) + '">' + inr(liveU) + '</b></div>';
+    return head + '<div class="empty" style="margin:14px">No closed trades in this era yet. Live unrealised: <b class="' + sgn(liveU) + '">' + inr(liveU) + '</b></div>';
   }
-  var win = dlWindowSlice(pts, DL_WINDOW);
+  var win = isUnreal
+    ? {points: pts.map(function(p){ return {date: String(p.ts || ''), gross_cum: p.value, net_cum: p.value}; }), rebaseNet: 0, rebaseGross: 0}
+    : dlWindowSlice(pts, DL_WINDOW);
   var rebase = DL_FOCUS === 'gross' ? win.rebaseGross : win.rebaseNet;
   var wp = win.points;
-  var subDateLabel = isUnreal ? 'marked to market by date' : 'cumulative by exit date';
-  var sub = wp.length
-    ? (DL_WINDOW === 'all' ? 'Since ' + dmy(wp[0].date) : dmy(wp[0].date) + ' \u2013 ' + dmy(wp[wp.length - 1].date))
-      + ' \u00b7 ' + wp.length + ' trading day' + (wp.length === 1 ? '' : 's') + ' \u00b7 ' + subDateLabel
-    : 'No trading days in this window yet';
+  var sub;
+  if(isUnreal){
+    sub = 'Last ' + wp.length + ' bar' + (wp.length === 1 ? '' : 's') + ' \u00b7 5-min \u00b7 ' + dlBarLabel(pts[0].ts) + ' \u2013 ' + dlBarLabel(pts[pts.length - 1].ts);
+  } else {
+    sub = wp.length
+      ? (DL_WINDOW === 'all' ? 'Since ' + dmy(wp[0].date) : dmy(wp[0].date) + ' \u2013 ' + dmy(wp[wp.length - 1].date))
+        + ' \u00b7 ' + wp.length + ' trading day' + (wp.length === 1 ? '' : 's') + ' \u00b7 cumulative by exit date'
+      : 'No trading days in this window yet';
+  }
+  var liveSlice = (isUnreal && !dlLiveNewerThan(pts[pts.length - 1].ts)) ? null : DL_SLICE;   /* null = dlChartSvg draws no live point */
   /* cc#2211: the brokerage note beside the pills and the "live = ..." line under the chart are gone for both kinds (founder
-     18-Sep); the hollow live end-point on the SVG itself stays. The unrealised sheet's widest window is 100 BARS (the last
-     100 points, dlWindowSlice '100b'), never SINCE START; the realised sheet keeps SINCE START / 1W / 1M / 3M as cc#2097 built them. */
+     18-Sep); the hollow live end-point on the SVG itself stays. cc#2212: the unrealised sheet has NO window row; the realised
+     sheet keeps SINCE START / 1W / 1M / 3M as cc#2097 built them. Net/Gross focus pills stay on both. */
   var pills = '<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">' + dlChartPill('net', 'Net') + dlChartPill('gross', 'Gross') + '</div>';
-  var winPills = '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">' + (isUnreal ? dlWindowPill('100b', '100 BARS') : dlWindowPill('all', 'SINCE START')) + dlWindowPill('1w', '1W') + dlWindowPill('1m', '1M') + dlWindowPill('3m', '3M') + '</div>';
+  var winPills = isUnreal ? '' : '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">' + dlWindowPill('all', 'SINCE START') + dlWindowPill('1w', '1W') + dlWindowPill('1m', '1M') + dlWindowPill('3m', '3M') + '</div>';
   var foot;
   if(!isUnreal && DL_WINDOW === 'all'){
     // cc#2097: era-level Return/CAGR are only ever shown for the unwindowed "Since start" view --
@@ -1479,7 +1505,7 @@ function dlChartSheetHtml(d){
     var chg = wp.length ? (DL_FOCUS === 'gross' ? wp[wp.length - 1].gross_cum : wp[wp.length - 1].net_cum) : 0;
     foot = '<div style="padding:10px 14px 22px;font-family:var(--mono);font-size:10.5px;color:var(--mute,#8C99BD)">Change over this window <b class="' + sgn(chg) + '">' + inr(chg) + '</b></div>';
   } else {
-    foot = '';   /* cc#2211: the unrealised sheet carries no cagr_note foot any more */
+    foot = '';   /* cc#2211: the unrealised sheet carries no note foot */
   }
   // cc#2097 item 2: the (i) breakdown folded in, below the chart, for whichever leading box
   // opened this sheet (DL_INFO_KEY null for a Long/Short sub-well, same as it never had one).
@@ -1492,7 +1518,7 @@ function dlChartSheetHtml(d){
       + '</div>';   /* cc#2211: no note sentence under the rows */
   }
   return head + '<div style="padding:6px 14px 0;font-family:var(--mono);font-size:10px;color:var(--mute,#8C99BD)">' + esc(sub) + '</div>'
-    + pills + winPills + '<div style="padding:10px 14px 0">' + dlChartSvg({points: wp}, DL_SLICE, DL_KIND, rebase) + '</div>' + foot + infoFoot;
+    + pills + winPills + '<div style="padding:10px 14px 0">' + dlChartSvg({points: wp}, liveSlice, DL_KIND, rebase) + '</div>' + foot + infoFoot;
 }
 function dlChartOpen(slice, kind, infoKey){
   DL_SLICE = slice || 'all';   // cc#2005: defaults to 'all', so the pre-existing Day Log chart
@@ -1500,7 +1526,7 @@ function dlChartOpen(slice, kind, infoKey){
                                 // now also getting the live end-point when STATE.book is loaded.
   DL_KIND = kind === 'unreal' ? 'unreal' : 'realised';
   DL_INFO_KEY = infoKey || null;
-  DL_WINDOW = DL_KIND === 'unreal' ? '100b' : 'all';   // cc#2211: unrealised opens on 100 BARS (was 1W, cc#2097 item 4); realised/net keep opening to Since start, unchanged
+  DL_WINDOW = 'all';   // realised/net open on Since start (cc#2097); the unrealised sheet has no windows since cc#2212 (a fixed last-100-bars 5-min line)
   DL_FOCUS = 'net';   // a fresh open always starts on Net (this was implicitly true before cc#2097; stated now that DL_KIND/DL_WINDOW also reset here)
   var ov = document.getElementById('v8-dlchart-ov');
   if(!ov){

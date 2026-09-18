@@ -1728,6 +1728,43 @@ def _bg_custom_alerts_live():
         raise
 
 
+_v8_unreal_5m_running = False
+def _bg_v8_unrealised_5m(now=None):
+    """cc#2212: the 5-MINUTE unrealised series. Every market-hours m%5 tick, dispatched by the same
+    sweep as _bg_v8_paper_exit, this snapshots v8_book_canon.book_canon() (rule 13 -- the one
+    formula the KPI well, the daily snapshot and /api/mobile/v8book all read) into
+    v8_unrealised_5m under the tick's 5-min bar boundary (v8_unrealised_daily.bar_ts). AFTER THE
+    EXIT PASS OF THE SAME TICK: the sweep spawns both onto the pool, so this job gives the exit
+    pass a moment to start and then waits (bounded, 90 s) while _v8_paper_exit_running is set --
+    the bar reflects that tick's exits. `now` is the sweep's IST clock, passed in so a wait never
+    moves the bar. The 15:30 tick is the close bar (_is_market_hours is inclusive of 15:30), so
+    the last bar of a session equals what the 15:35 daily snapshot stores. Registry-gated
+    (bg_v8_unrealised_5m) so an UPDATE, not a deploy, silences it; own scheduler_master row
+    (ENGINE_LIVENESS_RULE 13829). Never re-derives, never backfills."""
+    global _v8_unreal_5m_running
+    if _job_active("bg_v8_unrealised_5m") is not True:
+        return _Skip.disabled()
+    if _v8_unreal_5m_running:
+        return _Skip.already_running()
+    _v8_unreal_5m_running = True
+    try:
+        bar = now or _ist_now()
+        time.sleep(2)
+        deadline = time.time() + 90
+        while _v8_paper_exit_running and time.time() < deadline:
+            time.sleep(1)
+        import v8_unrealised_daily
+        with _conn() as conn:
+            res = v8_unrealised_daily.snapshot_unrealised_5m(conn, bar)
+        log.info(f"v8_unrealised_5m: {res}")
+        return res
+    except Exception as e:
+        log.error(f"v8_unrealised_5m: {e}")
+        raise
+    finally:
+        _v8_unreal_5m_running = False
+
+
 _v8_unreal_snapshot_ran_today = None
 def _bg_v8_unrealised_snapshot():
     """cc#2097 item 3: once per trading day, snapshot the canon unrealised figures
@@ -5325,6 +5362,7 @@ async def _scheduler_loop():
         if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
             _spawn(_bg_v14_cycle)
             _spawn(_bg_v8_paper_exit)         # cc_task #72 bug_0: live exit pass (primary)
+            _spawn(_bg_v8_unrealised_5m, now)   # cc#2212: 5-min unrealised bar, waits for the exit pass above inside
             # cc#1201: _bg_v10_tick LEFT THIS BLOCK and now dispatches on _is_cash_continuous with
             # the pivot star, a few lines up. It could NOT simply take this whole block with it:
             # six other jobs share this guard, and one of them is _bg_v8_paper_exit, the LIVE exit
