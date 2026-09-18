@@ -38,6 +38,14 @@ PURGE SHIPS WITH THE WRITER -- founder-mandated: "The 90-day purge is NOT a late
     tick of each day, inside this same job -- never VACUUM FULL or any other locking operation
     inline (MAINTENANCE_LOCK_RULE cc#351). Reports rows deleted via ops_log every time it runs.
 
+CC#2218 ADDENDUM (18-Sep-2026): two more purges ride this SAME last-tick block now, per the
+    founder's "ship together" rule extended to a sibling table rather than a new daily job.
+    RULE_RETENTION_DAYS cut 30 -> 3 (tc_universe_rule_ticks was projected to ~5.3 GB at 30 days;
+    its only reader wants a live "right now" answer, never history -- see the constant). And
+    intraday_prices gets its FIRST purge ever, 12 rolling calendar months, because it had none --
+    see INTRADAY_PRICES_RETENTION_MONTHS. This file's OWN aggregate table (tc_universe_ticks,
+    90 days) is unchanged either way.
+
 WHAT THIS DOES NOT DO
     Does not touch v8_tc_score_ticks / bg_tc_score_tick (see correction above). Does not touch
     bg_tc_scanner / tc_scanner_endpoints.run_scan() or the book's entry/exit logic -- this reads
@@ -73,7 +81,20 @@ LAST_TICK_HOUR, LAST_TICK_MINUTE = 15, 20   # founder-mandated: stop writing tic
 # vs 207x4 for the aggregate), so holding it to 90 days would mean ~78M rows instead of ~26M at
 # steady state -- 30 days keeps the newest month of rule history (the Check tab's own use case)
 # without carrying three months of granularity nothing currently reads past the aggregate table.
-RULE_RETENTION_DAYS = 30
+RULE_RETENTION_DAYS = 3   # cc#2218, cut from 30: measured 873,230 rows/day (203 B/row) -- 30 days
+# projected to ~26M rows / ~5.3 GB, larger than intraday_prices+raw_prices combined. The only
+# reader (app_check_endpoints.py cc#1995 item 3) fetches one symbol/bucket at a known ts for the
+# Check tab's live rule bars -- a "why is this symbol at 73 right now" question, never historical;
+# anything backtest-shaped reads the AGGREGATE table above (tc_universe_ticks, RETENTION_DAYS=90,
+# unaffected). 3 days caps this table near ~2.6M rows / ~530 MB permanently.
+
+# cc#2218: intraday_prices had NO purge of any kind until this card -- measured 18-Sep-2026 at
+# 4,953,230 rows spanning 431 days (77% a fyers_hist backfill source that stopped writing
+# 14-Aug-2026), with the live feeds (fyers_eq, fyers_fut) adding ~30k rows/day and nothing
+# trimming the tail. Ships on the SAME last tick as this file's own purges, per the founder's
+# "ship together" rule -- this file already runs that job every day; a new one is not needed for
+# two constants and one DELETE. 12 CALENDAR MONTHS (not 365 days) -- the founder's own stated rule.
+INTRADAY_PRICES_RETENTION_MONTHS = 12
 # A rule row whose recomputed weighted sum disagrees with the aggregate score100 it belongs to, by
 # more than this, is a real mismatch -- reject just that symbol/bucket's rule rows (the aggregate
 # row still writes), never a silently wrong number.
@@ -125,7 +146,9 @@ def run_tick() -> dict:
     """One 5-min tick: score the full active futures universe on all four score100 buckets (the
     SAME tc_v4_dual.score_card over tc_v4_scan._load_bulk bg_tc_scanner already runs) and bulk-
     insert every bucket's card for every symbol. On the 15:20 last tick, also purge rows older
-    than the 90-day rolling window -- same job, same run, per the founder's "ship together" rule."""
+    than the 90-day rolling window (this table), the 3-day window (tc_universe_rule_ticks) and the
+    12-month window (intraday_prices, cc#2218) -- same job, same run, per the founder's "ship
+    together" rule."""
     global _running
     if _running:
         return {"ok": False, "error": "already running"}
@@ -271,6 +294,7 @@ def run_tick() -> dict:
 
             purged = None
             rule_purged = None
+            intraday_purged = None
             if (now.hour, now.minute) == (LAST_TICK_HOUR, LAST_TICK_MINUTE):
                 with conn.cursor() as cur3:
                     cur3.execute("DELETE FROM tc_universe_ticks WHERE ts < NOW() - INTERVAL '%s days'"
@@ -283,20 +307,30 @@ def run_tick() -> dict:
                     cur3.execute("DELETE FROM tc_universe_rule_ticks WHERE ts < NOW() - INTERVAL '%s days'"
                                  % RULE_RETENTION_DAYS)
                     rule_purged = cur3.rowcount
+                    # cc#2218: intraday_prices' first rolling purge, riding this same last tick.
+                    # Plain DELETE, no locking op (MAINTENANCE_LOCK_RULE cc#351) -- confirmed cheap
+                    # via EXPLAIN before shipping (index-only scan on the existing (symbol, ts)
+                    # index, ~13k rows at the current boundary, not a table scan).
+                    cur3.execute("DELETE FROM intraday_prices WHERE ts < NOW() - INTERVAL '%s months'"
+                                 % INTRADAY_PRICES_RETENTION_MONTHS)
+                    intraday_purged = cur3.rowcount
                 conn.commit()
 
             with conn.cursor() as cur4:
                 _oplog(cur4, "tc_universe_tick",
                        {"symbols": len(D), "rows_written": len(rows), "failed": failed,
                         "purged": purged, "rule_rows_written": len(rule_rows),
-                        "rule_mismatches": len(rule_mismatches), "rule_purged": rule_purged})
+                        "rule_mismatches": len(rule_mismatches), "rule_purged": rule_purged,
+                        "intraday_purged": intraday_purged})
                 conn.commit()
             log.info(f"tc_universe_ticks: {len(rows)} rows, {len(D)} symbols, {failed} failed, "
                      f"purged={purged}; rule_ticks: {len(rule_rows)} rows, "
-                     f"{len(rule_mismatches)} mismatches, rule_purged={rule_purged}")
+                     f"{len(rule_mismatches)} mismatches, rule_purged={rule_purged}; "
+                     f"intraday_prices purged={intraday_purged}")
             return {"ok": True, "rows_written": len(rows), "symbols": len(D), "failed": failed,
                     "purged": purged, "rule_rows_written": len(rule_rows),
-                    "rule_mismatches": len(rule_mismatches), "rule_purged": rule_purged}
+                    "rule_mismatches": len(rule_mismatches), "rule_purged": rule_purged,
+                    "intraday_purged": intraday_purged}
         finally:
             conn.close()
     except Exception as e:
