@@ -4555,12 +4555,77 @@ function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{
 // cc#856: stars refresh with the basket panels; failure is silent by design.
 try{ loadPivotStars(); }catch(e){}
 
+// cc#2215: OPEN + CLOSED tables sit BELOW the qualified table on every bucket tab -- never
+// merged, a row lives in exactly one of the three. Server-side (v8_endpoints.py qualified())
+// already era-bounds CLOSED and applies the cross-basket same-side suppression to the qualified
+// rows above; this block only renders what open_table/closed_table/era_block already carry.
+// CLOSED_SHOWN is session-scoped per basket (a reload resets to one chunk), same shape as the
+// existing newsShowMore() show-more pattern elsewhere on this page.
+let CC2215_CLOSED_SHOWN={};
+const CC2215_CLOSED_CHUNK=20;
+const CC2215_OPEN_COLS=[["symbol","SYMBOL"],["side","SIDE"],["entry_ts","ENTRY TIME"],["entry_price","ENTRY PRICE"],["cmp","CMP"],["_days","DAYS"],["net_pnl","NET P&L"],["net_pnl_pct","NET P&L %"]];
+const CC2215_CLOSED_COLS=[["symbol","SYMBOL"],["side","SIDE"],["entry_ts","ENTRY TIME"],["entry_price","ENTRY PRICE"],["exit_ts","EXIT TIME"],["exit_price","EXIT PRICE"],["result","EXIT REASON"],["net_pnl","NET P&L"],["net_pnl_pct","NET P&L %"]];
+function cc2215Pct(v){return v==null?'--':sign(v,2)+'%';}
+function cc2215OpenRow(x){
+  return `<tr><td class="sym">${esc(x.symbol)}</td>
+    <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${esc(x.side||'')}</span></td>
+    <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
+    <td>${num(x.entry_price)}</td><td>${num(x.cmp)}</td>
+    <td style="color:var(--dim)">${x._days}</td>
+    <td class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
+    <td class="${cls(x.net_pnl_pct)}">${cc2215Pct(x.net_pnl_pct)}</td></tr>`;
+}
+function cc2215ClosedRow(x){
+  return `<tr><td class="sym">${esc(x.symbol)}</td>
+    <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${esc(x.side||'')}</span></td>
+    <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td><td>${num(x.entry_price)}</td>
+    <td style="color:var(--mut)">${fmtTs(x.exit_ts)}</td><td>${num(x.exit_price)}</td>
+    <td><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${esc(x.result||'')}</span></td>
+    <td class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
+    <td class="${cls(x.net_pnl_pct)}">${cc2215Pct(x.net_pnl_pct)}</td></tr>`;
+}
+function cc2215Mobile(rows,emptyMsg){
+  if(!rows.length)return `<div class="mob-cards"><div class="empty">${emptyMsg}</div></div>`;
+  return `<div class="mob-cards">${rows.map(x=>`<div class="mob-card"><div class="mob-card-header">
+    <span class="mob-sym">${esc(x.symbol)}</span><span class="mob-badge ${x.side==='SHORT'?'b-short':'b-long'}">${esc(x.side||'')}</span></div>
+    <div class="mob-chips"><span class="mob-chip">Entry ${num(x.entry_price)}</span>
+    ${x.cmp!=null?`<span class="mob-chip">CMP ${num(x.cmp)}</span>`:''}
+    ${x.exit_price!=null?`<span class="mob-chip">Exit ${num(x.exit_price)}</span>`:''}
+    <span class="mob-chip ${pnlCls(x.net_pnl)}">Net ${inr(x.net_pnl)}</span>
+    <span class="mob-chip ${cls(x.net_pnl_pct)}">${cc2215Pct(x.net_pnl_pct)}</span>
+    ${x.result?`<span class="mob-chip"><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${esc(x.result)}</span></span>`:''}
+    <span class="mob-chip" style="color:var(--dim)">${x.exit_ts?fmtTs(x.exit_ts):(x._days!=null?x._days+'d':'')}</span></div></div>`).join('')}</div>`;
+}
+function cc2215ClosedMore(bid){
+  CC2215_CLOSED_SHOWN[bid]=(CC2215_CLOSED_SHOWN[bid]||CC2215_CLOSED_CHUNK)+CC2215_CLOSED_CHUNK;
+  const b=BASKETS.find(x=>x.id===bid); if(!b)return;
+  const el=document.getElementById('panel'+b.panel); if(el)el.innerHTML=renderFunnel(b);
+}
+function cc2215OpenClosedBlock(b,d){
+  const openRows=(d.open_table||[]).map(r=>({...r,_days:holdDays(r.entry_ts)}));
+  const allClosed=d.closed_table||[];
+  const shown=CC2215_CLOSED_SHOWN[b.id]||CC2215_CLOSED_CHUNK;
+  const closedRows=allClosed.slice(0,shown);
+  const eraLabel=v8EraLabel(d.era_block);
+  const openTbl=sortTbl('cc2215_open_'+b.id,CC2215_OPEN_COLS,openRows,cc2215OpenRow,
+    {sortKey:'entry_ts',dir:-1,empty:'No open positions in this basket.'});
+  const closedTbl=sortTbl('cc2215_closed_'+b.id,CC2215_CLOSED_COLS,closedRows,cc2215ClosedRow,
+    {sortKey:'exit_ts',dir:-1,empty:'No closed trades yet.'});
+  const more=allClosed.length>shown
+    ? `<div onclick="cc2215ClosedMore('${b.id}')" style="text-align:center;padding:10px;margin-top:6px;cursor:pointer;font-size:12px;font-weight:700;color:var(--cyan);border:1px solid var(--line);border-radius:6px">Show more (${allClosed.length-shown} older) &#9662;</div>`
+    : '';
+  return `<div class="ptitle" style="margin-top:18px">Open</div>${openTbl}${cc2215Mobile(openRows,'No open positions in this basket.')}`
+       + `<div class="ptitle" style="margin-top:18px">Closed <span style="font-size:10px;font-weight:400;color:var(--dim)">${esc(eraLabel)}</span></div>${closedTbl}${cc2215Mobile(closedRows,'No closed trades yet.')}${more}`;
+}
 function renderFunnel(b){
   const d=cache['q_'+b.id];if(!d)return'<div class="loading">...</div>';
   const isSell=b.id.startsWith('sell');
   const meta=`<div class="ptitle">${b.label} <button class="info-btn" onclick="openInfo('${b.id}')" title="Strategy rules & filters">i</button> <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'--'}${d.win_n?` (${d.win_n} trades live)`:''}</span></div>`;
+  // cc#2215: computed once, used on both the empty-qualified early return below and the normal
+  // path at the end of this function -- OPEN/CLOSED render even on a day this bucket fires nothing.
+  const _openClosed=cc2215OpenClosedBlock(b,d);
   const stocks=d.stocks||[];
-  if(!stocks.length)return meta+`<div class="empty">No qualified names -- gate may be closed for this side.</div>`;
+  if(!stocks.length)return meta+`<div class="empty">No qualified names -- gate may be closed for this side.</div>`+_openClosed;
   const statusOrder={OPEN:0,SIGNAL:1};
   const sorted=[...stocks].sort((a,b)=>{const so=(statusOrder[a.status]??1)-(statusOrder[b.status]??1);if(so!==0)return so;return(b.gvm_score||0)-(a.gvm_score||0);});
   const legend=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
@@ -4593,7 +4658,7 @@ function renderFunnel(b){
        names" — which reads like a filter error on a day the basket simply did not fire. */
     {sortKey:null,dir:-1,empty:"No signals today"});
   const mobileCards=bkMobile(sorted,isSell);
-  return meta+legend+desktopTable+mobileCards+markerLegend();
+  return meta+legend+desktopTable+mobileCards+markerLegend()+_openClosed;
 }
 
 // cc#370: Trade log filters — Duration (calendar window) + Basket. Client-side (all closed trades

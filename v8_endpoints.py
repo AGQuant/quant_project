@@ -42,7 +42,7 @@ standard pool only, 20 total slots:
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import JSONResponse
-from v8_book_canon import retired_baskets   # cc#970 V8_PNL_CANON_V1 (rule 13)
+from v8_book_canon import retired_baskets, BROKERAGE_PER_TRADE   # cc#970 V8_PNL_CANON_V1 (rule 13)
 from price_sources import not_fut, NOT_FUT_SQL   # cc#1053 convention + cc#1056 registry
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -1728,6 +1728,106 @@ def _enrich_qualified_result(res: dict) -> dict:
     return res
 
 
+def _cc2215_side_family(basket: str) -> tuple:
+    """cc#2215: (side, (basket1, basket2)) for the side family a bucket belongs to -- buy:
+    buy_momentum + buy_reversal / LONG; sell: sell_momentum + sell_reversal / SHORT. Pure, no DB,
+    so the founder's cross-basket-pairing rule is unit-testable on its own. Scoped to exactly
+    those two baskets, not "any basket on this side" -- the legacy buy_s1_bounce basket (out of
+    scope, no tab) must never suppress a live signal."""
+    if basket.startswith("buy"):
+        return "LONG", ("buy_momentum", "buy_reversal")
+    return "SHORT", ("sell_momentum", "sell_reversal")
+
+
+def _open_symbols_same_side(basket: str) -> set:
+    """cc#2215: every symbol OPEN in EITHER of this basket's two side-family buckets -- side-
+    scoped, not single-basket-scoped, per the founder's cross-basket suppression rule. A name
+    already committed on one side must not also render as a fresh signal on the OTHER bucket tab
+    that trades the same side."""
+    side, family = _cc2215_side_family(basket)
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT DISTINCT symbol FROM v8_paper_positions
+                           WHERE status='OPEN' AND side=%s AND basket = ANY(%s)""", (side, list(family)))
+            return {r[0] for r in cur.fetchall()}
+    except Exception:
+        return set()
+
+
+def _cc2215_open_row(sym: str, p: dict) -> dict:
+    """cc#2215 one OPEN-table row from an open_pos entry. Pure -- no DB, no side effects -- so it
+    can be unit-tested without a database. NET P&L is the raw unrealised figure, no brokerage
+    deduction -- V8_PNL_CANON_V1 rule 13 only nets brokerage on REALISED (closed) P&L; an open
+    position hasn't paid an exit leg yet. DAYS is deliberately NOT computed here -- the frontend
+    already has holdDays(entry_ts) (cc_task #76 4b, "Day 1 = entered today", used elsewhere on
+    this same page) and this table must read the one existing convention, not grow a second
+    day-count formula."""
+    entry_price = float(p["entry_price"]) if p.get("entry_price") is not None else None
+    cmp_px      = float(p["cmp"]) if p.get("cmp") is not None else None
+    qty         = int(p["qty"]) if p.get("qty") is not None else None
+    side        = p.get("side")
+    net_pnl = None
+    if entry_price is not None and cmp_px is not None and qty is not None:
+        move = (cmp_px - entry_price) if side == "LONG" else (entry_price - cmp_px)
+        net_pnl = round(move * qty, 2)
+    return {
+        "symbol": sym, "side": side, "entry_ts": p.get("entry_ts"), "entry_price": entry_price,
+        "cmp": cmp_px, "net_pnl": net_pnl,
+        "net_pnl_pct": float(p["pnl_pct"]) if p.get("pnl_pct") is not None else None,
+    }
+
+
+def _cc2215_open_table(open_pos: dict) -> list:
+    """cc#2215 OPEN table: SYMBOL/SIDE/ENTRY TIME/ENTRY PRICE/CMP/DAYS/NET P&L/NET P&L% straight off
+    open_pos -- the SAME dict _enrich_with_status already uses for this basket, so this table can
+    never disagree with the qualified table's own OPEN rows (one query, two consumers)."""
+    out = [_cc2215_open_row(sym, p) for sym, p in open_pos.items()]
+    out.sort(key=lambda r: r["entry_ts"] or datetime.min)
+    return out
+
+
+def _cc2215_closed_row(t: dict, round_trip: float) -> dict:
+    """cc#2215 one CLOSED-table row from a v8_paper_trades record. Pure -- no DB -- so it can be
+    unit-tested without a database. NET P&L matches the Trade Log's own per-row convention exactly:
+    pnl minus ROUND-TRIP brokerage (both legs) -- v8_dashboard.html's renderTradeLog already nets
+    *2 per closed row, never *1, and this table must not invent a second definition of "net" on
+    the same page. NET P&L % is derived from net_pnl over the trade's own notional (entry_price *
+    qty), the same base return_pct already uses for the GROSS percentage."""
+    pnl         = float(t["pnl"]) if t.get("pnl") is not None else None
+    entry_price = float(t["entry_price"]) if t.get("entry_price") is not None else None
+    qty         = int(t["qty"]) if t.get("qty") is not None else None
+    net_pnl     = round(pnl - round_trip, 2) if pnl is not None else None
+    net_pnl_pct = (round(net_pnl / (entry_price * qty) * 100, 2)
+                   if (net_pnl is not None and entry_price and qty) else None)
+    return {
+        "symbol": t["symbol"], "side": t["side"], "entry_ts": t["entry_ts"],
+        "entry_price": entry_price, "exit_ts": t["exit_ts"],
+        "exit_price": float(t["exit_price"]) if t.get("exit_price") is not None else None,
+        "result": t.get("result"), "net_pnl": net_pnl, "net_pnl_pct": net_pnl_pct,
+    }
+
+
+def _cc2215_closed_table(basket: str, cutover_ts) -> list:
+    """cc#2215 CLOSED table: era-bounded on entry_ts (V8_ERA_CUTOVER_ONLY_V1 / V8_PNL_CANON_V1 rule
+    13's own fresh-era bound -- never a pre-cutover row), newest-exit-first, capped at 200 (the
+    frontend paginates the rest with show-more). Read-only against v8_paper_trades -- no schema or
+    writer change (do_not_touch)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT symbol, side, entry_ts, entry_price, exit_ts, exit_price, qty, result, pnl
+                FROM v8_paper_trades
+                WHERE basket=%s AND (%s::timestamp IS NULL OR entry_ts >= %s::timestamp)
+                ORDER BY exit_ts DESC LIMIT 200
+            """, (basket, cutover_ts, cutover_ts))
+            cols = [d[0] for d in cur.description]
+            trades = [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception:
+        return []
+    round_trip = BROKERAGE_PER_TRADE * 2
+    return [_cc2215_closed_row(t, round_trip) for t in trades]
+
+
 @router.get("/qualified/{basket}")
 def qualified(basket: str, response: Response, limit: int = 50):
     response.headers["Cache-Control"] = "max-age=300"   # 5-min — matches signal cadence
@@ -1807,6 +1907,14 @@ def qualified(basket: str, response: Response, limit: int = 50):
         rows = _enrich_with_status(rows, basket, open_pos, slot_full,
                                    closed_today, conflict_syms, missed,   # cc#326
                                    _load_signal_refs(basket))             # cc#1142
+        # cc#2215: cross-basket, side-scoped suppression -- a SIGNAL row (not yet open in THIS
+        # basket) whose symbol is already OPEN elsewhere on the same side must not double-count as
+        # a fresh entry candidate; it renders only in that OTHER basket's OPEN table below.
+        # Display-only: the engine's own gate order (has_open / cooloff / ...) is untouched, and a
+        # symbol genuinely OPEN in THIS basket keeps status='OPEN' from _enrich_with_status above,
+        # so it is never touched by this filter.
+        _open_elsewhere = _open_symbols_same_side(basket)
+        rows = [r for r in rows if not (r.get("status") == "SIGNAL" and r["symbol"] in _open_elsewhere)]
         # cc#517 Part D: F&O ban chip (display-only) -- the real entry-skip gate lives in
         # v8_signal_writer.py's _auto_paper_entry. Table-exists-safe (no-op before cc#517's first run).
         try:
@@ -1830,6 +1938,15 @@ def qualified(basket: str, response: Response, limit: int = 50):
         # that fails to resolve carries tc_error (never a bare null the page cannot tell from "no
         # signal"). Table only -- v8_tc_score_ticks/tc_position_stars_v2 themselves are untouched.
         _tc_meta = v8_live_tc.attach_live_tc(rows, basket)
+        # cc#2215: OPEN + CLOSED tables below the qualified table -- era-bounded, read-only,
+        # never merged with `rows` above. era_block is the same shape v8_era.era_block() serves
+        # everywhere else on this page (v8EraLabel() reads .era_label), so the bucket tab prints
+        # the identical caption the Trade Log / Day Log already print, never a typed-in string.
+        from v8_era import era_block as _v8_era_block
+        with _conn() as conn, conn.cursor() as cur:
+            _era_blk = _v8_era_block(cur)
+        _open_table   = _cc2215_open_table(open_pos)
+        _closed_table = _cc2215_closed_table(basket, _era_blk.get("cutover_ts"))
         extra = {}
         if basket == "buy_momentum":
             # cc#502 BUY_MOMENTUM_V3: fixed +3.0%/-3.0% (1:1), frozen at entry -- no Nifty-regime
@@ -1851,7 +1968,9 @@ def qualified(basket: str, response: Response, limit: int = 50):
             extra = {"target": "-3.0% fixed", "target_formula": "entry * 0.97",
                      "stop_formula": "+3.0% fixed = entry * 1.03 (true 1:1)"}
         return _enrich_qualified_result({"basket": basket, "count": len(rows), "stocks": rows,
-                "source": source_note, "tc_live": _tc_meta, **_basket_meta(basket), **extra})
+                "source": source_note, "tc_live": _tc_meta,
+                "open_table": _open_table, "closed_table": _closed_table, "era_block": _era_blk,
+                **_basket_meta(basket), **extra})
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 
