@@ -101,6 +101,15 @@ def get_primary_style_bands():
     return {"watch": float(_WATCH_10), "valid": float(_VALID_10), "strong": float(_STRONG_10)}
 
 
+def get_primary_best_card():
+    """cc#2214: the canonical best-of-four selector, fn(cards, side=None) -> card | None, on the
+    cc#1033 locked ratio (score / max). Exposed here so a surface that needs the SAME pick the
+    position-star batch makes (tc_v4_dual.best_card) imports nothing versioned (cc#738 / cc#1549)."""
+    _resolve_version()
+    from tc_v4_dual import best_card
+    return best_card
+
+
 def get_primary_scan():
     """The canonical universe scan: fn(side='ALL', verdict='ALL', segment=None, limit=250) -> dict
     whose `results` rows carry best_label / best_score100 / verdict per symbol, scored by the same

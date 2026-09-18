@@ -64,6 +64,7 @@ from nse_holidays import is_trading_day
 from v8_signal_writer import (BASKET_FILTERS, BASKET_SPEC, basket_filter_config,
                               basket_stage_rows, basket_funnel_keys)
 import v8_timing_rules   # cc#1138: V8_TIMING_RULES_V1, session_log 27321
+import v8_live_tc   # cc#2214: live TC /100 for every qualified row, via tc_resolver -- never v8_tc_score_ticks/tc_position_stars_v2 (both book-scoped)
 
 # cc#1038: how many buy_momentum HARD gates there are, asked of the registry rather than written
 # down. This used to be the literal 6 in `if len(passed) == 6:` — the exact FUNNEL_TRUTH failure
@@ -1822,6 +1823,13 @@ def qualified(basket: str, response: Response, limit: int = 50):
         except Exception:
             for r in rows:
                 r["banned"] = False
+        # cc#2214: TC /100 for EVERY row on this tab, resolved live (tc_resolver, best of four on the
+        # cc#1033 ratio) -- v8_tc_score_ticks and tc_position_stars_v2 are both scoped to symbols that
+        # are/were OPEN in the book, so a qualified name that was never traded got a bare "--", and a
+        # name that left the book kept rendering its last stored star as if it were today's. A row
+        # that fails to resolve carries tc_error (never a bare null the page cannot tell from "no
+        # signal"). Table only -- v8_tc_score_ticks/tc_position_stars_v2 themselves are untouched.
+        _tc_meta = v8_live_tc.attach_live_tc(rows, basket)
         extra = {}
         if basket == "buy_momentum":
             # cc#502 BUY_MOMENTUM_V3: fixed +3.0%/-3.0% (1:1), frozen at entry -- no Nifty-regime
@@ -1843,7 +1851,7 @@ def qualified(basket: str, response: Response, limit: int = 50):
             extra = {"target": "-3.0% fixed", "target_formula": "entry * 0.97",
                      "stop_formula": "+3.0% fixed = entry * 1.03 (true 1:1)"}
         return _enrich_qualified_result({"basket": basket, "count": len(rows), "stocks": rows,
-                "source": source_note, **_basket_meta(basket), **extra})
+                "source": source_note, "tc_live": _tc_meta, **_basket_meta(basket), **extra})
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 

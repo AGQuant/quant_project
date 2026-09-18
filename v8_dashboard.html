@@ -4032,7 +4032,12 @@ function tcHdrInfo(){
   return `<span class="info-btn" onclick="event.stopPropagation()" title="Best of the 4 cards, any direction. Tag = which card. Click a number for its 30-day trend." style="margin-left:4px;cursor:help">i</span>`;
 }
 function tcCell(x){
-  if(x.tc_score==null) return '--';
+  // cc#2214: a live-resolve failure gets its own affordance -- never the bare "--" that a page
+  // whose whole job is showing what was NOT taken cannot tell apart from "no signal at all".
+  if(x.tc_score==null){
+    if(x.tc_error) return `<span class="tcq-err" title="${esc(x.tc_error)}" style="font-family:'Sora',sans-serif;font-size:9.5px;font-weight:800;color:var(--red);cursor:help;border-bottom:1px dotted var(--red)">err</span>`;
+    return '--';
+  }
   const b=String(x.tc_bucket||''), buy=b.indexOf('BUY')===0, opp=!!x.tc_opposes;
   const capCol=buy?'var(--grn)':'var(--red)', capBg=buy?'rgba(47,212,139,.12)':'rgba(255,92,108,.12)';
   const sideTip=(x.tc_side_score!=null)?`on your side: ${x.tc_side_bucket||'--'} ${Number(x.tc_side_score).toFixed(0)}`:'on your side: no card scored';
@@ -4222,7 +4227,13 @@ function v8NormRow(x,ctx){
   // cc#1603 (TC_BEST_OF_FOUR_V1 22353 + founder 02-Sep 15:34): the column VALUE is the best of the
   // four cards in ANY direction (best_any_score100 = best_any_score10 x 10, 29138); the position's
   // own-side card rides along for the hover, never as the headline. Both straight off the batch row.
-  if(x.tc_score==null){const _t=(ctx.tcScores||{})[x.symbol+'|'+String(x.side||'').toUpperCase()];
+  // cc#2214: this fallback is a MASTER-surface-only thing now. A basket-tab row's tc_* fields come
+  // straight off /api/v8/qualified/{basket} (v8_live_tc.attach_live_tc, live-resolved per row,
+  // cc#2214) -- tc_score is null there ONLY on a genuine resolve failure, which carries tc_error, so
+  // falling back to the stale book-scoped position-stars-v2 map would silently hide that honest
+  // failure behind a wrong number (or, worse, a real number for a symbol that was never in the book
+  // for THIS pick). ctx.tcScores stays the source for the master/open-positions surface, unchanged.
+  if(x.tc_score==null && ctx.surface!=='basket'){const _t=(ctx.tcScores||{})[x.symbol+'|'+String(x.side||'').toUpperCase()];
     if(_t){
       if(_t.best_any_score100!=null)x.tc_score=_t.best_any_score100; else if(_t.best_any_score10!=null)x.tc_score=Math.round(Number(_t.best_any_score10)*100)/10;
       x.tc_bucket=_t.best_any_bucket||null; x.tc_band=_t.best_any_verdict10||null; x.tc_opposes=(_t.best_any_opposes_position===true);
