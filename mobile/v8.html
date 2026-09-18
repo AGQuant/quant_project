@@ -1321,7 +1321,8 @@ function daylogRetry(){
    daily.py) than Realised/Net Total's (v8_daylog_extras.py, unchanged). DL_KIND defaults
    'realised' so every pre-cc#2097 caller (dlChartOpen with no 3rd arg) is byte-identical to
    before. DL_WINDOW is the new 1W/1M/3M/Since-start toggle (item 5/6) -- 'all' means "Since
-   start", unchanged existing behaviour. DL_INFO_KEY is the kwInfoLines() key for whichever
+   start", unchanged existing behaviour; cc#2211 adds '100b' (the last 100 bars) as the
+   unrealised sheet's widest window in place of 'all'. DL_INFO_KEY is the kwInfoLines() key for whichever
    leading box opened this sheet (item 2's folded-in breakdown); null for a box that never had
    one (Long/Short sub-wells), same as opts.info was never set for them before. */
 var DL_SERIES = {realised:{all:null, long:null, short:null}, unreal:{all:null, long:null, short:null}};
@@ -1344,10 +1345,15 @@ function dlSeriesLoad(slice, kind){
    rebase amounts (net/gross) so the caller can pick the one matching the active DL_FOCUS. */
 function dlWindowSlice(pts, win){
   if(win === 'all' || !pts.length) return {points: pts, rebaseNet: 0, rebaseGross: 0};
-  var days = DL_WINDOW_DAYS[win] || 0;
-  var cutoff = new Date(pts[pts.length - 1].date + 'T00:00:00'); cutoff.setDate(cutoff.getDate() - days + 1);
-  var cutoffStr = cutoff.toISOString().slice(0, 10);
-  var sliced = pts.filter(function(p){ return p.date >= cutoffStr; });
+  var sliced;
+  if(win === '100b'){
+    sliced = pts.slice(-100);   /* cc#2211: the last 100 bars (one point = one trading day); fewer than 100 -> all of them, nothing padded */
+  } else {
+    var days = DL_WINDOW_DAYS[win] || 0;
+    var cutoff = new Date(pts[pts.length - 1].date + 'T00:00:00'); cutoff.setDate(cutoff.getDate() - days + 1);
+    var cutoffStr = cutoff.toISOString().slice(0, 10);
+    sliced = pts.filter(function(p){ return p.date >= cutoffStr; });
+  }
   if(!sliced.length) return {points: [], rebaseNet: 0, rebaseGross: 0};
   var baseNet = sliced[0].net_cum, baseGross = sliced[0].gross_cum;
   return {
@@ -1453,11 +1459,11 @@ function dlChartSheetHtml(d){
     ? (DL_WINDOW === 'all' ? 'Since ' + dmy(wp[0].date) : dmy(wp[0].date) + ' \u2013 ' + dmy(wp[wp.length - 1].date))
       + ' \u00b7 ' + wp.length + ' trading day' + (wp.length === 1 ? '' : 's') + ' \u00b7 ' + subDateLabel
     : 'No trading days in this window yet';
-  var brokNote = isUnreal ? 'A position pays no brokerage until it closes \u2014 gross and net are the same here'
-                          : (DL_FOCUS === 'net' ? 'Net is after \u20b9500/closed trade brokerage' : 'Gross is before brokerage');
-  var pills = '<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">' + dlChartPill('net', 'Net') + dlChartPill('gross', 'Gross') + '<span style="font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F)">' + brokNote + '</span></div>';
-  var winPills = '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">' + dlWindowPill('all', 'SINCE START') + dlWindowPill('1w', '1W') + dlWindowPill('1m', '1M') + dlWindowPill('3m', '3M') + '</div>';
-  var liveNote = liveU == null ? '' : '<div style="padding:0 14px 4px;font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F)">\u25cb live = ' + (isUnreal ? 'today\u2019s open positions marked to market' : 'today\u2019s open positions marked to market, added to the line above') + '</div>';
+  /* cc#2211: the brokerage note beside the pills and the "live = ..." line under the chart are gone for both kinds (founder
+     18-Sep); the hollow live end-point on the SVG itself stays. The unrealised sheet's widest window is 100 BARS (the last
+     100 points, dlWindowSlice '100b'), never SINCE START; the realised sheet keeps SINCE START / 1W / 1M / 3M as cc#2097 built them. */
+  var pills = '<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">' + dlChartPill('net', 'Net') + dlChartPill('gross', 'Gross') + '</div>';
+  var winPills = '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">' + (isUnreal ? dlWindowPill('100b', '100 BARS') : dlWindowPill('all', 'SINCE START')) + dlWindowPill('1w', '1W') + dlWindowPill('1m', '1M') + dlWindowPill('3m', '3M') + '</div>';
   var foot;
   if(!isUnreal && DL_WINDOW === 'all'){
     // cc#2097: era-level Return/CAGR are only ever shown for the unwindowed "Since start" view --
@@ -1473,7 +1479,7 @@ function dlChartSheetHtml(d){
     var chg = wp.length ? (DL_FOCUS === 'gross' ? wp[wp.length - 1].gross_cum : wp[wp.length - 1].net_cum) : 0;
     foot = '<div style="padding:10px 14px 22px;font-family:var(--mono);font-size:10.5px;color:var(--mute,#8C99BD)">Change over this window <b class="' + sgn(chg) + '">' + inr(chg) + '</b></div>';
   } else {
-    foot = '<div style="padding:0 14px 22px;font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F);line-height:1.4">' + esc(d.cagr_note || '') + '</div>';
+    foot = '';   /* cc#2211: the unrealised sheet carries no cagr_note foot any more */
   }
   // cc#2097 item 2: the (i) breakdown folded in, below the chart, for whichever leading box
   // opened this sheet (DL_INFO_KEY null for a Long/Short sub-well, same as it never had one).
@@ -1483,10 +1489,10 @@ function dlChartSheetHtml(d){
     infoFoot = '<div style="margin:0 14px 14px;padding-top:10px;border-top:1px solid var(--line,#22293A)">'
       + '<div style="font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--gold,#D4AF37);margin-bottom:6px">' + esc(info.title) + '</div>'
       + info.rows.map(function(r){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-family:var(--mono);font-size:12px"><span style="color:var(--mute,#8C99BD)">' + esc(r[0]) + '</span><b>' + r[1] + '</b></div>'; }).join('')
-      + '<div style="font-family:var(--mono);font-size:9.5px;color:var(--dim,#5E6B8F);line-height:1.4;margin-top:6px">' + esc(info.note) + '</div></div>';
+      + '</div>';   /* cc#2211: no note sentence under the rows */
   }
   return head + '<div style="padding:6px 14px 0;font-family:var(--mono);font-size:10px;color:var(--mute,#8C99BD)">' + esc(sub) + '</div>'
-    + pills + winPills + '<div style="padding:10px 14px 0">' + dlChartSvg({points: wp}, DL_SLICE, DL_KIND, rebase) + '</div>' + liveNote + foot + infoFoot;
+    + pills + winPills + '<div style="padding:10px 14px 0">' + dlChartSvg({points: wp}, DL_SLICE, DL_KIND, rebase) + '</div>' + foot + infoFoot;
 }
 function dlChartOpen(slice, kind, infoKey){
   DL_SLICE = slice || 'all';   // cc#2005: defaults to 'all', so the pre-existing Day Log chart
@@ -1494,7 +1500,7 @@ function dlChartOpen(slice, kind, infoKey){
                                 // now also getting the live end-point when STATE.book is loaded.
   DL_KIND = kind === 'unreal' ? 'unreal' : 'realised';
   DL_INFO_KEY = infoKey || null;
-  DL_WINDOW = DL_KIND === 'unreal' ? '1w' : 'all';   // item 4: unrealised opens to its 1-week default; realised/net keep opening to Since start, unchanged
+  DL_WINDOW = DL_KIND === 'unreal' ? '100b' : 'all';   // cc#2211: unrealised opens on 100 BARS (was 1W, cc#2097 item 4); realised/net keep opening to Since start, unchanged
   DL_FOCUS = 'net';   // a fresh open always starts on Net (this was implicitly true before cc#2097; stated now that DL_KIND/DL_WINDOW also reset here)
   var ov = document.getElementById('v8-dlchart-ov');
   if(!ov){
@@ -1722,26 +1728,23 @@ function posPaneChanged(){
 /* cc#2005 founder addition (11-Sep 21:20 IST): ONE (i) button per pane (its leading/headline box
    only — kpiWell's opts.info), showing that pane's own gross/brokerage/net working in plain
    words. Same body-level sheet shape openSortSheetOpen() already established in this file. */
-function kwInfoLines(key){
+function kwInfoLines(key){   /* cc#2211: title + three rows per key, no note sentence (founder 18-Sep) */
   var bk = STATE.book || {};
   if(key === 'unrealised') return {
     title: 'UNREALISED — HOW THIS IS WORKED OUT',
-    rows: [['P&L on open positions', inr(bk.unrealised)], ['Brokerage charged so far', '₹0'], ['Net', inr(bk.unrealised)]],
-    note: 'A position only pays the ₹500 brokerage when it closes — nothing is owed on it yet, so gross and net are the same number here.'
+    rows: [['P&L on open positions', inr(bk.unrealised)], ['Brokerage charged so far', '₹0'], ['Net', inr(bk.unrealised)]]
   };
   if(key === 'realised'){
     var g = num(bk.gross) ? bk.gross : 0, b = num(bk.brokerage) ? bk.brokerage : 0, n = num(bk.trades) ? bk.trades : 0;
     return {
       title: 'REALISED — HOW THIS IS WORKED OUT',
-      rows: [['Gross P&L', inr(g)], ['Brokerage ('+n+' closed trade'+(n===1?'':'s')+' × ₹500)', '−'+inr(b)], ['Net', inr(num(bk.realised)?bk.realised:g-b)]],
-      note: 'Net of brokerage is what actually landed after every closed trade paid its ₹500.'
+      rows: [['Gross P&L', inr(g)], ['Brokerage ('+n+' closed trade'+(n===1?'':'s')+' × ₹500)', '−'+inr(b)], ['Net', inr(num(bk.realised)?bk.realised:g-b)]]
     };
   }
   var u = num(bk.unrealised) ? bk.unrealised : 0, r = num(bk.realised) ? bk.realised : 0;
   return {
     title: 'NET TOTAL — HOW THIS IS WORKED OUT',
-    rows: [['Unrealised (net)', inr(u)], ['Realised (net)', inr(r)], ['Combined', inr(u+r)]],
-    note: 'Both halves are already net of brokerage, so the combined figure needs no further adjustment.'
+    rows: [['Unrealised (net)', inr(u)], ['Realised (net)', inr(r)], ['Combined', inr(u+r)]]
   };
 }
 /* cc#2097: kwInfoHtml/kwInfoOpen (the standalone (i) popover, cc#2005) are retired -- their only
