@@ -210,13 +210,22 @@ var url = Q.seg ? '/api/mobile/sector_app/segment?name='+encodeURIComponent(Q.se
 /* cc#2206: a failure is diagnosable from the screen -- HTTP status + content-type + the first 120 chars of the body (never the bare
    'Could not load sectors.' that hid a 502-during-deploy, an auth HTML page and a real bug behind one string). One automatic retry
    after 800 ms; then a Retry button that re-runs the SAME fetch (ladder -> /list, segment -> /segment?name=, all -> /list), no reload. */
+/* cc#2210: the cc#2208 helper, same behaviour. mobile_endpoints._guard answers a logged-out XHR with 401 {error:'unauthorized', login_url:'/login'};
+   that body is let through the cc#2206 status ladder above (a 401 is !r.ok, so it used to land in the catch -> auto retry -> a Retry button that
+   could never succeed) and handled here FIRST: go to the login page. Every non-auth failure keeps the cc#2206 path unchanged. GOING is a one-shot
+   so two fetches cannot both navigate. No return-to param: the app login lands on /m/home (login.html's hidden next=/m/home; login_get reads no
+   ?next=), exactly as cc#2208 found. */
+var GOING=false;
+function unauth(d){ if(d&&(d.error==='unauthorized'||d.login_url)){ if(!GOING){ GOING=true; var u=(typeof d.login_url==='string'&&d.login_url.charAt(0)==='/')?d.login_url:'/login'; location.replace(u); } return true; } return false; }
 function showErr(m, retry){ var az=document.getElementById('asof'); if(az) az.textContent='Not loaded'; document.getElementById('body').innerHTML='<div class="err">'+esc(m)+(retry?'<br><button type="button" class="se-retry" id="se-retry">Retry</button>':'')+'</div>'; var b=document.getElementById('se-retry'); if(b) b.addEventListener('click', function(){ load(0); }); }
 function load(attempt){
   fetch(url,{credentials:'same-origin'}).then(function(r){
     var ct=(r.headers.get('content-type')||'').split(';')[0].trim();
+    if(r.status===401&&ct==='application/json'){ return r.json().then(function(d){ if(unauth(d)) return null; throw new Error('HTTP 401 application/json — '+JSON.stringify(d).replace(/\s+/g,' ').slice(0,120)); }); }  /* cc#2210 */
     if(!r.ok||ct!=='application/json'){ return r.text().then(function(t){ throw new Error('HTTP '+r.status+(ct?' '+ct:'')+' — '+String(t||'').replace(/\s+/g,' ').trim().slice(0,120)); }); }
     return r.json();
   }).then(function(d){
+    if(d===null) return;  /* cc#2210: unauth() has already navigated */
     if(d.error){ showErr('Could not load: '+d.error, true); return; }
     Q.seg ? renderSeg(d) : (Q.view==='all' ? renderAll(d) : renderList(d));
   }).catch(function(e){

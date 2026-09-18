@@ -148,11 +148,18 @@ function renderNew(){
   document.getElementById('b-parse').addEventListener('click', parse);
   document.getElementById('f-file').addEventListener('change', parse);
 }
+/* cc#2210: the cc#2208 helper, same behaviour. mobile_endpoints._guard answers a logged-out XHR with 401 {error:'unauthorized', login_url:'/login'};
+   the page must go to the login page, not print the word 'unauthorized'. GOING is a one-shot so two fetches cannot both navigate. No return-to
+   param is invented: the app login lands on /m/home (login.html's hidden next=/m/home; login_get reads no ?next=), exactly as cc#2208 found.
+   Guards the boot fetch (health_app/list + /report) and the parse() / save() posts (/api/health/upload + /generate). */
+var GOING=false;
+function unauth(d){ if(d&&(d.error==='unauthorized'||d.login_url)){ if(!GOING){ GOING=true; var u=(typeof d.login_url==='string'&&d.login_url.charAt(0)==='/')?d.login_url:'/login'; location.replace(u); } return true; } return false; }
 function parse(){
   var out=document.getElementById('parse-out'); out.innerHTML='<div class="sub2">Reading…</div>';
   var fd=new FormData(); var f=document.getElementById('f-file').files[0]; var t=document.getElementById('f-text').value.trim();
   if(f) fd.append('file', f); else if(t) fd.append('text', t); else { out.innerHTML='<div class="sub2 neg">Paste holdings or pick a file first.</div>'; return; }
   fetch('/api/health/upload',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    if(unauth(d)) return;
     if(d.error&&!(d.rows||[]).length){ out.innerHTML='<div class="sub2 neg">'+esc(d.error)+'</div>'; return; }
     GRID=(d.rows||[]).map(function(r){ return {input:r.input||r.symbol, symbol:r.symbol, company_name:r.company_name, qty:r.qty, avg_price:r.avg_price, resolved:!!r.resolved}; });
     out.innerHTML='<div class="sub2">'+d.resolved+' matched · '+d.unresolved+' not matched'+(d.warning?' · '+esc(d.warning):'')+'</div>';
@@ -175,6 +182,7 @@ function save(){
   var inv=document.getElementById('f-inv').value, cash=document.getElementById('f-cash').value, st=document.getElementById('f-start').value;
   if(inv) body.invested_amount=Number(inv); if(cash) body.cash=Number(cash); if(st){ body.tracking_date=st; body.alpha_start_date=st; }
   fetch('/api/health/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    if(unauth(d)) return;
     if(d.error){ so.textContent=d.error; return; }
     location.href='/m/health?pid='+d.portfolio_id;
   }).catch(function(){ so.textContent='Could not save.'; });
@@ -242,7 +250,7 @@ function fail(m){ document.getElementById('body').innerHTML='<div class="err">'+
 if(Q.view==='new'){ renderNew(); }
 else {
   var url = Q.pid ? '/api/mobile/health_app/report?pid='+encodeURIComponent(Q.pid) : '/api/mobile/health_app/list';
-  fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){ if(d.error&&!(d.rows||[]).length){ fail('Could not load: '+d.error); return; } Q.pid ? renderReport(d) : renderList(d); }).catch(function(){ fail('Could not load portfolio health.'); });
+  fetch(url,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){ if(unauth(d)) return; if(d.error&&!(d.rows||[]).length){ fail('Could not load: '+d.error); return; } Q.pid ? renderReport(d) : renderList(d); }).catch(function(){ fail('Could not load portfolio health.'); });
 }
 </script>
 </body></html>
