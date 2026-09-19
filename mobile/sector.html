@@ -349,7 +349,16 @@ function renderTheme(d){
   var h='<div class="hero"><div class="eye">Theme</div><div class="nm">'+esc(d.theme||'')+'</div>'
     +(d.tagline?'<div class="si-tg">'+esc(d.tagline)+'</div>':'')+'</div>';
   var groups=d.groups||[];
-  h+='<div class="sec"><h2>Members</h2><span class="hint">'+(d.member_count||0)+' · grouped by segment, strongest first</span></div>';
+  // cc#2241 (founder 19-Sep): theme members are now a shortlist (GVM above the floor, server-side
+  // filtered), not a census -- the header must say so, or a reader seeing 31 with no context cannot
+  // tell whether the theme has 31 members or 81 with 50 hidden. total_member_count is the FULL,
+  // unfiltered count computed server-side before the filter; falls back to plain "N members" if it
+  // is ever absent (e.g. an older cached response) rather than showing a broken "of undefined".
+  var mCount=d.member_count||0, mTotal=d.total_member_count, mFloor=d.gvm_floor;
+  var mHint=(mTotal!=null&&mTotal!==mCount)
+    ? (mCount+' of '+mTotal+' · GVM above '+(mFloor!=null?mFloor:7)+' · grouped by segment, strongest first')
+    : (mCount+' · grouped by segment, strongest first');
+  h+='<div class="sec"><h2>Members</h2><span class="hint">'+esc(mHint)+'</span></div>';
   h+= groups.length ? '<div class="wrap" id="tb"></div>' : '<div class="card"><div class="emp"><b>No members on record</b>This theme has no scored companies in its related segments right now.</div></div>';
   h+='<div class="note"><b>Segments are ordered by their own mcap-weighted GVM, strongest first.</b> Names inside a segment are ordered by GVM — tap a header to sort within each segment.</div>';
   document.getElementById('body').innerHTML=h;

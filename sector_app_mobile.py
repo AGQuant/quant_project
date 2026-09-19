@@ -290,18 +290,33 @@ def mobile_sector_theme(request: Request, name: str = ""):
         cur.execute("SELECT MAX(score_date) FROM gvm_scores")
         score_date = cur.fetchone()[0]
 
+    # cc#2241 (founder 19-Sep): the theme view becomes a shortlist, GVM > 7 STRICT (not >=7 -- two
+    # themes have a member sitting at exactly 7.00, and the founder's own words were "above 7").
+    # total_member_count is the FULL, unfiltered membership -- computed before the filter below, so
+    # the header can honestly say "31 of 81" rather than just a smaller number with no context.
+    # do_not_touch: the Emerging Themes card's mcap-weighted GVM/3M return (_theme_mcap_stats,
+    # mobile_sector_list) already reads gvm_scores independently of this endpoint and is untouched
+    # by this filter -- it stays computed over the full membership, as the card requires.
+    total_member_count = len(member_rows)
+    GVM_FLOOR = 7
     groups = []
     cur_seg = object()   # sentinel -- no real segment name equals this, so the first row always opens a group
     cur_group = None
     for segment, seg_gvm, symbol, gvm_score, year_return in member_rows:
+        if gvm_score is None or float(gvm_score) <= GVM_FLOOR:
+            continue
         if segment != cur_seg:
             cur_seg = segment
             cur_group = {"segment": segment, "gvm": _fl(seg_gvm), "members": []}
             groups.append(cur_group)
         cur_group["members"].append({"symbol": symbol, "gvm": _fl(gvm_score), "year_return": _fl(year_return)})
+    # a segment whose every member fell below the floor never opened a group above (the sentinel
+    # check only fires on a row that survives the continue), so no empty-group prune is needed here.
 
+    member_count = sum(len(gr["members"]) for gr in groups)
     return {"theme": name, "tagline": tagline, "score_date": str(score_date) if score_date else None,
-            "groups": groups, "member_count": sum(len(gr["members"]) for gr in groups)}
+            "groups": groups, "member_count": member_count, "total_member_count": total_member_count,
+            "gvm_floor": GVM_FLOOR}
 
 
 _FY_QUARTER_RE = re.compile(r"^Q([1-4])FY(\d+)$")
