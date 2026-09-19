@@ -345,7 +345,11 @@ function renderTheme(d){
   // shell, same tbl() component, just the grouped mode and a different COLS set (item 8: no SEGMENT
   // column, the group header already carries it).
   document.getElementById('pg-title').textContent=d.theme||'Theme'; document.getElementById('back').style.display='';
-  document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(d.member_count||0)+' names';
+  // cc#2241: this top stamp used d.member_count, which is now the FILTERED (GVM > 7) count -- left
+  // as-is it would silently show 31 instead of 81 up here too, the exact problem the card raised
+  // for the Members section below. total_member_count (the full membership) is the more honest
+  // figure for a page-level "how big is this" stamp; falls back to member_count if it is ever absent.
+  document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(d.total_member_count!=null?d.total_member_count:(d.member_count||0))+' names';
   var h='<div class="hero"><div class="eye">Theme</div><div class="nm">'+esc(d.theme||'')+'</div>'
     +(d.tagline?'<div class="si-tg">'+esc(d.tagline)+'</div>':'')+'</div>';
   var groups=d.groups||[];
