@@ -212,7 +212,53 @@ DECLARE
     d        RECORD;                 -- cc#1729 data-check verdict
     rep      INT := 0;               -- cc#1729 skeleton repeats in the batch window
     skel     BOOLEAN := FALSE;
+    combined_text TEXT := COALESCE(NEW.headline_clean, '') || E'\\n' || COALESCE(NEW.summary, '') || E'\\n' || COALESCE(NEW.full_summary, '');
 BEGIN
+    -- cc#2230: News Intel renders PLAIN TEXT, not Markdown. 171 rows across every category
+    -- (AI Editorial, Domestic, Global, IPO) had shipped with literal **, #, --- and backticks on
+    -- screen -- this fires BEFORE the category-specific checks below, on every insert/update,
+    -- so a future chat-written draft can never reintroduce it. Blank-line paragraph breaks
+    -- (E'\\n\\n') are untouched -- none of these patterns match a bare newline. NOTE: this also
+    -- means an AI Editorial can no longer use **bold** section headers (the five-header skeleton
+    -- the format-lock check below was built to police) -- those rendered as literal asterisks too,
+    -- which is exactly the founder's complaint, so the skeleton-repeat NOTICE naturally stops
+    -- firing on future inserts (nothing broken, just structurally unreachable now that its own
+    -- input pattern is rejected upstream) -- named here rather than left to be rediscovered.
+    IF combined_text ~ '\\*' THEN
+        RAISE EXCEPTION
+          'POLISH_BODY_GUARD cc#2230 REJECTED: category=% raw_news_id=% headline=%. Markdown asterisk found (* or ** -- bold/italic) in headline_clean/summary/full_summary. News Intel renders PLAIN TEXT, not Markdown -- remove the asterisks and write it in plain words.',
+          NEW.category, COALESCE(NEW.raw_news_id, -1), hl
+          USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF combined_text ~ '(?n)^\\s{0,3}#{1,6} ' THEN
+        RAISE EXCEPTION
+          'POLISH_BODY_GUARD cc#2230 REJECTED: category=% raw_news_id=% headline=%. Markdown header line found (# through ######) in headline_clean/summary/full_summary. News Intel renders PLAIN TEXT, not Markdown -- remove the # marker; use a plain sentence or a blank-line paragraph break instead.',
+          NEW.category, COALESCE(NEW.raw_news_id, -1), hl
+          USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF combined_text ~ '(?n)^\\s*-{3,}\\s*$' THEN
+        RAISE EXCEPTION
+          'POLISH_BODY_GUARD cc#2230 REJECTED: category=% raw_news_id=% headline=%. Markdown horizontal rule found (a line of 3+ dashes) in headline_clean/summary/full_summary. News Intel renders PLAIN TEXT, not Markdown -- remove the rule line; a blank-line paragraph break already separates sections correctly.',
+          NEW.category, COALESCE(NEW.raw_news_id, -1), hl
+          USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF combined_text ~ '`' THEN
+        RAISE EXCEPTION
+          'POLISH_BODY_GUARD cc#2230 REJECTED: category=% raw_news_id=% headline=%. Backtick found in headline_clean/summary/full_summary. News Intel renders PLAIN TEXT, not Markdown code formatting -- remove the backtick(s).',
+          NEW.category, COALESCE(NEW.raw_news_id, -1), hl
+          USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF combined_text ~ '\\[[^\\]]+\\]\\([^)]+\\)' THEN
+        RAISE EXCEPTION
+          'POLISH_BODY_GUARD cc#2230 REJECTED: category=% raw_news_id=% headline=%. Markdown inline link found ([text](url)) in headline_clean/summary/full_summary. News Intel renders PLAIN TEXT -- links do not render as clickable; write the source/attribution in plain words instead.',
+          NEW.category, COALESCE(NEW.raw_news_id, -1), hl
+          USING ERRCODE = 'check_violation';
+    END IF;
+
     IF NEW.category IN ('Domestic', 'Global', 'IPO') AND body_len = 0 THEN
         RAISE EXCEPTION
           'POLISH_BODY_GUARD cc#870 REJECTED: category=% raw_news_id=% headline=%. full_summary is empty. A short polish must carry a 3-4 sentence paragraph (spec 733); a short is 3-4 lines, NOT a 1-2 line compression (spec 8188). Write the body, then insert.',
