@@ -1820,9 +1820,15 @@ body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
    direction indicator. Fully rounded (999px) + a hairline border added on top of that borrowed
    recipe because the spec's own words are "capsule ... rounded, bordered" -- .tr2 .pill itself has
    neither (radius-5, no border), so this is not a byte-identical reuse, stated rather than implied. */
-/* cc#2225 (founder 19-Sep): .pcrchip is retired -- its one caller (pcrMood()'s .pcite line) now
-   opens no popup, the option chain already has its own card on the rail. Not left orphaned. */
-.pcrtrendmini{display:inline-flex;align-items:center;vertical-align:middle}
+/* cc#2225 (founder 19-Sep) retired .pcrchip -- its one caller stopped opening a popup, the option
+   chain already had its own card on the rail. cc#2227 (founder 19-Sep 11:52 IST) restores it,
+   same shape, now wired to open the PCR chart instead of the chain -- the pill returns rather
+   than being reinvented. */
+.pcrchip{display:inline-flex;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--type-11);font-weight:800;letter-spacing:var(--track-em9);color:var(--mut);
+  background:color-mix(in srgb, var(--mut) 12%, transparent);border:var(--bw-1) solid var(--line2);
+  border-radius:999px;padding:var(--space-2) var(--space-6);cursor:pointer}
+.pcrchip:active{opacity:.65}
 /* cc#1568: one-line reason under the PCR line (CAUTIOUS cover reading / week unavailable). */
 .preason{font-size:var(--type-11);color:var(--mut);text-align:center;margin-top:var(--space-2)}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
@@ -2483,53 +2489,13 @@ function chipLoader(kind){
       });
   };
 }
-/* cc#2225: a compact INLINE sparkline for the Home hero PCR line -- deliberately NOT trendSvg
-   (that draws the full popup chart: axis date labels, a scrub crosshair, a filled area -- none of
-   which fit "on the same line as the value" at a few dozen px wide). Reuses trendRange, the SAME
-   range/padding logic trendSvg and wireScrub already share, so this can never plot a shape that
-   disagrees with what the popup would draw for the identical series -- only the SVG markup differs.
-   No date labels, no crosshair, no fill: a bare polyline is the whole point of "compact". */
-function miniSparkSvg(series){
-  var W = 44, H = 16;
-  var vs = series.map(function(p){ return p.v; });
-  var r = trendRange(vs), lo = r.lo, rng = r.rng;
-  var n = series.length;
-  var xs = function(i){ return n === 1 ? 0 : i / (n - 1) * W; };
-  var ys = function(v){ return H - ((v - lo) / rng) * H; };
-  var pts = series.map(function(p, i){ return xs(i).toFixed(1) + ',' + ys(p.v).toFixed(1); }).join(' ');
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true"'
-    + ' style="width:' + W + 'px;height:' + H + 'px;display:inline-block;vertical-align:middle">'
-    + '<polyline points="' + pts + '" fill="none" stroke="var(--blu,#4D7CFE)" stroke-width="1.4"/>'
-    + '</svg>';
-}
-/* cc#2225: fills #pcrtrendmini after paint (same paint-then-fill pattern as loadIndexBook() etc,
-   called alongside them below). ONE data source, chipLoader('pcr') -- the exact fetch every other
-   PCR/ADR/VIX chip already uses, itself reading /api/mobile/trends -> mobile_home2's live
-   whole-chain PCR compute (cc#1846/cc#1849), never a second derivation and never option_chain or
-   pcr_intraday queried directly from this file. Intraday (days=1) when the session has points per
-   the card's own instruction; falls back to the daily series (days=30) only when intraday comes
-   back with fewer than 2 points (before the first tick, a weekend, a holiday) -- the exact
-   TREND_INTRADAY-driven fallback rule togTrend/hasIntraday already encode elsewhere on this page,
-   applied here rather than re-invented. NULL-HONEST: fewer than 2 points either way leaves
-   #pcrtrendmini empty -- the card shows the PCR value and stamp alone, never a fabricated line
-   (the exact cc#1231 failure named in the card's own scope item 4). */
-function loadPcrTrendMini(){
-  var el = document.getElementById('pcrtrendmini');
-  if (!el) return;
-  var load = chipLoader('pcr');
-  var firstDays = hasIntraday('pcr') ? 1 : 30;
-  load(firstDays).then(function(res){
-    var series = res.series || [];
-    if (firstDays === 1 && series.length < 2) {
-      return load(30).then(function(res2){ return res2.series || []; });
-    }
-    return series;
-  }).then(function(series){
-    el.innerHTML = (series && series.length >= 2) ? miniSparkSvg(series) : '';
-  }).catch(function(){
-    el.innerHTML = '';
-  });
-}
+/* cc#2225 shipped a compact inline sparkline here (miniSparkSvg + loadPcrTrendMini, reusing
+   trendRange). cc#2227 (founder 19-Sep 11:52 IST, seeing it live: "Down show pcr line show pcr
+   capsule clickable in charts") SUPERSEDES it -- no series is drawn on the Home hero card in any
+   form any more. Both functions and the #pcrtrendmini paint-then-fill call are REMOVED, not left
+   dead: pcrMood()'s .pcite line now emits a plain capsule wired to togTrend(event,'pcr') instead,
+   the same PCR chip popout THE MARKET TODAY card's own PCR chip already opens -- one chart
+   implementation, reused from a second entry point, never forked. */
 /* Tape data. Daily = /api/global/history/{name} (flat global_indices rows, price+quote_date).
    1D = /api/global/intraday/{feed_name} (flat global_intraday rows, close+ts). Both return a
    FLAT LIST, or {error} on failure — verified by reading gvm_market_endpoints.py, not assumed.
@@ -5527,13 +5493,18 @@ function pcrMood(hero){
        cc#2225 (founder 19-Sep, "instead of full chain display pcr trend because chain already
        showing in 3rd card"): the pill is REMOVED -- the option chain is already reachable from its
        own card (heroCard3/oiCard, card 3 on this same rail), so the pill was a second door to a
-       surface the rail already carries. #pcrtrendmini is a paint-then-fill placeholder (same
-       pattern as #heroCard3Body/#apTrBody/#heroPositionsBody below) -- loadPcrTrendMini() fills it
-       from /api/mobile/trends?kind=pcr&days=1 (the SAME live whole-chain compute cc#1846/cc#1849
-       already route every PCR reader through, never pcr_intraday.pcr_total or a second query) once
-       #pcrtrendmini exists after paint. Null-honest: no series, no sparkline, the value and stamp
-       stand alone -- never a fabricated shape. */
-    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + ' <span class="pcrtrendmini" id="pcrtrendmini"></span>' + pcrAsOfSuffix(hero) + '</div>'
+       surface the rail already carries. Replaced with an inline sparkline (#pcrtrendmini).
+       cc#2227 (founder 19-Sep 11:52 IST, seeing the sparkline live: "Down show pcr line show pcr
+       capsule clickable in charts") SUPERSEDES that replacement -- no line drawn on the card at
+       all. Back to a capsule/pill on this line, same slot and shape as the retired "full chain"
+       pill, but wired to togTrend(event,'pcr') -- the SAME PCR chip popout THE MARKET TODAY card's
+       own PCR chip already opens (1D/7D/15D/30D tabs, its own empty state, its own source note).
+       No second chart, no inline series in any form: the capsule is a control, not a mini-chart.
+       If cc#2226 (the frozen option_chain.oi defect) is still open, the popout will show a flat
+       line -- correct and honest until that lands, not papered over here. */
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2))
+    + ' <span class="pcrchip" onclick="togTrend(event,\'pcr\')" role="button" aria-label="Open PCR chart">trend &rarr;</span>'
+    + pcrAsOfSuffix(hero) + '</div>'
     /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
        ("High put cover while Nifty is down 1.4% on the week"); a missing week input says so
        ("week return unavailable"). Both strings are the composer's — nothing is worded here. */
@@ -6202,7 +6173,6 @@ function renderHome(d, pv){
   loadIndexBook();    /* cc#1382: #heroCard3Body only exists after this paint, same as the mood letters */
   loadApprovedTrades();  /* cc#1867: #apTrBody only exists after this paint, same reason */
   loadHeroPositions(); /* cc#1386: #heroPositionsBody, same reason */
-  loadPcrTrendMini();  /* cc#2225: #pcrtrendmini, same reason */
   heroSetupHeightSync();  /* cc#1374: #heroTrack only exists after this paint, same reason */
   glitterSync();          /* cc#1378: sets the initial active-face class, same reason */
 
