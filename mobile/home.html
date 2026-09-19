@@ -1820,15 +1820,9 @@ body[data-theme="orangepeel"] .pstg button.on{color:var(--panel)}
    direction indicator. Fully rounded (999px) + a hairline border added on top of that borrowed
    recipe because the spec's own words are "capsule ... rounded, bordered" -- .tr2 .pill itself has
    neither (radius-5, no border), so this is not a byte-identical reuse, stated rather than implied. */
-/* cc#2225 (founder 19-Sep) retired .pcrchip -- its one caller stopped opening a popup, the option
-   chain already had its own card on the rail. cc#2227 (founder 19-Sep 11:52 IST) restores it,
-   same shape, now wired to open the PCR chart instead of the chain -- the pill returns rather
-   than being reinvented. */
-.pcrchip{display:inline-flex;align-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:var(--type-11);font-weight:800;letter-spacing:var(--track-em9);color:var(--mut);
-  background:color-mix(in srgb, var(--mut) 12%, transparent);border:var(--bw-1) solid var(--line2);
-  border-radius:999px;padding:var(--space-2) var(--space-6);cursor:pointer}
-.pcrchip:active{opacity:.65}
+/* .pcrchip's slot went full-chain pill (cc#2006) -> retired (cc#2225) -> restored as a trend
+   capsule (cc#2227) -> retired for good (cc#2228, founder 19-Sep 12:01 IST: "Don't show any
+   capsule"). No caller left anywhere on this card; not left orphaned this time either. */
 /* cc#1568: one-line reason under the PCR line (CAUTIOUS cover reading / week unavailable). */
 .preason{font-size:var(--type-11);color:var(--mut);text-align:center;margin-top:var(--space-2)}
 .v10k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--type-85);font-weight:800;
@@ -5485,26 +5479,14 @@ function pcrMood(hero){
        own composer -- a one-line fix if wrong. Parentheses dropped per the spec ("the capsule shape
        carries the meaning").
        cc#2019 (founder 12-Sep): the capsule's own text, "whole chain", duplicated what the popup it
-       opens already states -- the very next thing the user sees. Replaced with a short tap hint
-       ("so the user knows if he clicks the card he gets a detailed option chain") using the SAME
-       aria-label wording home.html already uses for the Max Pain chart's own tap target into this
-       identical popup (line ~3292, "Open full option chain") rather than inventing new copy for the
-       same action. Span class, onclick and the tap affordance are untouched -- text only.
-       cc#2225 (founder 19-Sep, "instead of full chain display pcr trend because chain already
-       showing in 3rd card"): the pill is REMOVED -- the option chain is already reachable from its
-       own card (heroCard3/oiCard, card 3 on this same rail), so the pill was a second door to a
-       surface the rail already carries. Replaced with an inline sparkline (#pcrtrendmini).
-       cc#2227 (founder 19-Sep 11:52 IST, seeing the sparkline live: "Down show pcr line show pcr
-       capsule clickable in charts") SUPERSEDES that replacement -- no line drawn on the card at
-       all. Back to a capsule/pill on this line, same slot and shape as the retired "full chain"
-       pill, but wired to togTrend(event,'pcr') -- the SAME PCR chip popout THE MARKET TODAY card's
-       own PCR chip already opens (1D/7D/15D/30D tabs, its own empty state, its own source note).
-       No second chart, no inline series in any form: the capsule is a control, not a mini-chart.
-       If cc#2226 (the frozen option_chain.oi defect) is still open, the popout will show a flat
-       line -- correct and honest until that lands, not papered over here. */
-    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2))
-    + ' <span class="pcrchip" onclick="togTrend(event,\'pcr\')" role="button" aria-label="Open PCR chart">trend &rarr;</span>'
-    + pcrAsOfSuffix(hero) + '</div>'
+       opens already states. Replaced with a short tap hint, then cc#2225/cc#2227 iterated the same
+       slot twice more (sparkline, then a "trend" capsule reopening togTrend(event,'pcr')).
+       cc#2228 (founder 19-Sep 12:01 IST, "Remove PCR trend from second home card... Already PCR
+       trend is available in first home card and it is not going nice if I click... Just show the
+       PCR meter which is already available. Don't show any capsule.") ENDS the slot for good --
+       PCR trend lives on card 1 only (THE MARKET TODAY's own PCR chip, untouched, same 1D/7D/15D/
+       30D popout). This line is now exactly value + as-of stamp, nothing between them. */
+    + '<div class="pcite">PCR ' + esc(Number(hero.pcr).toFixed(2)) + pcrAsOfSuffix(hero) + '</div>'
     /* cc#1568 scope 5: a CAUTIOUS reading says why, in plain words with the live numbers
        ("High put cover while Nifty is down 1.4% on the week"); a missing week input says so
        ("week return unavailable"). Both strings are the composer's — nothing is worded here. */
