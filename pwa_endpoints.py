@@ -504,14 +504,13 @@ PWA_JS = """
     ['/m/portfolio', '\\u25ce', 'My Portfolio (mobile)', 'm'],
     ['/m/myalerts', '\\u25ec', 'My Alerts (mobile)', 'm'],
     ['/m/mywatchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
-    // cc#2223: /m/watchlist ADDED — cc#2196's own name for the same watchlist page
-    // (watchlist_app_mobile.py serves both routes as an alias pair), live and PROTECTED since
-    // 17-Sep but never wired in here either. Same glyph as /m/mywatchlist directly above (same
-    // underlying page, same star icon on its Home-grid tile) — flagged for the founder that this
-    // now puts two More-sheet rows on one page under near-identical labels; left as the card's own
-    // explicit instruction rather than picked apart here, since app_route_map already tracks
-    // /m/watchlist as its own row separate from /m/mywatchlist.
-    ['/m/watchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
+    // cc#2229 (research-side re-verification, 19-Sep): cc#2223's /m/watchlist addition below was a
+    // wrong premise, not a genuine gap — the grep behind that card matched the literal string
+    // "m/watchlist" and missed "m/mywatchlist" one line above, which already carried this exact
+    // page into the array. Removed as a genuine duplicate (same label, same glyph, same serving
+    // file) rather than the cc#822/cc#1694-style "founder wants it off nav" removal — the ROUTE,
+    // PROTECTED, _PWA_INJECT_PATHS and NAV_REGISTRY are all untouched; /m/watchlist still loads by
+    // typed URL as the alias it always was. Was: ['/m/watchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
     ['/m/dash', '\\u26a1', 'Dashboard (mobile)', 'm'],   // cc#1916: app Dashboard hub
     ['/m/tcscan', '\\u25ce', 'TC Scanner (mobile)', 'm'],   // cc#1923
     ['/m/invscan', '\\u2316', 'Investment Scanner (mobile)', 'm'],   // cc#1923
