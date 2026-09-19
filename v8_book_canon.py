@@ -68,6 +68,24 @@ V8_CMP_LATERAL_SQL = """
             LEFT JOIN LATERAL (
                 SELECT close AS cmp, ts AS cmp_ts FROM intraday_prices
                 WHERE symbol = p.symbol AND """ + NOT_FUT_SQL + """
+                -- cc#2221: bounded, both ends. `ts` is a NAIVE column holding IST wall-clock
+                -- values (never UTC) -- comparing it straight against NOW() (a timestamptz) lets
+                -- Postgres cast NOW() through the session's Etc/UTC timezone instead, which is
+                -- off by the full IST offset and would silently mis-bound this exact guard. The
+                -- explicit `AT TIME ZONE 'Asia/Kolkata'` produces a naive value in the SAME
+                -- representation as `ts`, which is the only correct way to compare them.
+                -- Upper bound: never pick a row timestamped after right now, in IST -- the
+                -- defect that motivated this bound (cc#2216, cc_task_logs 7106/7107): a
+                -- transient ~23,175-row batch of future-dated auction prints on 18-Sep briefly
+                -- made book_canon()'s unbounded ORDER BY ts DESC LIMIT 1 pick a print from hours
+                -- ahead of the real market. Confirmed gone by 19-Sep (re-tested live before this
+                -- fix), but the join must never trust a future row again, from any source.
+                -- Lower bound (staleness floor): a symbol whose feed has been silent for days
+                -- must not keep marking against an ancient print as if it were current -- 7 days
+                -- covers every normal NSE gap (weekends, the longest holiday clusters) without
+                -- ever hiding a genuinely dead feed behind a stale-but-present price.
+                AND ts <= (NOW() AT TIME ZONE 'Asia/Kolkata')
+                AND ts >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '7 days'
                 ORDER BY ts DESC LIMIT 1
             ) lp ON true"""
 
