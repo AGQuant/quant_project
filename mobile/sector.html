@@ -350,8 +350,13 @@ function renderTheme(d){
     GROUPORDER.push(g.segment); GROUPMETA[g.segment]=g.gvm;
     (g.members||[]).forEach(function(m){ ROWS.push({segment:g.segment, symbol:m.symbol, gvm:m.gvm, year_return:m.year_return}); });
   });
-  KEY='gvm'; ASC=false; FILTER=''; GROUPKEY='segment'; NOWLBTN=false;   /* cc#2236: theme members keeps its + button, out of that card's scope */
-  COLS=[['symbol','Symbol',function(v){return esc(v);}],
+  KEY='gvm'; ASC=false; FILTER=''; GROUPKEY='segment';
+  // cc#2239 (founder direct, screenshots): theme members now matches renderSeg -- tapping the
+  // symbol opens the shared Analysis card (which already carries the + watchlist button globally,
+  // cc#2236), so the row's own separate + button is suppressed. Supersedes the cc#2236 comment that
+  // kept this table's inline + out of scope.
+  NOWLBTN=true;
+  COLS=[['symbol','Symbol',function(v){return '<a href="javascript:void(0)" data-open-an="'+esc(v)+'">'+esc(v)+'</a>';}],
         ['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],
         ['year_return','1Y Return',function(v){return v==null?'—':'<span class="'+cls(v)+'">'+pct(v)+'</span>';}]];
   tbl();
