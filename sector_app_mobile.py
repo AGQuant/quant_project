@@ -401,7 +401,7 @@ def _earnings_qoq_estimate(raw_names, anchor_quarter):
             FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
             WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
         """, (anchor_quarter, anchor_quarter, anchor_quarter, anchor_quarter,
-              anchor_quarter, anchor_quarter, raw_names))
+              anchor_quarter, raw_names))
         total, covered, sales_qoq, np_qoq = cur.fetchone()
     return {"anchor_quarter": anchor_quarter, "estimate_quarter": _next_fy_quarter(anchor_quarter),
             "total": total, "covered": covered,
@@ -462,69 +462,92 @@ async def mobile_sector_segment(request: Request, name: str = ""):
     g = _guard(request)
     if g:
         return g
-    rot = sector_rotation()
-    row = None
-    for r in (rot.get("all") or []) if isinstance(rot, dict) else []:
-        # cc#2233: search suggestions come from the 126 RAW sector_ratings names (item 1), which
-        # is not always the same string as a display_segment -- a thin (<5 member) raw segment
-        # merges into a family or "Others - Diversified" at display time (cc#827). Matching only
-        # display_segment left a search hit on any merged-away raw name resolving to nothing; also
-        # matching the absorbed list means every one of the 126 searchable names finds its page.
-        if (r.get("display_segment") or r.get("segment")) == name or name in (r.get("absorbed") or []):
-            row = r
-            break
-    if row is None:
-        return {"error": "no such segment"}
-    disp_name = row.get("display_segment") or row.get("segment")
-    # a merged display segment's brief lives under its own raw name when it absorbed nothing; when
-    # it absorbed others, the first absorbed raw name carries the brief (cc#827 merge keeps briefs raw)
-    brief_name = disp_name if not row.get("absorbed") else (row.get("absorbed") or [disp_name])[0]
     try:
-        b = await sector_brief(brief_name)
-    except Exception as e:
-        b = {"error": str(e)}
-    if not isinstance(b, dict) or b.get("error"):
-        b = {}
-    # members = every raw segment the display row covers (absorbed list, else its own name)
-    raw_names = row.get("absorbed") or [disp_name]
-    members = []
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute("""
-            SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2), g.verdict,
-                   ROUND(g.g_score::numeric,2), ROUND(g.v_score::numeric,2), ROUND(g.m_score::numeric,2),
-                   ROUND(g.market_cap::numeric,0), ROUND(s.pe::numeric,1),
-                   (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = g.symbol
-                      AND rp.close IS NOT NULL ORDER BY rp.price_date DESC LIMIT 1),
-                   (SELECT ut.year_return FROM universe_technicals ut WHERE ut.symbol = g.symbol
-                      ORDER BY ut.score_date DESC LIMIT 1)
-            FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
-            WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-        """, (raw_names,))
-        for sym, cn, gvm, vd, gg, vv, mm, mc, pe, px, yr in cur.fetchall():
-            # cc#2236: g/v/m stay in the payload (harmless, other consumers may exist) but the
-            # table no longer renders them -- the sub-score breakdown now lives on the stock card
-            # each symbol opens (scorr_analysis_card.js). year_return added for the new 1Y column;
-            # a null stays null (item 6 -- absent, never a fabricated 0.0%).
-            members.append({"symbol": sym, "name": cn, "gvm": _fl(gvm), "verdict": vd, "g": _fl(gg), "v": _fl(vv), "m": _fl(mm),
-                            "mcap": _fl(mc), "pe": _fl(pe), "price": _fl(px), "year_return": _fl(yr)})
-    members.sort(key=lambda x: -(x["gvm"] or 0))
-    # cc#2235: Earnings must be anchored to the SAME dominant quarter Results restricted to --
-    # computed here, not independently inside _earnings_qoq_estimate, so the two blocks can never
-    # disagree about which quarter they are both keyed off.
-    results_yoy = _results_yoy_growth(raw_names)
-    return {"segment": disp_name, "score_date": row.get("score_date"),
-            # cc#2231: "change" dropped from the scorecard too -- same reason as mobile_sector_list's rows.
-            "scorecard": {"gvm": _fl(row.get("gvm")), "g": _fl(row.get("g_score")), "v": _fl(row.get("v_score")), "m": _fl(row.get("m_score")),
-                          "verdict": row.get("verdict"), "size": row.get("size_class")},
-            "evidence": {"names": int(row.get("stocks_count") or 0), "mcap": _fl(row.get("total_mcap")),
-                         "inst": _fl(row.get("inst_change")), "qoq": _fl(row.get("qoq_profit")), "upside": _fl(row.get("annual_upside"))},
-            "absorbed": row.get("absorbed") or [],
-            "brief": {"what": b.get("what_is_it"), "drivers": b.get("growth_drivers"), "model": b.get("business_model"),
-                      "risks": b.get("key_risks"), "application": b.get("application_type"), "generated_at": b.get("generated_at")},
-            # cc#2233 items 3-5 / cc#2235: results snapshot (YoY %), earnings snapshot (QoQ % estimate),
-            # annual upside -- all mcap-weighted, all state their own member coverage, computed over the
-            # SAME raw_names population the holdings table below shows.
-            "last_quarter": results_yoy,
-            "next_quarter": _earnings_qoq_estimate(raw_names, results_yoy["quarter"]),
-            "upside_v2": _upside_mcap_weighted(raw_names),
-            "members": {"rows": members, "count": len(members)}}
+        rot = sector_rotation()
+        row = None
+        for r in (rot.get("all") or []) if isinstance(rot, dict) else []:
+            # cc#2233: search suggestions come from the 126 RAW sector_ratings names (item 1), which
+            # is not always the same string as a display_segment -- a thin (<5 member) raw segment
+            # merges into a family or "Others - Diversified" at display time (cc#827). Matching only
+            # display_segment left a search hit on any merged-away raw name resolving to nothing; also
+            # matching the absorbed list means every one of the 126 searchable names finds its page.
+            if (r.get("display_segment") or r.get("segment")) == name or name in (r.get("absorbed") or []):
+                row = r
+                break
+        if row is None:
+            return {"error": "no such segment"}
+        disp_name = row.get("display_segment") or row.get("segment")
+        # a merged display segment's brief lives under its own raw name when it absorbed nothing; when
+        # it absorbed others, the first absorbed raw name carries the brief (cc#827 merge keeps briefs raw)
+        brief_name = disp_name if not row.get("absorbed") else (row.get("absorbed") or [disp_name])[0]
+        try:
+            b = await sector_brief(brief_name)
+        except Exception as e:
+            b = {"error": str(e)}
+        if not isinstance(b, dict) or b.get("error"):
+            b = {}
+        # members = every raw segment the display row covers (absorbed list, else its own name)
+        raw_names = row.get("absorbed") or [disp_name]
+        members = []
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2), g.verdict,
+                       ROUND(g.g_score::numeric,2), ROUND(g.v_score::numeric,2), ROUND(g.m_score::numeric,2),
+                       ROUND(g.market_cap::numeric,0), ROUND(s.pe::numeric,1),
+                       (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = g.symbol
+                          AND rp.close IS NOT NULL ORDER BY rp.price_date DESC LIMIT 1),
+                       (SELECT ut.year_return FROM universe_technicals ut WHERE ut.symbol = g.symbol
+                          ORDER BY ut.score_date DESC LIMIT 1)
+                FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+                WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            """, (raw_names,))
+            for sym, cn, gvm, vd, gg, vv, mm, mc, pe, px, yr in cur.fetchall():
+                # cc#2236: g/v/m stay in the payload (harmless, other consumers may exist) but the
+                # table no longer renders them -- the sub-score breakdown now lives on the stock card
+                # each symbol opens (scorr_analysis_card.js). year_return added for the new 1Y column;
+                # a null stays null (item 6 -- absent, never a fabricated 0.0%).
+                members.append({"symbol": sym, "name": cn, "gvm": _fl(gvm), "verdict": vd, "g": _fl(gg), "v": _fl(vv), "m": _fl(mm),
+                                "mcap": _fl(mc), "pe": _fl(pe), "price": _fl(px), "year_return": _fl(yr)})
+        members.sort(key=lambda x: -(x["gvm"] or 0))
+        # cc#2235: Earnings must be anchored to the SAME dominant quarter Results restricted to --
+        # computed here, not independently inside _earnings_qoq_estimate, so the two blocks can never
+        # disagree about which quarter they are both keyed off.
+        results_yoy = _results_yoy_growth(raw_names)
+        return {"segment": disp_name, "score_date": row.get("score_date"),
+                # cc#2231: "change" dropped from the scorecard too -- same reason as mobile_sector_list's rows.
+                "scorecard": {"gvm": _fl(row.get("gvm")), "g": _fl(row.get("g_score")), "v": _fl(row.get("v_score")), "m": _fl(row.get("m_score")),
+                              "verdict": row.get("verdict"), "size": row.get("size_class")},
+                "evidence": {"names": int(row.get("stocks_count") or 0), "mcap": _fl(row.get("total_mcap")),
+                             "inst": _fl(row.get("inst_change")), "qoq": _fl(row.get("qoq_profit")), "upside": _fl(row.get("annual_upside"))},
+                "absorbed": row.get("absorbed") or [],
+                "brief": {"what": b.get("what_is_it"), "drivers": b.get("growth_drivers"), "model": b.get("business_model"),
+                          "risks": b.get("key_risks"), "application": b.get("application_type"), "generated_at": b.get("generated_at")},
+                # cc#2233 items 3-5 / cc#2235: results snapshot (YoY %), earnings snapshot (QoQ % estimate),
+                # annual upside -- all mcap-weighted, all state their own member coverage, computed over the
+                # SAME raw_names population the holdings table below shows.
+                "last_quarter": results_yoy,
+                "next_quarter": _earnings_qoq_estimate(raw_names, results_yoy["quarter"]),
+                "upside_v2": _upside_mcap_weighted(raw_names),
+                "members": {"rows": members, "count": len(members)}}
+    except Exception:
+        # cc#2238: this page's own cc#2235 regression (a parameter-count bug in
+        # _earnings_qoq_estimate) 500d silently for ~2 hours before a founder screenshot caught it --
+        # @_json_safe (mobile_endpoints.py, by design, see its own docstring) answers every failure
+        # here with HTTP 200 + an {"error": ...} body, so perf_request_log_middleware logged every
+        # one of those broken calls as a clean 200. That is correct for the OTHER 73 _json_safe call
+        # sites (changing the shared decorator's status code would risk breaking every screen that
+        # already handles a 200+error body, per its own docstring), but it means a total failure of
+        # THIS endpoint has no signal anywhere without a screenshot. This local catch adds ONE
+        # synthetic perf_request_log row per failure, status_code=500, so the SAME query that finds
+        # every other 5xx on this app also finds this one -- then re-raises unchanged, so
+        # @_json_safe's existing log.exception + 200/{"error"} response is untouched.
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO perf_request_log (path, method, status_code, response_time_ms, user_agent) VALUES (%s, %s, %s, %s, %s)",
+                    (request.url.path, request.method, 500, 0, request.headers.get("user-agent", ""))
+                )
+                conn.commit()
+        except Exception:
+            pass   # best-effort instrumentation only -- never let a logging failure mask the real one
+        raise
