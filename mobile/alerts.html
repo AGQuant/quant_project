@@ -296,7 +296,10 @@ function cardHead(c){
     : (c.qty_basis && c.qty_basis !== 'equity' && c.unrealised_pnl != null
         ? '<div class="ch ' + pctCls(c.unrealised_pnl) + '" style="font-size:11px;margin-top:2px">' + inrS(c.unrealised_pnl) + ' <span style="font-size:8px;opacity:.7">1 lot</span></div>'
         : '');
-  var ch = '<div class="ia-live"><div class="l">' + (done ? 'CLOSED' : (c.cmp_live === false ? 'LAST' : 'NOW')) + '</div><div class="px">' + fmtPx(px) + '</div><div class="ch ' + pctCls(c.since_pct) + '">' + pctS(c.since_pct) + '</div>' + rsLine + '</div>';
+  // cc#2220 item 6: a CLOSED card's ia-live block goes empty -- its price/since_pct/rsLine are now
+  // duplicated in the new ENTRY/EXIT/P&L plan tiles below (cardBody), and the CLOSED ribbon (rib,
+  // above) is the card's one status indicator. A LIVE card's ia-live block is unchanged.
+  var ch = done ? '' : ('<div class="ia-live"><div class="l">' + (c.cmp_live === false ? 'LAST' : 'NOW') + '</div><div class="px">' + fmtPx(px) + '</div><div class="ch ' + pctCls(c.since_pct) + '">' + pctS(c.since_pct) + '</div>' + rsLine + '</div>');
   return '<div class="ia-hd"><div><div class="ia-sym">' + esc(c.symbol) + '</div>'
     + '<div class="ia-tags"><span class="ia-tag ' + (c.direction === 'BUY' ? 'up' : 'dn') + '">' + esc(c.side) + '</span>'
     + '<span class="ia-tag gd">' + esc(c.origin_tag || 'EXPERT HANDPICKED') + '</span>'
@@ -383,12 +386,24 @@ function spark(c){
 function cardBody(c){
   var h = spark(c), done = c.status === 'closed';
   if (c.target != null && c.stop != null){
-    h += '<div class="ia-plan"><div><div class="ia-k">TARGET</div><div class="ia-v up">' + fmtPx(c.target) + '</div></div>'
-      + '<div><div class="ia-k">STOP</div><div class="ia-v dn">' + fmtPx(c.stop) + '</div></div>'
-      + (done
-          ? '<div><div class="ia-k">FINAL</div><div class="ia-v ' + pctCls(c.closed && c.closed.final_pct) + '">' + pctS(c.closed && c.closed.final_pct) + '</div></div>'
-          : '<div><div class="ia-k">TO TARGET</div><div class="ia-v">' + (c.to_target_pct == null ? '—' : Number(c.to_target_pct).toFixed(1) + '%') + '</div></div>')
-      + '</div>';
+    // cc#2220 item 5: a CLOSED engine-origin card gets ENTRY/EXIT/P&L instead of TARGET/STOP/
+    // FINAL -- those numbers now live in the redesigned tiles, not duplicated at the top (item 6).
+    // A LIVE card is unchanged: TARGET/STOP/TO TARGET exactly as before.
+    if (done){
+      h += '<div class="ia-plan"><div><div class="ia-k">ENTRY</div><div class="ia-v">' + fmtPx(c.approved_price) + '</div></div>'
+        + '<div><div class="ia-k">EXIT</div><div class="ia-v">' + fmtPx(c.closed && c.closed.price) + '</div></div>'
+        + '<div><div class="ia-k">P&L</div><div class="ia-v ' + pctCls(c.closed && c.closed.final_pct) + '">' + pctS(c.closed && c.closed.final_pct) + '</div>'
+        + (c.unrealised_pnl != null ? '<div class="' + pctCls(c.unrealised_pnl) + '" style="font-size:9px;opacity:.85">' + inrS(c.unrealised_pnl) + '</div>' : '')
+        + '</div></div>';
+    } else {
+      h += '<div class="ia-plan"><div><div class="ia-k">TARGET</div><div class="ia-v up">' + fmtPx(c.target) + '</div></div>'
+        + '<div><div class="ia-k">STOP</div><div class="ia-v dn">' + fmtPx(c.stop) + '</div></div>'
+        + '<div><div class="ia-k">TO TARGET</div><div class="ia-v">' + (c.to_target_pct == null ? '—' : Number(c.to_target_pct).toFixed(1) + '%') + '</div></div>'
+        + '</div>';
+    }
+    // cc#2220 item 7 (founder-flagged, NOT resolved here): the track bar below still labels its
+    // axis stop/target, unchanged -- the founder named the three boxes and the top block, not the
+    // track. Flagged in the task result in case he wants the bar's own labels reconciled too.
     if (c.track) h += track(c);
     h += foot(c, !c.track);
   } else if (c.trigger_price != null){

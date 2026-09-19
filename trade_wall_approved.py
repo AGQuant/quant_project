@@ -49,13 +49,14 @@ router = APIRouter()
 # CREATE TABLE only. No ALTER is issued against trade_alerts anywhere in this file.
 _DDL = """
 CREATE TABLE IF NOT EXISTS trade_alert_levels (
-    alert_id     BIGINT PRIMARY KEY REFERENCES trade_alerts(id),
-    target_price NUMERIC,
-    stop_loss    NUMERIC,
-    closed_at    TIMESTAMPTZ,
-    close_price  NUMERIC,
-    close_reason TEXT,
-    updated_at   TIMESTAMPTZ DEFAULT NOW()
+    alert_id        BIGINT PRIMARY KEY REFERENCES trade_alerts(id),
+    target_price    NUMERIC,
+    stop_loss       NUMERIC,
+    closed_at       TIMESTAMPTZ,
+    close_price     NUMERIC,
+    close_reason    TEXT,
+    hidden_from_app BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS trade_alert_level_log (
     id        BIGSERIAL PRIMARY KEY,
@@ -76,6 +77,12 @@ def _ensure(conn):
         return
     with conn.cursor() as cur:
         cur.execute(_DDL)
+        # cc#2220: additive column on a table that already exists in production -- CREATE TABLE IF
+        # NOT EXISTS above is a no-op there, so the live table needs its own ADD COLUMN IF NOT
+        # EXISTS, same idempotent-migration pattern trade_alerts_endpoints._ensure_schema already
+        # uses on trade_alerts. NOT NULL DEFAULT FALSE on a new column is a fast metadata-only
+        # ALTER on Postgres 11+ (no table rewrite), not a MAINTENANCE_LOCK_RULE (cc#351) operation.
+        cur.execute("ALTER TABLE trade_alert_levels ADD COLUMN IF NOT EXISTS hidden_from_app BOOLEAN NOT NULL DEFAULT FALSE")
     conn.commit()
     _READY = True
 

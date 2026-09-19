@@ -1066,18 +1066,20 @@ def resolve_close_state(cur, row):
     {closed, closed_at (naive IST), close_price, close_reason (as stored), close_source
      ('manual' | 'engine' | None), target, stop, level_source ('discretionary' | 'engine' | None),
      levels {target_price, stop_loss} (the sidecar values, set or None), origin (the
-     _resolve_origin row or None), hidden (V10 futures leg, 36703), mirrored (True when THIS call
-     wrote the engine mirror — the caller commits)}."""
+     _resolve_origin row or None), hidden (V10 futures leg, 36703), hidden_from_app (cc#2220:
+     the trade_alert_levels display-hide flag, closed-tab declutter, distinct from `hidden`
+     above), mirrored (True when THIS call wrote the engine mirror — the caller commits)}."""
     alert_id = row.get("id")
     out = {"closed": False, "closed_at": None, "close_price": None, "close_reason": None,
            "close_source": None, "target": None, "stop": None, "level_source": None,
            "levels": {"target_price": None, "stop_loss": None}, "origin": None, "hidden": False,
-           "mirrored": False}
-    cur.execute("""SELECT target_price, stop_loss, closed_at AT TIME ZONE 'Asia/Kolkata', close_price, close_reason
+           "hidden_from_app": False, "mirrored": False}
+    cur.execute("""SELECT target_price, stop_loss, closed_at AT TIME ZONE 'Asia/Kolkata', close_price, close_reason, hidden_from_app
                    FROM trade_alert_levels WHERE alert_id = %s""", (alert_id,))
     lv = cur.fetchone()
     lv_t, lv_s = (_fnum(lv[0]), _fnum(lv[1])) if lv else (None, None)
     out["levels"] = {"target_price": lv_t, "stop_loss": lv_s}
+    out["hidden_from_app"] = bool(lv[5]) if lv else False
     # the origin is resolved on EVERY call — a closed card still needs its style / instrument /
     # evidence for display — but it only ever WRITES under rule 3 below.
     o = _resolve_origin(cur, row)
@@ -1261,7 +1263,7 @@ def alerts_ideas(limit: int = 100):
             cur.execute("SELECT symbol, lot_size FROM futures_universe WHERE symbol = ANY(%s) AND is_active = true",
                         (syms,))
             lot_sizes = {s: (int(l) if l is not None else None) for s, l in cur.fetchall()}
-        ideas, hidden = [], 0
+        ideas, hidden, hidden_from_app_count = [], 0, 0
         for raw, row in zip(raws, rows):
             sym, direction = row["symbol"], row["direction"]
             created_at, triggered_at, approved_at = _ist_naive(raw[7]), _ist_naive(raw[8]), _ist_naive(raw[9])
@@ -1308,6 +1310,12 @@ def alerts_ideas(limit: int = 100):
             o = st["origin"]
             if st["hidden"]:
                 hidden += 1                     # a V10 futures leg: stored, never shown (36703)
+                continue
+            # cc#2220: a CLOSED card flagged hidden_from_app is a one-time board-declutter mark on
+            # trade_alert_levels, not a V10 leg -- its own counter, never overloaded onto `hidden`
+            # above (that one means something else). An OPEN row is never hidden this way.
+            if st["closed"] and st["hidden_from_app"]:
+                hidden_from_app_count += 1
                 continue
             if st["mirrored"]:
                 mirrored += 1
@@ -1414,7 +1422,7 @@ def alerts_ideas(limit: int = 100):
         "price_basis": "LIVE" if any_live else "CLOSE",
         "counts": counts, "stats": stats,
         "honesty": "Every idea here is picked and approved by hand. Prices and P&L are live since approval.",
-        "ideas": ideas, "hidden_option_context": hidden,
+        "ideas": ideas, "hidden_option_context": hidden, "hidden_from_app_count": hidden_from_app_count,
         "spec_ref": "APP_ALERTS_IDEAS_V1 session_log 37072 · cc#1620",
     }
 
