@@ -67,7 +67,16 @@
 /* cc#2232: grouped member table (theme tap-through) -- one segment header row per group, reusing the
    existing sortable table (tbl()) rather than a parallel implementation; see tbl()'s GROUPKEY branch. */
 tr.grp td{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-8);background:var(--hi);font-weight:800;font-size:var(--type-10);text-transform:uppercase;letter-spacing:var(--track-em8);color:var(--muted);padding:var(--space-7) var(--space-8)}
-tr.grp .grp-gv{color:var(--brand);text-transform:none;letter-spacing:0;font-weight:700;white-space:nowrap}
+/* cc#2240 (founder 19-Sep screenshot): the segment name and its GVM shared one flex row with neither
+   side constrained -- text-overflow's default (clip, no ellipsis) plus no min-width:0 on a flex child
+   let a long name ("Pharma - Bulk & API", "Pharma - Formulations") run past its shrunk box instead of
+   wrapping or truncating, reading as cut off mid-word under the GVM figure's own background. The GVM
+   side must never lose a character (that is the actual data, not decoration), so it gets flex-shrink:0
+   and keeps white-space:nowrap; the name gets the standard flex-truncation triple (min-width:0 +
+   overflow:hidden + text-overflow:ellipsis) so it degrades to "…" only on a name that genuinely does
+   not fit, rather than visually corrupting either side. */
+tr.grp .grp-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tr.grp .grp-gv{color:var(--brand);text-transform:none;letter-spacing:0;font-weight:700;white-space:nowrap;flex-shrink:0}
 /* detail */
 .hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
 .hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
@@ -242,7 +251,7 @@ function tbl(){
       var grows=rows.filter(function(r){ return r[GROUPKEY]===gv; });
       if(!grows.length) return '';
       var meta=(GROUPMETA&&GROUPMETA[gv]!=null)?'GVM '+f2(GROUPMETA[gv])+' · ':'';
-      return '<tr class="grp"><td colspan="'+COLS.length+'"><span>'+esc(gv)+'</span><span class="grp-gv">'+meta+grows.length+' names</span></td></tr>'+grows.map(rowHtml).join('');
+      return '<tr class="grp"><td colspan="'+COLS.length+'"><span class="grp-nm">'+esc(gv)+'</span><span class="grp-gv">'+meta+grows.length+' names</span></td></tr>'+grows.map(rowHtml).join('');
     }).join('');
   } else {
     tr=rows.map(rowHtml).join('');

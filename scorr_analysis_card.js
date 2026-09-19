@@ -82,7 +82,46 @@
     + '#scorrAnaOv #scorrAnaCard:empty{display:none}'
     + '@media(max-width:560px){#scorrAnaOv #scorrAnaCard{order:3;flex-basis:100%;margin-top:2px}}'
     + '#scorrAnaOv .sa-body{padding:16px 20px 28px}'
-    + '#scorrAnaOv .empty{padding:30px;text-align:center;color:var(--dim,#8a94ad);font-size:13px}';
+    + '#scorrAnaOv .empty{padding:30px;text-align:center;color:var(--dim,#8a94ad);font-size:13px}'
+    /* cc#2240 (founder 19-Sep screenshot: card renders dark navy inside a light app theme). ROOT
+       CAUSE, confirmed by reading scorr_theme_r5.css directly: its `:root:root:not([data-theme=
+       "light"])` rule (specificity 0,3,0) redefines --panel/--txt/--dim/--mut/--line/--line2/
+       --panel2/--surface2/--grn/--red/--blu/--amber to its own fixed navy-dark R5 palette whenever
+       <html>'s data-theme is not literally the string "light" -- true for EVERY one of the app's 15
+       named themes (goldnight, aquawhite, goldday, ...), light or dark alike, since none of them is
+       spelled "light". That beats scorr_themes.css's own body[data-theme="X"]{--panel:...} block
+       (0,1,1) on every app page, so this card's legacy dashboard-era token names were reading R5's
+       fixed dark palette instead of the app's actually-active theme -- not "dark when it should be
+       light", but "always R5-navy, regardless of theme".
+       --grn/--red/--blu/--pulse/--amber/--panel2/--surface2 are fixed by reading the app's OWN
+       equivalent tokens (--win/--loss/--accent/--hi), which happen NOT to be in R5's override list.
+       --panel/--txt/--dim/--mut/--line/--line2 have no such R5-untouched equivalent (R5 redefines
+       --panel/--ink/--muted/--edge too), so those are restated per theme below, copied verbatim from
+       scorr_themes.css's own body[data-theme="X"] blocks -- not re-derived, not invented -- scoped to
+       ONLY this card's two possible shells at ID specificity (1,0,0), which beats R5's (0,3,0)
+       regardless of which theme is active. A ROOT-FIX belongs in scorr_theme_r5.css's own gate or the
+       <html>-level theme stamp in main.py's _MOBILE_HEAD (so every R5-styled element benefits, not
+       just this one card) -- out of scope here: that is a sitewide change with a blast radius far
+       beyond a P1 card scoped to one shared component, flagged in the task result as a follow-up.
+       KNOWN MAINTENANCE COST, stated rather than hidden: if a theme's panel/ink/muted/edge value ever
+       changes in scorr_themes.css, this block goes stale until updated to match -- the honest tradeoff
+       of a targeted workaround instead of the sitewide fix. */
+    + '#scorrAnaOv,#infoModal{--panel2:var(--hi,#f6f8fb);--surface2:var(--hi,#f6f8fb);--grn:var(--win,#0a9e63);--red:var(--loss,#e5484d);--blu:var(--accent,#4d7cfe);--pulse:var(--accent,#7c3aed);--amber:var(--label,#f5b94a)}'
+    + 'body[data-theme="dark"] #scorrAnaOv,body[data-theme="dark"] #infoModal{--panel:#0F1A33;--txt:#EEF2FF;--dim:#93A0C4;--mut:#93A0C4;--line:#1E2C4E;--line2:#1E2C4E}'
+    + 'body[data-theme="goldday"] #scorrAnaOv,body[data-theme="goldday"] #infoModal{--panel:#FFFFFF;--txt:#1A1A1E;--dim:#8A8578;--mut:#8A8578;--line:#E5DFD2;--line2:#E5DFD2}'
+    + 'body[data-theme="goldnight"] #scorrAnaOv,body[data-theme="goldnight"] #infoModal{--panel:#131316;--txt:#F5F2EA;--dim:#8E8A7E;--mut:#8E8A7E;--line:#2A2A32;--line2:#2A2A32}'
+    + 'body[data-theme="aquawhite"] #scorrAnaOv,body[data-theme="aquawhite"] #infoModal{--panel:#FFFFFF;--txt:#0E1A20;--dim:#46585F;--mut:#46585F;--line:#BFD4DD;--line2:#BFD4DD}'
+    + 'body[data-theme="blush"] #scorrAnaOv,body[data-theme="blush"] #infoModal{--panel:#FFFFFF;--txt:#2B0E1A;--dim:#7A4658;--mut:#7A4658;--line:#F0DCE1;--line2:#F0DCE1}'
+    + 'body[data-theme="rosenight"] #scorrAnaOv,body[data-theme="rosenight"] #infoModal{--panel:#1A1216;--txt:#FBF1F4;--dim:#B08A98;--mut:#B08A98;--line:#2E1F27;--line2:#2E1F27}'
+    + 'body[data-theme="rosewall"] #scorrAnaOv,body[data-theme="rosewall"] #infoModal{--panel:#FFEAF1;--txt:#2A0F1C;--dim:#5E3347;--mut:#5E3347;--line:#F2B9CC;--line2:#F2B9CC}'
+    + 'body[data-theme="ainight"] #scorrAnaOv,body[data-theme="ainight"] #infoModal{--panel:#0B1020;--txt:#EAF2FF;--dim:#7F90B3;--mut:#7F90B3;--line:#1E3050;--line2:#1E3050}'
+    + 'body[data-theme="silvergold"] #scorrAnaOv,body[data-theme="silvergold"] #infoModal{--panel:#FFFFFF;--txt:#181A1F;--dim:#5B6170;--mut:#5B6170;--line:#CDD1D9;--line2:#CDD1D9}'
+    + 'body[data-theme="winepurple"] #scorrAnaOv,body[data-theme="winepurple"] #infoModal{--panel:#1C1223;--txt:#EFE7F7;--dim:#AB98C4;--mut:#AB98C4;--line:#31223C;--line2:#31223C}'
+    + 'body[data-theme="duskviolet"] #scorrAnaOv,body[data-theme="duskviolet"] #infoModal{--panel:#1F1D31;--txt:#DCD8EA;--dim:#A6A1BE;--mut:#A6A1BE;--line:#332F4A;--line2:#332F4A}'
+    + 'body[data-theme="indigoash"] #scorrAnaOv,body[data-theme="indigoash"] #infoModal{--panel:#1C2331;--txt:#D6DDE8;--dim:#9EAABC;--mut:#9EAABC;--line:#2E3849;--line2:#2E3849}'
+    + 'body[data-theme="duskday"] #scorrAnaOv,body[data-theme="duskday"] #infoModal{--panel:#FFFFFF;--txt:#241F38;--dim:#5B5175;--mut:#5B5175;--line:#DBD5EC;--line2:#DBD5EC}'
+    + 'body[data-theme="orangepeel"] #scorrAnaOv,body[data-theme="orangepeel"] #infoModal{--panel:#FFFFFF;--txt:#1A1206;--dim:#5C5348;--mut:#5C5348;--line:#E8DFD4;--line2:#E8DFD4}'
+    + 'body[data-theme="electricviolet"] #scorrAnaOv,body[data-theme="electricviolet"] #infoModal{--panel:#1D1533;--txt:#EFE8FF;--dim:#BCADE0;--mut:#BCADE0;--line:#3F2F63;--line2:#3F2F63}';
   function _injectStyle() {
     if (document.getElementById('scorr-ana-style')) return;
     try {
@@ -166,7 +205,25 @@
   }
 
   /* ── the A card itself (verbatim, v8_dashboard.html) ────────────────────────────────── */
+  // cc#2240: EVERY .open(sym) call, including a repeat tap on an already-open A tab or a return to
+  // A after visiting C/R/D, unconditionally blanked the body to "Loading…" and re-fetched both APIs
+  // from scratch -- zero caching existed. That is the founder's "C/A/R/D tab switching is not
+  // smooth": a visible blank-then-repaint on every tap, not just the first. Fixed the ONE thing this
+  // file can safely fix on its own: a same-symbol re-open now reuses the last rendered HTML with no
+  // flash and no refetch. It does NOT fix cross-letter jank (A -> C -> A) -- that is structural:
+  // C/A/R/D are four independently-built shared components (scorr_chart_card.js/this file/
+  // pwa_endpoints.py's ScorrRCard/scorr_cockpit_card.js), each owning its own overlay shell, and
+  // cardNav()'s _closeAll() (scorr_card_strip.js) closes all four before the next one opens -- by
+  // the cc#803/#805 LOCKED-letters design, no single card's file can merge those shells without
+  // rewriting the shared dispatcher, which is out of this card's scope. Stated rather than silently
+  // left unfixed.
+  var _lastSym = null, _lastHtml = null;
   async function qaAnalysis(sym){
+    if (sym === _lastSym && _lastHtml) {
+      _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery · trajectory',_lastHtml);
+      try{var _mb0=document.getElementById((_cur||_ids()).d);if(_mb0)_mb0.innerHTML=ScorrCardStripHtml(sym,'A');}catch(e){}
+      return;
+    }
     _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery · trajectory','<div class="empty">Loading…</div>');
     // cc#1959: the strip goes into the RESOLVED host slot -- _cur.d, set by _qaModal() on the line
     // above (PAGE_IDS.d on /dashboard, OWN_IDS.d = the self-built shell's #scorrAnaCard). The old
@@ -256,7 +313,11 @@
       // id=244 preserved: the Analysis card stays GVM/volume/delivery; the TC framework lives in its own
       // document, never merged into V8 render.
       h+=qaTcFooterHtml(sym);
-      _qaSetBody(h||'<div class="empty">No analysis data for '+newsEsc(sym)+'.</div>');
+      // cc#2240: cache AFTER a successful render only -- a failed/partial load (the catch below)
+      // must never be cached, or a transient API error would freeze the card on that error until
+      // page reload, exactly the risk skipping a genuine refresh would create.
+      _lastSym = sym; _lastHtml = h || '<div class="empty">No analysis data for '+newsEsc(sym)+'.</div>';
+      _qaSetBody(_lastHtml);
     }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">Analysis failed to load.</div>');}
   }
 

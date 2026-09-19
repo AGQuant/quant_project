@@ -142,6 +142,40 @@
     });
   }
 
+  /* cc#2240 item 3 (founder screenshot): the disabled letter (D, futures-only, on a non-future
+     symbol) rendered as a dashed <span> with a title= tooltip -- readable on hover, invisible on a
+     phone, where there is no hover. A tap did nothing at all, which the card correctly named as
+     "looking like a broken button" rather than a deliberately unavailable one. R's own `en` is
+     hardcoded true in cardAvail() below (it self-handles its empty state after opening, never via
+     this dashed path), so D is the only letter this reaches today; the toast is written generically
+     in case that changes. Same lightweight, theme-token-based toast idiom scorr_watchlist_add.js
+     already uses (fixed bottom pill, auto-dismiss) -- not exposed as a shared global there, so
+     reproduced here rather than reached into that file's closure. */
+  var CSS_TOAST = '.scorr-cs-toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:100600;'
+    + 'background:var(--ink,var(--txt,#1c2536));color:var(--field,var(--surface2,#fff));font:700 12.5px Sora,system-ui,sans-serif;'
+    + 'padding:10px 14px;border-radius:12px;max-width:calc(100vw - 32px);text-align:center}';
+  try {
+    var stt = document.createElement('style');
+    stt.setAttribute('data-scorr', 'card-strip-toast');
+    stt.appendChild(document.createTextNode(CSS_TOAST));
+    (document.head || document.documentElement).appendChild(stt);
+  } catch (e) {}
+  function _toast(m) {
+    var t = document.createElement('div');
+    t.className = 'scorr-cs-toast';
+    t.textContent = m;
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 2200);
+  }
+  var _OFF_REASON = {
+    D: function (sym) { return sym + ' is not a futures stock, so Cockpit does not apply.'; },
+    R: function (sym) { return 'No result on record for ' + sym + ' yet.'; }
+  };
+  function cardOffTap(k, sym) {
+    var f = _OFF_REASON[k];
+    _toast(f ? f(sym) : (sym + ': ' + k + ' is not available right now.'));
+  }
+
   /* ── availability ────────────────────────────────────────────────────────────────────────
    * cc#789 item 4: ONE rule for which letters render, everywhere. D is futures-only; R
    * self-handles its own empty state; C and A are always available.
@@ -223,7 +257,11 @@
       var k = it[0], title = it[1];
       var en = (k === 'D') ? av.fut : (k === 'R' ? av.result : true);
       if (k === active) return '<span class="scorr-cs-b scorr-cs-on" title="' + title + ' (current)">' + k + '</span>';
-      if (!en) return '<span class="scorr-cs-b scorr-cs-off" title="' + title + '">' + k + '</span>';
+      // cc#2240: a <button>, not a <span> -- a dashed, muted pill with NO handler read as a broken
+      // control on tap (the founder's own words). Same visual (scorr-cs-off), now tappable: it
+      // explains why in a toast instead of doing nothing.
+      if (!en) return '<button type="button" class="scorr-cs-b scorr-cs-off" title="' + title + '" '
+        + 'onclick="ScorrCardOff(\'' + k + '\',\'' + s + '\')">' + k + '</button>';
       return '<button type="button" class="scorr-cs-b" title="' + title + '" '
         + 'onclick="ScorrCardNav(\'' + k + '\',\'' + s + '\')">' + k + '</button>';
     }).join('');
@@ -371,6 +409,7 @@
 
   window.ScorrCardStripHtml = stripHtml;
   window.ScorrCardNav = cardNav;
+  window.ScorrCardOff = cardOffTap;    // cc#2240: the disabled-letter tap explanation, inline onclick target
   window.ScorrCardRow = rowStrip;      // cc#798: table-row shorthand, replaces ScorrRCard.pill+pillV
   window.ScorrCardStrip = {
     html: stripHtml,
