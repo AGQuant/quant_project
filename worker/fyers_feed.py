@@ -1791,6 +1791,28 @@ class OptionBarStore:
         self.lock    = threading.RLock()
         self.last_oi = {}   # fyers_option_symbol -> latest OI from DEPTH poll (WS strips OI)
         self._db_reconnect_attempted = False  # cc#489 step_4: DB-write resilience
+        # cc#2226: diagnostic only, never changes what gets written. fsym -> (last oi value,
+        # consecutive-bars-unchanged, source of that value). The 19-Sep incident (NIFTY's top CE
+        # strike: 77/77 bars identical all session) could not be told apart, from static code
+        # alone, between "our lookup never finds a fresh value" (source stays db_stale_carry
+        # forever) and "Fyers depth genuinely returns the same OI all session" (source is
+        # last_oi_cache every time, i.e. the poll succeeds and this IS what it returns). This
+        # makes that question answerable from the log on the next live session instead of
+        # requiring the same forensic DB reconstruction again.
+        self._oi_streak = {}
+
+    _OI_STREAK_LOG_EVERY = 6   # bars (30 min at 5-min bars) between repeat log lines for the same symbol
+
+    def _log_oi_streak(self, fsym, oi, source):
+        prev_val, prev_n = self._oi_streak.get(fsym, (None, 0))
+        n = prev_n + 1 if (prev_val is not None and prev_val == oi) else 1
+        self._oi_streak[fsym] = (oi, n)
+        if n >= 3 and (n == 3 or n % self._OI_STREAK_LOG_EVERY == 0):
+            log.warning(f"cc#2226 oi_streak: {fsym} oi={oi} unchanged for {n} consecutive bars "
+                        f"(source={source}) — source=last_oi_cache/ws_tick means the depth poll "
+                        f"itself is returning this same value (upstream); source=db_stale_carry "
+                        f"means this symbol's last_oi is never being refreshed by the poll (a "
+                        f"lookup bug, not upstream)")
 
     def _bucket(self, ts):
         # 5-min bucket
@@ -1831,6 +1853,7 @@ class OptionBarStore:
         underlying, strike, otype, expiry = meta
         # WS strips OI (Fyers SDK pops it) -> fall back to the DEPTH-poll value.
         oi = bar['oi'] if bar.get('oi') is not None else self.last_oi.get(fsym)
+        oi_source = 'ws_tick' if bar.get('oi') is not None else ('last_oi_cache' if oi is not None else None)
         # cc#591 fix_1: NEVER write a NULL option OI. A strike freshly subscribed after an ATM-roll
         # (or one the DEPTH-poll cycle hasn't reached yet — BANKNIFTY ATM±20 is still a wide band) has no
         # WS-OI and no last_oi -> NULL, and NULL PE rows sum to 0 -> put_oi_total=0 -> the PCR
@@ -1845,8 +1868,11 @@ class OptionBarStore:
                     _r = _c.fetchone()
                 if _r and _r[0] is not None:
                     oi = int(_r[0]); self.last_oi[fsym] = oi
+                    oi_source = 'db_stale_carry'
             except Exception:
                 pass
+        if oi is not None:
+            self._log_oi_streak(fsym, oi, oi_source or 'unknown')   # cc#2226: diagnostic only
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
@@ -2826,7 +2852,14 @@ def run(auth_code=None):
                 agg.on_tick(nse, float(ltp), float(vol),
                             source='fyers_fut', oi=agg.last_oi.get(nse))
             else:
+                # cc#2226: futures attaches oi=agg.last_oi.get(nse) on every WS tick (line above);
+                # options never did -- bar['oi'] stayed None for the bar's whole life and every
+                # flush fell back to a lookup at flush time only. Same last_oi source either way,
+                # so this alone was unlikely to be the whole freeze, but it is a real asymmetry
+                # against the one path (futures) that demonstrably updates its OI normally, so it
+                # is fixed to match rather than left standing.
                 opt_store.on_tick(fsym, float(ltp),
+                                  oi=opt_store.last_oi.get(fsym),
                                   vol=float(vol),
                                   bid=msg.get('bid'), ask=msg.get('ask'))
         except Exception as e:

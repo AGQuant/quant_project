@@ -2368,11 +2368,29 @@ function dlab(d){
 /* cc#1231 scope 3: `markers` draws a dot on every close so a daily series reads as daily prints
    rather than a continuous line. Defaulted off, so every existing caller renders byte-identically
    and the intraday charts are untouched. */
+/* cc#2226: a near-flat series with one differing point (e.g. 76 identical PCR ticks + one
+   differing tick from a frozen option_chain.oi input, 19-Sep) used to stretch that single point
+   to the FULL chart height -- min/max alone has no way to know a 5% blip "should" look small, so
+   it rendered a dead input as a dramatic cliff. Floor: the plotted range is never allowed below
+   15% of the series' own mean level, padded symmetrically around the data -- a real multi-point
+   trend (whose raw hi-lo already exceeds that floor) is completely untouched, only a range this
+   narrow gets widened. ONE function, both trendSvg (draws the line) and wireScrub (positions the
+   crosshair) call it, so the two can never disagree about where a point sits. */
+function trendRange(vs){
+  var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs);
+  var mean = vs.reduce(function(a, b){ return a + b; }, 0) / (vs.length || 1);
+  var minRng = Math.abs(mean) * 0.15;
+  var rawRng = hi - lo;
+  if (rawRng < minRng) {
+    var pad = (minRng - rawRng) / 2;
+    lo -= pad; hi += pad;
+  }
+  return { lo: lo, hi: hi, rng: (hi - lo) || 1 };
+}
 function trendSvg(series, kind, markers){
   var W = 320, H = 110, PL = 6, PR = 6, PT = 8, PB = 18;
   var vs = series.map(function(p){ return p.v; });
-  var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs);
-  var rng = (hi - lo) || 1;
+  var r = trendRange(vs), lo = r.lo, hi = r.hi, rng = r.rng;
   var n = series.length;
   var xs = function(i){ return PL + (n === 1 ? 0 : i / (n - 1) * (W - PL - PR)); };
   var ys = function(v){ return PT + (1 - (v - lo) / rng) * (H - PT - PB); };
@@ -2402,8 +2420,7 @@ function wireScrub(kind, series){
   if (!svg || !series.length) return;
   var W = 320, PL = 6, PR = 6, PT = 8, PB = 18, H = 110;
   var vs = series.map(function(p){ return p.v; });
-  var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs);
-  var rng = (hi - lo) || 1, n = series.length;
+  var r = trendRange(vs), lo = r.lo, hi = r.hi, rng = r.rng, n = series.length;
   var cx = document.getElementById('tcx_' + kind), cd = document.getElementById('tcd_' + kind);
   function latest(){ var l = series[n - 1]; if (hd) hd.textContent = Number(l.v).toFixed(2) + ' \u00b7 ' + dlab(l.d); }
   function show(clientX){
