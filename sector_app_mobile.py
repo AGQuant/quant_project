@@ -144,6 +144,56 @@ def _fl(v):
         return None
 
 
+# cc#2232 (session_log 19-Sep-2026, founder ruling): BOTH new theme figures are MCAP-WEIGHTED,
+# everywhere, no exceptions -- "if we are computing weighted average... always consider based on
+# market cap, irrespective company sector." Verified against the founder's own evidence numbers on
+# live data for all 10 themes (9/10 exact to the decimal, 1 within 0.1pp on a 36-name weighted
+# average -- ordinary rounding-order variance, not a methodology gap).
+#
+# 3-month return has NO stored column (universe_technicals carries week/month/year/3y, not 3-month)
+# so it is derived from raw_prices: latest close vs the closest close at or before today-91 days.
+# A member with no such pair is excluded from BOTH the numerator and denominator of the weighted
+# average (never treated as a zero return) -- so a name missing 3-month history cannot drag the
+# figure toward zero, it simply does not vote.
+def _theme_mcap_stats():
+    """{theme_name: {"gvm": mcap-weighted GVM, "ret3m": mcap-weighted 3-month return}} for every
+    theme, in ONE query (not N+1 per theme). Membership = every gvm_scores row at the latest
+    score_date whose segment appears in that theme's related_segments (same derivation sector_themes
+    itself has no company column for -- the card's own evidence field)."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            WITH segs AS (
+                SELECT theme_name, jsonb_array_elements_text(related_segments) AS segment
+                FROM sector_themes
+            ),
+            members AS (
+                SELECT s.theme_name, g.symbol, g.gvm_score, g.market_cap
+                FROM segs s
+                JOIN gvm_scores g ON g.segment = s.segment
+                WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            ),
+            p3m AS (
+                SELECT m.symbol,
+                       (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = m.symbol
+                          AND rp.close IS NOT NULL ORDER BY rp.price_date DESC LIMIT 1) AS px_now,
+                       (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = m.symbol
+                          AND rp.close IS NOT NULL AND rp.price_date <= CURRENT_DATE - 91
+                          ORDER BY rp.price_date DESC LIMIT 1) AS px_3mo_ago
+                FROM (SELECT DISTINCT symbol FROM members) m
+            )
+            SELECT mm.theme_name,
+                   ROUND((SUM(mm.gvm_score * mm.market_cap) / NULLIF(SUM(mm.market_cap), 0))::numeric, 2) AS gvm,
+                   ROUND((SUM(CASE WHEN p3m.px_now IS NOT NULL AND p3m.px_3mo_ago IS NOT NULL AND p3m.px_3mo_ago <> 0
+                                   THEN ((p3m.px_now - p3m.px_3mo_ago) / p3m.px_3mo_ago) * mm.market_cap END)
+                          / NULLIF(SUM(CASE WHEN p3m.px_now IS NOT NULL AND p3m.px_3mo_ago IS NOT NULL AND p3m.px_3mo_ago <> 0
+                                             THEN mm.market_cap END), 0) * 100)::numeric, 1) AS ret3m
+            FROM members mm
+            LEFT JOIN p3m ON p3m.symbol = mm.symbol
+            GROUP BY mm.theme_name
+        """)
+        return {row[0]: {"gvm": _fl(row[1]), "ret3m": _fl(row[2])} for row in cur.fetchall()}
+
+
 @router.get("/api/mobile/sector_app/list")
 @_json_safe
 def mobile_sector_list(request: Request):
@@ -170,15 +220,87 @@ def mobile_sector_list(request: Request):
     for r in rows:
         verdicts[r["verdict"] or "—"] = verdicts.get(r["verdict"] or "—", 0) + 1
     th = sector_themes()
+    theme_stats = _theme_mcap_stats()   # cc#2232: mcap-weighted GVM + 3M return per theme, batched once
     themes = []
     for t in (th.get("themes") or []) if isinstance(th, dict) else []:
+        stats = theme_stats.get(t.get("theme_name")) or {}
         themes.append({"rank": t.get("rank"), "name": t.get("theme_name"), "tagline": t.get("tagline"),
                        "segments": t.get("related_segments") or [],
+                       "gvm": stats.get("gvm"), "ret3m": stats.get("ret3m"),
                        "top": [{"symbol": c.get("symbol"), "gvm": _fl(c.get("gvm_score")), "segment": c.get("segment")}
                                for c in (t.get("companies") or [])[:3]]})
     return {"score_date": rot.get("score_date"), "segments": len(rows), "raw_segments": rot.get("raw_segments"),
             "verdicts": verdicts, "rows": rows, "themes": themes,
             "note": "Mcap-weighted GVM per segment — one big weak name pulls its whole segment down."}
+
+
+# cc#2232: full member list for a theme, GROUPED by segment (founder ruling 19-Sep-2026, after
+# considering and rejecting a flat table with a sector column). TWO-LEVEL ORDER, both already fixed
+# by the SQL below: segment groups by that segment's OWN mcap-weighted GVM (read straight from
+# sector_ratings -- the same canonical figure SEGMENT ratings already use, not redefined here), and
+# names inside a group by their own GVM. 1-year return comes from universe_technicals.year_return
+# at its latest score_date only -- a null there stays null, never substituted from another source.
+@router.get("/api/mobile/sector_app/theme")
+@_json_safe
+def mobile_sector_theme(request: Request, name: str = ""):
+    g = _guard(request)
+    if g:
+        return g
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT tagline FROM sector_themes WHERE theme_name = %s", (name,))
+        row = cur.fetchone()
+        if row is None:
+            return {"error": "no such theme"}
+        tagline = row[0]
+
+        cur.execute("""
+            WITH theme AS (
+                SELECT related_segments FROM sector_themes WHERE theme_name = %s
+            ),
+            segs AS (
+                SELECT jsonb_array_elements_text(related_segments) AS segment FROM theme
+            ),
+            seg_gvm AS (
+                SELECT sr.segment, sr.mcap_weighted_gvm
+                FROM sector_ratings sr
+                WHERE sr.score_date = (SELECT MAX(score_date) FROM sector_ratings)
+                  AND sr.segment IN (SELECT segment FROM segs)
+            ),
+            members AS (
+                SELECT g.symbol, g.segment, g.gvm_score
+                FROM gvm_scores g
+                JOIN segs s ON s.segment = g.segment
+                WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            ),
+            y1 AS (
+                SELECT DISTINCT ON (symbol) symbol, year_return
+                FROM universe_technicals
+                WHERE symbol IN (SELECT symbol FROM members)
+                ORDER BY symbol, score_date DESC
+            )
+            SELECT sg.segment, sg.mcap_weighted_gvm, mm.symbol, mm.gvm_score, y1.year_return
+            FROM members mm
+            JOIN seg_gvm sg ON sg.segment = mm.segment
+            LEFT JOIN y1 ON y1.symbol = mm.symbol
+            ORDER BY sg.mcap_weighted_gvm DESC NULLS LAST, mm.gvm_score DESC NULLS LAST
+        """, (name,))
+        member_rows = cur.fetchall()
+
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        score_date = cur.fetchone()[0]
+
+    groups = []
+    cur_seg = object()   # sentinel -- no real segment name equals this, so the first row always opens a group
+    cur_group = None
+    for segment, seg_gvm, symbol, gvm_score, year_return in member_rows:
+        if segment != cur_seg:
+            cur_seg = segment
+            cur_group = {"segment": segment, "gvm": _fl(seg_gvm), "members": []}
+            groups.append(cur_group)
+        cur_group["members"].append({"symbol": symbol, "gvm": _fl(gvm_score), "year_return": _fl(year_return)})
+
+    return {"theme": name, "tagline": tagline, "score_date": str(score_date) if score_date else None,
+            "groups": groups, "member_count": sum(len(gr["members"]) for gr in groups)}
 
 
 @router.get("/api/mobile/sector_app/segment")

@@ -54,17 +54,26 @@
 .si-more b{display:block;font-size:var(--type-12);font-weight:800}.si-more span{display:block;font-size:var(--type-10);color:var(--muted);margin-top:var(--space-2)}.si-more i{font-style:normal;color:var(--brand);font-size:var(--type-18);font-weight:800}
 /* themes rail */
 .rl{display:flex;gap:var(--space-10);overflow-x:auto;padding:var(--space-4) var(--space-16) var(--space-4);scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}.rl::-webkit-scrollbar{display:none}
-.tc{flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
+/* cc#2232: .tc is now a tap target (was a div) -- reset link styling like .lr/.si-more do, display:block so flex/scroll-snap sizing keeps working */
+.tc{display:block;text-decoration:none;color:inherit;flex:0 0 78vw;max-width:320px;scroll-snap-align:start;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-12) var(--space-13)}
 /* cc#2166: si- prefixed like cc#2155 -- .rk / .tg / .pil / .v are also mobile_app.css bare selectors (mono font, 48px flex tagline, boxed value pill) */
 .tc .si-rk{font-size:var(--type-9);font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:var(--track-em10)}
 .tc .nm{font-size:var(--type-14);font-weight:800;margin-top:var(--space-3)}.tc .si-tg{font-size:var(--type-105);color:var(--muted);margin-top:var(--space-3);line-height:1.45}
+/* cc#2232: the two new theme-level figures -- compact, one line, does not crowd name/tagline/top-3 */
+.tc .tc-stats{display:flex;gap:var(--space-12);margin-top:var(--space-7);font-size:var(--type-10);color:var(--muted)}
+.tc .tc-stats b{color:var(--ink);font-weight:800}
 .tc .lst{margin-top:var(--space-9);border-top:var(--bw-1) solid var(--hi);padding-top:var(--space-6)}
 .tc .r{display:flex;justify-content:space-between;font-size:var(--type-115);padding:var(--space-4) 0}.tc .r b{font-weight:800}.tc .r span{color:var(--muted)}
+/* cc#2232: grouped member table (theme tap-through) -- one segment header row per group, reusing the
+   existing sortable table (tbl()) rather than a parallel implementation; see tbl()'s GROUPKEY branch. */
+tr.grp td{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-8);background:var(--hi);font-weight:800;font-size:var(--type-10);text-transform:uppercase;letter-spacing:var(--track-em8);color:var(--muted);padding:var(--space-7) var(--space-8)}
+tr.grp .grp-gv{color:var(--brand);text-transform:none;letter-spacing:0;font-weight:700;white-space:nowrap}
 /* detail */
 .hero{margin:var(--space-12) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-16);padding:var(--space-14);position:relative;overflow:hidden}
 .hero::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--bw-3);background:linear-gradient(180deg,var(--brand),transparent)}
 .hero .eye{font-size:var(--type-10);font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:var(--track-em12)}
 .hero .nm{font-size:var(--type-22);font-weight:800;line-height:1.05;margin-top:var(--space-3)}
+.hero .si-tg{font-size:var(--type-115);color:var(--muted);margin-top:var(--space-8);line-height:1.45}   /* cc#2232: theme tap-through tagline */
 .hero .big{display:flex;align-items:baseline;gap:var(--space-10);margin-top:var(--space-8)}
 .hero .big .r{font-size:var(--type-34);font-weight:800;line-height:1}.hero .big .n{font-size:var(--type-11);color:var(--muted)}.hero .big .n b{color:var(--ink)}
 .si-pil{margin-top:var(--space-10)}.si-pil .r{display:grid;grid-template-columns:22px 1fr 44px;gap:var(--space-10);align-items:center;padding:var(--space-5) 0}
@@ -151,8 +160,13 @@ function renderList(d){
   h+= cold.length ? '<div class="lad">'+cold.map(function(r,i){return ladderRow(r,i,true);}).join('')+'</div>' : '<div class="card"><div class="emp"><b>No cold segment today</b>Nothing rates under 6.</div></div>';
   var th=d.themes||[];
   h+='<div class="sec"><h2>Emerging themes</h2><span class="hint">'+th.length+' · swipe →</span></div>';
+  // cc#2232: theme card is now a tap target (-> the full grouped member table) and carries two new
+  // mcap-weighted figures. Both GVM and the 3-month return are mcap-weighted, no exceptions (founder
+  // ruling 19-Sep-2026) -- computed server-side in _theme_mcap_stats, never a simple average here.
   h+= th.length ? '<div class="rl">'+th.map(function(t){
-      return '<div class="tc"><div class="si-rk">Theme '+t.rank+'</div><div class="nm">'+esc(t.name)+'</div><div class="si-tg">'+esc(t.tagline||'')+'</div><div class="lst">'+(t.top||[]).map(function(c){return '<div class="r"><b>'+esc(c.symbol)+'</b><span>GVM '+f2(c.gvm)+'</span></div>';}).join('')+'</div></div>';
+      return '<a class="tc" href="/m/sector?theme='+encodeURIComponent(t.name)+'"><div class="si-rk">Theme '+t.rank+'</div><div class="nm">'+esc(t.name)+'</div><div class="si-tg">'+esc(t.tagline||'')+'</div>'
+        +'<div class="tc-stats"><span>GVM <b>'+f2(t.gvm)+'</b></span><span>3M <b class="'+cls(t.ret3m)+'">'+pct(t.ret3m)+'</b></span></div>'
+        +'<div class="lst">'+(t.top||[]).map(function(c){return '<div class="r"><b>'+esc(c.symbol)+'</b><span>GVM '+f2(c.gvm)+'</span></div>';}).join('')+'</div></a>';
     }).join('')+'</div>' : '<div class="card"><div class="emp"><b>No themes on record</b>The theme pass has not written any rows yet.</div></div>';
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Tap a segment for its brief, the numbers behind the score and every member.</div>';
   document.getElementById('body').innerHTML=h;
@@ -166,12 +180,29 @@ function drawLadder(){
   var all=(D.rows||[]).length, band=SIZE==='ALL'?'':' '+SIZE.toLowerCase();
   document.getElementById('lmore').innerHTML='<a class="si-more" href="/m/sector?view=all"><div><b>View all '+all+' segments</b><span>'+(rows.length>5?'Showing the top 5 of '+rows.length+band:'All '+rows.length+band+' shown')+' · sortable table</span></div><i>›</i></a>';
 }
-var ROWS=[], KEY='gvm', ASC=false, COLS=[], FILTER='';   /* cc#2206: FILTER = the All Segments search, case-insensitive substring on the segment name */
+var ROWS=[], KEY='gvm', ASC=false, COLS=[], FILTER='', GROUPKEY=null, GROUPORDER=null, GROUPMETA=null;   /* cc#2206: FILTER = the All Segments search, case-insensitive substring on the segment name. cc#2232: GROUPKEY/GROUPORDER/GROUPMETA are the theme tap-through's optional grouping -- unused (null) by every other caller, so renderAll/renderSeg are unchanged. */
 function tbl(){
   var src=FILTER?ROWS.filter(function(r){ return String(r.segment||'').toLowerCase().indexOf(FILTER)>-1; }):ROWS;
   var rows=src.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
   var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
-  var tr=rows.map(function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); if(i===0&&r.symbol&&window.ScorrWatchlistAdd) cell=window.ScorrWatchlistAdd.button(r.symbol,'sector',true)+' '+cell; return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; }).join('');   /* cc#2196: the watchlist + on company rows (a segment row has no symbol, so no button) */
+  var rowHtml=function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); if(i===0&&r.symbol&&window.ScorrWatchlistAdd) cell=window.ScorrWatchlistAdd.button(r.symbol,'sector',true)+' '+cell; return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; };   /* cc#2196: the watchlist + on company rows (a segment row has no symbol, so no button) */
+  var tr;
+  if(GROUPKEY&&GROUPORDER){
+    // cc#2232: GROUP ORDER is fixed (precomputed server-side, each segment's own mcap-weighted GVM,
+    // strongest first) and never changes on a header tap. WITHIN a group, rows keep the SAME sort
+    // `rows` above already applied for KEY/ASC -- filtering a globally-sorted array down to one
+    // group preserves its relative order, so tapping a column header still re-sorts, just scoped to
+    // each group, with zero extra sort logic. Only the segment tap-through's caller sets this; the
+    // flat path below is byte-for-byte what it was before this card.
+    tr=GROUPORDER.map(function(gv){
+      var grows=rows.filter(function(r){ return r[GROUPKEY]===gv; });
+      if(!grows.length) return '';
+      var meta=(GROUPMETA&&GROUPMETA[gv]!=null)?'GVM '+f2(GROUPMETA[gv])+' · ':'';
+      return '<tr class="grp"><td colspan="'+COLS.length+'"><span>'+esc(gv)+'</span><span class="grp-gv">'+meta+grows.length+' names</span></td></tr>'+grows.map(rowHtml).join('');
+    }).join('');
+  } else {
+    tr=rows.map(rowHtml).join('');
+  }
   document.getElementById('tb').innerHTML='<div class="scroll"><table><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div><div class="foot">'+rows.length+(FILTER?' of '+ROWS.length:'')+' rows · tap a header to sort</div>';
   document.querySelector('thead').addEventListener('click', function(e){ var t=e.target.closest('th'); if(!t) return; var k=t.getAttribute('data-k'); if(k===KEY) ASC=!ASC; else { KEY=k; ASC=(k==='segment'||k==='symbol'); } tbl(); });
 }
@@ -179,7 +210,7 @@ function renderAll(d){
   document.getElementById('pg-title').textContent='All segments'; document.getElementById('back').style.display='';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(d.rows||[]).length+' segments';
   document.getElementById('body').innerHTML='<div class="wrap"><div class="se-search"><input id="se-q" type="search" inputmode="search" placeholder="Search segments" aria-label="Search segments" autocomplete="off"></div><div id="tb"></div></div>';   /* cc#2206: search box above the table, filters live */
-  ROWS=d.rows||[]; KEY='gvm'; ASC=false; FILTER='';
+  ROWS=d.rows||[]; KEY='gvm'; ASC=false; FILTER=''; GROUPKEY=null; GROUPORDER=null; GROUPMETA=null;
   COLS=[['segment','Segment',function(v,r){return '<a href="/m/sector?seg='+encodeURIComponent(v)+'">'+esc(v)+'<small>'+esc(r.verdict||'')+(r.size?' · '+r.size.toLowerCase():'')+'</small></a>';}],
         ['gvm','GVM',function(v){return '<span class="'+((v||0)>=7?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],
         ['names','Names'],['mcap','Mcap',cr]];   // cc#2231: Δ column dropped -- change is no longer in the API payload
@@ -203,15 +234,43 @@ function renderSeg(d){
   h+='<div class="sec"><h2>Members</h2><span class="hint">'+(d.members||{}).count+' · by GVM</span></div><div class="wrap" id="tb"></div>';
   h+='<div class="note"><b>One weak giant can sink a segment.</b> The score is weighted by market cap, so read the members table before trusting the headline.</div>';
   document.getElementById('body').innerHTML=h;
-  ROWS=(d.members||{}).rows||[]; KEY='gvm'; ASC=false;
+  ROWS=(d.members||{}).rows||[]; KEY='gvm'; ASC=false; FILTER=''; GROUPKEY=null; GROUPORDER=null; GROUPMETA=null;
   COLS=[['symbol','Name',function(v,r){return esc(v)+'<small>'+esc(r.name||'')+'</small>';}],['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],['pe','P/E',f1],['mcap','Mcap',cr]];
   tbl();
 }
-var Q={}; try{ var u=new URLSearchParams(location.search); Q.seg=u.get('seg'); Q.view=u.get('view'); }catch(e){}
-var url = Q.seg ? '/api/mobile/sector_app/segment?name='+encodeURIComponent(Q.seg) : '/api/mobile/sector_app/list';
+function renderTheme(d){
+  // cc#2232: the theme tap-through mirrors the segment tap-through (item 7) -- same hero/table/wrap
+  // shell, same tbl() component, just the grouped mode and a different COLS set (item 8: no SEGMENT
+  // column, the group header already carries it).
+  document.getElementById('pg-title').textContent=d.theme||'Theme'; document.getElementById('back').style.display='';
+  document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(d.member_count||0)+' names';
+  var h='<div class="hero"><div class="eye">Theme</div><div class="nm">'+esc(d.theme||'')+'</div>'
+    +(d.tagline?'<div class="si-tg">'+esc(d.tagline)+'</div>':'')+'</div>';
+  var groups=d.groups||[];
+  h+='<div class="sec"><h2>Members</h2><span class="hint">'+(d.member_count||0)+' · grouped by segment, strongest first</span></div>';
+  h+= groups.length ? '<div class="wrap" id="tb"></div>' : '<div class="card"><div class="emp"><b>No members on record</b>This theme has no scored companies in its related segments right now.</div></div>';
+  h+='<div class="note"><b>Segments are ordered by their own mcap-weighted GVM, strongest first.</b> Names inside a segment are ordered by GVM — tap a header to sort within each segment.</div>';
+  document.getElementById('body').innerHTML=h;
+  if(!groups.length) return;
+  ROWS=[]; GROUPORDER=[]; GROUPMETA={};
+  groups.forEach(function(g){
+    GROUPORDER.push(g.segment); GROUPMETA[g.segment]=g.gvm;
+    (g.members||[]).forEach(function(m){ ROWS.push({segment:g.segment, symbol:m.symbol, gvm:m.gvm, year_return:m.year_return}); });
+  });
+  KEY='gvm'; ASC=false; FILTER=''; GROUPKEY='segment';
+  COLS=[['symbol','Symbol',function(v){return esc(v);}],
+        ['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],
+        ['year_return','1Y Return',function(v){return v==null?'—':'<span class="'+cls(v)+'">'+pct(v)+'</span>';}]];
+  tbl();
+}
+var Q={}; try{ var u=new URLSearchParams(location.search); Q.seg=u.get('seg'); Q.view=u.get('view'); Q.theme=u.get('theme'); }catch(e){}
+var url = Q.seg ? '/api/mobile/sector_app/segment?name='+encodeURIComponent(Q.seg)
+        : Q.theme ? '/api/mobile/sector_app/theme?name='+encodeURIComponent(Q.theme)
+        : '/api/mobile/sector_app/list';
 /* cc#2206: a failure is diagnosable from the screen -- HTTP status + content-type + the first 120 chars of the body (never the bare
    'Could not load sectors.' that hid a 502-during-deploy, an auth HTML page and a real bug behind one string). One automatic retry
-   after 800 ms; then a Retry button that re-runs the SAME fetch (ladder -> /list, segment -> /segment?name=, all -> /list), no reload. */
+   after 800 ms; then a Retry button that re-runs the SAME fetch (ladder -> /list, segment -> /segment?name=, all -> /list,
+   theme -> /theme?name= -- cc#2232), no reload. */
 /* cc#2210: the cc#2208 helper, same behaviour. mobile_endpoints._guard answers a logged-out XHR with 401 {error:'unauthorized', login_url:'/login'};
    that body is let through the cc#2206 status ladder above (a 401 is !r.ok, so it used to land in the catch -> auto retry -> a Retry button that
    could never succeed) and handled here FIRST: go to the login page. Every non-auth failure keeps the cc#2206 path unchanged. GOING is a one-shot
@@ -229,7 +288,7 @@ function load(attempt){
   }).then(function(d){
     if(d===null) return;  /* cc#2210: unauth() has already navigated */
     if(d.error){ showErr('Could not load: '+d.error, true); return; }
-    Q.seg ? renderSeg(d) : (Q.view==='all' ? renderAll(d) : renderList(d));
+    Q.seg ? renderSeg(d) : (Q.theme ? renderTheme(d) : (Q.view==='all' ? renderAll(d) : renderList(d)));
   }).catch(function(e){
     var m='Could not load sectors — '+((e&&e.message)?e.message:'network error');
     if(!attempt){ showErr(m+' · retrying…', false); setTimeout(function(){ load(1); }, 800); return; }
