@@ -25,6 +25,7 @@ sector page (scorr_sector.html) and sector_endpoints.py's /api/sector/rotation â
 different endpoint, different query, both left exactly as they are.
 """
 import os
+import re
 
 from fastapi import APIRouter, Request
 import psycopg
@@ -303,69 +304,108 @@ def mobile_sector_theme(request: Request, name: str = ""):
             "groups": groups, "member_count": sum(len(gr["members"]) for gr in groups)}
 
 
-def _fundamentals_last_quarter(raw_names):
-    """cc#2233 Block 2: last reported quarter, aggregated mcap-weighted across the segment's
-    covered members (Sales/Revenue and Net Profit -- present on every 'quarters' row at the
-    latest period_end, verified live: 731 of 731). COVERAGE-GATED -- fundamentals_history holds
-    only 729 of 1,773 scored symbols (41%); 26 of 126 raw segments have none at all. Missing
-    members are excluded from both sides of the weighting, never zero."""
+_FY_QUARTER_RE = re.compile(r"^Q([1-4])FY(\d+)$")
+
+
+def _next_fy_quarter(q):
+    """cc#2235: 'Q1FY27' -> 'Q2FY27', 'Q4FY27' -> 'Q1FY28' (fiscal year rolls at Q4->Q1).
+    None or unparseable input -> None, never a guessed label."""
+    m = _FY_QUARTER_RE.match(q or "")
+    if not m:
+        return None
+    qn, yr = int(m.group(1)) + 1, int(m.group(2))
+    if qn > 4:
+        qn, yr = 1, yr + 1
+    return f"Q{qn}FY{yr:02d}"
+
+
+def _results_yoy_growth(raw_names):
+    """cc#2235: Results Snapshot, replacing cc#2233's fundamentals_history-based absolutes.
+    SOURCE IS screener_raw (sales_latest_quarter/sales_preceding_year_quarter and
+    profit_after_tax_latest_quarter/profit_after_tax_preceding_year_quarter), not
+    fundamentals_history -- better coverage (~99% of 1,865 rows vs fundamentals_history's 41%)
+    and it carries a genuine prior-year column, which is what a YoY headline needs.
+
+    THE HEADLINE IS GROWTH OF THE MCAP-WEIGHTED AGGREGATE, NOT A WEIGHTED AVERAGE OF EACH
+    COMPANY'S OWN GROWTH RATE: (SUM(latest*mcap) / SUM(prior*mcap) - 1) * 100. Verified live
+    against the card's own evidence (Auto - Engines & Thermal, 23/23 members on Q1FY27): this
+    formula reproduces the stated +23.9% sales / +9.5% net profit exactly. A weighted-AVERAGE-of-
+    rates formula (SUM(rate_i*mcap_i)/SUM(mcap_i), the pattern used for GVM/upside/3M-return
+    elsewhere on this page) gives +25.4%/+32.7% for the same segment -- visibly wrong against the
+    evidence, because growth-of-a-ratio does not commute with weighted-averaging the ratio itself
+    the way a level (GVM, upside, return) does. Do not reuse the other blocks' formula here.
+
+    MIXED-QUARTER GUARD (item 5): last_result_quarter is not uniform across the universe (96.1%
+    Q1FY27, a 3.9% tail on older quarters) -- both sums are restricted to the segment's DOMINANT
+    quarter (MODE), never blended across quarters, and the dominant quarter is returned so the
+    caller can label the block and coverage line with it."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            WITH latest_period AS (
-                SELECT MAX(period_end) AS period_end FROM fundamentals_history WHERE section = 'quarters'
+            WITH m AS (
+                SELECT g.symbol, g.market_cap, s.last_result_quarter,
+                       s.sales_latest_quarter, s.sales_preceding_year_quarter,
+                       s.profit_after_tax_latest_quarter, s.profit_after_tax_preceding_year_quarter
+                FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+                WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
             ),
-            latest_q AS (
-                SELECT fh.symbol,
-                       COALESCE(NULLIF(REPLACE(fh.metrics->>'Sales', ',', ''), ''),
-                                NULLIF(REPLACE(fh.metrics->>'Revenue', ',', ''), ''))::numeric AS sales,
-                       NULLIF(REPLACE(fh.metrics->>'Net Profit', ',', ''), '')::numeric AS net_profit
-                FROM fundamentals_history fh, latest_period lp
-                WHERE fh.section = 'quarters' AND fh.period_end = lp.period_end
-            )
-            SELECT (SELECT fh2.period_label FROM fundamentals_history fh2, latest_period lp2
-                     WHERE fh2.section = 'quarters' AND fh2.period_end = lp2.period_end LIMIT 1),
-                   (SELECT period_end FROM latest_period),
-                   ROUND((SUM(lq.sales * g.market_cap)
-                          / NULLIF(SUM(CASE WHEN lq.sales IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
-                   ROUND((SUM(lq.net_profit * g.market_cap)
-                          / NULLIF(SUM(CASE WHEN lq.net_profit IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
-                   COUNT(*) FILTER (WHERE lq.symbol IS NOT NULL),
-                   COUNT(*)
-            FROM gvm_scores g
-            LEFT JOIN latest_q lq ON lq.symbol = g.symbol
-            WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            dom AS (SELECT MODE() WITHIN GROUP (ORDER BY last_result_quarter) AS q FROM m)
+            SELECT (SELECT q FROM dom),
+                   COUNT(*),
+                   COUNT(*) FILTER (WHERE last_result_quarter = (SELECT q FROM dom)
+                                     AND (sales_latest_quarter IS NOT NULL OR profit_after_tax_latest_quarter IS NOT NULL)),
+                   ROUND(((SUM(CASE WHEN last_result_quarter = (SELECT q FROM dom)
+                                          AND sales_latest_quarter IS NOT NULL AND sales_preceding_year_quarter IS NOT NULL
+                                     THEN sales_latest_quarter * market_cap END)
+                          / NULLIF(SUM(CASE WHEN last_result_quarter = (SELECT q FROM dom)
+                                             AND sales_latest_quarter IS NOT NULL AND sales_preceding_year_quarter IS NOT NULL
+                                        THEN sales_preceding_year_quarter * market_cap END), 0)) - 1) * 100, 1),
+                   ROUND(((SUM(CASE WHEN last_result_quarter = (SELECT q FROM dom)
+                                          AND profit_after_tax_latest_quarter IS NOT NULL AND profit_after_tax_preceding_year_quarter IS NOT NULL
+                                     THEN profit_after_tax_latest_quarter * market_cap END)
+                          / NULLIF(SUM(CASE WHEN last_result_quarter = (SELECT q FROM dom)
+                                             AND profit_after_tax_latest_quarter IS NOT NULL AND profit_after_tax_preceding_year_quarter IS NOT NULL
+                                        THEN profit_after_tax_preceding_year_quarter * market_cap END), 0)) - 1) * 100, 1)
+            FROM m
         """, (raw_names,))
-        label, period_end, sales, net_profit, covered, total = cur.fetchone()
-    return {"period_label": label, "period_end": str(period_end) if period_end else None,
-            "sales_mcap_wt": _fl(sales), "net_profit_mcap_wt": _fl(net_profit),
-            "covered": covered, "total": total}
+        dominant_q, total, covered, sales_yoy, np_yoy = cur.fetchone()
+    return {"quarter": dominant_q, "total": total, "covered": covered,
+            "sales_yoy_pct": _fl(sales_yoy), "net_profit_yoy_pct": _fl(np_yoy)}
 
 
-def _screener_next_quarter(raw_names):
-    """cc#2233 Block 3: SOURCE IS screener_raw (expected_qtr_sales/expected_quarterly_net_profit/
-    expected_quarterly_eps), NOT trendlyne_estimates -- trendlyne holds only ONE period (FY27,
-    annual) with no analyst-count/estimate-range columns populated and no clean symbol key, so it
-    cannot serve a quarterly block at all (verified live). anchor_quarter is the segment's most
-    common screener_raw.last_result_quarter (the quarter each estimate is anchored to) -- the
-    block names its own period from this rather than saying 'next quarter' generically."""
+def _earnings_qoq_estimate(raw_names, anchor_quarter):
+    """cc#2235: Earnings Snapshot -- percentage growth, QoQ vs anchor_quarter (the segment's
+    dominant last_result_quarter, e.g. Q1FY27), labelled by the quarter being ESTIMATED
+    (Q2FY27), not the anchor. NOT YoY: screener_raw carries no year-ago counterpart for the
+    estimate (no Q2FY26 actual column exists anywhere in this source) -- QoQ vs the anchor is the
+    only available base. That is a data limit, not a design choice, and the caller must say so
+    rather than presenting this figure as if it were measured the same way as the Results block's
+    YoY headline. Same aggregate-growth formula and mixed-quarter guard as _results_yoy_growth --
+    restricted to anchor_quarter so both blocks describe the exact same member population."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            SELECT MODE() WITHIN GROUP (ORDER BY s.last_result_quarter),
-                   ROUND((SUM(CASE WHEN s.expected_qtr_sales IS NOT NULL THEN s.expected_qtr_sales * g.market_cap END)
-                          / NULLIF(SUM(CASE WHEN s.expected_qtr_sales IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
-                   ROUND((SUM(CASE WHEN s.expected_quarterly_net_profit IS NOT NULL THEN s.expected_quarterly_net_profit * g.market_cap END)
-                          / NULLIF(SUM(CASE WHEN s.expected_quarterly_net_profit IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
-                   ROUND((SUM(CASE WHEN s.expected_quarterly_eps IS NOT NULL THEN s.expected_quarterly_eps * g.market_cap END)
-                          / NULLIF(SUM(CASE WHEN s.expected_quarterly_eps IS NOT NULL THEN g.market_cap END), 0))::numeric, 2),
-                   COUNT(*) FILTER (WHERE s.expected_qtr_sales IS NOT NULL OR s.expected_quarterly_net_profit IS NOT NULL),
-                   COUNT(*)
-            FROM gvm_scores g
-            LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE s.last_result_quarter = %s
+                                     AND (s.expected_qtr_sales IS NOT NULL OR s.expected_quarterly_net_profit IS NOT NULL)),
+                   ROUND(((SUM(CASE WHEN s.last_result_quarter = %s
+                                          AND s.expected_qtr_sales IS NOT NULL AND s.sales_latest_quarter IS NOT NULL
+                                     THEN s.expected_qtr_sales * g.market_cap END)
+                          / NULLIF(SUM(CASE WHEN s.last_result_quarter = %s
+                                             AND s.expected_qtr_sales IS NOT NULL AND s.sales_latest_quarter IS NOT NULL
+                                        THEN s.sales_latest_quarter * g.market_cap END), 0)) - 1) * 100, 1),
+                   ROUND(((SUM(CASE WHEN s.last_result_quarter = %s
+                                          AND s.expected_quarterly_net_profit IS NOT NULL AND s.profit_after_tax_latest_quarter IS NOT NULL
+                                     THEN s.expected_quarterly_net_profit * g.market_cap END)
+                          / NULLIF(SUM(CASE WHEN s.last_result_quarter = %s
+                                             AND s.expected_quarterly_net_profit IS NOT NULL AND s.profit_after_tax_latest_quarter IS NOT NULL
+                                        THEN s.profit_after_tax_latest_quarter * g.market_cap END), 0)) - 1) * 100, 1)
+            FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
             WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-        """, (raw_names,))
-        anchor_quarter, sales, net_profit, eps, covered, total = cur.fetchone()
-    return {"anchor_quarter": anchor_quarter, "sales_mcap_wt": _fl(sales), "net_profit_mcap_wt": _fl(net_profit),
-            "eps_mcap_wt": _fl(eps), "covered": covered, "total": total}
+        """, (anchor_quarter, anchor_quarter, anchor_quarter, anchor_quarter,
+              anchor_quarter, anchor_quarter, raw_names))
+        total, covered, sales_qoq, np_qoq = cur.fetchone()
+    return {"anchor_quarter": anchor_quarter, "estimate_quarter": _next_fy_quarter(anchor_quarter),
+            "total": total, "covered": covered,
+            "sales_qoq_pct": _fl(sales_qoq), "net_profit_qoq_pct": _fl(np_qoq)}
 
 
 def _upside_mcap_weighted(raw_names):
@@ -462,6 +502,10 @@ async def mobile_sector_segment(request: Request, name: str = ""):
             members.append({"symbol": sym, "name": cn, "gvm": _fl(gvm), "verdict": vd, "g": _fl(gg), "v": _fl(vv), "m": _fl(mm),
                             "mcap": _fl(mc), "pe": _fl(pe), "price": _fl(px)})   # cc#2233 Block 5: PRICE column added
     members.sort(key=lambda x: -(x["gvm"] or 0))
+    # cc#2235: Earnings must be anchored to the SAME dominant quarter Results restricted to --
+    # computed here, not independently inside _earnings_qoq_estimate, so the two blocks can never
+    # disagree about which quarter they are both keyed off.
+    results_yoy = _results_yoy_growth(raw_names)
     return {"segment": disp_name, "score_date": row.get("score_date"),
             # cc#2231: "change" dropped from the scorecard too -- same reason as mobile_sector_list's rows.
             "scorecard": {"gvm": _fl(row.get("gvm")), "g": _fl(row.get("g_score")), "v": _fl(row.get("v_score")), "m": _fl(row.get("m_score")),
@@ -471,10 +515,10 @@ async def mobile_sector_segment(request: Request, name: str = ""):
             "absorbed": row.get("absorbed") or [],
             "brief": {"what": b.get("what_is_it"), "drivers": b.get("growth_drivers"), "model": b.get("business_model"),
                       "risks": b.get("key_risks"), "application": b.get("application_type"), "generated_at": b.get("generated_at")},
-            # cc#2233 items 3-5: last-quarter highlights, next-quarter earnings snapshot, annual upside --
-            # all mcap-weighted, all state their own member coverage, computed over the SAME raw_names
-            # population the holdings table below shows (item 11: every block carries its own as-of + coverage).
-            "last_quarter": _fundamentals_last_quarter(raw_names),
-            "next_quarter": _screener_next_quarter(raw_names),
+            # cc#2233 items 3-5 / cc#2235: results snapshot (YoY %), earnings snapshot (QoQ % estimate),
+            # annual upside -- all mcap-weighted, all state their own member coverage, computed over the
+            # SAME raw_names population the holdings table below shows.
+            "last_quarter": results_yoy,
+            "next_quarter": _earnings_qoq_estimate(raw_names, results_yoy["quarter"]),
             "upside_v2": _upside_mcap_weighted(raw_names),
             "members": {"rows": members, "count": len(members)}}

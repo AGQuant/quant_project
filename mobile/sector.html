@@ -255,17 +255,25 @@ function renderAll(d){
 // states its own coverage on screen (item 11 -- different sources, different member coverage, a
 // page-level date would misrepresent at least one) and renders an honest-empty state when its
 // source has nothing for this segment, matching the trend block precedent elsewhere on this page.
-function fundBlock(fq){
-  if(!fq||!fq.covered) return '<div class="card"><div class="ch"><span class="t">Results snapshot</span></div><div class="emp"><b>No fundamentals on record</b>None of the names in this segment have quarterly fundamentals scraped yet.</div></div>';
-  return '<div class="card"><div class="ch"><span class="t">Results snapshot</span><span class="n">'+esc(fq.period_label||'—')+'</span></div>'
-    +'<div class="p">Sales <b>'+cr(fq.sales_mcap_wt)+'</b> &nbsp;&nbsp; Net profit <b>'+cr(fq.net_profit_mcap_wt)+'</b></div>'
-    +'<div class="p mu">Mcap-weighted, from '+fq.covered+' of '+fq.total+' names with fundamentals on record.</div></div>';
+//
+// cc#2235: both snapshot blocks lead with PERCENTAGE GROWTH, not absolute rupee totals, and each
+// names its own quarter AND its own basis. Results is YoY (screener_raw carries a genuine
+// year-ago column); Earnings is QoQ vs the same anchor quarter (no year-ago counterpart exists
+// for the estimate anywhere in this source) -- stated explicitly on screen so a reader comparing
+// the two numbers never mistakes one measurement basis for the other.
+function resultsBlock(fq){
+  if(!fq||!fq.covered) return '<div class="card"><div class="ch"><span class="t">Results snapshot</span></div><div class="emp"><b>No results on record</b>None of the names in this segment carry a reported quarter yet.</div></div>';
+  return '<div class="card"><div class="ch"><span class="t">Results snapshot</span><span class="n">'+esc(fq.quarter||'—')+'</span></div>'
+    +'<div class="p">Sales <b class="'+cls(fq.sales_yoy_pct)+'">'+pct(fq.sales_yoy_pct)+'</b> &nbsp;&nbsp; Net profit <b class="'+cls(fq.net_profit_yoy_pct)+'">'+pct(fq.net_profit_yoy_pct)+'</b></div>'
+    +'<div class="p mu">Year-on-year, vs the same quarter a year ago.</div>'
+    +'<div class="p mu">Mcap-weighted, from '+fq.covered+' of '+fq.total+' names on '+esc(fq.quarter||'—')+'.</div></div>';
 }
-function nextQBlock(nq){
+function earningsBlock(nq){
   if(!nq||!nq.covered) return '<div class="card"><div class="ch"><span class="t">Earnings snapshot</span></div><div class="emp"><b>No estimates on record</b>None of the names in this segment carry a next-quarter estimate.</div></div>';
-  return '<div class="card"><div class="ch"><span class="t">Earnings snapshot</span><span class="n">after '+esc(nq.anchor_quarter||'—')+'</span></div>'
-    +'<div class="p">Sales <b>'+cr(nq.sales_mcap_wt)+'</b> &nbsp;&nbsp; Net profit <b>'+cr(nq.net_profit_mcap_wt)+'</b> &nbsp;&nbsp; EPS <b>'+(nq.eps_mcap_wt==null?'—':'₹'+f2(nq.eps_mcap_wt))+'</b></div>'
-    +'<div class="p mu">Mcap-weighted, from '+nq.covered+' of '+nq.total+' names with an estimate on record.</div></div>';
+  return '<div class="card"><div class="ch"><span class="t">Earnings snapshot</span><span class="n">'+esc(nq.estimate_quarter||'—')+' estimates</span></div>'
+    +'<div class="p">Sales <b class="'+cls(nq.sales_qoq_pct)+'">'+pct(nq.sales_qoq_pct)+'</b> &nbsp;&nbsp; Net profit <b class="'+cls(nq.net_profit_qoq_pct)+'">'+pct(nq.net_profit_qoq_pct)+'</b></div>'
+    +'<div class="p mu">Quarter-on-quarter, vs '+esc(nq.anchor_quarter||'—')+' — no year-ago estimate exists to measure this one YoY.</div>'
+    +'<div class="p mu">Mcap-weighted, from '+nq.covered+' of '+nq.total+' names on '+esc(nq.anchor_quarter||'—')+'.</div></div>';
 }
 function upsideBlock(up){
   if(!up||!up.covered) return '<div class="card"><div class="ch"><span class="t">Potential annual upside</span></div><div class="emp"><b>No upside on record</b>None of the names in this segment carry a computed upside.</div></div>';
@@ -291,8 +299,8 @@ function renderSeg(d){
   // the numbered 5 -- kept, positioned after the 4 core blocks so the founder's order is unbroken.
   if(b.what) h+='<div class="card"><div class="ch"><span class="t">What it is</span><span class="n">brief</span></div><div class="p">'+esc(b.what)+'</div>'+(b.model?'<div class="p mu">'+esc(b.model)+'</div>':'')+'</div>';
   else h+='<div class="card"><div class="emp"><b>No brief yet</b>This segment has no written brief on record. The numbers above still stand.</div></div>';
-  h+=fundBlock(d.last_quarter);
-  h+=nextQBlock(d.next_quarter);
+  h+=resultsBlock(d.last_quarter);
+  h+=earningsBlock(d.next_quarter);
   h+=upsideBlock(d.upside_v2);
   if(b.drivers) h+='<div class="card"><div class="ch"><span class="t">What drives it</span></div><div class="p">'+esc(b.drivers)+'</div></div>';
   if(b.risks) h+='<div class="card"><div class="ch"><span class="t">What can go wrong</span></div><div class="p">'+esc(b.risks)+'</div></div>';
