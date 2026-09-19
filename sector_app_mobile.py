@@ -157,7 +157,11 @@ def mobile_sector_list(request: Request):
     for r in rot.get("all") or []:
         rows.append({"segment": r.get("display_segment") or r.get("segment"), "gvm": _fl(r.get("gvm")),
                      "g": _fl(r.get("g_score")), "v": _fl(r.get("v_score")), "m": _fl(r.get("m_score")),
-                     "change": _fl(r.get("gvm_change")), "names": int(r.get("stocks_count") or 0),
+                     # cc#2231: "change" dropped -- sector_ratings has one score_date and no scheduler
+                     # produces a second one; the underlying gvm_history delta join matches at most 1 of
+                     # 126 segments against a single stray 2002 seed row. A field that describes a delta
+                     # that cannot exist is a false promise in the payload, same as the pill was on screen.
+                     "names": int(r.get("stocks_count") or 0),
                      "mcap": _fl(r.get("total_mcap")), "size": r.get("size_class"), "verdict": r.get("verdict"),
                      "inst": _fl(r.get("inst_change")), "qoq": _fl(r.get("qoq_profit")), "upside": _fl(r.get("annual_upside")),
                      "top": [{"symbol": p.get("symbol"), "gvm": _fl(p.get("gvm")), "day": _fl(p.get("day_ret"))}
@@ -174,7 +178,7 @@ def mobile_sector_list(request: Request):
                                for c in (t.get("companies") or [])[:3]]})
     return {"score_date": rot.get("score_date"), "segments": len(rows), "raw_segments": rot.get("raw_segments"),
             "verdicts": verdicts, "rows": rows, "themes": themes,
-            "note": "Mcap-weighted GVM per segment — one big weak name pulls its whole segment down. Change = move since the first scored day on record."}
+            "note": "Mcap-weighted GVM per segment — one big weak name pulls its whole segment down."}
 
 
 @router.get("/api/mobile/sector_app/segment")
@@ -216,8 +220,9 @@ async def mobile_sector_segment(request: Request, name: str = ""):
                             "mcap": _fl(mc), "pe": _fl(pe)})
     members.sort(key=lambda x: -(x["gvm"] or 0))
     return {"segment": name, "score_date": row.get("score_date"),
+            # cc#2231: "change" dropped from the scorecard too -- same reason as mobile_sector_list's rows.
             "scorecard": {"gvm": _fl(row.get("gvm")), "g": _fl(row.get("g_score")), "v": _fl(row.get("v_score")), "m": _fl(row.get("m_score")),
-                          "verdict": row.get("verdict"), "change": _fl(row.get("gvm_change")), "size": row.get("size_class")},
+                          "verdict": row.get("verdict"), "size": row.get("size_class")},
             "evidence": {"names": int(row.get("stocks_count") or 0), "mcap": _fl(row.get("total_mcap")),
                          "inst": _fl(row.get("inst_change")), "qoq": _fl(row.get("qoq_profit")), "upside": _fl(row.get("annual_upside"))},
             "absorbed": row.get("absorbed") or [],

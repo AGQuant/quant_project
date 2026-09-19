@@ -844,6 +844,32 @@ async def _log_perf(path, method, status_code, duration_ms, user_agent):
     except Exception as e:
         logging.warning(f"Failed to log perf data: {e}")
 
+
+# cc#2231: an exception that escapes routing/response-serialization (e.g. FastAPI failing to
+# encode a bad return value) never reaches perf_request_log_middleware above — call_next() raises
+# straight past it to Starlette's own ServerErrorMiddleware, which is OUTSIDE every app-level
+# middleware. That gap is exactly how the sector_app_mobile async/_json_safe bug (cc#2231) produced
+# a real "HTTP 500 text/plain / Internal Server Error" the founder had to screenshot, with ZERO
+# rows in perf_request_log across 3 days -- not a slow query, not a bad row, just invisible. A
+# registered Exception handler is the one place every such failure still passes through (Starlette
+# calls it INSTEAD OF the default plain-text body), so it is where this class of bug becomes
+# self-reporting: logged with a traceback, recorded as a 500 in the SAME table every other request
+# lands in, and answered as JSON so the client's own cc#2206 status ladder can read it like any
+# other API error instead of choking on a bare text/plain body.
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    logging.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    try:
+        with psycopg.connect(os.getenv("DATABASE_URL")) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO perf_request_log (path, method, status_code, response_time_ms, user_agent) VALUES (%s, %s, %s, %s, %s)",
+                (request.url.path, request.method, 500, 0, request.headers.get("user-agent", ""))
+            )
+            conn.commit()
+    except Exception as log_err:
+        logging.warning(f"Failed to log unhandled-exception perf row: {log_err}")
+    return JSONResponse({"error": f"{type(exc).__name__}: {str(exc)[:200]}"}, status_code=500)
+
 # cc#712: serve HTML pages from an in-memory cache — read each file once, then from the dict. A new
 # deploy is a fresh process, so it naturally reloads (no TTL needed). Removes per-request disk reads.
 _HTML_CACHE = {}

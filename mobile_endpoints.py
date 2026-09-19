@@ -43,6 +43,7 @@ PERFORMANCE — THIS FILE IS BORN CLEAN (cc#869 findings 2+3, enforced by cc#879
 """
 
 import os
+import asyncio
 import functools
 import logging
 from datetime import datetime, time as dt_time, timedelta, timezone
@@ -93,9 +94,31 @@ def _conn():
 # It returns HTTP 200 with an {"error": ...} body on purpose: that is the shape the in-try path
 # already returns and the shape every template's failBox reads. A 500 here would be more correct
 # in the abstract and would break every screen that already handles this correctly.
+#
+# cc#2231: this file's own doctrine (line 39 above) is every handler is `def`, never `async def` —
+# but sector_app_mobile.mobile_sector_segment is a legitimate exception (it awaits sector_brief,
+# itself async) and reused this decorator unchanged. A plain `def wrapper` calling an async fn only
+# constructs its coroutine and never runs or awaits it — `try` never sees an exception, because the
+# handler's body never executes at all, so the escape route above stayed closed for every SYNC
+# handler and re-opened for the one ASYNC one. The un-awaited coroutine object then reached
+# FastAPI's own response encoding, which cannot serialise it -- that failure happens inside
+# call_next(), before perf_request_log_middleware regains control, so it produced the exact
+# "uninstrumented, never logged, real 500" signature cc#2231 found (0 rows for this path in 3 days
+# of perf_request_log). Branching on iscoroutinefunction so the wrapper is itself a coroutine
+# function whenever fn is — FastAPI must see an async callable to await it correctly.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 def _json_safe(fn):
     """Guarantee a mobile API handler answers with JSON, never a raw 500."""
+    if asyncio.iscoroutinefunction(fn):
+        @functools.wraps(fn)
+        async def async_wrapper(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as e:
+                log.exception("%s escaped with an unhandled exception", fn.__name__)
+                return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+        return async_wrapper
+
     @functools.wraps(fn)          # keeps the signature FastAPI introspects for its dependencies
     def wrapper(*args, **kwargs):
         try:

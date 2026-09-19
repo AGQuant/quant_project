@@ -44,11 +44,10 @@
 .lr .sub{font-size:var(--type-95);color:var(--muted);margin-top:var(--space-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lr .sub b{color:var(--ink);font-weight:700}
 /* cc#2155: score block. si-* names on purpose -- mobile_app.css has bare .c/.gv/.rk/.more card rules that
-   restyled the old names (the boxed, cut-off delta). Score and delta are two separate pieces now. */
+   restyled the old names (the boxed, cut-off delta). cc#2231: the delta chip itself is gone (it could
+   never populate -- see the ladderRow comment above), so this is score-only now. */
 .lr .si-gv{display:flex;flex-direction:column;align-items:flex-end;gap:var(--space-3);min-width:56px}
 .lr .si-gv .si-n{font-size:var(--type-17);font-weight:800;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
-.lr .si-gv .si-d{display:inline-block;font-size:var(--type-9);font-weight:700;line-height:1;padding:var(--space-2) var(--space-5);border-radius:var(--radius-8);background:var(--hi);color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
-.lr .si-gv .si-d.pos{color:var(--win)}.lr .si-gv .si-d.neg{color:var(--loss)}
 .pill{display:inline-block;font-size:var(--type-8);font-weight:800;letter-spacing:var(--track-em8);text-transform:uppercase;padding:var(--space-1) var(--space-5);border-radius:var(--radius-8);background:var(--hi);border:var(--bw-1) solid var(--edge);color:var(--muted);margin-left:var(--space-5);vertical-align:middle}
 .pill.g{color:var(--win)}.pill.w{color:var(--loss)}
 .si-more{display:flex;align-items:center;justify-content:space-between;gap:var(--space-10);margin:var(--space-8) var(--space-16) 0;padding:var(--space-10) var(--space-14);background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-12);text-decoration:none;color:var(--ink)}
@@ -126,14 +125,17 @@ function sg(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); ret
 function cls(v){ return v==null?'':(Number(v)>0?'pos':(Number(v)<0?'neg':'')); }
 function cr(v){ if(v==null) return '—'; v=Number(v); return v>=100000?'₹'+(v/100000).toFixed(1)+'L Cr':v>=1000?'₹'+(v/1000).toFixed(0)+'k Cr':'₹'+Math.round(v)+' Cr'; }
 function vcls(v){ return v==='Good'||v==='Excellent'?'g':(v==='Weak'?'w':''); }
-function dchip(v){ if(v==null||isNaN(Number(v))) return '—'; var x=Number(v); return (x>0?'▲ ':(x<0?'▼ ':''))+sg(x); }   // cc#2155: delta since first score, arrow + signed number
 var D=null, SIZE='ALL';
 function ladderRow(r,i,cold){
   var top=(r.top||[])[0];
   return '<a class="lr '+(cold?'cold':(vcls(r.verdict)==='g'?'good':''))+'" href="/m/sector?seg='+encodeURIComponent(r.segment)+'"><span class="si-rk">'+(i+1)+'</span>'
     +'<div><div class="nm">'+esc(r.segment)+'<span class="pill '+vcls(r.verdict)+'">'+esc(r.verdict||'—')+'</span></div>'
     +'<div class="sub">G '+f1(r.g)+' · V '+f1(r.v)+' · M '+f1(r.m)+' · '+r.names+' names'+(top?' · <b>'+esc(top.symbol)+'</b> '+(top.day!=null?'<span class="'+cls(top.day)+'">'+pct(top.day)+'</span>':''):'')+'</div></div>'
-    +'<div class="si-gv"><div class="si-n">'+f2(r.gvm)+'</div><span class="si-d '+cls(r.change)+'">'+dchip(r.change)+'</span></div></a>';
+    // cc#2231: the change pill (was here) can never populate -- sector_ratings has one score_date and no
+    // scheduler produces a second one, and the underlying gvm_history delta join matches at most 1 of 126
+    // segments against a single stray 2002 seed row. Removed with its header claim, not hidden behind a
+    // flag; see item 4 of cc#2231 for what would have to be true before it can come back.
+    +'<div class="si-gv"><div class="si-n">'+f2(r.gvm)+'</div></div></a>';
 }
 function renderList(d){
   D=d;
@@ -141,7 +143,7 @@ function renderList(d){
   var vs=d.verdicts||{}; var good=(vs.Good||0)+(vs.Excellent||0), weak=vs.Weak||0;
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+rows.length+' segments · mcap-weighted GVM';
   var h='<div class="km"><div><div class="k">Segments</div><div class="si-v">'+rows.length+'</div></div><div><div class="k">Good</div><div class="si-v pos">'+good+'</div></div><div><div class="k">Average</div><div class="si-v">'+(vs.Average||0)+'</div></div><div><div class="k">Weak</div><div class="si-v neg">'+weak+'</div></div></div>';
-  h+='<div class="sec"><h2>Strongest segments</h2><span class="hint">by GVM · Δ since first score</span></div>';
+  h+='<div class="sec"><h2>Strongest segments</h2><span class="hint">by GVM</span></div>';
   h+='<div class="seg" id="sz">'+['ALL','LARGE','MID','SMALL'].map(function(s){return '<span data-s="'+s+'"'+(s===SIZE?' class="on"':'')+'>'+(s==='ALL'?'All':s.charAt(0)+s.slice(1).toLowerCase())+'</span>';}).join('')+'</div>';
   h+='<div class="lad" id="ladder"></div><div id="lmore"></div>';
   var cold=rows.filter(function(r){return r.gvm!=null&&r.gvm<6;}).sort(function(a,b){return (a.gvm||0)-(b.gvm||0);}).slice(0,5);
@@ -180,7 +182,7 @@ function renderAll(d){
   ROWS=d.rows||[]; KEY='gvm'; ASC=false; FILTER='';
   COLS=[['segment','Segment',function(v,r){return '<a href="/m/sector?seg='+encodeURIComponent(v)+'">'+esc(v)+'<small>'+esc(r.verdict||'')+(r.size?' · '+r.size.toLowerCase():'')+'</small></a>';}],
         ['gvm','GVM',function(v){return '<span class="'+((v||0)>=7?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],
-        ['change','Δ',function(v){return '<span class="'+cls(v)+'">'+sg(v)+'</span>';}],['names','Names'],['mcap','Mcap',cr]];
+        ['names','Names'],['mcap','Mcap',cr]];   // cc#2231: Δ column dropped -- change is no longer in the API payload
   tbl();
   document.getElementById('se-q').addEventListener('input', function(){ FILTER=this.value.trim().toLowerCase(); tbl(); });
 }
@@ -190,7 +192,7 @@ function renderSeg(d){
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(s.size?s.size.toLowerCase()+' segment · ':'')+e.names+' names';
   var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+(v==null?0:Math.min(100,v*10))+'%"></i></div><span class="si-pv">'+f1(v)+'</span></div>'; };
   var h='<div class="hero"><div class="eye">Segment · '+esc(s.verdict||'—')+(d.absorbed&&d.absorbed.length>1?' · covers '+d.absorbed.length+' sub-segments':'')+'</div><div class="nm">'+esc(d.segment)+'</div>'
-    +'<div class="big"><div class="r">'+f2(s.gvm)+'</div><div class="n">mcap-weighted GVM<br>Δ since first score <b class="'+cls(s.change)+'">'+sg(s.change)+'</b></div></div>'
+    +'<div class="big"><div class="r">'+f2(s.gvm)+'</div><div class="n">mcap-weighted GVM</div></div>'
     +'<div class="si-pil">'+bar('G',s.g)+bar('V',s.v)+bar('M',s.m)+'</div></div>';
   h+='<div class="strip"><div><div class="si-sk">Names</div><div class="si-sv">'+e.names+'</div></div><div><div class="si-sk">Mcap</div><div class="si-sv">'+cr(e.mcap)+'</div></div><div><div class="si-sk">Inst. flow</div><div class="si-sv '+cls(e.inst)+'">'+(e.inst==null?'—':pct(e.inst))+'</div></div><div><div class="si-sk">QoQ profit</div><div class="si-sv '+cls(e.qoq)+'">'+(e.qoq==null?'—':pct(e.qoq))+'</div></div></div>';
   if(b.what||b.drivers||b.risks){
