@@ -104,6 +104,13 @@ tr:last-child td{border-bottom:none}.gd{color:var(--brand)}
 .se-retry{margin-top:var(--space-10);padding:var(--space-8) var(--space-14);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);background:var(--panel);color:var(--ink);font:inherit;font-size:var(--type-12);font-weight:700}
 .se-search{padding:var(--space-10) var(--space-12);border-bottom:var(--bw-1) solid var(--edge)}
 .se-search input{width:100%;box-sizing:border-box;padding:var(--space-9) var(--space-12);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);background:var(--hi);color:var(--ink);font:inherit;font-size:var(--type-12)}
+/* cc#2233: segment search, a standalone card below Emerging Themes (not inside a .wrap table, so its
+   own small panel rather than reusing .se-search's border-bottom-only styling). */
+.seg-search-wrap{margin:var(--space-10) var(--space-16) 0;background:var(--panel);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-14);padding:var(--space-10) var(--space-12)}
+.seg-search-wrap input{width:100%;box-sizing:border-box;padding:var(--space-9) var(--space-12);border:var(--bw-1) solid var(--edge);border-radius:var(--radius-11);background:var(--hi);color:var(--ink);font:inherit;font-size:var(--type-12)}
+.seg-sugg a{display:flex;justify-content:space-between;align-items:center;padding:var(--space-9) var(--space-4);border-top:var(--bw-1) solid var(--hi);text-decoration:none;color:var(--ink);font-size:var(--type-12);font-weight:600}
+.seg-sugg a span{color:var(--muted);font-size:var(--type-10);font-weight:600}
+.seg-sugg .emp{padding:var(--space-9) var(--space-4) 0}
 .back{color:var(--brand);text-decoration:none;font-size:var(--type-18);font-weight:800}
 </style>
 </head>
@@ -168,9 +175,15 @@ function renderList(d){
         +'<div class="tc-stats"><span>GVM <b>'+f2(t.gvm)+'</b></span><span>3M <b class="'+cls(t.ret3m)+'">'+pct(t.ret3m)+'</b></span></div>'
         +'<div class="lst">'+(t.top||[]).map(function(c){return '<div class="r"><b>'+esc(c.symbol)+'</b><span>GVM '+f2(c.gvm)+'</span></div>';}).join('')+'</div></a>';
     }).join('')+'</div>' : '<div class="card"><div class="emp"><b>No themes on record</b>The theme pass has not written any rows yet.</div></div>';
+  // cc#2233: SEGMENT search (never company/symbol), below Emerging Themes -- type part of a segment
+  // name, get segment suggestions; selecting one opens that segment's detail view (the fuller view
+  // for everything the search element promises, item 1).
+  h+='<div class="sec"><h2>Find a segment</h2><span class="hint">type to search</span></div>';
+  h+='<div class="seg-search-wrap"><input id="seg-q" type="search" inputmode="search" placeholder="Search segments — try auto or wiring" aria-label="Search segments" autocomplete="off"><div class="seg-sugg" id="seg-sugg"></div></div>';
   h+='<div class="note"><b>How to read this.</b> '+esc(d.note||'')+' Tap a segment for its brief, the numbers behind the score and every member.</div>';
   document.getElementById('body').innerHTML=h;
   drawLadder();
+  wireSegSearch();
   document.getElementById('sz').addEventListener('click', function(e){ var s=e.target.closest('[data-s]'); if(!s) return; SIZE=s.getAttribute('data-s'); this.querySelectorAll('span').forEach(function(x){x.classList.toggle('on',x===s);}); drawLadder(); });
 }
 function drawLadder(){
@@ -179,6 +192,27 @@ function drawLadder(){
   document.getElementById('ladder').innerHTML= top.length ? top.map(function(r,i){return ladderRow(r,i,false);}).join('') : '<div class="emp" style="padding:12px">No segment in this size band.</div>';
   var all=(D.rows||[]).length, band=SIZE==='ALL'?'':' '+SIZE.toLowerCase();
   document.getElementById('lmore').innerHTML='<a class="si-more" href="/m/sector?view=all"><div><b>View all '+all+' segments</b><span>'+(rows.length>5?'Showing the top 5 of '+rows.length+band:'All '+rows.length+band+' shown')+' · sortable table</span></div><i>›</i></a>';
+}
+// cc#2233: debounced (250ms) segment-name suggestions, separate from the page's main load() fetch --
+// this is a side query, not the primary data load, so it uses a plain fetch and fails quietly.
+function wireSegSearch(){
+  var input=document.getElementById('seg-q'), sugg=document.getElementById('seg-sugg'), t=null;
+  if(!input) return;
+  input.addEventListener('input', function(){
+    var v=this.value.trim();
+    clearTimeout(t);
+    if(!v){ sugg.innerHTML=''; return; }
+    t=setTimeout(function(){
+      fetch('/api/mobile/sector_app/search?q='+encodeURIComponent(v), {credentials:'same-origin'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          var res=(d&&d.results)||[];
+          sugg.innerHTML = res.length ? res.map(function(s){
+            return '<a href="/m/sector?seg='+encodeURIComponent(s.segment)+'">'+esc(s.segment)+'<span>'+s.names+' names</span></a>';
+          }).join('') : '<div class="emp">No segment matches "'+esc(v)+'".</div>';
+        }).catch(function(){});
+    }, 250);
+  });
 }
 var ROWS=[], KEY='gvm', ASC=false, COLS=[], FILTER='', GROUPKEY=null, GROUPORDER=null, GROUPMETA=null;   /* cc#2206: FILTER = the All Segments search, case-insensitive substring on the segment name. cc#2232: GROUPKEY/GROUPORDER/GROUPMETA are the theme tap-through's optional grouping -- unused (null) by every other caller, so renderAll/renderSeg are unchanged. */
 function tbl(){
@@ -217,25 +251,58 @@ function renderAll(d){
   tbl();
   document.getElementById('se-q').addEventListener('input', function(){ FILTER=this.value.trim().toLowerCase(); tbl(); });
 }
+// cc#2233 items 2-4 (results snapshot / earnings snapshot / potential annual upside): every block
+// states its own coverage on screen (item 11 -- different sources, different member coverage, a
+// page-level date would misrepresent at least one) and renders an honest-empty state when its
+// source has nothing for this segment, matching the trend block precedent elsewhere on this page.
+function fundBlock(fq){
+  if(!fq||!fq.covered) return '<div class="card"><div class="ch"><span class="t">Results snapshot</span></div><div class="emp"><b>No fundamentals on record</b>None of the names in this segment have quarterly fundamentals scraped yet.</div></div>';
+  return '<div class="card"><div class="ch"><span class="t">Results snapshot</span><span class="n">'+esc(fq.period_label||'—')+'</span></div>'
+    +'<div class="p">Sales <b>'+cr(fq.sales_mcap_wt)+'</b> &nbsp;&nbsp; Net profit <b>'+cr(fq.net_profit_mcap_wt)+'</b></div>'
+    +'<div class="p mu">Mcap-weighted, from '+fq.covered+' of '+fq.total+' names with fundamentals on record.</div></div>';
+}
+function nextQBlock(nq){
+  if(!nq||!nq.covered) return '<div class="card"><div class="ch"><span class="t">Earnings snapshot</span></div><div class="emp"><b>No estimates on record</b>None of the names in this segment carry a next-quarter estimate.</div></div>';
+  return '<div class="card"><div class="ch"><span class="t">Earnings snapshot</span><span class="n">after '+esc(nq.anchor_quarter||'—')+'</span></div>'
+    +'<div class="p">Sales <b>'+cr(nq.sales_mcap_wt)+'</b> &nbsp;&nbsp; Net profit <b>'+cr(nq.net_profit_mcap_wt)+'</b> &nbsp;&nbsp; EPS <b>'+(nq.eps_mcap_wt==null?'—':'₹'+f2(nq.eps_mcap_wt))+'</b></div>'
+    +'<div class="p mu">Mcap-weighted, from '+nq.covered+' of '+nq.total+' names with an estimate on record.</div></div>';
+}
+function upsideBlock(up){
+  if(!up||!up.covered) return '<div class="card"><div class="ch"><span class="t">Potential annual upside</span></div><div class="emp"><b>No upside on record</b>None of the names in this segment carry a computed upside.</div></div>';
+  return '<div class="card"><div class="ch"><span class="t">Potential annual upside</span></div>'
+    +'<div class="p"><b class="'+cls(up.upside_mcap_wt)+'" style="font-size:var(--type-22)">'+pct(up.upside_mcap_wt)+'</b></div>'
+    +'<div class="p mu">Mcap-weighted, from '+up.covered+' of '+up.total+' names with a computed upside.</div></div>';
+}
 function renderSeg(d){
   var s=d.scorecard||{}, e=d.evidence||{}, b=d.brief||{};
   document.getElementById('pg-title').textContent=d.segment; document.getElementById('back').style.display='';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(s.size?s.size.toLowerCase()+' segment · ':'')+e.names+' names';
   var bar=function(l,v){ return '<div class="r"><span class="l">'+l+'</span><div class="bar"><i style="width:'+(v==null?0:Math.min(100,v*10))+'%"></i></div><span class="si-pv">'+f1(v)+'</span></div>'; };
+  // cc#2233 item 9: GVM rating is the header figure -- s.gvm is read straight from the same
+  // sector_rotation() row the Strongest/Cold rails render, never re-derived here.
   var h='<div class="hero"><div class="eye">Segment · '+esc(s.verdict||'—')+(d.absorbed&&d.absorbed.length>1?' · covers '+d.absorbed.length+' sub-segments':'')+'</div><div class="nm">'+esc(d.segment)+'</div>'
     +'<div class="big"><div class="r">'+f2(s.gvm)+'</div><div class="n">mcap-weighted GVM</div></div>'
     +'<div class="si-pil">'+bar('G',s.g)+bar('V',s.v)+bar('M',s.m)+'</div></div>';
   h+='<div class="strip"><div><div class="si-sk">Names</div><div class="si-sv">'+e.names+'</div></div><div><div class="si-sk">Mcap</div><div class="si-sv">'+cr(e.mcap)+'</div></div><div><div class="si-sk">Inst. flow</div><div class="si-sv '+cls(e.inst)+'">'+(e.inst==null?'—':pct(e.inst))+'</div></div><div><div class="si-sk">QoQ profit</div><div class="si-sv '+cls(e.qoq)+'">'+(e.qoq==null?'—':pct(e.qoq))+'</div></div></div>';
-  if(b.what||b.drivers||b.risks){
-    h+='<div class="card"><div class="ch"><span class="t">What it is</span><span class="n">brief</span></div><div class="p">'+esc(b.what||'')+'</div>'+(b.model?'<div class="p mu">'+esc(b.model)+'</div>':'')+'</div>';
-    if(b.drivers) h+='<div class="card"><div class="ch"><span class="t">What drives it</span></div><div class="p">'+esc(b.drivers)+'</div></div>';
-    if(b.risks) h+='<div class="card"><div class="ch"><span class="t">What can go wrong</span></div><div class="p">'+esc(b.risks)+'</div></div>';
-  } else h+='<div class="card"><div class="emp"><b>No brief yet</b>This segment has no written brief on record. The numbers above still stand.</div></div>';
+  // cc#2233 item 10, BLOCK ORDER IS FIXED: (1) overview, (2) results snapshot, (3) earnings
+  // snapshot, (4) potential annual upside, (5) holdings (below) -- a narrative from what the
+  // segment is, to what it just did, to what it is expected to do, to what it is worth, to what
+  // is in it. "What drives it"/"What can go wrong" are supplementary brief content, not part of
+  // the numbered 5 -- kept, positioned after the 4 core blocks so the founder's order is unbroken.
+  if(b.what) h+='<div class="card"><div class="ch"><span class="t">What it is</span><span class="n">brief</span></div><div class="p">'+esc(b.what)+'</div>'+(b.model?'<div class="p mu">'+esc(b.model)+'</div>':'')+'</div>';
+  else h+='<div class="card"><div class="emp"><b>No brief yet</b>This segment has no written brief on record. The numbers above still stand.</div></div>';
+  h+=fundBlock(d.last_quarter);
+  h+=nextQBlock(d.next_quarter);
+  h+=upsideBlock(d.upside_v2);
+  if(b.drivers) h+='<div class="card"><div class="ch"><span class="t">What drives it</span></div><div class="p">'+esc(b.drivers)+'</div></div>';
+  if(b.risks) h+='<div class="card"><div class="ch"><span class="t">What can go wrong</span></div><div class="p">'+esc(b.risks)+'</div></div>';
   h+='<div class="sec"><h2>Members</h2><span class="hint">'+(d.members||{}).count+' · by GVM</span></div><div class="wrap" id="tb"></div>';
   h+='<div class="note"><b>One weak giant can sink a segment.</b> The score is weighted by market cap, so read the members table before trusting the headline.</div>';
   document.getElementById('body').innerHTML=h;
   ROWS=(d.members||{}).rows||[]; KEY='gvm'; ASC=false; FILTER=''; GROUPKEY=null; GROUPORDER=null; GROUPMETA=null;
-  COLS=[['symbol','Name',function(v,r){return esc(v)+'<small>'+esc(r.name||'')+'</small>';}],['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],['pe','P/E',f1],['mcap','Mcap',cr]];
+  COLS=[['symbol','Name',function(v,r){return esc(v)+'<small>'+esc(r.name||'')+'</small>';}],['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],['pe','P/E',f1],
+        ['price','Price',function(v){return v==null?'—':'₹'+f2(v);}],   // cc#2233 Block 5: extra optional column, existing columns unchanged
+        ['mcap','Mcap',cr]];
   tbl();
 }
 function renderTheme(d){

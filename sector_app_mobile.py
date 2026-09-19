@@ -303,6 +303,119 @@ def mobile_sector_theme(request: Request, name: str = ""):
             "groups": groups, "member_count": sum(len(gr["members"]) for gr in groups)}
 
 
+def _fundamentals_last_quarter(raw_names):
+    """cc#2233 Block 2: last reported quarter, aggregated mcap-weighted across the segment's
+    covered members (Sales/Revenue and Net Profit -- present on every 'quarters' row at the
+    latest period_end, verified live: 731 of 731). COVERAGE-GATED -- fundamentals_history holds
+    only 729 of 1,773 scored symbols (41%); 26 of 126 raw segments have none at all. Missing
+    members are excluded from both sides of the weighting, never zero."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            WITH latest_period AS (
+                SELECT MAX(period_end) AS period_end FROM fundamentals_history WHERE section = 'quarters'
+            ),
+            latest_q AS (
+                SELECT fh.symbol,
+                       COALESCE(NULLIF(REPLACE(fh.metrics->>'Sales', ',', ''), ''),
+                                NULLIF(REPLACE(fh.metrics->>'Revenue', ',', ''), ''))::numeric AS sales,
+                       NULLIF(REPLACE(fh.metrics->>'Net Profit', ',', ''), '')::numeric AS net_profit
+                FROM fundamentals_history fh, latest_period lp
+                WHERE fh.section = 'quarters' AND fh.period_end = lp.period_end
+            )
+            SELECT (SELECT fh2.period_label FROM fundamentals_history fh2, latest_period lp2
+                     WHERE fh2.section = 'quarters' AND fh2.period_end = lp2.period_end LIMIT 1),
+                   (SELECT period_end FROM latest_period),
+                   ROUND((SUM(lq.sales * g.market_cap)
+                          / NULLIF(SUM(CASE WHEN lq.sales IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
+                   ROUND((SUM(lq.net_profit * g.market_cap)
+                          / NULLIF(SUM(CASE WHEN lq.net_profit IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
+                   COUNT(*) FILTER (WHERE lq.symbol IS NOT NULL),
+                   COUNT(*)
+            FROM gvm_scores g
+            LEFT JOIN latest_q lq ON lq.symbol = g.symbol
+            WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+        """, (raw_names,))
+        label, period_end, sales, net_profit, covered, total = cur.fetchone()
+    return {"period_label": label, "period_end": str(period_end) if period_end else None,
+            "sales_mcap_wt": _fl(sales), "net_profit_mcap_wt": _fl(net_profit),
+            "covered": covered, "total": total}
+
+
+def _screener_next_quarter(raw_names):
+    """cc#2233 Block 3: SOURCE IS screener_raw (expected_qtr_sales/expected_quarterly_net_profit/
+    expected_quarterly_eps), NOT trendlyne_estimates -- trendlyne holds only ONE period (FY27,
+    annual) with no analyst-count/estimate-range columns populated and no clean symbol key, so it
+    cannot serve a quarterly block at all (verified live). anchor_quarter is the segment's most
+    common screener_raw.last_result_quarter (the quarter each estimate is anchored to) -- the
+    block names its own period from this rather than saying 'next quarter' generically."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT MODE() WITHIN GROUP (ORDER BY s.last_result_quarter),
+                   ROUND((SUM(CASE WHEN s.expected_qtr_sales IS NOT NULL THEN s.expected_qtr_sales * g.market_cap END)
+                          / NULLIF(SUM(CASE WHEN s.expected_qtr_sales IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
+                   ROUND((SUM(CASE WHEN s.expected_quarterly_net_profit IS NOT NULL THEN s.expected_quarterly_net_profit * g.market_cap END)
+                          / NULLIF(SUM(CASE WHEN s.expected_quarterly_net_profit IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
+                   ROUND((SUM(CASE WHEN s.expected_quarterly_eps IS NOT NULL THEN s.expected_quarterly_eps * g.market_cap END)
+                          / NULLIF(SUM(CASE WHEN s.expected_quarterly_eps IS NOT NULL THEN g.market_cap END), 0))::numeric, 2),
+                   COUNT(*) FILTER (WHERE s.expected_qtr_sales IS NOT NULL OR s.expected_quarterly_net_profit IS NOT NULL),
+                   COUNT(*)
+            FROM gvm_scores g
+            LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+            WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+        """, (raw_names,))
+        anchor_quarter, sales, net_profit, eps, covered, total = cur.fetchone()
+    return {"anchor_quarter": anchor_quarter, "sales_mcap_wt": _fl(sales), "net_profit_mcap_wt": _fl(net_profit),
+            "eps_mcap_wt": _fl(eps), "covered": covered, "total": total}
+
+
+def _upside_mcap_weighted(raw_names):
+    """cc#2233 Block 4: mcap-weighted gvm_scores.upside_raw (the valuation rating's own forward
+    potential-upside figure, 83.6% covered). NOT the same measure as sector_rotation()'s existing
+    `annual_upside` (screener_agg CTE: a SIMPLE average of (historical_pe-pe)/pe*100, i.e. how far
+    current PE sits from the stock's OWN historical PE -- a valuation-compression signal, not a
+    growth-based upside estimate). Verified live these are genuinely different quantities, not just
+    different aggregation methods -- correlation -0.66 to -0.71 across sampled segments, sign
+    flips on more than one (Hospitals - Mid & Small: -18.8% old vs +51.8% new). Per the card's own
+    resolution rule ("if derived differently, keep both and label each"): the old field is left
+    untouched in sector_rotation()/mobile_sector_list (do_not_touch) and was never rendered
+    anywhere on this page before this card, so there is no on-screen collision -- this is the
+    first time an annual-upside figure is shown here, and it is this one, clearly labelled."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT ROUND((SUM(CASE WHEN g.upside_raw IS NOT NULL THEN g.upside_raw * g.market_cap END)
+                          / NULLIF(SUM(CASE WHEN g.upside_raw IS NOT NULL THEN g.market_cap END), 0))::numeric, 1),
+                   COUNT(*) FILTER (WHERE g.upside_raw IS NOT NULL),
+                   COUNT(*)
+            FROM gvm_scores g
+            WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+        """, (raw_names,))
+        upside, covered, total = cur.fetchone()
+    return {"upside_mcap_wt": _fl(upside), "covered": covered, "total": total}
+
+
+@router.get("/api/mobile/sector_app/search")
+@_json_safe
+def mobile_sector_search(request: Request, q: str = ""):
+    """cc#2233 item 1: SEGMENT search (never company/symbol) against the 126 raw segment names in
+    sector_ratings at the latest score_date -- case-insensitive, prefix AND substring ('wiring'
+    finds 'Auto - Wiring & Electricals'). Prefix matches rank first."""
+    g = _guard(request)
+    if g:
+        return g
+    q = (q or "").strip()
+    if not q:
+        return {"query": q, "results": []}
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT segment, stocks_count FROM sector_ratings
+            WHERE score_date = (SELECT MAX(score_date) FROM sector_ratings) AND segment ILIKE %s
+            ORDER BY (segment ILIKE %s) DESC, segment ASC
+            LIMIT 15
+        """, (f"%{q}%", f"{q}%"))
+        results = [{"segment": r[0], "names": r[1]} for r in cur.fetchall()]
+    return {"query": q, "results": results}
+
+
 @router.get("/api/mobile/sector_app/segment")
 @_json_safe
 async def mobile_sector_segment(request: Request, name: str = ""):
@@ -312,14 +425,20 @@ async def mobile_sector_segment(request: Request, name: str = ""):
     rot = sector_rotation()
     row = None
     for r in (rot.get("all") or []) if isinstance(rot, dict) else []:
-        if (r.get("display_segment") or r.get("segment")) == name:
+        # cc#2233: search suggestions come from the 126 RAW sector_ratings names (item 1), which
+        # is not always the same string as a display_segment -- a thin (<5 member) raw segment
+        # merges into a family or "Others - Diversified" at display time (cc#827). Matching only
+        # display_segment left a search hit on any merged-away raw name resolving to nothing; also
+        # matching the absorbed list means every one of the 126 searchable names finds its page.
+        if (r.get("display_segment") or r.get("segment")) == name or name in (r.get("absorbed") or []):
             row = r
             break
     if row is None:
         return {"error": "no such segment"}
+    disp_name = row.get("display_segment") or row.get("segment")
     # a merged display segment's brief lives under its own raw name when it absorbed nothing; when
     # it absorbed others, the first absorbed raw name carries the brief (cc#827 merge keeps briefs raw)
-    brief_name = name if not row.get("absorbed") else (row.get("absorbed") or [name])[0]
+    brief_name = disp_name if not row.get("absorbed") else (row.get("absorbed") or [disp_name])[0]
     try:
         b = await sector_brief(brief_name)
     except Exception as e:
@@ -327,21 +446,23 @@ async def mobile_sector_segment(request: Request, name: str = ""):
     if not isinstance(b, dict) or b.get("error"):
         b = {}
     # members = every raw segment the display row covers (absorbed list, else its own name)
-    raw_names = row.get("absorbed") or [name]
+    raw_names = row.get("absorbed") or [disp_name]
     members = []
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2), g.verdict,
                    ROUND(g.g_score::numeric,2), ROUND(g.v_score::numeric,2), ROUND(g.m_score::numeric,2),
-                   ROUND(g.market_cap::numeric,0), ROUND(s.pe::numeric,1)
+                   ROUND(g.market_cap::numeric,0), ROUND(s.pe::numeric,1),
+                   (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = g.symbol
+                      AND rp.close IS NOT NULL ORDER BY rp.price_date DESC LIMIT 1)
             FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
             WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
         """, (raw_names,))
-        for sym, cn, gvm, vd, gg, vv, mm, mc, pe in cur.fetchall():
+        for sym, cn, gvm, vd, gg, vv, mm, mc, pe, px in cur.fetchall():
             members.append({"symbol": sym, "name": cn, "gvm": _fl(gvm), "verdict": vd, "g": _fl(gg), "v": _fl(vv), "m": _fl(mm),
-                            "mcap": _fl(mc), "pe": _fl(pe)})
+                            "mcap": _fl(mc), "pe": _fl(pe), "price": _fl(px)})   # cc#2233 Block 5: PRICE column added
     members.sort(key=lambda x: -(x["gvm"] or 0))
-    return {"segment": name, "score_date": row.get("score_date"),
+    return {"segment": disp_name, "score_date": row.get("score_date"),
             # cc#2231: "change" dropped from the scorecard too -- same reason as mobile_sector_list's rows.
             "scorecard": {"gvm": _fl(row.get("gvm")), "g": _fl(row.get("g_score")), "v": _fl(row.get("v_score")), "m": _fl(row.get("m_score")),
                           "verdict": row.get("verdict"), "size": row.get("size_class")},
@@ -350,4 +471,10 @@ async def mobile_sector_segment(request: Request, name: str = ""):
             "absorbed": row.get("absorbed") or [],
             "brief": {"what": b.get("what_is_it"), "drivers": b.get("growth_drivers"), "model": b.get("business_model"),
                       "risks": b.get("key_risks"), "application": b.get("application_type"), "generated_at": b.get("generated_at")},
+            # cc#2233 items 3-5: last-quarter highlights, next-quarter earnings snapshot, annual upside --
+            # all mcap-weighted, all state their own member coverage, computed over the SAME raw_names
+            # population the holdings table below shows (item 11: every block carries its own as-of + coverage).
+            "last_quarter": _fundamentals_last_quarter(raw_names),
+            "next_quarter": _screener_next_quarter(raw_names),
+            "upside_v2": _upside_mcap_weighted(raw_names),
             "members": {"rows": members, "count": len(members)}}
