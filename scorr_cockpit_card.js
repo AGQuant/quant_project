@@ -416,6 +416,10 @@
   // cc#2034: the IVP tag in plain words -- CHEAP/FAIR/EXPENSIVE are the internal values; a founder
   // reading the panel sees the same words the dot's own title attribute used to carry.
   function _dcTagWord(tag){ return {CHEAP:'Cheap', FAIR:'Fair value', EXPENSIVE:'Expensive'}[tag] || ''; }
+  // cc#2219: o.tag (deriv_metrics._price_rows()'s Black-Scholes premium/fair ratio verdict) is a
+  // DISTINCT vocabulary from ivp.tag's CHEAP/FAIR/EXPENSIVE above -- REASONABLE, not FAIR, so the
+  // two word maps must never be blurred into one function (session_log 49262).
+  function _dcBsTagWord(tag){ return {CHEAP:'Cheap', EXPENSIVE:'Expensive', REASONABLE:'Reasonable'}[tag] || ''; }
   // cc#2019: one decimal place everywhere an LTP renders in this component (grid + detail panel),
   // display-only -- deriv_metrics._price_rows() already rounds to 2 decimals server-side; this is
   // formatting the same stored value, not a second, different round.
@@ -484,27 +488,33 @@
     if(!row) return '';
     var leg=function(o,label){
       if(!o) return '<div style="flex:1;min-width:150px"><div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div><div style="color:var(--c-dim)">no data</div></div>';
-      var ivpTag=o.ivp&&o.ivp.tag, ivpFair=o.ivp&&o.ivp.fair_value;
-      // cc#2034 item 4: a strike/bucket below cc#1859's own session floor carries tag=None/
-      // fair_value=None -- say so in plain words, never a blank line or a guessed number.
-      // cc#2048 item 1 (founder's own unambiguous ask): the Cheap/Fair/Expensive tag now sits
-      // beside Premium (the live traded price), not beside Fair value -- moved into premiumLine
-      // below. This line keeps the Fair value NUMBER exactly as before, tag-free.
-      var fairLine = (ivpFair!=null)
-        ? ('<div>Fair value <b>'+_dcRupee(ivpFair)+'</b></div>')
-        : '<div style="color:var(--c-dim)">Not enough history yet to rate this strike</div>';
-      // cc#2048 item 2 (founder-flagged, NOT resolved here -- needs sign-off): once beside
-      // Premium, a reader will naturally read this tag as "this premium is expensive relative to
-      // Fair value" -- but ivp.tag is an IV-PERCENTILE read (today's IV vs its own 120-session
-      // history), independent of whether the median-IV-based Fair value happens to sit above or
-      // below today's live Premium. A strike can legitimately show Premium just below Fair value
-      // while still reading EXPENSIVE. This card moves the tag exactly where the founder asked;
-      // it does NOT relabel it (e.g. "IV: Expensive") or switch to the older direct Premium-vs-
-      // Fair-value tag in deriv_metrics.py's _price_rows() -- that choice reopens cc#1859's own
-      // founder-ruled methodology and is logged in cc_task_logs for that ruling, not decided here.
+      var ivpTag=o.ivp&&o.ivp.tag;
+      // cc#2219 (session_log 49262, resolves cc#2048 item 2): Premium's tag now comes from o.tag
+      // -- deriv_metrics._price_rows()'s own Black-Scholes premium/fair ratio verdict, the number
+      // this tag is actually about (Premium vs its OWN fair value, not IV vs its own history).
+      // o.tag is null outside the ATM+-5 band or when the cc#1847 sanity gate rejects this strike/
+      // leg -- no tag then, never a guessed one (deriv_metrics.py, unchanged this card).
       var premiumLine = '<div>Premium <b>'+(o.ltp!=null?Number(o.ltp).toFixed(1):'&mdash;')+'</b>'
-        + (ivpTag!=null ? ' <span style="color:var(--c-mut)">('+_dcTagWord(ivpTag)+')</span>' : '')
+        + (o.tag!=null ? ' <span style="color:var(--c-mut)">('+_dcBsTagWord(o.tag)+')</span>' : '')
         + '</div>';
+      // cc#2219: Fair value now reads o.fair (Black-Scholes/RV20, already computed server-side,
+      // never displayed since cc#2044 removed its old commentary line) instead of ivp.fair_value.
+      // Tag-free, as it already was -- the tag lives on Premium above. o.fair is null when RV20
+      // is not computable (fewer than 21 raw_prices closes) or there is no expiry/T; that is a
+      // DIFFERENT condition from ivp's 60-session floor, so it gets its own wording, not the
+      // "Not enough history yet to rate this strike" sentence (which moved to the IV line below,
+      // where it now correctly describes what it is gating).
+      var fairLine = (o.fair!=null)
+        ? ('<div>Fair value <b>'+_dcRupee(o.fair)+'</b></div>')
+        : '<div style="color:var(--c-dim)">Not enough price history to work out a fair value</div>';
+      // cc#2219: IV gets its own small tag, sourced from ivp.tag (Cheap/Fair value/Expensive --
+      // ivp's own vocabulary, _dcTagWord unchanged). ivp.tag is null below cc#1859's 60-session
+      // floor, in which case the "not enough history" sentence renders here instead of the tag --
+      // this IS the line it describes (an IV read vs its own trailing history), not Fair value.
+      var ivLine = '<div>IV <b>'+(o.iv!=null?o.iv+'%':'&mdash;')+'</b>'
+        + (ivpTag!=null ? ' <span style="color:var(--c-mut)">('+_dcTagWord(ivpTag)+')</span>' : '')
+        + '</div>'
+        + (ivpTag==null ? '<div style="color:var(--c-dim)">Not enough history yet to rate this strike</div>' : '');
       var g = o.greeks;
       var greeks = '<div style="font-weight:800;color:var(--c-tx);margin:8px 0 4px;padding-top:8px;border-top:1px solid var(--c-bd)">Option Greeks</div>'
         + (g
@@ -516,11 +526,11 @@
       return '<div style="flex:1;min-width:150px">'
         + '<div style="font-weight:800;color:var(--c-tx);margin-bottom:4px">'+label+'</div>'
         + premiumLine
-        + '<div>IV <b>'+(o.iv!=null?o.iv+'%':'&mdash;')+'</b></div>'
+        + ivLine
         + fairLine
-        // cc#2044 item 3: the Black-Scholes/realised-vol commentary line is removed from display --
-        // founder does not want it surfaced. o.fair stays untouched in the API payload (display-only
-        // removal); cc#1859's own Fair value/tag line above (fairLine) is the number that stays.
+        // cc#2219 (resolves cc#2048 item 2): Fair value's BS/RV20 number is back on display, tag-
+        // free, sourced from o.fair -- superseding cc#2044's removal note above, which described a
+        // display state this card has now changed; kept for history rather than deleted.
         + '<div>OI <b>'+_dcOiTxt(o)+'</b></div>'
         // cc#2048 item 3 (explicit founder ruling this session, verbatim: "if something is not
         // available, don't show, why show comment"): the OI-change and Bid/ask explanatory
