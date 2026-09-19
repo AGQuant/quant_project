@@ -393,6 +393,13 @@ def list_alerts(status: str = "all", limit: int = 200):
     limit = max(1, min(int(limit), 1000))
     with _conn() as conn, conn.cursor() as cur:
         _ensure_schema(conn)   # cc#1524: rows now carry the source columns
+        # cc#2224: resolve_close_state() reads trade_alert_levels (hidden_from_app included since
+        # cc#2220), and _ensure_schema above never touches that table -- only alerts_ideas() ran
+        # this ensure, so this reader alone was serving every approved row through a missing-column
+        # error since the cc#2220 deploy. ONE owner (trade_wall_approved._ensure, unchanged) now
+        # runs before every caller of resolve_close_state(), this one included.
+        from trade_wall_approved import _ensure as _ensure_levels
+        _ensure_levels(conn)
         if status == "all":
             cur.execute(f"""SELECT {_COLS} FROM trade_alerts
                             ORDER BY created_at DESC, id DESC LIMIT %s""", (limit,))
@@ -456,7 +463,13 @@ def list_alerts(status: str = "all", limit: int = 200):
                         r["instrument"] = "FUTURES"   # trade_wall_endpoints.INSTRUMENTS spelling
                     elif r["instrument"] == "OPT":
                         r["instrument"] = "OPTIONS"
-                except Exception as e:   # a resolver hiccup must not blank the whole list
+                except (psycopg.errors.UndefinedColumn, psycopg.errors.UndefinedTable):
+                    # cc#2224: same class as cc#2222 (scheduler._run_recorded reporting ok on a
+                    # swallowed exception) -- a missing column/table is a deploy fault, not a
+                    # per-row hiccup, and must surface rather than silently degrade every approved
+                    # row to EQUITY/not-closed behind a 200. Re-raised, not caught here.
+                    raise
+                except Exception as e:   # a genuine per-row resolver hiccup must not blank the whole list
                     log.warning("list_alerts: resolve_close_state failed for id=%s (%s)", r.get("id"), e)
                     r["closed"], r["closed_at"], r["close_price"], r["instrument"] = False, None, None, "EQUITY"
                 _fill_alert_columns(cur, r, st, origin, lot_sizes)
