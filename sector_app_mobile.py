@@ -494,13 +494,19 @@ async def mobile_sector_segment(request: Request, name: str = ""):
                    ROUND(g.g_score::numeric,2), ROUND(g.v_score::numeric,2), ROUND(g.m_score::numeric,2),
                    ROUND(g.market_cap::numeric,0), ROUND(s.pe::numeric,1),
                    (SELECT rp.close FROM raw_prices rp WHERE rp.symbol = g.symbol
-                      AND rp.close IS NOT NULL ORDER BY rp.price_date DESC LIMIT 1)
+                      AND rp.close IS NOT NULL ORDER BY rp.price_date DESC LIMIT 1),
+                   (SELECT ut.year_return FROM universe_technicals ut WHERE ut.symbol = g.symbol
+                      ORDER BY ut.score_date DESC LIMIT 1)
             FROM gvm_scores g LEFT JOIN screener_raw s ON s.nse_code = g.symbol
             WHERE g.segment = ANY(%s) AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
         """, (raw_names,))
-        for sym, cn, gvm, vd, gg, vv, mm, mc, pe, px in cur.fetchall():
+        for sym, cn, gvm, vd, gg, vv, mm, mc, pe, px, yr in cur.fetchall():
+            # cc#2236: g/v/m stay in the payload (harmless, other consumers may exist) but the
+            # table no longer renders them -- the sub-score breakdown now lives on the stock card
+            # each symbol opens (scorr_analysis_card.js). year_return added for the new 1Y column;
+            # a null stays null (item 6 -- absent, never a fabricated 0.0%).
             members.append({"symbol": sym, "name": cn, "gvm": _fl(gvm), "verdict": vd, "g": _fl(gg), "v": _fl(vv), "m": _fl(mm),
-                            "mcap": _fl(mc), "pe": _fl(pe), "price": _fl(px)})   # cc#2233 Block 5: PRICE column added
+                            "mcap": _fl(mc), "pe": _fl(pe), "price": _fl(px), "year_return": _fl(yr)})
     members.sort(key=lambda x: -(x["gvm"] or 0))
     # cc#2235: Earnings must be anchored to the SAME dominant quarter Results restricted to --
     # computed here, not independently inside _earnings_qoq_estimate, so the two blocks can never

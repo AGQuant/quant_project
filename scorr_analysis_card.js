@@ -182,6 +182,12 @@
       const boxd=(inner)=>`<div style="background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px">${inner}</div>`;
       const secLbl=(t)=>`<div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:14px 0 6px">${t}</div>`;
       let h='';
+      // cc#2236: the watchlist + relocates onto this card -- it is the "stock card" every symbol
+      // tap now opens (mobile/sector.html's members table dropped its own row button). Reuses the
+      // existing shared component/write path unchanged (window.ScorrWatchlistAdd.button, the same
+      // call every other surface makes) -- guarded, since this card also renders on /dashboard
+      // (web), where the watchlist module may not be loaded.
+      if(window.ScorrWatchlistAdd) h+='<div style="display:flex;justify-content:flex-end;margin-bottom:8px">'+window.ScorrWatchlistAdd.button(sym,'analysis',true)+'</div>';
       // (1) GVM ANALYSIS + sector rating/rank box
       if(g){
         const pill=(lbl,v)=>`<div style="flex:1;text-align:center;padding:8px;background:var(--surface2);border:1px solid var(--line2);border-radius:8px"><div style="font-size:10px;color:var(--dim);font-weight:700">${lbl}</div><div style="font-size:16px;font-weight:800;font-family:'Sora',sans-serif">${v==null?'--':Number(v).toFixed(2)}</div></div>`;

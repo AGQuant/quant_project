@@ -214,12 +214,22 @@ function wireSegSearch(){
     }, 250);
   });
 }
-var ROWS=[], KEY='gvm', ASC=false, COLS=[], FILTER='', GROUPKEY=null, GROUPORDER=null, GROUPMETA=null;   /* cc#2206: FILTER = the All Segments search, case-insensitive substring on the segment name. cc#2232: GROUPKEY/GROUPORDER/GROUPMETA are the theme tap-through's optional grouping -- unused (null) by every other caller, so renderAll/renderSeg are unchanged. */
+// cc#2236 item 4: tapping a symbol in the segment members table opens the existing stock card
+// (scorr_analysis_card.js, injected site-wide by main.py _MOBILE_HEAD -- no new script tag here).
+// One delegated listener, registered once at script load, same pattern scorr_watchlist_add.js
+// itself uses for its own [data-wl-add] buttons -- correct for content tbl() re-renders on every
+// sort/search, not just what existed when the page first loaded.
+document.addEventListener('click', function(e){
+  var a=e.target.closest('[data-open-an]'); if(!a) return;
+  e.preventDefault();
+  if(window.ScorrAnalysisCard) window.ScorrAnalysisCard.open(a.getAttribute('data-open-an'));
+});
+var ROWS=[], KEY='gvm', ASC=false, COLS=[], FILTER='', GROUPKEY=null, GROUPORDER=null, GROUPMETA=null, NOWLBTN=false;   /* cc#2206: FILTER = the All Segments search, case-insensitive substring on the segment name. cc#2232: GROUPKEY/GROUPORDER/GROUPMETA are the theme tap-through's optional grouping -- unused (null) by every other caller, so renderAll/renderTheme are unchanged. cc#2236: NOWLBTN -- the segment members table drops the row + button (it moved onto the stock card); the theme members table (cc#2232, out of scope for that card) keeps it, so this is a per-caller opt-out, not a global removal. */
 function tbl(){
   var src=FILTER?ROWS.filter(function(r){ return String(r.segment||'').toLowerCase().indexOf(FILTER)>-1; }):ROWS;
   var rows=src.slice().sort(function(a,b){ var x=a[KEY], y=b[KEY]; if(x==null) return 1; if(y==null) return -1; if(typeof x==='string') return ASC? x.localeCompare(y) : y.localeCompare(x); return ASC? x-y : y-x; });
   var th=COLS.map(function(c){ return '<th data-k="'+c[0]+'" class="'+(KEY===c[0]?'on'+(ASC?' asc':''):'')+'">'+c[1]+'</th>'; }).join('');
-  var rowHtml=function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); if(i===0&&r.symbol&&window.ScorrWatchlistAdd) cell=window.ScorrWatchlistAdd.button(r.symbol,'sector',true)+' '+cell; return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; };   /* cc#2196: the watchlist + on company rows (a segment row has no symbol, so no button) */
+  var rowHtml=function(r){ return '<tr>'+COLS.map(function(c,i){ var v=r[c[0]]; var cell=c[2]?c[2](v,r):esc(v==null?'—':v); if(i===0&&r.symbol&&window.ScorrWatchlistAdd&&!NOWLBTN) cell=window.ScorrWatchlistAdd.button(r.symbol,'sector',true)+' '+cell; return '<td'+(i===0?'':'')+'>'+cell+'</td>'; }).join('')+'</tr>'; };   /* cc#2196: the watchlist + on company rows (a segment row has no symbol, so no button). cc#2236: ...&&!NOWLBTN -- segment members opts out, theme members does not */
   var tr;
   if(GROUPKEY&&GROUPORDER){
     // cc#2232: GROUP ORDER is fixed (precomputed server-side, each segment's own mcap-weighted GVM,
@@ -244,7 +254,7 @@ function renderAll(d){
   document.getElementById('pg-title').textContent='All segments'; document.getElementById('back').style.display='';
   document.getElementById('asof').innerHTML='Scored <b>'+esc(dmy(d.score_date))+'</b> · '+(d.rows||[]).length+' segments';
   document.getElementById('body').innerHTML='<div class="wrap"><div class="se-search"><input id="se-q" type="search" inputmode="search" placeholder="Search segments" aria-label="Search segments" autocomplete="off"></div><div id="tb"></div></div>';   /* cc#2206: search box above the table, filters live */
-  ROWS=d.rows||[]; KEY='gvm'; ASC=false; FILTER=''; GROUPKEY=null; GROUPORDER=null; GROUPMETA=null;
+  ROWS=d.rows||[]; KEY='gvm'; ASC=false; FILTER=''; GROUPKEY=null; GROUPORDER=null; GROUPMETA=null; NOWLBTN=false;
   COLS=[['segment','Segment',function(v,r){return '<a href="/m/sector?seg='+encodeURIComponent(v)+'">'+esc(v)+'<small>'+esc(r.verdict||'')+(r.size?' · '+r.size.toLowerCase():'')+'</small></a>';}],
         ['gvm','GVM',function(v){return '<span class="'+((v||0)>=7?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],
         ['names','Names'],['mcap','Mcap',cr]];   // cc#2231: Δ column dropped -- change is no longer in the API payload
@@ -308,8 +318,16 @@ function renderSeg(d){
   h+='<div class="note"><b>One weak giant can sink a segment.</b> The score is weighted by market cap, so read the members table before trusting the headline.</div>';
   document.getElementById('body').innerHTML=h;
   ROWS=(d.members||{}).rows||[]; KEY='gvm'; ASC=false; FILTER=''; GROUPKEY=null; GROUPORDER=null; GROUPMETA=null;
-  COLS=[['symbol','Name',function(v,r){return esc(v)+'<small>'+esc(r.name||'')+'</small>';}],['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],['g','G',f1],['v','V',f1],['m','M',f1],['pe','P/E',f1],
-        ['price','Price',function(v){return v==null?'—':'₹'+f2(v);}],   // cc#2233 Block 5: extra optional column, existing columns unchanged
+  // cc#2236: G/V/M columns dropped (founder: "in sector composition don't show GVM separately") --
+  // that breakdown now lives on the stock card the symbol opens, not lost. 1-YEAR RETURN takes
+  // their place, coloured like a return (cls()+pct()), never 0.0% for a null (item 6). The row +
+  // button is gone (NOWLBTN below); tapping the symbol opens that same card, where the + now lives.
+  NOWLBTN=true;
+  COLS=[['symbol','Name',function(v,r){return '<a href="javascript:void(0)" data-open-an="'+esc(v)+'">'+esc(v)+'</a><small>'+esc(r.name||'')+'</small>';}],
+        ['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],
+        ['year_return','1Y Return',function(v){return v==null?'—':'<span class="'+cls(v)+'">'+pct(v)+'</span>';}],
+        ['pe','P/E',f1],
+        ['price','Price',function(v){return v==null?'—':'₹'+f2(v);}],
         ['mcap','Mcap',cr]];
   tbl();
 }
@@ -332,7 +350,7 @@ function renderTheme(d){
     GROUPORDER.push(g.segment); GROUPMETA[g.segment]=g.gvm;
     (g.members||[]).forEach(function(m){ ROWS.push({segment:g.segment, symbol:m.symbol, gvm:m.gvm, year_return:m.year_return}); });
   });
-  KEY='gvm'; ASC=false; FILTER=''; GROUPKEY='segment';
+  KEY='gvm'; ASC=false; FILTER=''; GROUPKEY='segment'; NOWLBTN=false;   /* cc#2236: theme members keeps its + button, out of that card's scope */
   COLS=[['symbol','Symbol',function(v){return esc(v);}],
         ['gvm','GVM',function(v){return '<span class="'+((v||0)>=8?'gd':'')+'">'+f2(v)+'</span>';}],
         ['year_return','1Y Return',function(v){return v==null?'—':'<span class="'+cls(v)+'">'+pct(v)+'</span>';}]];
