@@ -491,9 +491,27 @@ PWA_JS = """
     // identical wrong assumption. /m/results (cc#1901's route, above) already had its entry —
     // verified, not re-added. Glyphs match each page's own Home-grid tile exactly (home.html
     // dashRow()/gtile() calls), not invented here.
-    ['/m/myportfolio', '\\u25c8', 'My Portfolio (mobile)', 'm'],
+    // cc#2223 (research-side NAV-COMPLETE sweep, 19-Sep): /m/myportfolio REMOVED from the nav.
+    // cc#2197 (founder 17-Sep) hidden the SmartGain My Portfolio tile and its Home-grid entry —
+    // app_route_map.in_nav went false — but this array's own line was never touched, so the page
+    // kept rendering in the mobile More sheet under the exact label cc#2194's NEW /m/portfolio was
+    // built to take over. Route, PROTECTED and NAV_REGISTRY (typed-url) are UNCHANGED — /m/myportfolio
+    // still loads by typed URL and old links, same cc#822/cc#1694 precedent. Was: ['/m/myportfolio', '\\u25c8', 'My Portfolio (mobile)', 'm'],
+    // cc#2223: /m/portfolio ADDED — cc#2194's page (portfolio_app_mobile.py), live and PROTECTED
+    // since 17-Sep but never wired into this array, so the only way in was a typed URL. Donut glyph
+    // (bullseye, two concentric circles) matches its Home-grid tile SVG — "distinct from SmartGain's
+    // briefcase" per the tile's own cc#2194 comment in mobile/home.html.
+    ['/m/portfolio', '\\u25ce', 'My Portfolio (mobile)', 'm'],
     ['/m/myalerts', '\\u25ec', 'My Alerts (mobile)', 'm'],
     ['/m/mywatchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
+    // cc#2223: /m/watchlist ADDED — cc#2196's own name for the same watchlist page
+    // (watchlist_app_mobile.py serves both routes as an alias pair), live and PROTECTED since
+    // 17-Sep but never wired in here either. Same glyph as /m/mywatchlist directly above (same
+    // underlying page, same star icon on its Home-grid tile) — flagged for the founder that this
+    // now puts two More-sheet rows on one page under near-identical labels; left as the card's own
+    // explicit instruction rather than picked apart here, since app_route_map already tracks
+    // /m/watchlist as its own row separate from /m/mywatchlist.
+    ['/m/watchlist', '\\u2606', 'My Watchlist (mobile)', 'm'],
     ['/m/dash', '\\u26a1', 'Dashboard (mobile)', 'm'],   // cc#1916: app Dashboard hub
     ['/m/tcscan', '\\u25ce', 'TC Scanner (mobile)', 'm'],   // cc#1923
     ['/m/invscan', '\\u2316', 'Investment Scanner (mobile)', 'm'],   // cc#1923

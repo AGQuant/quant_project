@@ -1593,7 +1593,7 @@ NAV_REGISTRY = {
     "/m/myportfolio": ("My Portfolio (mobile, SmartGain data) — HIDDEN 17-Sep-2026 (cc#2197): duplicate of /m/holdings; route alive for old links, off the Home grid, never in the NAV array", "typed-url"),   # cc#1895, tier fixed cc#1907, hidden cc#2197
     "/m/myalerts":    ("My Alerts (mobile) — the ONE alerts page since cc#2195: Triggered · Pending · Create; the Home bell (scorr_bell.js on /m/*) and the My Scorr tile both open it", "nav-mobile"),   # cc#1896, tier fixed cc#1907, rebuilt cc#2195
     "/m/mywatchlist": ("My Watchlist (mobile) — user watchlists (max 5), swipeable list cards, names sheet with rating + CMP; the + on every stock card writes here (cc#2196)", "nav-mobile"),   # cc#1897, tier fixed cc#1907, live store cc#2196
-    "/m/watchlist":   ("My Watchlist (mobile) — alias of /m/mywatchlist, the cc#2196 card's own name for the page", "typed-url"),   # cc#2196
+    "/m/watchlist":   ("My Watchlist (mobile) — alias of /m/mywatchlist, the cc#2196 card's own name for the page; NAV array + More sheet since cc#2223", "nav-mobile"),   # cc#2196, tier fixed cc#2223
     "/m/dash":        ("Dashboard hub (mobile) — My Portfolio / My Alerts / My Watchlist / My Trades; Home grid Dashboard tile", "nav-mobile"),   # cc#1916 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)
     "/m/qb/holdings": ("Quant Basket holdings table (mobile) — reached from /m/qb?basket= detail page", "grid-tile"),   # cc#1922: not in the NAV array by design (detail-page link only), so grid-tile is the right tier here
     "/m/tcscan":      ("TC Scanner trades (mobile) — open/closed book, record; Home grid tile", "nav-mobile"),   # cc#1923 (spec said grid-tile; it is in the NAV array with m, so nav-mobile per cc#1907)
@@ -1603,7 +1603,7 @@ NAV_REGISTRY = {
     "/m/options":    ("Option Strategy Builder (mobile)", "nav-mobile"),   # cc#2039: OPT sprint 4/5, More sheet ('m' flag, not a bottom-nav slot)
     "/m/sector":     ("Sector Intel (mobile)",  "nav-mobile"),   # cc#1900, tier fixed cc#1907
     "/m/health":     ("Portfolio Health (mobile) — Home grid tile HIDDEN 17-Sep-2026 (cc#2199), folded into My Portfolio (cc#2194); route + page alive", "typed-url"),   # cc#1902, hidden cc#2199
-    "/m/portfolio":  ("My Portfolio (mobile) — the client's Adaptive Dashboard row as 3 snapshot cards + the web /health report as swipeable cards + client picker; Home grid tile (My Scorr)", "grid-tile"),   # cc#2194
+    "/m/portfolio":  ("My Portfolio (mobile) — the client's Adaptive Dashboard row as 3 snapshot cards + the web /health report as swipeable cards + client picker; Home grid tile (My Scorr) + NAV array/More sheet since cc#2223", "nav-mobile"),   # cc#2194, tier fixed cc#2223
     "/m/mf":         ("Mutual Funds (mobile)",   "nav-mobile"),   # cc#1903: new page, wired via the NAV array's More sheet
     "/m/aicio":      ("AICIO (mobile) — bottom-bar slot 3 since cc#2170 (founder 17-Sep); More sheet + Home grid too", "nav-mobile"),   # cc#1904 page; cc#2170 slot
     "/m/learn":      ("Learn (mobile) — Knowledge Hub articles (knowledge_endpoints); Home grid tile + More sheet", "nav-mobile"),   # cc#1961
