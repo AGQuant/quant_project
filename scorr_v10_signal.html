@@ -357,14 +357,21 @@ body{background:var(--field-night);font-family:'Space Grotesk',sans-serif;color:
  border-radius:var(--radius-5);border:var(--bw-1) solid var(--edge);background:var(--hi);color:var(--muted);
  cursor:pointer;margin:0 var(--space-5) var(--space-5) 0;display:inline-block}
 .csbchip.on{border-color:var(--aqua);color:var(--aqua)}
-/* column widths, proportional not device-measured (unlike .b6tbl/.qbtbl/.vftbl above, stated
-   honestly rather than implying a Chromium measurement that was not done) -- SYMBOL/CMP mirror
-   .b6tbl's own split since the CMP cell is the identical shape (price + embedded day% span); the
-   remaining numeric columns split the rest evenly, 5-way without WK or 6-way with it. */
-.butbl.csbtbl th:nth-child(1),.butbl.csbtbl td:nth-child(1){width:19%}
-.butbl.csbtbl th:nth-child(2),.butbl.csbtbl td:nth-child(2){width:23%}
-.butbl.csbtbl th:nth-child(n+3),.butbl.csbtbl td:nth-child(n+3){width:11.6%}
-.butbl.csbtbl.wk th:nth-child(n+3),.butbl.csbtbl.wk td:nth-child(n+3){width:9.67%}
+/* cc#2237 (founder 19-Sep, screenshot): OI Δ% + BASIS columns dropped from this table (still
+   filterable/computed, just not rendered here -- see csbTable()), which frees real width instead
+   of just blanking two columns. Re-split from scratch rather than reusing the old 19/23 split,
+   which was ALREADY truncating SYMBOL at 7 columns (evidence: two distinct symbols both clipped
+   to "ADANIPO…" -- genuinely ambiguous). SYMBOL takes .vftbl's own proven 27% (that file's own
+   comment: 22% was tight on GMRAIRPORT-length names, 27% fixed it -- same font, same table
+   family, reused rather than re-guessed). CMP takes .b6tbl's own proven 25% (same two-part
+   price+day% cell shape). Remaining numerics (Vol R/Vol P/Vol D, +WK when shown) split the rest
+   evenly, 3-way without WK or 4-way with it -- both comfortably wider than the old 11.6%/9.67%
+   even though there are now fewer numeric columns competing for room, and the values themselves
+   ("2.0×", "1.23×") are shorter than OI Δ%/BASIS ever were, so no ellipsis risk. */
+.butbl.csbtbl th:nth-child(1),.butbl.csbtbl td:nth-child(1){width:27%}
+.butbl.csbtbl th:nth-child(2),.butbl.csbtbl td:nth-child(2){width:25%}
+.butbl.csbtbl th:nth-child(n+3),.butbl.csbtbl td:nth-child(n+3){width:16%}
+.butbl.csbtbl.wk th:nth-child(n+3),.butbl.csbtbl.wk td:nth-child(n+3){width:12%}
 .csbtbl .cmpct{font-size:var(--type-10)}
 .vfveil{position:fixed;inset:0;background:var(--veil);z-index:80}
 .vfsheet{position:fixed;left:0;right:0;bottom:0;max-height:78vh;display:flex;flex-direction:column;z-index:81;
@@ -1607,16 +1614,21 @@ function csbTh(label, key){
 }
 function csbTable(rows){
   var showWk = !!CSB.flow;
-  var head = csbTh('SYMBOL', 'SYMBOL') + csbTh('CMP', 'CMP') + csbTh('OI Δ%', 'OI')
-    + csbTh('BASIS', 'BASIS') + csbTh('Vol R', 'VOLR') + csbTh('Vol P', 'VOLP') + csbTh('Vol D', 'VOLD')
+  /* cc#2237 (founder 19-Sep): OI Δ% and BASIS columns removed from render -- table was too
+     crowded at mobile width, both columns truncating on nearly every row. csbSort('OI')/('BASIS')
+     stay defined in CSB_SORT_GETTERS (harmless -- basis_pct is still read live for the BASIS BAND
+     filter below) but are no longer reachable from any header, since csbTh() is no longer called
+     for either; CSB.sort itself is never persisted (csbSave() only stores build/flow/basis/volr),
+     so a fresh page load can never carry a stale OI/BASIS sort key forward. Underlying oi_pct/
+     basis_pct fields are UNCHANGED in csbPool()'s row objects -- this is a render-only change. */
+  var head = csbTh('SYMBOL', 'SYMBOL') + csbTh('CMP', 'CMP')
+    + csbTh('Vol R', 'VOLR') + csbTh('Vol P', 'VOLP') + csbTh('Vol D', 'VOLD')
     + (showWk ? csbTh('WK', 'WK') : '');
   var body = rows.map(function(r){
     var d = r.day_pct;
     var dtxt = d == null ? '' : ' <span class="cmpct ' + (d > 0 ? 'up' : d < 0 ? 'dn' : '') + '">' + Number(d).toFixed(2) + '%</span>';
     return '<tr><td class="sym">' + esc(r.symbol) + '</td>'
       + '<td>' + (r.cmp != null ? String(Math.round(Number(r.cmp))) : '—') + dtxt + '</td>'
-      + buNum(r.oi_pct, 2, '%', true)
-      + buNum(r.basis_pct, 2, '%', true)
       + (r.vol_r == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_r).toFixed(1) + '×</td>')
       + (r.vol_p == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_p).toFixed(1) + '×</td>')
       + (r.vol_d == null ? '<td>—</td>' : '<td class="am">' + Number(r.vol_d).toFixed(2) + '×</td>')
@@ -1646,16 +1658,14 @@ function csbSection(){
   var body = !rows.length
     ? ('<div class="unavail">' + (D.build ? 'No symbol matches this combination right now. Try Any on one picker, or a wider band.' : 'Loading…') + '</div>')
     : csbTable(rows);
-  // cc#2078: the SAME gap the founder reported on the V8 Dashboard's own Custom Screen Builder --
-  // D.build.opening_data_missing (cc#1844) is read on THIS page's buCard() (verbatim wording
-  // reused here, not reinvented) but was never wired into this page's own csbSection(). Same
-  // payload, same card family, same fix.
-  var oiNotice = (D.build && D.build.opening_data_missing)
-    ? ('<div class="unavail" style="margin-bottom:10px">Opening data is missing for today — the futures feed started at '
-        + esc(D.build.first_bar_time ? String(D.build.first_bar_time).slice(0, 5) + ' IST' : 'a later time')
-        + ', after the market opened. OI Δ% needs the session\'s first bar to measure '
-        + 'open-interest change from, so it has nothing to show right now.</div>')
-    : '';
+  // cc#2237: the cc#2078 opening_data_missing notice lived here ONLY to explain why OI Δ% had
+  // nothing to show on a late feed-start day -- that column is now removed from render (founder
+  // 19-Sep, table too crowded), so the notice would point at a column the user can no longer see.
+  // Vol R/Vol P/Vol D don't share OI Δ%'s specific "needs the session's first bar" dependency (they
+  // compare today's running volume/delivery to historical baselines, not to today's own open), so
+  // nothing left in this table needs the notice. Removed rather than left dangling. buCard()'s own
+  // copy of this notice (cc#2078, a separate local var in a different function) is untouched --
+  // its table still shows OI Δ% and still needs it.
   return '<div class="card">'
     + '<div class="vfhd"><h3>Custom Screen Builder</h3><span class="busub">' + rows.length + ' MATCH</span><span class="sp"></span>'
     + '<button type="button" class="vfib" onclick="csbGuide()" aria-label="How to read this card">i</button></div>'
@@ -1665,7 +1675,6 @@ function csbSection(){
     + '<div class="lb">BASIS BAND</div><div class="csbrow">' + csbBandChips(CSB_BASIS_BANDS, CSB.basis, 'csbToggleBasis') + '</div>'
     + '<div class="lb">VOLUME R BAND (first guess)</div><div class="csbrow">' + csbBandChips(CSB_VOLR_BANDS, CSB.volr, 'csbToggleVolr') + '</div>'
     + '</div>'
-    + oiNotice
     + body
     + (st.txt ? '<div class="vfasof' + (st.amber ? ' stale' : '') + '">' + esc(st.txt) + ' · ' + bbCount + ' of ' + universe + ' scanned</div>' : '')
     + '</div>';
