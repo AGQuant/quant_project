@@ -142,7 +142,7 @@ _QUARTERS_SQL = """
         SELECT UPPER(f.symbol) AS sym, f.period_end, f.consolidated,
                NULLIF(replace(COALESCE(f.metrics->>'Sales', f.metrics->>'Revenue'), ',', ''), '')::numeric AS rev,
                NULLIF(replace(f.metrics->>'Net Profit', ',', ''), '')::numeric AS pat,
-               NULLIF(replace(replace(f.metrics->>'OPM %', ',', ''), '%%', ''), '')::numeric AS opm,
+               NULLIF(replace(replace(f.metrics->>'OPM %%', ',', ''), '%%', ''), '')::numeric AS opm,
                ROW_NUMBER() OVER (PARTITION BY UPPER(f.symbol), f.period_end
                                   ORDER BY f.consolidated DESC, f.scraped_at DESC) AS rn
           FROM fundamentals_history f
