@@ -197,6 +197,41 @@ class _Skip:
         return _Skip("precondition_missing", _SKIP_CONDITIONAL, detail)
 
 
+class _Failed:
+    """cc#2222 — the fourth outcome, and the one every _bg_* job's own outer except was already
+    hiding.
+
+    _Empty and _Skip both cover a job that finished WITHOUT raising. This covers the opposite: the
+    job's own top-level `except Exception` caught a real failure, logged it (log.error + usually
+    _log_alert), and then fell through to an implicit `return None` because 131 job functions in
+    this file are written to isolate their own crash from the dispatch loop -- deliberately, so one
+    broken job never takes the tick loop down with it. That isolation is correct and stays exactly
+    as-is. What was missing is that _run_recorded had no way to tell that swallowed-None apart from
+    a genuine successful None-ish return, so it classified BOTH as status='ok'.
+
+    Proof this was live, not theoretical: cc#2148's qb_universe_derived job failed on 100% of its
+    runs for 3 straight days (17/18/19-Sep, same psycopg escape error every time) while
+    scheduler_master read last_status='ok', last_duration_ms=150 throughout -- a false-green badge,
+    the exact ENGINE_LIVENESS_RULE failure mode. _maybe_alert_job_failure only ever looks at status
+    in ('error','empty'), so the paging path never fired either.
+
+    Each affected except block now does `return _Failed(str(e))` as its LAST statement -- purely
+    additive, appended after whatever logging it already did. Nothing about the try body, the
+    success path, or any other return elsewhere in the function changes; a function that legitimately
+    returns None or nothing on a healthy run keeps doing exactly that and still reads 'ok'. Only the
+    swallowed-exception path changes shape, from invisible to status='error' with the real message
+    in last_error -- which also means _maybe_alert_job_failure starts paging on these for the first
+    time, restoring the escalation path ROLE_CHARTER_V4/ENGINE_LIVENESS_RULE assumed was already there.
+    """
+    __slots__ = ("detail",)
+
+    def __init__(self, detail):
+        self.detail = str(detail)[:400]
+
+    def __repr__(self):
+        return "_Failed(%r)" % (self.detail,)
+
+
 _BILLING_AUTH_RE = re.compile(
     r"credit balance|invalid_request_error|\b401\b|\b403\b|unauthorized|authentication_error",
     re.I)
@@ -281,6 +316,15 @@ def _run_recorded(fn, args):
     # later edit cannot reintroduce the silent-ok by reordering these two branches.
     if isinstance(result, _Empty):
         status, err = "empty", result.detail
+    # cc#2222: _Failed is checked alongside _Empty/_Skip, before the bare sentinel and the final
+    # 'ok' fallthrough -- a job's own except block returning this means its outer try/except
+    # caught a real exception and is reporting it, not silently succeeding. status='error' here
+    # is deliberately the SAME status a propagated exception gets two branches up, so every
+    # existing reader of scheduler_master.last_status (dashboards, _maybe_alert_job_failure,
+    # ENGINE_LIVENESS badges) already knows how to treat it -- nothing downstream needs to learn
+    # a new status value.
+    elif isinstance(result, _Failed):
+        status, err = "error", result.detail
     # cc#1256: _Skip is checked BEFORE the bare sentinel and by isinstance, for the same
     # reason _Empty is — a _Skip instance compared against the _SKIPPED string is False
     # anyway, but the order is stated so a later edit cannot drop the reason by reordering.
@@ -445,6 +489,7 @@ def _bg_catchup_sweep():
                 conn.commit()
         except Exception as e2:
             log.error("catchup error-oplog also failed: %s", e2)
+        return _Failed(str(e))
     return None
 
 
@@ -954,6 +999,7 @@ def _bg_signal_writer():
             log.error(f"signal_writer: crash-to-ops_log also failed: {_le}")
         if _signal_writer_fail_streak >= 3:
             _request_restart(f"signal_writer 3 consecutive failures: {e}")
+        return _Failed(str(e))
     finally:
         if _signal_writer_token == my_token:   # only the latest run clears the marker
             _signal_writer_started_at = None
@@ -1006,6 +1052,7 @@ def _bg_result_radar_snapshot():
         log.info(f"result_radar snapshot: {intraday_scanner_endpoints.result_radar_snapshot()}")
     except Exception as e:
         log.error(f"_bg_result_radar_snapshot: {e}")
+        return _Failed(str(e))
     finally:
         _result_radar_running = False
 
@@ -1018,6 +1065,7 @@ def _bg_result_radar_log():
         log.info(f"result_radar backfill: {intraday_scanner_endpoints.result_radar_backfill_returns()}")
     except Exception as e:
         log.error(f"_bg_result_radar_log: {e}")
+        return _Failed(str(e))
 
 
 _smartgain_resync_running = False
@@ -1044,6 +1092,7 @@ def _bg_smartgain_resync():
                 log.error(f"smartgain 09:10 resync {acct}: {e}")
     except Exception as e:
         log.error(f"_bg_smartgain_resync: {e}")
+        return _Failed(str(e))
     finally:
         _smartgain_resync_running = False
 
@@ -1063,6 +1112,7 @@ def _bg_v8_paper_exit():
             log.info(f"v8_paper_exit live: closed {res['closed']}")
     except Exception as e:
         log.error(f"v8_paper_exit: {e}")
+        return _Failed(str(e))
     finally:
         _v8_paper_exit_running = False
 
@@ -1102,6 +1152,7 @@ def _bg_v8_paper_exit_eod():
         with _v8_paper_exit_eod_lock:
             _v8_paper_exit_eod_ran = None   # cc#1589: release the claim so a retry can run
         log.error(f"v8_paper_exit_eod: {e}")
+        return _Failed(str(e))
 
 def _bg_v10_tick():
     global _v10_running
@@ -1122,7 +1173,9 @@ def _bg_v10_tick():
                     "VALUES ('v10_tick_hb', %s, %s)",
                     ("v10 tick", Json({"feeds": summary})))
             conn.commit()
-    except Exception as e: log.error(f"v10_tick: {e}")
+    except Exception as e:
+        log.error(f"v10_tick: {e}")
+        return _Failed(str(e))
     finally: _v10_running = False
 
 def _bg_trade_alerts_check():
@@ -1208,7 +1261,9 @@ def _bg_intraday_paper():
         en = tc_intraday.run_intraday_paper_entry()
         ex = tc_intraday.run_intraday_paper_exit()
         log.info(f"intraday_paper: cache={rc.get('written')} entered={en.get('entered')}")
-    except Exception as e: log.error(f"intraday_paper: {e}")
+    except Exception as e:
+        log.error(f"intraday_paper: {e}")
+        return _Failed(str(e))
     finally: _intraday_paper_running = False
 
 def _bg_tc_lite():
@@ -1226,6 +1281,7 @@ def _bg_tc_lite():
             log.info(f"tc_lite: +{res.get('new_long')}L +{res.get('new_short')}S")
     except Exception as e:
         log.error(f"tc_lite: {e}")
+        return _Failed(str(e))
     finally:
         _tc_lite_running = False
 
@@ -1276,6 +1332,7 @@ def _bg_tc_position_stars():
         log.info(f"tc_position_stars: {len(rows)}/{len(pairs)} scored @ {batch_ts:%H:%M IST}")
     except Exception as e:
         log.error(f"tc_position_stars: {e}")
+        return _Failed(str(e))
     finally:
         _tc_position_stars_running = False
 
@@ -1301,6 +1358,7 @@ def _bg_tc_position_stars_v2():
         log.info(f"tc_position_stars_v2: {r}")
     except Exception as e:
         log.error(f"tc_position_stars_v2: {e}")
+        return _Failed(str(e))
     finally:
         _tc_position_stars_v2_running = False
 
@@ -1457,6 +1515,7 @@ def _bg_smartgain_mtm():
         log.info(f"smartgain_mtm: refreshed {n} holdings (fut-ltp-first) + {n_idx} index holdings (cc#762)")
     except Exception as e:
         log.error(f"smartgain_mtm: {e}")
+        return _Failed(str(e))
     finally:
         _smartgain_mtm_running = False
 
@@ -1476,6 +1535,7 @@ def _bg_fut_rest_fallback():
         fut_rest_fallback.run()
     except Exception as e:
         log.error(f"fut_rest_fallback bg: {e}")
+        return _Failed(str(e))
     finally:
         _fut_rest_fallback_running = False
 
@@ -1488,7 +1548,9 @@ def _bg_qb_intraday_mark():
         import qb_eod_checker
         with _conn() as conn: res = qb_eod_checker.qb_intraday_mark(conn)
         log.info(f"qb_intraday_mark: {res.get('marked')}/{res.get('symbols')}")
-    except Exception as e: log.error(f"qb_intraday_mark: {e}")
+    except Exception as e:
+        log.error(f"qb_intraday_mark: {e}")
+        return _Failed(str(e))
     finally: _qb_intraday_mark_running = False
 
 def _bg_equity_cmp_poll():
@@ -1504,7 +1566,9 @@ def _bg_equity_cmp_poll():
         res = equity_cmp_poll.run_equity_cmp_poll()
         log.info(f"equity_cmp_poll: universe={res.get('universe_size')} quoted={res.get('quoted')} "
                  f"cmp_written={res.get('cmp_written')} qb_marked={res.get('qb_marked')}")
-    except Exception as e: log.error(f"equity_cmp_poll: {e}")
+    except Exception as e:
+        log.error(f"equity_cmp_poll: {e}")
+        return _Failed(str(e))
     finally: _equity_cmp_poll_running = False
 
 def _bg_v21_killswitch():
@@ -1533,6 +1597,7 @@ def _bg_v21_killswitch():
         log.info(f"v21_killswitch: {len(tripped)} tripped {tripped or ''}")
     except Exception as e:
         log.error(f"v21_killswitch: {e}")
+        return _Failed(str(e))
 
 
 _qsr_scan_ran = None
@@ -1572,6 +1637,7 @@ def _bg_qsr_scan():
         _qsr_scan_ran = today
     except Exception as e:
         log.error("qsr_scan: %s", e)
+        return _Failed(str(e))
 
 
 def _bg_stale_claim_release():
@@ -1662,6 +1728,7 @@ def _bg_qsr_exits():
         _qsr_exits_ran = today
     except Exception as e:
         log.error("qsr_exits: %s", e)
+        return _Failed(str(e))
 
 
 def _bg_v8_eod():
@@ -1677,7 +1744,9 @@ def _bg_v8_eod():
             _log_health(conn, "v8_eod", {"symbols": result.get("symbols_processed")})  # cc#255
         log.info(f"v8_eod: {result.get('symbols_processed')} syms")
         _eod_ran_today = today
-    except Exception as e: log.error(f"v8_eod: {e}")
+    except Exception as e:
+        log.error(f"v8_eod: {e}")
+        return _Failed(str(e))
     finally: _eod_running = False
 
 _custom_alerts_daily_ran_today = None
@@ -1855,6 +1924,7 @@ def _bg_heal_intraday():
         _heal_ran_today = today
     except Exception as e:
         log.error(f"heal_intraday(EOD Branch B): {e}")
+        return _Failed(str(e))
 
 
 def _bg_gate_rebalance():
@@ -1908,6 +1978,7 @@ def _bg_gate_rebalance():
         log.info(f"gate_rebalance: closed {res.get('closed')} | {res.get('slot_math')}")
     except Exception as e:
         log.error(f"gate_rebalance: {e}")
+        return _Failed(str(e))
 
 # ── ADR/PCR watchdog + health (task #59) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _log_health(conn, title: str, details: dict):
@@ -2044,7 +2115,9 @@ def _bg_adr_pcr():
         else:
             _log_alert("adr_missing", f"ADR not computed for {today} after 15:50 — retry scheduled 16:00")
         log.info("adr_pcr done")
-    except Exception as e: log.error(f"adr_pcr: {e}")
+    except Exception as e:
+        log.error(f"adr_pcr: {e}")
+        return _Failed(str(e))
 
 
 def _bg_adr_pcr_retry():
@@ -2081,6 +2154,7 @@ def _bg_tc_sim_tick():
         return res
     except Exception as e:
         log.error(f"tc_sim_tick: {e}")
+        return _Failed(str(e))
     finally:
         _tc_sim_running = False
 
@@ -2093,7 +2167,9 @@ def _bg_tc_screener_precompute():
             _log_health(_c, "tc_screener_precompute",
                         {"rows": res.get("rows") if isinstance(res, dict) else res})
         log.info(f"tc_screener_precompute: {res.get('rows') if isinstance(res, dict) else res} rows")
-    except Exception as e: log.error(f"tc_screener_precompute: {e}")
+    except Exception as e:
+        log.error(f"tc_screener_precompute: {e}")
+        return _Failed(str(e))
 
 # cc#1095 P5 — a day this far below the previous one is not SHRINKING, it is still ARRIVING.
 # 0.5 is deliberately generous: a real coverage collapse worth alerting on has never approached
@@ -2226,7 +2302,9 @@ def _bg_yahoo_daily_sync():
                                         duration_ms=int((time.time() - _pg_t0) * 1000))
         except Exception as _re:
             log.warning(f"record_run(hr_price_coverage_guard) failed: {_re}")
-    except Exception as e: log.error(f"yahoo_daily: {e}")
+    except Exception as e:
+        log.error(f"yahoo_daily: {e}")
+        return _Failed(str(e))
     finally: _yahoo_daily_running = False
 
 
@@ -2238,6 +2316,7 @@ def _bg_ca_daily_note():
         log.info(f"ca_daily_note: {note.get('headline')}")
     except Exception as e:
         log.error(f"ca_daily_note: {e}")
+        return _Failed(str(e))
 
 
 def _bg_protocol_one():
@@ -2267,6 +2346,7 @@ def _bg_protocol_one():
                 conn.commit()
         except Exception as e2:
             log.error("protocol_one error-oplog also failed: %s", e2)
+        return _Failed(str(e))
 
 
 def _bg_master_watchdog_note():
@@ -2277,6 +2357,7 @@ def _bg_master_watchdog_note():
         log.info(f"master_watchdog_note [{note.get('status')}]: {note.get('headline')}")
     except Exception as e:
         log.error(f"master_watchdog_note: {e}")
+        return _Failed(str(e))
 
 
 def _bg_ca_sweep_daily():
@@ -2289,6 +2370,7 @@ def _bg_ca_sweep_daily():
                  f"{s.get('symbols_scanned')} symbols, {s.get('nse_misses')} NSE misses")
     except Exception as e:
         log.error(f"ca_sweep_daily: {e}")
+        return _Failed(str(e))
 
 
 def _bg_ca_weekly_scan():
@@ -2300,6 +2382,7 @@ def _bg_ca_weekly_scan():
                  f"{len(s.get('genuine_crash_flags') or [])} genuine flags")
     except Exception as e:
         log.error(f"ca_weekly_scan: {e}")
+        return _Failed(str(e))
 
 
 def _bg_weekly_ops_metrics_queue():
@@ -2398,6 +2481,7 @@ def _bg_weekly_ops_metrics_queue():
         log.info(f"weekly_ops_metrics_queue: +{len(work)} queued, pending depth={depth}")
     except Exception as e:
         log.error(f"weekly_ops_metrics_queue: {e}")
+        return _Failed(str(e))
 
 
 # cc#773 OPS-METRICS SEASON MODE: through 15-Aug-2026 the queue-filler runs at DOUBLE pace (daily
@@ -2486,6 +2570,7 @@ def _bg_ops_metrics_coverage():
         log.info(f"ops_metrics_coverage: {payload}")
     except Exception as e:
         log.error(f"_bg_ops_metrics_coverage: {e}")
+        return _Failed(str(e))
 
 
 _ops_polish_detect_running = False
@@ -2596,6 +2681,7 @@ def _bg_ops_polish_detector(scheduled=False):
                     conn.commit()
             except Exception:
                 pass
+        return _Failed(str(e))
     finally:
         _ops_polish_detect_running = False
 
@@ -2706,7 +2792,9 @@ def _bg_gvm():
                                         duration_ms=int((time.time() - _is_t0) * 1000))
         except Exception as _re:
             log.warning(f"record_run(investment_score_eod) failed: {_re}")
-    except Exception as e: log.error(f"gvm: {e}")
+    except Exception as e:
+        log.error(f"gvm: {e}")
+        return _Failed(str(e))
 
 def _bg_gvm_backfill():
     """cc#468/470: 5yr daily GVM deep-history reconstruction (futures-first, then
@@ -2753,6 +2841,7 @@ def _bg_gvm_backfill():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _gvm_backfill_running = False
 
@@ -2801,6 +2890,7 @@ def _bg_gvm_backfill_ext():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _gvm_backfill_running = False
 
@@ -2864,6 +2954,7 @@ def _bg_bt14_fut_oi():
                 conn.commit()
     except Exception as e:
         log.error(f"bt14_fut_oi: {e}")
+        return _Failed(str(e))
     finally:
         _bt14_fut_oi_running = False
 
@@ -2899,6 +2990,7 @@ def _bg_yahoo_new_listings():
             conn.commit()
     except Exception as e:
         log.error(f"yahoo_new_listings: {e}")
+        return _Failed(str(e))
     finally:
         _yahoo_new_listings_running = False
 
@@ -3008,6 +3100,7 @@ def _bg_yahoo_symbol_resolve():
                 log.error(f"yahoo_symbol_resolve nse_heal: {he}")
     except Exception as e:
         log.error(f"yahoo_symbol_resolve: {e}")
+        return _Failed(str(e))
     finally:
         if armed:
             try:
@@ -3041,6 +3134,7 @@ def _bg_pivots():
     except Exception as e:
         log.error(f"pivots: {e}")
         _log_alert("pivots_error", f"paper pivot build failed for {today}: {e}")
+        return _Failed(str(e))
 
 def _bg_universe_pivots():
     """cc#342: nightly full-universe (~1720+) rolling-5d pivot rebuild into v8_paper_pivots.
@@ -3066,6 +3160,7 @@ def _bg_universe_pivots():
     except Exception as e:
         log.error(f"universe_pivots: {e}")
         _log_alert("universe_pivots_error", f"universe pivot build failed for {today}: {e}")
+        return _Failed(str(e))
 
 def _bg_universe_technicals():
     """cc#154: nightly RSI/DMA/returns/pivots for the full ~1766 GVM universe
@@ -3088,6 +3183,7 @@ def _bg_universe_technicals():
     except Exception as e:
         log.error(f"universe_technicals: {e}")
         _log_alert("universe_technicals_error", f"nightly run failed for {today}: {e}")
+        return _Failed(str(e))
 
 
 def _bg_qb_universe_derived():
@@ -3112,6 +3208,7 @@ def _bg_qb_universe_derived():
     except Exception as e:
         log.error(f"qb_universe_derived: {e}")
         _log_alert("qb_universe_derived_error", f"nightly precompute failed for {today}: {e}")
+        return _Failed(str(e))
 
 
 _rvol_ran_today: Optional[date] = None   # cc#674: RVOL profiles nightly guard
@@ -3132,6 +3229,7 @@ def _bg_rvol_profiles():
         log.info(f"rvol_profiles: {res}")
     except Exception as e:
         log.error(f"rvol_profiles: {e}")
+        return _Failed(str(e))
 
 
 def _check_pivots_health():
@@ -3168,6 +3266,7 @@ def _bg_oi_snapshot():
         log.info(f"oi_snapshot: {res}")
     except Exception as e:
         log.error(f"oi_snapshot: {e}")
+        return _Failed(str(e))
 
 
 def _bg_nse_eod_ingest():
@@ -3183,6 +3282,7 @@ def _bg_nse_eod_ingest():
         log.info(f"nse_eod_ingest: {res}")
     except Exception as e:
         log.error(f"nse_eod_ingest: {e}")
+        return _Failed(str(e))
 
 
 def _bg_fo_eod():
@@ -3198,6 +3298,7 @@ def _bg_fo_eod():
         log.info(f"fo_eod: {res}")
     except Exception as e:
         log.error(f"fo_eod: {e}")
+        return _Failed(str(e))
 
 
 def _bg_option_iv_daily():
@@ -3217,6 +3318,7 @@ def _bg_option_iv_daily():
         log.info(f"option_eod_slice: {res}")
     except Exception as e:
         log.error(f"option_eod_slice: {e}")
+        return _Failed(str(e))
 
 
 def _bg_fo_ban_fetch():
@@ -3237,6 +3339,7 @@ def _bg_fo_ban_fetch():
         log.info(f"fo_ban_fetch: {len(rows)} banned for {now.date()}")
     except Exception as e:
         log.error(f"fo_ban_fetch: {e}")
+        return _Failed(str(e))
 
 
 # cc#660 FEED_GUARDIAN_V1: the five legacy feed watchdogs (feed_staleness_watch cc#475,
@@ -3254,6 +3357,7 @@ def _bg_guardian_tick():
             log.info(f"feed_guardian tick: legs={res.get('legs')} actions={res.get('actions')}")
     except Exception as e:
         log.error(f"guardian_tick: {e}")
+        return _Failed(str(e))
 
 
 # cc#876 item 3 — THE DEAD-MAN ALERT THAT WAS MISSING ON 06-AUG.
@@ -3321,6 +3425,7 @@ def _bg_guardian_offhours():
             log.error(f"feed_guardian offhours: worker silent {res.get('heartbeat_age_min')}min")
     except Exception as e:
         log.error(f"guardian_offhours: {e}")
+        return _Failed(str(e))
 
 
 def _bg_guardian_eod_oi():
@@ -3331,6 +3436,7 @@ def _bg_guardian_eod_oi():
         log.info(f"feed_guardian eod_oi: {res}")
     except Exception as e:
         log.error(f"guardian_eod_oi: {e}")
+        return _Failed(str(e))
 
 
 _JOB_ACTIVE_CACHE = {}          # job_name -> (checked_at_monotonic, active_or_None)
@@ -3493,6 +3599,7 @@ def _bg_v14_cycle():
                      f"exits={res.get('exits', {}).get('closed')}")
     except Exception as e:
         log.error(f"v14_cycle: {e}")
+        return _Failed(str(e))
     finally:
         _v14_running = False
 
@@ -3563,7 +3670,9 @@ def _bg_qb_eod():
                                          "nav": (nav_out or {}).get("baskets")})  # cc#255
         log.info(f"qb_eod: {checked} baskets checked, rebalanced={rebalanced}")
         _qb_eod_ran_today = today
-    except Exception as e: log.error(f"qb_eod: {e}")
+    except Exception as e:
+        log.error(f"qb_eod: {e}")
+        return _Failed(str(e))
     finally: _qb_eod_running = False
 
 
@@ -3624,7 +3733,9 @@ def _bg_fu_sync():
         # Membership add/remove stays weekly here.
         _fu_sync_ran_this_week = today
         log.info("fu_sync done")
-    except Exception as e: log.error(f"fu_sync: {e}")
+    except Exception as e:
+        log.error(f"fu_sync: {e}")
+        return _Failed(str(e))
 
 
 # cc#1804's _bg_news_polish_auto() wrapper and news_polish_auto.py were REMOVED here (cc#1836,
@@ -3651,7 +3762,9 @@ def _bg_lot_sync():
                                            "changed": rep.get("changed_count")})
         _lot_sync_ran_today = today
         log.info(f"lot_sync: {rep.get('applied')} lots corrected, {rep.get('changed_count')} stale")
-    except Exception as e: log.error(f"lot_sync: {e}")
+    except Exception as e:
+        log.error(f"lot_sync: {e}")
+        return _Failed(str(e))
 
 def _bg_fetch_global():
     global _global_fetching
@@ -3661,7 +3774,9 @@ def _bg_fetch_global():
         import global_indices
         with global_indices.get_conn_from_env() as conn:
             asyncio.run(global_indices.fetch_global_indices(conn))
-    except Exception as e: log.error(f"global_fetch: {e}")
+    except Exception as e:
+        log.error(f"global_fetch: {e}")
+        return _Failed(str(e))
     finally: _global_fetching = False
 
 def _bg_fetch_global_intraday():
@@ -3675,7 +3790,9 @@ def _bg_fetch_global_intraday():
             try: global_indices.prune_global_intraday(conn, days=7)
             except Exception: pass
         log.debug(f"global_intraday: {res.get('stored')} bars")
-    except Exception as e: log.debug(f"global_intraday: {e}")
+    except Exception as e:
+        log.debug(f"global_intraday: {e}")
+        return _Failed(str(e))
     finally: _global_intraday_fetching = False
 
 # ── news fetch (task #38) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -3685,7 +3802,9 @@ def _bg_fetch_market_news():
         import news_fetcher
         with _conn() as conn: res = news_fetcher.fetch_market_news(conn)
         log.info(f"news_market: {res.get('inserted') if isinstance(res, dict) else res} new")
-    except Exception as e: log.error(f"news_market: {e}")
+    except Exception as e:
+        log.error(f"news_market: {e}")
+        return _Failed(str(e))
 
 def _bg_earnings_refresh():
     """cc#225: daily 06:15 IST earnings_calendar refresh (runs BEFORE the 09:10 pre-market
@@ -3711,6 +3830,7 @@ def _bg_earnings_refresh():
         _log_alert("earnings_refresh_failed",
                    f"06:15 earnings_calendar refresh raised (prior data kept): {e}")
         log.error(f"earnings_refresh: {e}")
+        return _Failed(str(e))
 
 def _bg_feed_daily_log():
     """cc#495 change_4: daily 16:15 IST post-close feed summary — ONE ops_log entry
@@ -3789,6 +3909,7 @@ def _bg_feed_daily_log():
                  f"{len(dropped)} dropped, {len(floor_breaches)} floor breaches")
     except Exception as e:
         log.error(f"feed_daily_log failed: {e}")
+        return _Failed(str(e))
 
 # cc#660: _bg_open_bars_alarm (cc#229 feed-silent-at-open) folded into feed_guardian.guardian_tick()
 # — the 09:20-09:30 open-silence check now lives there with the same <400-bars floor.
@@ -3811,7 +3932,9 @@ def _bg_cleanup_news():
             _log_health(conn, "cleanup_news",  # cc#255
                         {"result": res if isinstance(res, dict) else str(res)})
         log.info(f"news_retention: {res}")
-    except Exception as e: log.error(f"news_retention: {e}")
+    except Exception as e:
+        log.error(f"news_retention: {e}")
+        return _Failed(str(e))
 
 def _bg_log_retention():
     """cc#469 audit_1(e): keep tick-class telemetry 30 days, delete older. Only pure
@@ -3836,6 +3959,7 @@ def _bg_log_retention():
         log.info(f"log_retention: ops={n_ops} session={n_sess} tick rows purged (>30d)")
     except Exception as e:
         log.error(f"log_retention: {e}")
+        return _Failed(str(e))
     # cc#548: drive the consolidated data-retention matrix off the same nightly retention
     # chain (own connection + try/except, so it always runs regardless of the log purge above).
     _bg_data_retention()
@@ -3886,6 +4010,7 @@ def _bg_data_retention():
         log.info(f"data_retention: {counts}")
     except Exception as e:
         log.error(f"data_retention: {e}")
+        return _Failed(str(e))
 
 def _bg_cleanup_perf_log():
     """cc#1272 scope 1: 7-day retention for perf_request_log (performance metrics table).
@@ -3902,6 +4027,7 @@ def _bg_cleanup_perf_log():
         log.info(f"perf_cleanup: {n_deleted} rows deleted (>7d)")
     except Exception as e:
         log.error(f"perf_cleanup: {e}")
+        return _Failed(str(e))
 
 def _bg_tc_score_tick():
     """cc#1540 (founder cadence amendment, cc_task_logs 4292): Trade Check score TICKS every
@@ -4022,6 +4148,7 @@ def _bg_fetch_stock_news():
         log.info(f"fetch_stock_news: {res}")
     except Exception as e:
         log.error(f"fetch_stock_news: {e}")
+        return _Failed(str(e))
 
 # cc#847: _bg_fetch_position_news REMOVED — Position News is retired (tab, fetcher,
 # endpoints, table read path). The 3 slots/day (05:35/13:35/19:35) ran ~1,800 external
@@ -4047,6 +4174,7 @@ def _bg_fetch_universe_reco_news(slot: int = 0):
         log.info(f"fetch_universe_reco_news(slot={slot}): {res}")
     except Exception as e:
         log.error(f"fetch_universe_reco_news(slot={slot}): {e}")
+        return _Failed(str(e))
 
 
 def _bg_stock_news_watchdog():
@@ -4092,6 +4220,7 @@ def _bg_stock_news_watchdog():
                 log.info("stock_news watchdog: OK")
     except Exception as e:
         log.error(f"_bg_stock_news_watchdog: {e}")
+        return _Failed(str(e))
 
 def _bg_tag_news():
     """cc#207 Part C: tag untagged polished_news with universe symbols so company pages
@@ -4103,6 +4232,7 @@ def _bg_tag_news():
         log.info(f"news_tagger: {res}")
     except Exception as e:
         log.error(f"news_tagger: {e}")
+        return _Failed(str(e))
 
 def _bg_mf_nav():
     """cc#466: V15 MF data layer — daily AMFI NAV pull + master upsert + append NAV history, then a
@@ -4114,6 +4244,7 @@ def _bg_mf_nav():
         log.info(f"_bg_mf_nav: nav={r1} reconcile_matched={sum(1 for x in r2.get('results',[]) if x.get('amfi_code'))}")
     except Exception as e:
         log.error(f"_bg_mf_nav: {e}")
+        return _Failed(str(e))
 
 
 _mf_derived_nightly_armed_day = None
@@ -4136,6 +4267,7 @@ def _bg_mf_derived_nightly():
         log.info(f"_bg_mf_derived_nightly: {mf_derived.run_nightly()}")
     except Exception as e:
         log.error(f"_bg_mf_derived_nightly: {e}")
+        return _Failed(str(e))
 
 
 _mf_derived_audit_armed_day = None
@@ -4156,6 +4288,7 @@ def _bg_mf_derived_audit():
         log.info(f"_bg_mf_derived_audit: {mf_derived.run_weekly_audit()}")
     except Exception as e:
         log.error(f"_bg_mf_derived_audit: {e}")
+        return _Failed(str(e))
 
 
 _mf_monthly_mc_armed_day = None
@@ -4228,6 +4361,7 @@ def _bg_mf_monthly_mc():
     except Exception as e:
         status, err = "failed", str(e)[:400]
         log.error(f"_bg_mf_monthly_mc: {e}")
+        return _Failed(str(e))
     # job_runs spine + universal failure rule (ops_log category=scrape_review on non-ok)
     try:
         import ops_control_plane
@@ -4235,6 +4369,7 @@ def _bg_mf_monthly_mc():
                                      error=err, scope="v15_mf")
     except Exception as e:
         log.warning(f"_bg_mf_monthly_mc record_run failed: {e}")
+        return _Failed(str(e))
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""INSERT INTO job_runs (job_key, started_at, finished_at, status, sections_landed, error)
@@ -4247,6 +4382,7 @@ def _bg_mf_monthly_mc():
             conn.commit()
     except Exception as e:
         log.warning(f"_bg_mf_monthly_mc job_runs write failed: {e}")
+        return _Failed(str(e))
 
 
 def _bg_mf_returns_backfill():
@@ -4280,6 +4416,7 @@ def _bg_mf_returns_backfill():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _mf_backfill_running = False
 
@@ -4319,6 +4456,7 @@ def _bg_mf_v15_wiring():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _mf_wiring_running = False
 
@@ -4332,6 +4470,7 @@ def _bg_mf_weekly():
         log.info(f"_bg_mf_weekly: {res}")
     except Exception as e:
         log.error(f"_bg_mf_weekly: {e}")
+        return _Failed(str(e))
 
 
 def _bg_mf_weekly_manual():
@@ -4370,6 +4509,7 @@ def _bg_mf_weekly_manual():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _mf_weekly_manual_running = False
 
@@ -4385,6 +4525,7 @@ def _bg_mf_score_nightly():
         log.info(f"_bg_mf_score_nightly: {res}")
     except Exception as e:
         log.error(f"_bg_mf_score_nightly: {e}")
+        return _Failed(str(e))
 
 
 def _bg_mf_aum_monthly():
@@ -4398,6 +4539,7 @@ def _bg_mf_aum_monthly():
         log.info(f"_bg_mf_aum_monthly: {res}")
     except Exception as e:
         log.error(f"_bg_mf_aum_monthly: {e}")
+        return _Failed(str(e))
 
 
 _mc_discover_running = False   # cc#500: Moneycontrol discovery-probe single-flight guard
@@ -4441,6 +4583,7 @@ def _bg_mf_mc_discover():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _mc_discover_running = False
 
@@ -4486,6 +4629,7 @@ def _bg_mf_mc_oneshot():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _mc_oneshot_running = False
 
@@ -4581,6 +4725,7 @@ def _bg_ops_metrics_backfill():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _ops_metrics_running = False
 
@@ -4636,6 +4781,7 @@ def _bg_ops_text_fetch():
                 conn.commit()
         except Exception:
             pass
+        return _Failed(str(e))
     finally:
         _ops_text_fetch_running = False
 
@@ -4659,6 +4805,7 @@ def _bg_ops_peer_benchmark():
         log.info(f"_bg_ops_peer_benchmark: {res}")
     except Exception as e:
         log.error(f"_bg_ops_peer_benchmark: {e}")
+        return _Failed(str(e))
     return None
 
 
@@ -4683,6 +4830,7 @@ def _bg_engine_watchdog():
         log.info(f"_bg_engine_watchdog: {res}")
     except Exception as e:
         log.error(f"_bg_engine_watchdog: {e}")
+        return _Failed(str(e))
     return None
 
 def _bg_watchdog_market():
@@ -4696,6 +4844,7 @@ def _bg_watchdog_market():
             log.warning(f"_bg_watchdog_market: {res}")
     except Exception as e:
         log.error(f"_bg_watchdog_market: {e}")
+        return _Failed(str(e))
 
 
 _result_corner_ran_on = None   # cc#602 day-lock: news-vs-calendar verify + reconcile once/day
@@ -4720,6 +4869,7 @@ def _bg_result_corner_verify():
         log.info(f"_bg_result_corner_verify: {res}")
     except Exception as e:
         log.error(f"_bg_result_corner_verify: {e}")
+        return _Failed(str(e))
     return None
 
 _result_analysis_sweep_ran_on = None   # cc#618 Section B: Sunday full-season completion sweep day-lock
@@ -4744,6 +4894,7 @@ def _bg_result_analysis_weekly_sweep():
         log.info(f"_bg_result_analysis_weekly_sweep: {res}")
     except Exception as e:
         log.error(f"_bg_result_analysis_weekly_sweep: {e}")
+        return _Failed(str(e))
     return None
 
 
@@ -4801,6 +4952,7 @@ def _bg_futures_gap_backfill():
         log.info(f"_bg_futures_gap_backfill: backfilled {gap_dates} -> {res}")
     except Exception as e:
         log.error(f"_bg_futures_gap_backfill: {e}")
+        return _Failed(str(e))
     return None
 
 
@@ -4845,6 +4997,7 @@ def _bg_v9_paper_monthly():
         log.info(f"_bg_v9_paper_monthly: {res}")
     except Exception as e:
         log.error(f"_bg_v9_paper_monthly: {e}")
+        return _Failed(str(e))
     return None
 
 
@@ -4867,6 +5020,7 @@ def _bg_v9_paper_mtm():
         log.info(f"_bg_v9_paper_mtm: {res}")
     except Exception as e:
         log.error(f"_bg_v9_paper_mtm: {e}")
+        return _Failed(str(e))
     return None
 
 
@@ -4900,6 +5054,7 @@ def _bg_shareholding_quarterly():
         log.info(f"_bg_shareholding_quarterly: {res}")
     except Exception as e:
         log.error(f"_bg_shareholding_quarterly: {e}")
+        return _Failed(str(e))
     finally:
         _shareholding_q_running = False
 
@@ -4934,6 +5089,7 @@ def _bg_ops_metrics_t1():
         log.info(f"_bg_ops_metrics_t1: {res}")
     except Exception as e:
         log.error(f"_bg_ops_metrics_t1: {e}")
+        return _Failed(str(e))
 
 
 def _bg_ops_metrics_saturday():
@@ -4953,6 +5109,7 @@ def _bg_ops_metrics_saturday():
         log.info(f"_bg_ops_metrics_saturday: {res}")
     except Exception as e:
         log.error(f"_bg_ops_metrics_saturday: {e}")
+        return _Failed(str(e))
 
 
 def _bg_ops_metrics_season_sweep():
@@ -4975,6 +5132,7 @@ def _bg_ops_metrics_season_sweep():
         log.info(f"_bg_ops_metrics_season_sweep: {res}")
     except Exception as e:
         log.error(f"_bg_ops_metrics_season_sweep: {e}")
+        return _Failed(str(e))
 
 
 # cc#660 FEED_GUARDIAN_V1: _bg_feed_staleness_watch (cc#475), _log_feed_alert_ops, and
@@ -5009,6 +5167,7 @@ def _bg_tc_scanner():
         log.info(f"tc_scanner tick: {scan_res} | {exit_res}")
     except Exception as e:
         log.error(f"_bg_tc_scanner: {e}")
+        return _Failed(str(e))
     finally:
         _tc_scanner_running = False
 
@@ -5026,6 +5185,7 @@ def _bg_tc_universe_tick():
             log.error(f"tc_universe_tick: {res}")
     except Exception as e:
         log.error(f"_bg_tc_universe_tick: {e}")
+        return _Failed(str(e))
 
 
 def _bg_marker_ticks_tcs():
@@ -5054,6 +5214,7 @@ def _bg_marker_ticks_tcs():
             log.error(f"marker_ticks_tcs: {res}")
     except Exception as e:
         log.error(f"_bg_marker_ticks_tcs: {e}")
+        return _Failed(str(e))
 
 
 def _bg_marker_ticks_star():
@@ -5144,6 +5305,7 @@ def _bg_tc_scanner_eod():
         log.info(f"tc_scanner EOD sweep: {res}")
     except Exception as e:
         log.error(f"_bg_tc_scanner_eod: {e}")
+        return _Failed(str(e))
 
 
 def _bg_intraday_scan():
@@ -5173,6 +5335,7 @@ def _bg_intraday_scan():
                  f"SHORT {short.get('status')} sig={short.get('count')} rec={short.get('recorded_to_watchlist')}")
     except Exception as e:
         log.error(f"_bg_intraday_scan: {e}")
+        return _Failed(str(e))
     finally:
         _intraday_scan_running = False
 
@@ -5621,6 +5784,7 @@ def _bg_scheduler_master_startup_audit():
         log.info(f"scheduler_master startup audit: {res}")
     except Exception as e:
         log.error(f"scheduler_master startup audit failed: {e}")
+        return _Failed(str(e))
 
 
 _scheduler_master_audit_armed_day = None
@@ -5643,6 +5807,7 @@ def _bg_scheduler_master_daily_audit():
         log.info(f"scheduler_master daily audit: {res}")
     except Exception as e:
         log.error(f"scheduler_master daily audit failed: {e}")
+        return _Failed(str(e))
 
 
 async def stop_background():
